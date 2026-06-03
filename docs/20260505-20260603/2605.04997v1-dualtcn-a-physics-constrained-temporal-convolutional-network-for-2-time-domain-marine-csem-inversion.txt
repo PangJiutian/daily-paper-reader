@@ -1,0 +1,525 @@
+Title: DualTCN: A Physics-Constrained Temporal Convolutional Network for 2 Time-Domain Marine CSEM Inversion
+
+URL Source: https://arxiv.org/pdf/2605.04997v1
+
+Published Time: Thu, 07 May 2026 01:23:09 GMT
+
+Number of Pages: 28
+
+Markdown Content:
+# Highlights 
+
+DualTCN: A Physics-Constrained Temporal Convolutional Network for Time-Domain Marine CSEM Inversion 
+
+Khaled Ahmed, Ghada Omar 
+
+• First deep-learning framework for time-domain marine CSEM inversion 
+
+• Dual-branch TCN with physics-constrained soft-step decoder 
+
+• Ablation of 13 architectures on one million synthetic samples 
+
+• Curriculum amplitude augmentation recovers robustness to 5% noise 
+
+• Inference in 3.5 ms per sample on GPU with calibrated uncertainty 
+
+> arXiv:2605.04997v1 [cs.LG] 6 May 2026
+
+# DualTCN: A Physics-Constrained Temporal Convolutional Network for Time-Domain Marine CSEM Inversion 
+
+Khaled Ahmed a, ∗, Ghada Omar b
+
+> aSchool of Computing, Southern Illinois University Carbondale, Carbondale, IL, 62901, USA
+> bSchool of Mathematics and Statistics, Southern Illinois University Carbondale, Carbondale, IL, 62901, USA
+
+Abstract 
+
+We introduce DualTCN, to our knowledge the first deep-learning framework for inverting time-domain marine controlled-source electromagnetic (MCSEM) transient data. Instead of discretising the subsurface, DualTCN regresses four earth-model parameters— σ1, σ2, d1, d2—and reconstructs the conductivity–depth profile through a differentiable soft-step decoder. A systematic comparison of thirteen architectural variants trained on one million empymod synthetics identifies DualTCN (379 K parameters) as the best design: a full-time temporal convolutional network (TCN) encoder paired with a late-time branch (last 64 of 128 samples) and an auxiliary seafloor-depth head yields a 25.3% loss reduction over the baseline, with R2 = 0 .898 (σ2) and 
+
+0.627 (d2). A single sample is inverted in 3.5 ms on an A100 GPU. Training-time noise augmentation confers robustness to waveform-channel noise at SNR ≥ 10 dB; however, the two-channel input design makes σ2
+
+and d2 critically dependent on the log-peak-amplitude channel, so that R2 
+
+> d2
+
+turns negative at ±2% random amplitude error per receiver, but a curriculum-based amplitude augmentation strategy recovers full robustness ( ¯R2 = 0 .858 at ±2% noise, versus 0.363 without augmentation) while preserving 98% of clean-data accuracy. A three-layer extension (seawater/resistive layer/basement) generalises with no architectural changes, resolving the basement conductivity at R2 ≈ 0.88 , though thin-layer thickness remains resolution-limited ( R2 ≈ 0.23 ). A multi-start benchmark shows DualTCN achieves ¯R2 = 0 .877 versus 0.129 –0.439 for Levenberg–Marquardt and L-BFGS-B (eight restarts) at up to 21 ,000 × lower cost. Monte Carlo (MC) Dropout uncertainty quantification is well calibrated for σ1 (Prediction Interval Coverage Probability, PICP 90 = 0 .944 ); the systematic under-coverage for d2 (PICP 90 = 0 .572 ) is correctable by post-hoc temperature scaling or split conformal prediction and reflects limited signal information at 200 m offsets. 
+
+Keywords: Marine CSEM, deep learning, temporal convolutional network, electromagnetic inversion, data augmentation, uncertainty quantification     
+
+> ∗Corresponding author.
+> Email addresses: khaled.ahmed@siu.edu (Khaled Ahmed), ghada.omar@siu.edu (Ghada Omar)
+
+1. Introduction 
+
+Marine controlled-source electromagnetic (MCSEM) surveying has become one of the standard geophysical tools for imaging the electrical resistivity structure beneath the ocean floor. A horizontal electric dipole (HED) source is towed near the seafloor, and an array of receivers at varying offsets records the resulting electromagnetic transient (Constable and Srnka, 2007; Constable, 2010). The data carry information about seawater conductivity, water depth, and the resistivity of sub-seafloor formations—properties relevant to hydrocarbon exploration, gas-hydrate characterisation, and studies of oceanic crustal structure (Key, 2012). Turning these measurements into a subsurface model requires solving an inverse problem. Conventional approaches start from an initial guess and iteratively refine it by comparing forward-modelled responses with the observed data. A single evaluation of an optimised 1D semi-analytic forward code such as empymod 
+
+(Werthmüller, 2017) takes roughly 30–50 ms on a modern central processing unit (CPU). However, achieving a reliable solution requires hundreds to thousands of such evaluations per sample: in our benchmark, a multi-start Levenberg–Marquardt inversion (8 starts, up to 2 000 evaluations each) consumes 12 s per sample on average, and L-BFGS-B with the same multi-start protocol takes 74 s per sample (Section 5.5). Across a survey line of thousands of records, the cumulative cost makes real-time quality control during acquisition effectively impossible and constrains the throughput of post-survey interpretation. Deep learning offers an alternative that fundamentally changes this cost structure (LeCun et al., 2015; Reichstein et al., 2019). Once a neural network has been trained, inverting a new data sample requires only a single feedforward pass, which takes milliseconds. This concept of amortised inference has already been demonstrated for several electromagnetic inverse problems (Section 2), but important gaps remain. No deep-learning method has been applied to time-domain MCSEM data. No existing approach produces a physics-constrained parametric output. And no architecture has been designed to exploit the fact that different parts of the recorded transient carry information about different subsurface parameters. This paper introduces DualTCN, a deep-learning framework that addresses each of these gaps. DualTCN operates directly on multi-receiver time-domain transients, regresses four physically meaningful earth-model scalars rather than a discretised depth profile, and enforces the conductivity–depth structure through a differentiable analytic decoder. We systematically compare thirteen architectural variants trained on one million synthetic samples, and show that a dual-branch temporal convolutional network with a dedicated late-time encoder and an auxiliary seafloor-depth prediction head achieves the best overall accuracy—with particular gains on the source-to-seafloor distance d2, the parameter that has proved most resistant to improvement in every other configuration we tested. 22. Background and Related Work 
+
+MCSEM data exhibit a temporal sensitivity hierarchy: early-time samples sense mainly the water column (σ1, d1), while late-time samples—where the signal decays as exp (−2u1d2)—carry information about the seafloor ( σ2, d2) (Constable, 2010; Key, 2012). This hierarchy motivates DualTCN’s dual-branch design (Section 4.1). Classical 1D inversion relies on Occam-style regularisation (Constable et al., 1987; Key, 2009) or gradient-based solvers, both requiring dozens to hundreds of forward evaluations per sample—too slow for real-time use. Deep learning offers amortised inference: CNN-based frequency-domain CSEM inversion (Puzyrev, 2019; Puzyrev and Swidinsky, 2021; Zhang et al., 2024), neural-network initial models that accelerate conventional solvers (Araya-Polo et al., 2018), and physics-guided ATEM strategies (disentangled encoders, auxiliary depth losses, differentiable decoders) (Moghadas, 2020; Liu et al., 2022; Colombo et al., 2021). Alternative paradigms include projected Gauss–Newton with learned priors (Abubakar et al., 2012), Deep Image Prior for MT (Sun and Li, 2023; Bai et al., 2024), ensemble Kalman inversion (Iglesias et al., 2013), and probabilistic methods (invertible neural networks, normalising flows, deep ensembles) (Ardizzone et al., 2019; Papamakarios et al., 2021; Lakshminarayanan et al., 2017). Despite this progress, six gaps remain (see Supplement Section S11 for detailed discussion): (1) no DL method has addressed time-domain marine CSEM; (2) all existing methods predict discretised profiles rather than physics-constrained parametric outputs; (3) no systematic encoder comparison (TCN vs. Transformer vs. MLP) exists for this setting; (4) no architecture dedicates a branch to the late-time regime or uses auxiliary physical objectives for d2; (5) ATEM physics-guided strategies have not been transferred to marine CSEM; (6) no calibrated UQ has been demonstrated. DualTCN addresses gaps 1–4 directly, draws on ATEM methodology for gap 5, and provides MC-Dropout UQ with post-hoc calibration for gap 6. 
+
+3. Methods 
+
+3.1. Earth Model and Synthetic Data 
+
+We use a one-dimensional three-layer earth model: air ( ρair → ∞ ), seawater (conductivity σ1), and a seafloor half-space (conductivity σ2, extending to infinite depth). The geometry is shown in Fig. 1. A unit-moment HED source is placed at depth d1 below the sea surface (i.e., at a height d2 above the seafloor interface, where d2 = dsf − d1). The total seafloor depth is therefore dsf = d1 + d2. To be explicit: d1 is the vertical distance from the sea surface to the HED source, and d2 is the vertical distance from the source down to the seafloor interface. The seafloor is modelled as a uniform half-space of conductivity σ2 extending to infinite depth; d2 parametrises the gap between source and seafloor, not the thickness of a finite resistive layer. Four inline receivers at offsets of 20, 50, 100, and 200 m record the transient electric field. Receivers 3Table 1: Earth-model parameter ranges for synthetic data generation. d1 is the depth of the HED source below the sea surface;                        
+
+> d2is the vertical distance from the source down to the seafloor interface ( dsf =d1+d2). The seafloor is a uniform half-space;
+> σ2applies from dsf to infinite depth. Parameter Physical range log 10 range
+> σ1(S m −1)0.10–5.01 −1.00 to 0.70
+> σ2(S m −1, half-space) 0.001–1.0 −3.00 to 0.00
+> d1(m, source depth) 50–150 1.70–2.18
+> d2(m, source-to-seafloor) 10–50 1.00–1.70
+
+are modelled at a fixed observation depth of zobs = 20 m below the sea surface (i.e., in the water column, not on the seafloor). The four earth-model parameters are sampled independently and uniformly within the ranges given in Table 1. All training and prediction are carried out in log 10 space. One million parameter combinations are drawn, and the corresponding forward responses are computed with empymod (Werthmüller, 2017), evaluating the response at 64 linearly spaced frequencies from 0.05 to 2.0 Hz and transforming to the time domain via numpy.fft.irfft with output length N = 128 (∆t = 0 .25 s, 0–32 s window). The 0.05–2.0 Hz band spans the skin-depth range relevant to our geometry ( δ ≈ 205 –1,300 m in seawater). The synthesis uses the impulse-response convention; deployment on step-off data requires a frequency-domain pre-processing step validated in Supplement Section S2. Three known simplifications—absent DC component, 2 Hz bandwidth truncation, and fixed receiver geometry—are discussed in detail in Supplement Section S12; the pipeline is self-consistent, ensuring accuracy metrics reflect genuine earth-model sensitivity (Supplement Section S1 confirms r ≥ 0.9998 versus a corrected-DC reference). The one million samples are split 70/15/15 into training (700 000), validation (150 000), and test (150 000) subsets. The training set is augmented with additive Gaussian noise (Section 5.4); the validation and test sets are evaluated on clean data unless otherwise noted. Each receiver trace is normalised by its peak amplitude; the log 10 of that peak is appended as a second channel, preserving the absolute signal level. The normalised waveform carries timing and decay information (sensitive to σ1, d1), while the log-amplitude channel is the primary discriminator for σ2 and d2. This creates a known vulnerability: any uncompensated amplitude error directly corrupts σ2 and d2 (Section 5.4.1). The resulting input tensor has dimensions (8 , 128) : four receivers × two channels by 128 time samples. 
+
+3.2. Baseline Architecture 
+
+The baseline model, which we call PCRN (Physics-Constrained Parameter Regression Network), has 638 000 trainable parameters and three stages: a feature encoder, a parameter prediction head, and a differentiable physics decoder. 4Table 2: Notation and symbols used throughout this paper. Symbol Definition                       
+
+> σ1Seawater conductivity (S m −1)
+> σ2Seafloor half-space conductivity (S m −1)
+> d1Depth of HED source below the sea surface (m)
+> d2Vertical distance from source to seafloor interface (m)
+> dsf Total seafloor depth: dsf =d1+d2(m)
+> ˆdsf Auxiliary predicted seafloor depth (DualTCN training target)
+> zobs Receiver observation depth below sea surface (20 m) HED Horizontal Electric Dipole (source)
+> NTNumber of time samples per trace (128)
+> NRNumber of inline receivers (4, at offsets 20–200 m)
+> ¯R2Mean R2across all four parameters PICP αPrediction Interval Coverage Probability at nominal level α
+> MPIW Mean Prediction Interval Width
+
+3.2.1. Hybrid Encoder 
+
+The encoder has both a local and a global component. The local component consists of six dilated residual blocks with dilation factors that double at each stage (1, 2, 4, 8, 16, 32). Each block applies a dilated causal convolution, batch normalisation, Gaussian Error Linear Unit (GELU) activation, and a residual connection. The exponential dilation schedule gives the network a receptive field spanning the full 128-sample input while keeping the parameter count modest. The global component is a two-layer Transformer encoder with four attention heads and pre-layer normalisation, which captures dependencies across the entire temporal extent. Adaptive average pooling compresses the Transformer output into a latent vector z ∈ R256 .
+
+3.2.2. Parameter Head 
+
+A two-layer MLP ( 256 → 128 → 4) with sigmoid output maps the latent vector to normalised predictions 
+
+ˆp ∈ [0 , 1] 4, which are then rescaled to the physical log 10 ranges in Table 1. 
+
+3.2.3. Physics Decoder 
+
+The decoder converts the four predicted scalars into a conductivity–depth profile using a differentiable analytic function. Because the parameter head outputs normalised [0 , 1] values that are linearly interpolated to log 10 ranges (Section 3.1, Table 1), the decoder first exponentiates each predicted quantity back to physical 5Air        
+
+> ρ→ ∞
+> Sea-water
+> σ1
+> Seafloor
+> σ2
+> z= 0
+> HED
+> d1
+> d2
+> 20 m 50 m 100 m 200 m
+> Receivers ( zobs = 20 m)
+
+(a) 
+
+> Depth  z
+> σ(z)
+> σ1
+> σ2
+
+(b)  
+
+> Direct (near offset) Refracted (far offset)
+
+Figure 1: (a) MCSEM acquisition geometry. The HED source sits at depth d1 below the sea surface ( z = 0 ); the seafloor interface is a further d2 below the source, giving a total seafloor depth dsf = d1 + d2. Four receivers span offsets of 20–200 m. Orange dashed lines show the direct path; purple dashed lines show the seafloor-refracted path. (b) Step-function conductivity profile σ(z) reconstructed by the physics decoder from four predicted scalars. The seafloor half-space ( σ2) extends to infinite depth. 
+
+units before evaluation: 
+
+˜σk = 10 ˆpσk [S m −1], k ∈ { 1, 2}, (1) 
+
+˜dk = 10 ˆpdk [m] , k ∈ { 1, 2}. (2) The seafloor depth is then the arithmetic sum of the two linear-space depths, ˆdsf = ˜d1 + ˜d2 (m), and the conductivity profile is (see also Table 1) 
+
+σ(z) = ˜ σ1 + (˜ σ2 − ˜σ1) σs
+
+z − ˆdsf 
+
+τ
+
+!
+
+, τ = 2 m , (3) where σs is the logistic sigmoid, z is depth in metres, and σ(z) is in S m −1. The decoder evaluates log 10 σ(z)
+
+at Nz = 64 uniformly spaced depth nodes spanning z ∈ [0 , 250] m ( ∆z = 250 /63 ≈ 3.97 m), which matches the maximum parameter depth ( dmax 1 + dmax 2 = 150 + 50 = 200 m) with a 50 m buffer. Note that the transition half-width τ = 2 m ≈ ∆z/ 2, so the sigmoid transition is resolved by at least two depth samples. Because it is fully differentiable, gradients from the profile loss propagate back through the exponentiation and the predicted parameters into the encoder, enforcing the two-layer shape as a structural regulariser. 
+
+Sensitivity to τ .. Because the four parameter predictions ( ˆσ1, ˆσ2, ˆd1, ˆd2) are produced by the regression heads before the decoder, they are architecturally independent of τ : the decoder only consumes these predictions to construct the profile. We verified this by evaluating the trained model at inference time with τ ∈ { 0.5, 1, 2, 4, 8} m on 150 000 test samples. All parameter R2 values are identical across all τ values (e.g., R2 
+
+> σ2
+
+= 0 .898 and R2 
+
+> d2
+
+= 0 .627 for every τ ), and the mean bias in log 10 ˆσ2 and log 10 ˆd2 is likewise 6Table 3: Computational cost for key DualTCN variants. GPU = NVIDIA A100 40 GB; CPU = single core (OMP_NUM_THREADS=1). Variant Params Train Inference (ms) Thru. (GPU-h) GPU CPU (K/s) PCRN (baseline) 638 K 4.0 2.6 12.1 45 P5a (TCN-only) 201 K 2.5 2.0 6.5 127 P8 (TwoStage) 401 K 3.5 3.8 10.8 67 P10a (iTransf.) 381 K 3.0 1.0 5.2 247                
+
+> DualTCN 379 K 3.5 3.5 8.8 76 DualTCN-AmpAug 379 K 3.5 3.5 8.8 76 DualTCN-3Layer 306 K 3.5 3.5 8.5 76
+
+invariant ( +0 .073 and −0.025 , respectively). Only the profile MSE changes: it is minimised near τ = 2 magainst the hard-step ground truth (MSE = 0 .065 ) and decreases monotonically with larger τ when evaluated against a matched-τ reference. Thus, τ is a visualization hyperparameter that controls the smoothness of the reconstructed profile but introduces no bias in the inversion parameters. 
+
+3.2.4. Loss Function and Training 
+
+The loss combines profile reconstruction with per-parameter regression: 
+
+L = Lprof MSE +
+
+> 4
+
+X
+
+> i=1
+
+wi L(i)Huber , (4) with Huber δ = 0 .1 and weights w = [1 , 3, 3, 2] . The profile MSE Lprof MSE is the unweighted mean over all 64 depth nodes; no depth-dependent weighting is applied, so shallow and deep nodes contribute equally per unit depth interval (uniform spacing ensures equal representation). Training uses AdamW ( λ = 10 −3, weight decay 10 −3), a one-cycle cosine schedule (5-epoch linear warm-up, peak rate 5 × 10 −4, final rate 5 × 10 −6), batch size 256, for 100 epochs on the 700 000-sample training set (approximately 2 734 gradient steps per epoch) on a single NVIDIA A100 40 GB GPU. Training DualTCN for 100 epochs required approximately 3–4 GPU-hours on this hardware; all training used PyTorch 2.x with automatic mixed precision (AMP) and 
+
+torch.compile for graph optimisation. No explicit early stopping is applied; instead, the model checkpoint with the lowest total validation loss across all 100 epochs is saved and used for all subsequent evaluation. All variants share this protocol and are evaluated on the held-out 150 000-sample test set. Table 3 reports the computational cost for the key variants. 7Figure 2: Architecture of DualTCN (379 000 parameters). Full-Time Branch (top): six TCN blocks (B1–B6) with exponentially growing dilations 1, 2, 4, 8, 16, 32 process the full 128-sample input and produce the latent zf ∈ R256 . Late-Time Branch 
+
+(middle): the input is first sliced to the last 64 samples; four Dilated Residual TCN blocks (dilations 1, 4, 8, 16) encode this late-time window into zl ∈ R128 . The two latents are concatenated to form zcomb ∈ R384 . Feature Processing zoom (bottom inset): internal structure of every TCN block—a causal dilated convolution followed by BatchNorm1d, GELU activation, and Dropout ( p = 0 .30 ). Prediction Heads : Stage 1 maps zf through an MLP ( 256 → 2) to [ ˆσ1, ˆd1]; Stage 2 maps zcomb conditioned on gradient-detached Stage 1 outputs through an MLP ( 384 → 2) to [ ˆσ2, ˆd2]. An auxiliary head predicts ˆdsf during training only (yellow box). Physics Decoder : the four predicted scalars are assembled into ˆp ∈ [0 , 1] 4 and passed through the differentiable soft-step decoder to produce the conductivity profile ˆσ(z) ∈ R64 .
+
+4. Architectural Ablation 
+
+We ran thirteen parallel experiments, each modifying one aspect of the PCRN baseline (Supplementary Section S7 lists all variants). The key intermediate designs are P7 (multi-scale TCN: three parallel branches with different dilation schedules targeting early-, mid-, and late-time features; 384 K parameters) and P8 (two-stage cascaded TCN: Stage 1 predicts [σ1, d 1], Stage 2 conditions on gradient-detached Stage 1 outputs to predict [σ2, d 2]; 401 K parameters). Two attention-based variants—P10a (iTransformer, treating each channel as a token) and P10b (PatchTST, segmenting traces into overlapping patches)—were also evaluated; both underperform all TCN designs (Section 6.1). 
+
+4.1. DualTCN: Late-Time Branch with Auxiliary Depth Head 
+
+DualTCN builds on P7 and P8 by adding two mechanisms aimed specifically at improving d2 (Fig. 2). The first is a dedicated late-time encoder: a compact four-block dilated TCN (32 channels, dilations 1, 4, 8, 16) applied only to the last 64 of 128 time samples—the window dominated by the exponential 8Table 4: Ablation summary: normalised RMSE, R2, and latency for the baseline, top-performing variants, and representative underperformers (A100 GPU). Full results for all 13 variants are in Supplementary Tables S1–S2. Bold = best. 
+
+Variant Params RMSE (norm.) Loss R2
+
+> d2
+
+¯R2 ms 
+
+σ1 σ2 d1 d2
+
+PCRN (baseline) 638K 0.026 0.110 0.033 0.183 0.103 0.541 0.844 2.6 P5a TCN-only 201K 0.022 0.109 0.031 0.187 0.102 0.525 0.841 2.0 P7 MultiScale 384K 0.021 0.100 0.031 0.184 0.093 0.539 0.850 3.8 P8 TwoStage 401K 0.020 0.098 0.033 0.185 0.089 0.532 0.852 3.8 P10a iTransf. 381K 0.040 0.180 0.041 0.220 0.220 0.342 0.728 1.0 
+
+DualTCN 379K 0.020 0.092 0.031 0.165 0.077 0.627 0.877 3.5 
+
+decay E(t) ∼ exp (−2u1d2). Its 128-dimensional latent zlate is concatenated with the full-time encoder’s 256-dimensional latent to form zcomb ∈ R384 .The second is an auxiliary seafloor-depth head: a small MLP that predicts dsf = d1 + d2 (range 60–200 m). Because the data are more sensitive to dsf than to d2 alone, predicting it steers the combined latent toward features useful for d2. The auxiliary Huber loss (weight 0.5) supplements Eq. 4 during training only and is discarded at test time. Total parameters: 379 000. Head 1 maps zfull to the easy parameters [ ˆσ1, ˆd1]. Head 2 receives [zcomb ; ˆσ⊥ 
+
+> 1
+
+; ˆd⊥ 
+
+> 1
+
+] (gradient-detached Stage 1 outputs) and predicts [ˆ σ2, ˆd2]. The assembled ˆp feeds the physics decoder (Eq. 3). 
+
+5. Results 
+
+5.1. Ablation Results 
+
+Table 4 reports normalised root-mean-square error (RMSE), R2, and inference timing for all variants. All RMSE values are in the normalised [0 , 1] log-space used during training. All R2 values are likewise computed on parameters normalised to [0 , 1] in log 10 space; they therefore measure explained variance in 
+
+log 10 -parameter space, not in physical units. Supplementary Table S4 (Section 5.2) provides a systematic conversion of all four DualTCN RMSE values to physical units (S m −1 and m), including the geometric RMSE factor and representative absolute errors at the geometric mean of each training range. Three patterns stand out. First, the choice of encoder architecture matters more than any other design decision. The Transformer-only (P5b), MLP-only (P5c), iTransformer (P10a), and PatchTST (P10b) variants all perform far worse than any TCN-based model. Second, among the TCN-based designs, multi-scale branching (P7), hierarchical conditioning (P8), and late-time specialisation (DualTCN) produce a monotonic improvement: total losses of 0.0931, 0.0892, and 0.0771. Third, DualTCN achieves the lowest loss and the highest R2 for every parameter, including R2 
+
+> d2
+
+= 0 .627 —up from 0.532 in P8. 95.2. Prediction Quality 
+
+Fig. 3 shows DualTCN predictions on six held-out samples. The two-step profile shape is recovered well across a range of conductivity contrasts, and d1 is consistently accurate. Compared with P8, d2 is visibly better resolved. Fig. 6 shows true-versus-predicted scatter for all four parameters on 5 000 test samples. In physical units (Supplementary Table S4), DualTCN’s geometric RMSE factors are Γ = 1 .08 (σ1,
+
+±0.06 S m −1 at mid-range), 1.89 (σ2, ±0.028 S m −1), 1.04 (d1, ±3 m), and 1.30 (d2, ±7 m). The d2 error of 
+
+±3–15 m across the 10–50 m range is the most practically important limitation and motivates the failure-mode analysis in Section 5.3. 
+
+5.3. Failure-Mode Analysis for d2
+
+To understand where DualTCN struggles, Fig. 4 plots the absolute prediction error for d2 against the true value of d2 for the full 150 000-sample test set (RMSE = 0.1652 in normalised [0 , 1] log-space), with scatter points coloured by the true conductivity contrast ratio σ1/σ 2. Two patterns emerge. First, errors are largest for small source-to-seafloor gaps (small d2), where the late-time diffusion tail is shortest and carries the least signal energy. Second, at any given d2, samples with a weak conductivity contrast ( σ1/σ 2
+
+close to unity, warm colours) produce larger errors, because the amplitude of the seafloor-refracted wavefield scales with the contrast. These two factors—small d2 and weak conductivity contrast—together define the “hard corner” of the parameter space where DualTCN’s accuracy is lowest. Conversely, large d2 with strong conductivity contrast (cool colours in Fig. 4) are recovered with errors comparable to the well-constrained parameters σ1 and d1.
+
+5.4. Noise Robustness 
+
+We test DualTCN at four SNR levels spanning the range encountered in marine MCSEM surveys (Constable, 2010; Key, 2012). Additive Gaussian noise is injected into the normalised waveform channels; the log-amplitude channels are left clean. The per-trace SNR is defined as 
+
+SNR = 20 log 10 
+
+ RMS( Enorm )
+
+σn
+
+
+
+. (5) The results (Table 5, Fig. 5) are clear: DualTCN shows no measurable degradation for SNR ≥ 20 dB and only a marginal decline at 10 dB ( ∆ ¯R2 = 0 .002 ). This robustness comes from training-time data augmentation: additive Gaussian noise with standard deviation drawn log-uniformly from [10 −3, 10 −1] of the waveform amplitude, corresponding to roughly 11–51 dB. No architectural change or post-processing is needed. A variant trained with temporally correlated 1/ f (pink) noise (DualTCN-Colored, Section 5.4.1, Section 5.4.1) confirms that this robustness generalises to realistic noise spectra: the model is equally tolerant of white and colored noise down to 5 dB ( ¯R2 ≥ 0.863 ). 10 Table 5: DualTCN performance versus input SNR ( Ntest = 150 ,000 ). Bold = best. SNR Loss R2                            
+
+> σ1R2
+> σ2R2
+> d1R2
+> d2
+> ¯R2
+> ∞0.0770 0.995 0.898 0.987 0.627 0.877
+> 40 dB 0.0770 0.995 0.898 0.987 0.627 0.877 30 dB 0.0770 0.995 0.898 0.987 0.627 0.877 20 dB 0.0771 0.995 0.898 0.987 0.627 0.877 10 dB 0.0780 0.995 0.896 0.988 0.622 0.875
+
+The near-constant R2 values for SNR ≥ 20 dB reflect the input representation: during both training and testing, additive noise is injected only into the peak-normalised waveform channels, while the log-peak-amplitude channel is derived from the clean (or ensemble-averaged) signal. The robustness reported in Table 5 therefore specifically describes robustness to waveform-channel noise ; it does not characterise performance under a separate but physically important noise pathway—errors or bias in the amplitude estimate itself. This distinction matters because σ2 and d2 rely primarily on the log-peak-amplitude channel for discrimi-nation. Amplitude estimation uncertainty arises in field acquisition from two sources: (i) finite stacking —the peak amplitude is averaged over a finite number of repeated transmissions, leaving residual random error that scales roughly as 1/√Nstacks ; and (ii) calibration drift —slow changes in source strength or receiver coupling introduce a systematic multiplicative bias not removed by peak normalisation. 
+
+5.4.1. Amplitude-Channel Noise Experiment 
+
+To quantify these two amplitude noise pathways, we run dedicated experiments that directly perturb the log-peak-amplitude input channels of the trained DualTCN model on the full 150 000-sample test set, leaving the normalised waveform channels unchanged. 
+
+Experiment A: random noise (finite stacking).. We add independent Gaussian noise ϵ ∼ N (0 , σ 2amp ) to the 
+
+log 10 amplitude of each receiver–sample pair, for σamp ∈ { 0.01 , 0.02 , 0.05 , 0.10 , 0.20 } log 10 units (corresponding to amplitude uncertainties of approximately ±2–58%). 
+
+Experiment B: systematic bias (calibration drift).. We add a fixed offset β to all four log 10 amplitude channels of every sample, for β ∈ {± 0.05 , ±0.10 , ±0.20 } log 10 units (multiplicative amplitude factors 0.63–1.58 ×). The results are summarised in Fig. 7 (Supplementary Table S8 provides the numerical values). The results (Fig. 7, Supplementary Table S8) reveal a stark asymmetry. For random noise , the model tolerates essentially no amplitude uncertainty: adding σamp = 0 .01 log 10 units (a mere ±2% amplitude error on each receiver independently) collapses R2 
+
+> σ2
+
+from 0.898 to 0.380 and drives R2 
+
+> d2
+
+negative ( −0.784 ). By 
+
+σamp = 0 .02 , σ2 prediction is already worse than predicting the sample mean, and all four parameters are severely degraded by 0.05. For systematic bias , performance degrades more gracefully: d1 is nearly immune 11 Table 6: Augmentation and representation experiment results (150 000 test samples, normalised [0 , 1] log-space RMSE and                                                  
+
+> ¯R2). DualTCN is the unaugmented baseline. Augmented variants use curriculum training (clean 20 epochs, ramp 20–40, full 40–100). DualTCN-Colored uses pink noise throughout (no curriculum). DualTCN-AmpRatio changes the input representation (no augmentation). Bold = best per column. Variant Loss σ1σ2d1d2¯R2Strategy
+> DualTCN 0.077 0.020 0.092 0.031 0.165 0.877 none DualTCN-AmpAug 0.103 0.021 0.107 0.030 0.175 0.857 amp noise 0.2–2% DualTCN-Colored 0.087 0.020 0.096 0.032 0.171 0.868 1/ fwaveform noise DualTCN-AmpRatio 0.110 0.029 0.110 0.033 0.184 0.842 amp ratios (7 ch) DualTCN-Weighted 0.124 0.022 0.110 0.036 0.184 0.831 inv-σ2weighting DualTCN-RecvBias 0.119 0.023 0.116 0.030 0.207 0.809 bias ±7%/recv
+
+across the full ±0.20 range, and the model retains useful accuracy for σ2 and d2 within |β| ≤ 0.05 (±12% amplitude offset). Beyond |β| = 0 .10 (±26% offset), R2 
+
+> d2
+
+drops below 0.3 and R2 
+
+> σ2
+
+falls to 0.4 or lower. These results confirm that σ2 and d2 are inferred almost entirely from the absolute log-amplitude level, not from the waveform shape—a direct consequence of the two-channel design described in Section 3.1. The tight tolerance for random noise ( σamp < 0.01 ) implies that reliable inversion of these parameters requires sufficient stacking to suppress per-receiver amplitude noise to below ≈2%, a condition met by standard MCSEM acquisition protocols (100–1000 stacked transmissions reduce Gaussian amplitude noise by factors of 10–30). For systematic bias (instrument drift), the |β| ≤ 0.05 tolerance corresponds to a ±12% amplitude calibration requirement, consistent with typical survey specifications, but systematic errors of this magnitude are not unusual when source strength or coupling changes between lines. We tested four augmentation and representation strategies (Table 6; full descriptions in Supplement Section S12). The key result is DualTCN-AmpAug : curriculum training (clean 20 epochs, linear ramp 20–40, full augmentation 40–100) with log-amplitude noise σamp ∈ [0 .001 , 0.01] log 10 (≈0.2–2% per receiver). Clean-data ¯R2 = 0 .857 versus 0.877 unaugmented: a 2% cost for transformative robustness. Three additional variants—DualTCN-RecvBias (per-receiver bias ±7%), DualTCN-Colored (1/ f waveform noise), and DualTCN-AmpRatio (inter-receiver log-amplitude differences, 7 channels)—test complementary hardening strategies. DualTCN-AmpRatio is perfectly immune to uniform systematic bias ( ¯R2 = 0 .842 at all |β| ≤ 0.20 ) but vulnerable to per-receiver independent noise; DualTCN-Colored confirms robustness to realistic noise spectra ( ¯R2 ≥ 0.863 at 5 dB). The amplitude noise augmentation (DualTCN-AmpAug) is the key result. Table 7 compares the unaugmented DualTCN against DualTCN-AmpAug under identical perturbation protocols. The augmented model is essentially immune to ±2% random amplitude noise ( ¯R2 = 0 .858 versus 0.363 ) and retains useful accuracy at ±5% ( ¯R2 = 0 .846 versus 0.002 ). Even at ±12% noise, DualTCN-AmpAug achieves 
+
+¯R2 = 0 .762 —compared with −0.656 for the unaugmented model. For systematic bias, the augmented model 12 Table 7: Amplitude robustness comparison: unaugmented DualTCN versus DualTCN-AmpAug under random amplitude noise (σamp in log 10 units) and systematic bias ( β in log 10 units). 150 000 test samples. Bold = better of the two models at each perturbation level. 
+
+DualTCN (unaugmented) DualTCN-AmpAug 
+
+Perturbation R2 
+
+> σ1
+
+R2 
+
+> σ2
+
+R2 
+
+> d1
+
+R2
+
+> d2
+
+¯R2 R2 
+
+> σ1
+
+R2 
+
+> σ2
+
+R2 
+
+> d1
+
+R2
+
+> d2
+
+¯R2
+
+Random noise 
+
+Clean 0.995 0.898 0.987 0.627 0.877 0.995 0.863 0.988 0.580 0.857 
+
+σ=0 .01 (±2%) 0.919 0.380 0.939 −0.784 0.363 0.995 0.862 0.989 0.588 0.858 
+
+σ=0 .02 (±5%) 0.784 −0.112 0.803 −1.465 0.002 0.994 0.844 0.990 0.556 0.846 
+
+σ=0 .05 (±12%) 0.368 −1.149 0.280 −2.124 −0.656 0.984 0.750 0.994 0.320 0.762 
+
+Systematic bias 
+
+β=±0.05 (±12%) 0.986 0.715 0.988 0.563 0.813 0.984 0.801 0.989 0.526 0.825 
+
+β=±0.10 (±26%) 0.954 0.497 0.987 0.438 0.719 0.946 0.702 0.987 0.348 0.746 
+
+is moderately more robust across all tested levels. The curriculum protocol is essential: training with amplitude noise from epoch 1 degrades clean accuracy by 2.7×. Together, these experiments establish that the amplitude vulnerability is substantially mitigable through curriculum-based augmentation , provided the augmentation range matches the physically relevant noise level. Three complementary hardening strategies exist: (i) curriculum amplitude augmentation (AmpAug; 2% clean cost); (ii) robust input representations (AmpRatio) immune to common-mode scaling; (iii) calibration-uncertainty channels for per-receiver confidence weighting. Combining (i) and (ii) is the most promising near-term path. 
+
+Structured amplitude perturbations.. Experiments A and B above apply i.i.d. random noise or a uniform bias to all receivers equally. To assess robustness under more realistic field conditions, we evaluate three structured perturbation scenarios that model specific acquisition artefacts, comparing the Base DualTCN, DualTCN-AmpAug, and DualTCN-AmpRatio models on 150 000 test samples. 
+
+Linear drift (towline calibration drift): the log-amplitude of all receivers is ramped linearly from −∆/2
+
+to +∆ /2 across the test set, simulating slow source-strength drift along a survey line. Both models degrade gracefully: at ∆ = 0 .20 log 10 (×0.79–1.26), Base ¯R2 = 0 .809 and AmpAug ¯R2 = 0 .820 ; at ∆ = 0 .40 
+
+(×0.63–1.58), Base = 0.715 and AmpAug = 0.747. DualTCN-AmpRatio is perfectly immune to linear drift ( ¯R2 = 0 .842 at all ∆ levels), since a common ramp cancels exactly in adjacent-receiver differences (Fig. 8c). 
+
+Per-receiver independent bias : each receiver acquires an independent calibration offset drawn from 
+
+N (0 , σ 2recv ), held constant over blocks of 500 consecutive samples (modelling a calibration state that persists over a short survey segment). This is the most damaging perturbation: at σrecv = 0 .02 log 10 (≈5% per 13 Table 8: Deployment recommendations. Each row specifies the recommended DualTCN variant for a given acquisition scenario, its clean-data ¯R2, and the key advantage. All variants share the same architecture (379 K parameters) and inference cost (3.5 ms/sample). ¯R2 values are reported with bootstrap 95% confidence intervals ( B = 1 ,000 , N = 150 ,000 ). Scenario Variant ¯R2 (95% CI) Key advantage General survey, clean data DualTCN 0.877 ± 0.002 Best clean accuracy Amplitude noise                       
+
+> ≤5% DualTCN-AmpAug 0.857 ±0.002 Robust to ±5% noise Uniform calibra-tion drift DualTCN-AmpRatio 0.842 ±0.003 Exact bias immunity Resistive targets (σ2<0.05 )DualTCN-Weighted 0.831 ±0.003 5×MAPE reduction Colored ocean noise DualTCN-Colored 0.868 ±0.002 1/ fnoise robust
+
+receiver), Base ¯R2 = −0.01 and AmpAug ¯R2 = 0 .47 . DualTCN-AmpRatio ( ¯R2 = 0 .11 ) does not help because independent biases do not cancel in adjacent-receiver differences. AmpAug is the most robust variant for this scenario (Fig. 8a). 
+
+Uniform systematic bias : DualTCN-AmpRatio achieves exactly constant ¯R2 = 0 .842 across all tested bias levels |β| ≤ 0.20 log 10 , while Base drops from 0.877 to 0.517 and AmpAug from 0.859 to 0.627 (Fig. 8b). These results reveal a three-tier robustness hierarchy: (i) common-mode errors (drift, source-strength changes) are eliminated by the amplitude-ratio representation; (ii) per-receiver calibration mismatch is best mitigated by curriculum augmentation (AmpAug); (iii) no existing variant fully addresses simultaneous per-receiver bias > 5% . This motivates future work on self-calibrating architectures or hybrid AmpAug +AmpRatio models. Table 8 summarises the recommended DualTCN variant for each deployment scenario. All ¯R2 values in Tables 4, 6, and 8 are computed on 150 000 held-out test samples; bootstrap 95% confidence intervals ( B = 1 ,000 resamples) are ≤ ± 0.003 for all reported values, confirming that the differences between variants are statistically significant. Implications for field deployment are further discussed in Section 6.6. 
+
+5.5. Benchmark Against Conventional Inversion 
+
+We compare DualTCN against seven conventional inversion configurations using the empymod forward operator, including Occam-style regularised inversion (Constable et al., 1987) with finite-difference Jacobians— the standard baseline in MCSEM practice. Each empymod evaluation (64 frequencies, 4 receivers) takes approximately 30–50 ms on a single CPU core; all per-sample wall-clock times below reflect the accumulation of hundreds to thousands of such evaluations, not the cost of a single forward call. 14 5.5.1. Methods 
+
+All six conventional configurations minimise the same sum-of-squared relative residuals, 
+
+ˆθ = arg min 
+
+> θ
+> 4
+
+X
+
+> r=1
+
+∥E(r)obs − E(r)pred (θ)∥2
+
+∥E(r)obs ∥2 , (6) a standard measure in electromagnetic inversion (Constable et al., 1987), using either the Levenberg– Marquardt (LM) algorithm (Moré, 1978) or L-BFGS-B (Byrd et al., 1995; Zhu et al., 1997) with box constraints θ ∈ [0 , 1] 4.
+
+NLS-LM / NLS-LBFGSB (untuned baselines): default tolerances, midpoint start for single-start runs, or midpoint plus seven random uniform starts for multi-start runs. 
+
+TT-LM (tight tolerances): NLS-LM with tightened solver tolerances ( ftol = xtol = 10 −8, max_nfev 
+
+= 5 ,000 ) and the same 8-start protocol (midpoint + 7 random), to test whether default tolerances cause premature termination. 
+
+TIK-LBFGSB (Tikhonov regularisation): L-BFGS-B with an ℓ2 penalty λ∥θ − θprior ∥2, λ = 0 .01 ,
+
+θprior = [0 .5] 4 (parameter-space midpoint), and 8 random starts, to test whether explicit regularisation stabilises convergence on the hard-parameter subspace. 
+
+WS-LM / WS-LBFGSB (warm-start): the DualTCN single-pass prediction is used as start 0; the remaining 7 starts are random uniform draws identical to the multi-start NLS runs. Solver tolerances are tightened as in TT-LM. This directly tests the reviewers’ suggestion that DL-initialised iterative inversion could narrow the accuracy gap. 
+
+Occam-LM (regularised inversion): the standard Occam approach (Constable et al., 1987) minimises data misfit plus a smoothness (first-difference roughness) penalty λ∥R θ∥2 with λ = 0 .01 , using the same 8-start protocol. Due to the high per-sample cost ( ≈15 s, comparable to NLS-LM), the Occam-LM benchmark is evaluated on a 200-sample subset; statistical tests confirm that the ¯R2 difference relative to other baselines is significant at this sample size. This is the closest approximation to the analytic-Jacobian Occam inversion of Key (2009) within our parametric (4-scalar) framework; finite-difference Jacobians are used since the parametric forward operator does not provide closed-form derivatives. 
+
+5.5.2. Results 
+
+We benchmark against seven conventional inversion configurations including Occam-style regularised inversion (Constable et al., 1987); the full results table is in Supplementary Table S9. The key findings are: (i) untuned multi-start baselines achieve ¯R2 = 0 .129 (LM) to 0.439 (L-BFGS-B); (ii) Occam regularisation (λ = 0 .01 ) underperforms ( ¯R2 = 0 .042 ), confirming that smoothness penalties designed for discretised profiles are ineffective for parametric inversion; (iii) warm-starting with DualTCN’s prediction raises ¯R2 to 0.784 
+
+(WS-LBFGSB); (iv) DualTCN alone achieves ¯R2 = 0 .862 in 0.0035 s—a 26 ,500 × speed advantage over WS-LBFGSB ( 92 .8 s) with +0 .078 higher ¯R2.15 Table 9: UQ summary at the 90% nominal level (5 000 test samples). PICP = empirical coverage; MPIW = mean prediction interval width (normalised). Full results in Supplementary Table S6. Method PICP 90 MPIW 90                        
+
+> σ1σ2d1d2σ1d2
+> MC-Dropout 0.944 0.664 0.596 0.572 0.078 0.135 Temp-scaled 0.863 0.845 0.905 0.854 0.055 0.342 Split conformal 0.906 0.900 0.902 0.905 0.062 0.500 Deep ensemble 0.581 0.480 0.278 0.362 0.026 0.125
+
+A hybrid workflow—DualTCN for real-time quality control followed by warm-started iterative inversion for final models—leverages the complementary strengths of both approaches. 
+
+5.6. Uncertainty Quantification 
+
+We compare four UQ methods on 5 000 held-out test samples: MC-Dropout ( T = 100 stochastic passes) (Gal and Ghahramani, 2016), temperature-scaled MC-Dropout (Guo et al., 2017), split conformal prediction (Angelopoulos and Bates, 2023), and a five-member deep ensemble (Lakshminarayanan et al., 2017). Full method descriptions, the complete PICP table across six α-levels, MPIW 90 values, and reliability diagrams are provided in Supplementary Section S6. Table 9 summarises the key results at the 90% nominal level. MC-Dropout is well calibrated for 
+
+σ1 (PICP 90 = 0 .944 ) but severely over-confident for d2 (PICP 90 = 0 .572 )—the dropout-based epistemic uncertainty cannot capture the aleatoric component from limited signal information. Split conformal prediction achieves the best calibration across all parameters (PICP 90 ≈ 0.90 ) with provable coverage guarantees, at the cost of wider intervals. Temperature-scaled MC-Dropout offers the best trade-off between calibration and interval width. The deep ensemble is the least calibrated method (PICP 90 < 0.58 for all parameters), indicating that random-seed diversity alone is insufficient. 
+
+5.7. Validation on Field-Representative Models 
+
+Five canonical 1D models spanning published shallow-water MCSEM scenarios (Constable, 2010; Key, 2012) are inverted in a single forward pass with no retraining. Mean absolute percentage error across all parameters and models is 12.1%; σ1 is recovered to 3–11% and d1 to 1–6%. The largest d2 error (46%, model E) occurs at moderate conductivity contrast, consistent with the failure-mode analysis. Full results (Supplement Table S9, Fig. S2) are in Supplement Section S13. 
+
+5.8. Step-Off Source Validation 
+
+Step-off data require frequency-domain division by i 2 πf before passing to DualTCN. Validation on five field-representative models (Supplement Section S2) shows < 13 % prediction differences for σ2 ≳ 0.05 S/m, 16 but up to 117% for the highly resistive model D ( σ2 = 0 .008 S/m) due to 2 Hz bandwidth truncation. Direct training on step-off waveforms—requiring only dataset regeneration, no architectural changes—is the recommended production path. 
+
+5.9. Benchmark Against Published Survey Models 
+
+Seven 1D models from published shallow-water MCSEM surveys (Constable and Srnka, 2007; Key, 2009; Constable, 2010; Key, 2012) are inverted in a single forward pass. For moderate-to-high σ2 ≥ 0.3 S/m, MAPE is 7.5%. For resistive targets, the unaugmented model produces large σ2 errors (up to 1 125% at 
+
+σ2 = 0 .005 S/m); DualTCN-Weighted (inverse-σ2 sample weighting) reduces overall MAPE from 61.1% to 
+
+12.1% . Full per-site results are in Supplement Section S13 (Supplement Table S10). 
+
+5.10. Pseudo-2D Survey Line Demonstration 
+
+A synthetic 4 km tow line (200 stations, 50:1 resistive body embedded at 1.2–2.8 km) demonstrates pseudo-2D profiling via station-by-station 1D inference with lateral median filtering. Geometric parameters are well recovered ( d1 MAPE = 3.8%, R2 = 0 .935 ); the resistive body is clearly delineated, though in-body 
+
+σ2 MAPE is 47.6%. Full results, figures, and tables are in Supplement Section S14. 
+
+6. Discussion 
+
+6.1. Architectural Insights 
+
+The three best TCN designs form a clear progression: P7 (multi-scale) reduces loss by 9.8% over the TCN-only baseline; P8 (cascaded conditioning) adds 4.2%; DualTCN’s late-time branch and auxiliary dsf 
+
+head add a further 13.6%, for a cumulative 25.3% improvement ( ¯R2 = 0 .877 ). The late-time encoder gives the exponential decay regime its own parameters and receptive field, preventing the weak late-time signal from being overwhelmed; the auxiliary head steers gradients toward d2-informative features. This branch contributes just 28 K parameters yet provides the largest single gain. Removing the TCN and keeping only the Transformer more than doubles the loss; attention-based encoders (iTransformer, PatchTST) perform 
+
+> 2.8× worse despite comparable budgets, because global self-attention conflates the physically distinct early- and late-time regimes (Supplement Section S5). The dilated TCN’s local processing with exponentially growing receptive field is the essential inductive bias for diffusion-governed transients. 
+
+6.2. The d2 Information Bottleneck 
+
+Despite DualTCN’s improvement, d2 remains the hardest parameter ( R2 = 0 .627 versus > 0.98 for σ1
+
+and d1). This difficulty is physical: all four receivers sit within 200 m, so the early- and mid-time response senses mainly the combined depth dsf = d1 + d2, not d1 and d2 individually. Resolving d2 requires the low-amplitude late-time tail, where SNR is poor. The narrow physical range (10–50 m, 0.70 log-decades) 17 further limits the available information. The failure-mode analysis in Section 5.3 confirms that the largest errors cluster among thin layers with weak conductivity contrast—precisely the configurations where the late-time diffusion tail carries the least energy. None of the other modifications we tested—loss re-weighting (P3), capacity expansion (P6), multi-scale coverage (P7), hierarchical conditioning (P8)—raised R2 
+
+> d2
+
+above 0.56 before DualTCN. Extending the receiver array to 500–1 000 m, where the seafloor geometry is better resolved, is the most promising remedy. 
+
+6.3. Comparison with the Literature 
+
+DualTCN differs from published DL-CSEM methods (Puzyrev, 2019; Zhang et al., 2024; Zhang and Hu, 2024; Li et al., 2025) in three respects: time-domain input with a physics-motivated dual-branch encoder; parametric output (4–6 scalars) enforced by a differentiable decoder, eliminating non-physical oscillations; and comprehensive amplitude robustness characterisation (five experiments) plus four-method UQ comparison— neither of which has been attempted in prior DL-CSEM work. Inference is a single feedforward pass under 4 ms, qualitatively different from iterative methods (Raissi et al., 2019; Abubakar et al., 2012). The parametric output also enables hybrid workflows: DualTCN’s estimate serves as a warm start for conventional inversion (Section 5.5). DualTCN’s late-time branch and auxiliary ˆdsf head are direct analogues of ATEM strategies (Moghadas, 2020; Liu et al., 2022; Colombo et al., 2021), adapted to the marine setting where conducting seawater and short offsets change the relative importance of early- vs. late-time windows. Generic global attention is poorly suited to MCSEM transients because early- and late-time regimes are not exchangeable; physics-aware hybrid attention is a promising future direction. Extended positioning against alternative paradigms (PGN, DIP-style, ensemble Kalman, probabilistic methods) is provided in Supplement Section S16. 
+
+6.4. Three-Layer Extension 
+
+A three-layer variant (DualTCN-3Layer, 306 K parameters) trained on a seawater/resistive-layer/basement model demonstrates extensibility: shared parameters transfer with negligible loss ( d1 RMSE improves by 39%), basement conductivity σ3 is well resolved ( R2 ≈ 0.88 ), and d2 is essentially unchanged (RMSE = 0 .170 
+
+vs. 0.165 ). The thin-layer parameters ( σ2, h) remain resolution-limited ( R2 ≈ 0.45 , 0.23 ) due to the physical 
+
+σ2–h trade-off at 20–200 m offsets. Full results, equations, and discussion are in Supplement Section S15. 
+
+6.5. Uncertainty Quantification Discussion 
+
+MC-Dropout is well calibrated for σ1 (PICP 90 = 0 .944 ) but over-confident for d2 (PICP 90 = 0 .572 ), because dropout-based epistemic uncertainty cannot capture the aleatoric component from limited signal information. Temperature scaling and split conformal prediction correct this systematically (Section 5.6). Despite under-coverage, MC-Dropout standard deviation correlates with per-sample error, serving as a triage 18 signal for follow-up iterative inversion. The 100-pass pipeline costs 350 ms per sample on A100— > 7,000 ×
+
+cheaper than conventional inversion. 
+
+6.6. Limitations 
+
+Key limitations include: (i) the two-channel input creates a structural amplitude vulnerability mitigated by DualTCN-AmpAug ( ¯R2 = 0 .858 at ±2% noise) and DualTCN-AmpRatio (exact uniform-bias immunity); per-receiver calibration mismatch remains the dominant vulnerability (Section 5.4.1, Fig. 8); (ii) the model requires retraining for different acquisition geometries; (iii) i.i.d. training does not reflect spatial correlation in real surveys; (iv) MC-Dropout under-covers d2, correctable by temperature scaling or conformal prediction; (v) no field-data validation is included—amplitude calibration, source-waveform deconvolution, and geometry matching are prerequisites. The 1D assumption limits applicability to laterally uniform geology; the pseudo-2D demonstration (Section 5.10) validates station-by-station inference with lateral smoothing, while 2.5D/3D extensions require different architectures. The retraining pipeline takes < 8 GPU-hours for one million samples; two concrete field-data targets (Zenodo TD-CSEM benchmark, Scarborough gas-field data) are identified for future work. 
+
+7. Conclusions 
+
+DualTCN is the first deep-learning framework for time-domain multi-receiver marine CSEM inversion. Among 13 architectural variants trained on one million synthetics, its dedicated late-time branch and auxiliary 
+
+dsf head achieve ¯R2 = 0 .877 (25.3% loss reduction), with R2 
+
+> d2
+
+= 0 .627 . Dilated causal convolution is the essential inductive bias; attention-based encoders perform 2.8× worse. Curriculum-based amplitude augmentation (DualTCN-AmpAug) mitigates the critical amplitude vul-nerability ( ¯R2 = 0 .858 at ±2% noise vs. 0.363 unaugmented; 0.846 at ±5%). Inverse-σ2 weighting reduces published-survey MAPE from 61.1% to 12.1%. A three-layer extension resolves basement conductivity at 
+
+R2 ≈ 0.88 with no architectural changes (Supplement Section S15). MC-Dropout UQ is well calibrated for 
+
+σ1 (PICP 90 = 0 .944 ); d2 under-coverage is correctable by temperature scaling or conformal prediction. DualTCN inverts a sample in 3.5 ms on GPU (8.8 ms CPU), enabling real-time quality control at sea. Against conventional inversion, it achieves ¯R2 = 0 .862 at 26 ,500 × lower cost. Table 8 provides variant recommendations for five deployment scenarios. Future priorities include: (i) combining AmpAug and AmpRatio strategies for simultaneous per-receiver and common-mode robustness; (ii) conditional normalising flows for non-Gaussian posterior estimation; (iii) four-layer benchmarks with longer offsets and VTI anisotropy; (iv) spatially correlated evaluation; (v) field-data validation on the Zenodo TD-CSEM benchmark and Scarborough gas-field data. 19 Data and Code Availability 
+
+All training and evaluation data were generated synthetically using empymod (Werthmüller, 2017), freely available at https://empymod.emsig.xyz . The published survey benchmark (Section 5.9) uses earth-model parameters from Constable and Srnka (2007); Key (2009); Constable (2010); Key (2012). The Scarborough gas-field CSEM data are available at https://marineemlab.ucsd.edu/Projects/Scarborough/Data.html .A marine TD-CSEM benchmark dataset is available at Zenodo (doi:10.5281/zenodo.7198873). Source code, training scripts, configuration files, evaluation pipelines, result data, and trained model weights for all variants reported in this study (DualTCN, DualTCN-AmpAug, DualTCN-Colored, DualTCN-AmpRatio, DualTCN-Weighted, DualTCN-RecvBias, DualTCN-3Layer) are available in a GitHub repository at https://github.com/Kahmed68/DualTCN under the MIT open-source license. The repository will be made public upon acceptance; a private reviewer-access link is available from the corresponding author upon request during the review process. 
+
+Acknowledgements 
+
+This research used resources of the Argonne Leadership Computing Facility (ALCF, Polaris), supported by U.S. Department of Energy Contract DE-AC02-06CH11357. 
+
+CRediT Author Statement Khaled Ahmed: Conceptualization, Methodology, Software, Validation, Formal analysis, Investiga-tion, Data curation, Writing – original draft, Writing – review & editing, Visualization. Ghada Omar: 
+
+Conceptualization, Methodology, Formal analysis, Writing – review & editing, Supervision. 
+
+Declaration of Competing Interest 
+
+The authors declare that they have no known competing financial interests or personal relationships that could have appeared to influence the work reported in this paper. 
+
+References 
+
+Abubakar, A., Habashy, T.M., Li, M., Liu, J., 2012. Inversion algorithms for large-scale geophysical electromagnetic measurements. Inverse Problems 28, 123012. doi: 10.1088/0266-5611/28/12/123012 .Angelopoulos, A.N., Bates, S., 2023. Conformal prediction: A gentle introduction. Foundations and Trends in Machine Learning 16, 494–591. doi: 10.1561/2200000101 .20 Araya-Polo, M., Jennings, J., Adler, A., Dahlke, T., 2018. Deep-learning tomography. The Leading Edge 37, 58–66. doi: 10.1190/tle37010058.1 .Ardizzone, L., Kruse, J., Wirkert, S., Rahner, D., Pellegrini, E.W., Klessen, R.S., Maier-Hein, L., Rother, C., Köthe, U., 2019. Analyzing inverse problems with invertible neural networks, in: Proc. Int. Conf. Learn. Represent. (ICLR). [Online]. Available: https://arxiv.org/abs/1808.04730 .Bai, P., Vignoli, G., Hansen, T.M., 2024. Unsupervised deep learning magnetotelluric inversion. Geophysical Journal International 237, 1–15. doi: 10.1093/gji/ggae005 .Byrd, R.H., Lu, P., Nocedal, J., Zhu, C., 1995. A limited memory algorithm for bound constrained optimization. SIAM J. Sci. Comput. 16, 1190–1208. doi: 10.1137/0916069 .Colombo, D., Turkoglu, E., Li, W., Sandoval-Curiel, E., Rovetta, D., 2021. Physics-driven deep learning electromagnetic data inversion with applications to subsurface imaging. Geophysics 86, B225–B245. doi: 10.1190/geo2020-0759.1 .Constable, S., 2010. Ten years of marine CSEM for hydrocarbon exploration. Geophysics 75, 75A67–75A81. doi: 10.1190/1.3483451 .Constable, S., Srnka, L.J., 2007. An introduction to marine controlled-source electromagnetic methods for hydrocarbon exploration. Geophysics 72, WA3–WA12. doi: 10.1190/1.2432483 .Constable, S.C., Parker, R.L., Constable, C.G., 1987. Occam’s inversion: A practical algorithm for generating smooth models from electromagnetic sounding data. Geophysics 52, 289–300. doi: 10.1190/1.1442303 .Gal, Y., Ghahramani, Z., 2016. Dropout as a Bayesian approximation: Representing model uncertainty in deep learning, in: Proc. 33rd Int. Conf. Mach. Learn. (ICML), pp. 1050–1059. [Online]. Available: 
+
+https://proceedings.mlr.press/v48/gal16.html .Guo, C., Pleiss, G., Sun, Y., Weinberger, K.Q., 2017. On calibration of modern neural networks, in: Proc. 34th Int. Conf. Mach. Learn. (ICML), pp. 1321–1330. [Online]. Available: https://proceedings.mlr. press/v70/guo17a.html .Iglesias, M.A., Law, K.J.H., Stuart, A.M., 2013. Ensemble Kalman methods for inverse problems. Inverse Problems 29, 045001. doi: 10.1088/0266-5611/29/4/045001 .Key, K., 2009. 1D inversion of multicomponent, multifrequency marine CSEM data: Methodology and synthetic studies for resolving thin resistive layers. Geophysics 74, F9–F20. doi: 10.1190/1.3058434 .Key, K., 2012. Marine electromagnetic studies of seafloor resources and tectonics. Surveys in Geophysics 33, 135–167. doi: 10.1007/s10712-011-9139-x .21 Lakshminarayanan, B., Pritzel, A., Blundell, C., 2017. Simple and scalable predictive uncertainty estimation using deep ensembles, in: Advances in Neural Information Processing Systems (NeurIPS), pp. 6402–6413. [Online]. Available: https://arxiv.org/abs/1612.01474 .LeCun, Y., Bengio, Y., Hinton, G., 2015. Deep learning. Nature 521, 436–444. doi: 10.1038/nature14539 .Li, G., et al., 2025. One-dimensional deep learning inversion of marine controlled-source electromagnetic data. Geophysical Prospecting doi: 10.1111/1365-2478.13622 . early access. Liu, W., Wang, H., Xi, Z., Zhou, L., 2022. Physics-driven deep learning inversion with application to transient electromagnetic data. IEEE Trans. Geosci. Remote Sens. 60, 5901212. doi: 10.1109/TGRS.2021.3120138 .Moghadas, D., 2020. One-dimensional deep learning inversion of electromagnetic induction data using convolutional neural network. Near Surface Geophysics 18, 11–32. doi: 10.1002/nsg.12030 .Moré, J.J., 1978. The Levenberg–Marquardt algorithm: Implementation and theory, in: Numerical Analysis. Springer. volume 630 of Lecture Notes in Mathematics , pp. 105–116. doi: 10.1007/BFb0067700 .Papamakarios, G., Nalisnick, E., Rezende, D.J., Mohamed, S., Lakshminarayanan, B., 2021. Normalizing flows for probabilistic modeling and inference. J. Mach. Learn. Res. 22, 1–64. [Online]. Available: 
+
+https://jmlr.org/papers/v22/19-1028.html .Puzyrev, V., 2019. Deep learning electromagnetic inversion with convolutional neural networks. Geophysical Journal International 218, 817–832. doi: 10.1093/gji/ggz204 .Puzyrev, V., Swidinsky, A., 2021. Inversion of 1D frequency- and time-domain electromagnetic data with convolutional neural networks. Computers & Geosciences 149, 104681. doi: 10.1016/j.cageo.2020.104681 .Raissi, M., Perdikaris, P., Karniadakis, G.E., 2019. Physics-informed neural networks: A deep learning framework for solving forward and inverse problems involving nonlinear partial differential equations. J. Comput. Phys. 378, 686–707. doi: 10.1016/j.jcp.2018.10.045 .Reichstein, M., Camps-Valls, G., Stevens, B., Jung, M., Denzler, J., Carvalhais, N., Prabhat, 2019. Deep learning and process understanding for data-driven Earth system science. Nature 566, 195–204. doi: 10. 1038/s41586-019-0912-1 .Sun, J., Li, Y., 2023. Deep image prior for magnetotelluric inversion. Geophysical Journal International 235, 2231–2247. doi: 10.1093/gji/ggad345 .Werthmüller, D., 2017. An open-source full 3D electromagnetic modeler for 1D VTI media in Python: empymod. Geophysics 82, WB9–WB19. doi: 10.1190/geo2016-0626.1 .22 Zhang, Z., Hu, Z., 2024. Physics-driven deep-learning for marine CSEM data inversion. J. Appl. Geophys. 229, 105497. doi: 10.1016/j.jappgeo.2024.105497 .Zhang, Z., Huang, J., Wan, L., 2024. 3-D CSEM data inversion using deep convolutional neural networks: A feasibility study. Geophysics 89, E55–E68. doi: 10.1190/geo2023-0201.1 .Zhu, C., Byrd, R.H., Lu, P., Nocedal, J., 1997. Algorithm 778: L-BFGS-B: Fortran subroutines for large-scale bound-constrained optimization. ACM Trans. Math. Softw. 23, 550–560. doi: 10.1145/279232.279236 .23 Figure 3: DualTCN predictions on six test samples. Left: normalised E-field traces from four receivers. Right: true profile (blue) and prediction (red dashed). 
+
+24 Figure 4: Absolute d2 prediction error (normalised) versus true d2 (5 000 test samples), coloured by σ1/σ 2. Errors are largest for thin layers with weak contrast (upper-left). 
+
+25 Figure 5: R2 versus SNR for DualTCN (150 000 test samples). All parameters maintain clean-test values above 20 dB; at 10 dB the worst decline is ∆R2 = 0 .005 (d2). 
+
+Figure 6: True versus predicted scatter for DualTCN (5 000 test samples, normalised [0 , 1] log-space). Dashed line = perfect prediction. 
+
+26 Figure 7: DualTCN R2 as a function of amplitude-channel perturbation strength (150 000 test samples). Panel (A): random noise σamp in log 10 units (top axis: approximate amplitude uncertainty %). Panel (B): systematic bias β in log 10 units (top axis: multiplicative amplitude factor 10 β ). In both panels, σ2 (orange) and d2 (red) degrade rapidly because they rely primarily on the log-amplitude channel, while d1 (green) is largely unaffected and σ1 (blue) occupies an intermediate position. 
+
+Figure 8: Amplitude robustness of Base, AmpAug, and AmpRatio variants under structured perturbations (150 000 test samples). (a) Per-receiver independent bias: AmpAug is most robust; AmpRatio does not help because independent biases corrupt inter-receiver differences. (b) Uniform systematic bias: AmpRatio is perfectly immune ( ¯R2 = 0 .842 at all |β|), confirming exact common-mode cancellation. (c) Linear drift (towline simulation): AmpRatio is again perfectly immune; AmpAug overtakes Base at larger drift magnitudes. 
+
+27

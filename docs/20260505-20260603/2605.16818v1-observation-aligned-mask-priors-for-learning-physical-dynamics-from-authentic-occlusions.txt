@@ -1,0 +1,1607 @@
+Title: Observation-Aligned Mask Priors for Learning Physical Dynamics from Authentic Occlusions
+
+URL Source: https://arxiv.org/pdf/2605.16818v1
+
+Published Time: Tue, 19 May 2026 00:34:38 GMT
+
+Number of Pages: 34
+
+Markdown Content:
+# Observation-Aligned Mask Priors for Learning Physical Dynamics from Authentic Occlusions 
+
+Chiyuan Ma 1, Zihan Zhou 1,2, Tianshu Yu †,1,21School of Data Science, The Chinese University of Hong Kong, Shenzhen 
+
+> 2
+
+Shanghai Artificial Intelligence Laboratory 
+
+{chiyuanma, zihanzhou1}@link.cuhk.edu.cn yutianshu@cuhk.edu.cn 
+
+# Abstract 
+
+Learning physical dynamics directly from incomplete observations is challenging because authentic occlusions are structured, sample-dependent, and often missing not at random, whereas existing methods typically rely on heuristic masking rules or predefined mask distributions. We propose Observation-Aligned Mask Priors, a framework that learns the distribution of authentic observation masks and uses it to construct context-query partitions for training from incomplete data. Specifically, we pretrain a Bayesian Flow Network (BFN) on binary observation masks to capture real occlusion topologies, then guide BFN sampling with a globally normalized cross-entropy objective to generate sample-specific masks aligned with each sparse observation. The intersection between the guided mask and the observed mask defines the context, and the remaining observed entries become query targets for a diffusion-based reconstruction model. We show that this intersection-based partitioning gives every valid observed dimension a strictly positive probability of being queried, preventing zero-query dead zones and local generative collapse. Experiments on three real-world oceanographic datasets with authentic satellite occlusions, across resolutions up to 256 ×256, show consistent improvements over strong diffusion baselines in MSE and PSNR. These results demonstrate that learning mask priors from authentic occlusions is an effective alternative to heuristic masking for learning from incomplete physical observations without access to fully observed fields. 
+
+# 1 Introduction 
+
+Learning physical dynamics from observational data is a central goal of scientific machine learning, with broad impact on ocean monitoring [ 1, 2], weather analysis [ 3, 4], and environmental forecast-ing [ 5 , 6]. In these applications, however, the underlying physical field is almost never observed on a complete spatial grid [ 7 ]. Measurements arrive through authentic occlusions caused by cloud cover, sensor swath gaps, orbital trajectories, and geographic boundaries [ 8], yielding observation masks that are structured, sample-dependent, and often missing not at random (MNAR). These masks are not generic corruption that can be approximated by random dropout; they are part of the sensing process itself. A central challenge is therefore to learn physical dynamics directly from incomplete observations, without requiring access to fully observed fields, while respecting the topology of real-world occlusions. 
+
+Existing Bottleneck. Recently, a promising direction is to train directly on incomplete data through 
+
+context-query partitioning [9]. Instead of supervising a model with complete ground truth, one 
+
+> †Corresponding author. Preprint.
+> arXiv:2605.16818v1 [cs.CV] 16 May 2026
+
+splits the observed region into a visible context and a withheld query region, and trains the model to reconstruct the query from the context. This removes the unrealistic requirement of fully observed supervision, but it introduces a new bottleneck: the success of learning now depends critically on how the context-query partition is constructed. In fact, the seminal study [ 9] shows that a spatial dimension can only be learned if it has a strictly positive probability of being assigned to the query region; otherwise its expected gradient vanishes and the model may output arbitrary values there. Existing approaches typically instantiate this partition using heuristic masking rules [ 9– 11 ], such as independent pixel dropout, regular block masking, or hand-designed saliency heuristics. While convenient, these strategies implicitly assume a predefined mask distribution and are poorly matched to authentic physical occlusions, whose geometry is shaped by clouds, coastlines, and sensing constraints. When missingness is structured and potentially MNAR, the mismatch between heuristic masking and real observational topology becomes a fundamental obstacle. 
+
+Our Solution. The key idea is to stop assuming the mask distribution and instead learn it from data. Although the missingness mechanism of real observations is analytically unknown, its spatial structure is encoded in the observation masks themselves. We therefore propose Observation-Aligned Mask Priors , a framework that learns a generative prior over authentic observation masks and uses it to drive context-query partitioning. Specifically, we pretrain a Bayesian Flow Network (BFN) [ 12 ] on binary observation masks to capture realistic occlusion topologies. During training of the physical reconstruction model, we then guide BFN sampling with a globally normalized cross-entropy objective so that the sampled mask is aligned with the current sparse observation rather than generated unconditionally. The intersection between the guided mask and the actual observation mask defines the context region, while the remaining observed entries become the query region. In this way, the partition is both data-driven and sample-specific: it respects the learned prior over authentic occlusions while remaining anchored to what is truly observed in the current sample. 
+
+Theoretical & Empirical Value. This design yields both theoretical and practical benefits. On the theory side, we show that intersection-based partitioning gives every valid observed dimension a strictly positive probability of being queried. We first establish this property when masks are independently sampled from the learned prior, and then prove that the guarantee is preserved under our observation-aligned guided partitioning strategy. This eliminates zero-query dead zones that would otherwise cause local generative collapse and structural information deficiency. On the practical side, the resulting partitions focus learning on meaningful missing regions and substantially improve reconstruction quality under authentic structured missingness. Across three real-world oceanographic datasets [ 8] with genuine satellite occlusions—Black Sea CHL, Baltic Sea NANO, and Global Ocean SSS—and across resolutions up to 256 ×256, our method consistently outperforms strong diffusion-based baselines in MSE and PSNR, demonstrating that learning occlusion priors from data is a viable alternative to heuristic masking when complete physical fields are unavailable. More related works are discussed in Appendix A. We present our contributions as follows: • From heuristic masks to learned occlusion priors. We introduce Observation-Aligned Mask Priors , a new framework that replaces handcrafted context-query partitioning rules with a learned generative prior over authentic observation masks, and aligns this prior to each input sample through guided mask generation. • Strict positivity, not just empirical coverage. We provide theoretical guarantees showing that our intersection-based partitioning strategy assigns every valid observed dimension a strictly positive query probability, both under mask-prior sampling and under observation-aligned guidance, thereby preventing zero-query dead zones and local collapse. • Real gains under authentic occlusions. We validate the framework on three challenging real-world oceanographic datasets with genuine structured missingness and show consistent improve-ments over diffusion baselines across multiple spatial resolutions, without ever requiring fully observed training fields. 
+
+# 2 Preliminaries 
+
+In realistic physical science applications, training datasets typically only consist of partial observations 
+
+uobs = M ⊙ u0, where M is a binary observation mask. To learn complete physical dynamics directly from incomplete data, previous work [ 9] introduced a context-query partitioning framework. 2Learning Dynamics via Context-Query Partitioning. During training, each incomplete sample is strategically partitioned into an observable context mask Mctx ⊂ M and a non-request mask 
+
+Mqry ⊆ M . The model is trained to reconstruct the query region conditioned solely on the context region: 
+
+L(uobs , Mctx , Mqry ) = || Mqry ⊙ (uϕ(Mctx ⊙ uobs , Mctx ) − uobs )|| 2. (1) By penalizing reconstruction error exclusively on the withheld region, the network is forced to abandon naive local pixel memorization and infer the missing region. 
+
+Theoretical Foundation of Global Prediction. The success of this framework fundamentally depends on the context-query splitting strategy. Theoretical analysis establishes that minimizing Eq. (1) leads to an optimal prediction (uϕ)i for a specific feature dimension i given by:                          
+
+> (uϕ(Mctx ⊙uobs ,Mctx )) i=
+> E[( u0)i|Mctx ⊙uobs ,Mctx ],P(( Mqry )i= 1 |Mctx )>0
+> an arbitrary value ,P(( Mqry )i= 1 |Mctx ) = 0
+
+(2) This reveals that the model can only learn a meaningful conditional expectation for a specific spatial dimension if its probability of being queried is strictly positive. This condition ensures non-vanishing expected gradients, as detailed in Appendix D. 
+
+Bottleneck of Heuristic Design. To ensure that the model learns a complete physical field, every originally unobserved dimension must have a strictly positive probability of being queried during training. Although previous work [ 9 , 11 ] identified this necessity, it relied on manually designing 
+
+Mctx selection strategies tailored to each individual observation pattern, such as independent pixel dropout and block-wise occlusion. Such customized methods inevitably introduce distribution-specific hyperparameters and fail to integrate the design of various mask topologies into a unified framework. More importantly, relying on simplistic handcrafted rules makes it mathematically arduous to universally guarantee this strict positivity across complex real-world spatial dependencies. Therefore, overcoming the bottleneck requires moving beyond heuristic splitting rules to establish a unified mechanism capable of providing robust theoretical guarantee for any valid spatial topology. 
+
+# 3 Method 
+
+3.1 Overview: The Observation-Aligned Imputation Framework 
+
+In this work, we propose a novel observation-aligned imputation framework to reconstruct complete physical dynamics from incomplete observations. Our method builds upon the context-query learning paradigm, where a prediction model learns to infer missing query regions Mqry conditioned on observed context regions Mctx , but fundamentally transforms how this partitioning is constructed. Rather than relying on simplistic, random splitting strategies that fail to capture the structured nature of real-world missingness, our framework intelligently drives the data partitioning process using a generative prior. Specifically, our framework pipeline consists of three interconnected modules, which will be detailed in the following subsections: • Mask Distribution Modeling (Sec. 3.3): We first introduce a Bayesian Flow Network (BFN) [ 12 ] to explicitly model the authentic spatial distribution of the discrete binary ob-servation masks. • Observation-Aligned Mask Generation (Sec. 3.4): To align the generated masks with the actual sparse observations of a given sample, we propose a classifier guidance mechanism during the BFN sampling phase. This ensures the generated context masks respect both the learned physical occlusion priors and the available data points. • Guided Context-Query Training (Sec. 3.5): Finally, these intelligently generated masks are used to construct Mctx and Mqry , dynamically dictating the training of the prediction model. By replacing heuristic random masking with this generative, observation-aligned selection mechanism, our framework actively concentrates the prediction model’s learning capacity on the most critical missing regions, significantly bridging the gap between unstructured data matching and structured physical realities. 33.2 Context-Query Partitioning via Generative Priors 
+
+As established in Sec. 2, relying on heuristic masking strategies introduces severe limitations, as handcrafted rules cannot encapsulate the complex, structured nature of authentic physical occlusions. To establish a universally robust framework, we shift the paradigm from manually partitioning observations to explicitly modeling the authentic underlying mask distribution P (M ) using a data-driven generative prior. By driving the context-query selection through this learned prior, we can establish a unified mechanism that guarantees non-zero query probabilities for any valid spatial topology. Specifically, we theoretically establish that intersecting two independent samples from 
+
+P (M ) naturally satisfies this strict positivity requirement, thus eliminating the need for heuristic designs. 
+
+Theorem 1 (Strict Positivity of Query Probabilities via Mask Intersection) . Let M1, M2 ∈ { 0, 1}d
+
+be independently sampled binary masks from the same underlying distribution p(M ). Define the context mask as Mctx = M1 ⊙ M2 and the query mask as Mqry = M1 ⊙ (1 − Mctx ). Under Assumption 1, for any valid context mask m and any unobserved dimension i (where mi = 0 ), the conditional probability of dimension i being selected as a query is strictly positive: 
+
+P (( Mqry )i = 1 | Mctx = m) > 0. (3) The proof can be found in Appendix C.3. Theorem 1 provides a rigorous mathematical guarantee for our partitioning strategy. However, realizing this guarantee in practice introduces a new prerequi-site: we must successfully model and sample from the complex, discrete distribution p(M ). This theoretical requirement directly motivates the need for a powerful discrete generative prior. 
+
+3.3 Modeling Mask Distributions via Bayesian Flow Networks (BFN) 
+
+To fulfill the prerequisite established by Theorem 1, we require a generative model capable of captur-ing the intricate spatial dependencies inherent in authentic missing patterns. Our mask generation module is fundamentally built upon Bayesian Flow Networks (BFN) [ 12 ], a framework naturally suited for modeling discrete binary variables. Furthermore, to facilitate gradient-based interventions in the latent space, which will become essential for observation-aligned conditioning (as detailed in Sec. 3.4), we deliberately recast the standard BFN training dynamics into a continuous diffusion-style formulation. This reinterpretation preserves mathematical equivalence with the standard BFN framework (see Appendix B for further analysis) while providing a principled pathway for injecting physical constraints. Specifically, we proceed by viewing the discrete mask generation through the lens of continuous forward-backward processes. Let c ∈ { 1, . . . , K } be a discrete categorical variable (where K = 2 for our binary masks), and 
+
+ec ∈ RK be its one-hot encoding. To model this discrete variable within a continuous diffusion framework, we employ a scaled logit representation . Specifically, we observe that for a sufficiently large scaling factor K, the softmax transformation softmax( Kec) yields a probability distribution arbitrarily close to the hard one-hot vector ec. Consequently, we may equivalently view the generation of discrete categories as the estimation of a continuous target x0 = Kec. Following traditional continuous diffusion methods, we define a forward process that gradually corrupts this continuous target by injecting Gaussian noise over time t:
+
+xt = αtx0 + σtϵ, ϵ ∼ N (0, I). (4) Under this formulation, training a standard noise matching model ˆeθ can theoretically generate a mask distribution that faithfully matches the training dataset. However, theoretical success is not sufficient for robust and efficient optimization. It is critical to note that our continuous target representation inherently possesses shift invariance: adding any scalar constant across all logits does not alter the resulting softmax probabilities. As established in previous work [ 13 ], the score function 
+
+∇xt log pt(xt) of such a diffusion process inherently inherits this shift invariance. We explicitly enforce shift invariance architecturally by projecting the noisy latent xt onto the probability simplex before it enters the network, meaning the model processes softmax( xt) as its input (see Theorem 3 and Appendix C.1 for a rigorous proof and analysis). Concurrently, we reparameterize the standard noise matching objective into a direct data prediction formulation (see Appendix C.2 for detailed derivations) [ 14 ]. The network directly outputs the predicted class probabilities ˆeθ (t, softmax( xt)) 
+
+to estimate ec, yielding our final discrete data matching objective: 
+
+LDM-discrete = Et,c, ϵ
+
+w(t)∥ˆeθ (t, softmax( xt)) − ec∥2 , (5) 4where w(t) is a time-dependent weighting function derived from the BFN objective. Once trained, the discrete data predictor ˆeθ relates to the score function via Tweedie’s formula: 
+
+∇xt log pt(xt) = αtK ˆeθ (t, softmax( xt)) − xt
+
+σ2
+
+> t
+
+. (6) Consequently, we sample discrete masks by integrating the standard probability flow ODE backward from Gaussian noise xT ∼ N (0, I), and finally decode via ec = arg max 1 
+
+> K
+
+(x0 + 1).
+
+Limitation of Unconditional Intersection. While sampling unconditionally from the learned marginal distribution p(M ) strictly satisfies the positivity guarantee of Theorem 1, directly applying this unconditional intersection presents a critical practical bottleneck. Because unconditional gen-eration operates entirely independent of the specific valid observations of a given data sample, the spatial overlap between the authentic observation mask and the generated mask can be exceedingly small. Such a minimal intersection produces a highly sparse context region Mctx , which inherently exacerbates the structural information gap identified in prior work [ 9], leaving the imputation model without sufficient spatial anchors to reconstruct complex physical dynamics. To overcome this limitation and ensure a sufficiently informative context partition, it is imperative to transition from unconditional sampling to observation-aligned conditional generation. In the following section, we introduce our specific observation-aligned mechanism to achieve this conditional generation. 
+
+3.4 Observation-Aligned Context Mask Generation 
+
+Before detailing the practical guidance mechanism, a fundamental theoretical question must be addressed: does restricting the mask generation to align with a specific observation break the strict positivity requirement established in Theorem 1? Fortunately, Theorem 2 provides the theoretical assurance that under a well-defined intersection constraint, conditional generation strictly preserves this property. 
+
+Theorem 2 (Strict Positivity of Query Probabilities under Ratio-Guided Partitioning) . Let M ∈{0, 1}d be a fixed observation mask. Let the conditionally generated mask ˆM ∈ { 0, 1}d be sampled from the guided distribution P ( ˆM | Ck) satisfying the intersection constraint Ck as defined in Assumption 2. Define the context mask as Mctx = ˆM ⊙ M and the query mask as Mqry =
+
+M ⊙ (1 − Mctx ). Under Assumption 2, for any valid observed dimension i (where Mi = 1 ), the marginal probability of dimension i being assigned as a query region is strictly positive: P (( Mqry )i =1 | Ck) > 0.
+
+The proof can be found in Appendix C.4. Empowered by this theoretical guarantee, we formulate a practical classifier guidance mechanism during the BFN sampling phase to dynamically anchor the generation process to the valid observations. Our method consists of three key steps: 
+
+Stochastic anchor construction. First, we construct a stochastic binary anchor y ∈ { 0, 1}d by applying Bernoulli sampling to the valid observation points (where Mi = 1 , representing the i-th pixel of M ) with a predefined retention ratio ρ ∈ (0 , 1) :
+
+yi = 1[ri < ρ ] · Mi, ri ∼ Uniform (0 , 1) . (7) If we directly guide the BFN using all observation points, the generation tends to collapse into a single deterministic output (see Appendix E.10 for details). This lacks the diversity needed for robust downstream training. By randomly dropping a fraction of these observation points, we inject essential stochasticity. It forces the BFN to dynamically connect these scattered anchor points using its learned physical priors. Consequently, the model can generate diverse, physically plausible sub-masks for the exact same observation field. 
+
+Globally normalized guidance objective. Next, we formulate the guidance objective at a given BFN sampling time step t. Let xt ∈ Rd be the latent state at step t, and ˆe ∈ [0 , 1] d be the                  
+
+> The condition shifts from Mctx (Theorem 1) to Ckto reflect the algorithmic transition from random partitioning to observation-anchored generation. Guaranteeing the marginal probability P(( Mqry )i= 1 |Ck)>0is mathematically sufficient to ensure a strictly positive query frequency ( pi>0in Eq. (45) ) across epochs. See Remark 1 in Appendix for a detailed discussion.
+
+5network’s predicted probability of each pixel being a valid observation, derived from the latent state as ˆe = ˆ eθ (t, softmax( xt)) . We compute a Cross-Entropy loss over the entire spatial domain of d
+
+pixels between the prediction ˆe and the anchor y:
+
+Lguidance (xt, y) = − 1
+
+d
+
+> d
+
+X
+
+> i=1
+
+[yi log ˆ ei + (1 − yi) log(1 − ˆei)] . (8) Global normalization ensures that the gradient magnitude of the guidance signal remains highly stable across samples with drastically different sparsity levels, preventing gradient explosion or vanishing during training. 
+
+Latent space intervention. Finally, we inject this guidance signal during the reverse sampling process of the BFN. Let ti and ti+1 denote consecutive discrete time steps in the reverse time schedule. Denoting xbase  
+
+> ti+1
+
+as the unconditional latent state update computed from xti , we intervene by applying a gradient descent step using our guidance loss: 
+
+xti+1 ← xbase  
+
+> ti+1
+
+− wg ∇xti Lguidance (xti , y), (9) where wg is the guidance scale that acts as a balancing knob. It guarantees that the final generated mask respects the learned physical occlusion priors while strictly anchoring to the selected sparse observations. 
+
+3.5 Imputation Training with Guided Partitioning Strategic partitioning via generative intersection. Building upon the theoretical foundations established in Theorem 1 and the validity guarantees of Theorem 2, we now formalize our final context-query partitioning strategy. To learn from incomplete observations uobs = M ⊙ u0, we leverage the observation-aligned binary mask ˆM ∈ { 0, 1}d generated by our guided BFN to execute the intersection-based partition. Specifically, we define context region Mctx as the intersection between actual observed fields M and BFN conditional generated fields ˆM . The query region Mqry 
+
+is the remaining portion after excluding the observable area of the context region. Specifically, 
+
+Mctx = ˆM ⊙ M , Mqry = M ⊙ (1 − Mctx ). (10) 
+
+Training objective and information withholding. During training of the main imputation model, the network uϕ is fed exclusively with the context elements Mctx ⊙ uobs and the context mask Mctx .The optimization objective is to minimize the Mean Squared Error (MSE) between the network’s prediction and the clean observations, but only within the query regions: 
+
+L = E ∥Mqry ⊙ (uϕ(Mctx ⊙ uobs , Mctx ) − uobs ) ∥2 . (11) By deliberately withholding the query information Mqry during the forward pass, we force the model to abandon local pixel memorization and instead learn the spatial correlations between different physical regions. The model must “fill in the blanks” by understanding the underlying physical dynamics. Because the query region is selected by the conditional BFN to match realistic physical occlusions, the model focuses its learning capacity on the most challenging and meaningful spatial transitions. 
+
+Convergence to conditional expectation. Under this prediction-driven training objective, the net-work naturally learns to approximate the conditional expectation E[u0|Mctx ⊙ uobs , Mctx ]. Crucially, as mathematically guaranteed by Theorem 2, our guided partitioning inherently satisfies the strict positivity requirement for every valid spatial dimension. By eliminating the heuristic bottleneck identified in Sec. 2, this ensures that no part of the observation space is ignored. Over many iterations, the model develops a robust ability to reconstruct missing spatial domains. Ultimately, this enables the framework to transfer its reconstructive capabilities from synthetically masked training subsets to the inherently missing regions of real-world data, successfully bridging the gap without ever requiring access to any fully complete observation. 6Algorithm 1 Guided BFN Mask Generation 
+
+Require: M , pre-trained BFN ˆeθ , wg , n, ρ
+
+Ensure: generated mask ˆM 
+
+> 1:
+
+anchor yi = 1[ri < ρ ] · Mi , ri ∼ Uni. (0 , 1)  
+
+> 2:
+
+time schedule {ti}ni=0 (t0 = 1 , t n = 0 ) 
+
+> 3:
+
+sample xt0 ∼ N (0, I) 
+
+> 4:
+
+for i = 0 , . . . , n − 1 do  
+
+> 5:
+
+ˆx0 ← K ˆeθ (ti, softmax( xti ))  
+
+> 6:
+
+xbase  
+
+> ti+1
+
+← αti+1 ˆx0 + σti+1 (αti ˆx0 − xti )/σ 2 
+
+> ti
+> 7:
+
+xti+1 ← xbase  
+
+> ti+1
+
+− wg ∇xti Lguid (xti , y ) 
+
+> 8:
+
+end for  
+
+> 9:
+
+ˆM ← arg max 1 
+
+> K
+
+(x0 + 1)  
+
+> 10:
+
+return ˆM
+
+Algorithm 2 Train Imputation with Partition 
+
+Require: dataset D = {(u(i) 
+
+> obs
+
+, M (i))}Ni=1 
+
+Ensure: imputation model parameters ϕ 
+
+> 1:
+
+while not converged do  
+
+> 2:
+
+for each batch (uobs , M ) ∈ D do  
+
+> 3:
+
+ˆM ← Algorithm 1( uobs , M , . . . ) 
+
+> 4:
+
+Mctx ← ˆM ⊙ M 
+
+> 5:
+
+Mqry ← M ⊙ (1 − Mctx ) 
+
+> 6:
+
+ˆu ← uϕ(Mctx ⊙ uobs , Mctx ) 
+
+> 7:
+
+L ← || Mqry ⊙ ( ˆ u − uobs )|| 2 
+
+> 8:
+
+update ϕ using gradient descent on L 
+
+> 9:
+
+end for  
+
+> 10:
+
+end while 
+
+# 4 Experiments 
+
+4.1 Baselines 
+
+To evaluate the effectiveness of our framework, we compare it against the following established diffusion-based reconstruction approaches. DINDiff [1] utilizes a denoising diffusion model with hierarchical masking to reconstruct incomplete satellite observations via ensemble averaging. Am-bient Diffusion [ 10 ] reconstructs uncorrupted distributions directly from highly corrupted training data by incorporating known degradation processes into the forward pass. MissDiff [15 ] handles incomplete datasets by optimizing a unified diffusion objective that effectively marginalizes over unobserved variables. In addition to these evaluated methods, we also explored several other baselines in Appendix E.2. For our method, we first pre-train a dataset-specific BFN model ˆeθ on the observation masks, freezing its parameters during the primary imputation training to maintain stable generative priors. Key hyperparameters including retention ratio ρ, guidance scale wg , and sampling steps n (see Algorithm 1) are set empirically, with a detailed sensitivity analysis provided in Appendix E.3. 
+
+4.2 Datasets 
+
+We conduct comprehensive experiments on several real-world high-resolution datasets to validate our framework’s performance in reconstructing complex physical dynamics. Regarding the data format, we processed the datasets into partially observed gridded fields and observation mask data pairs. Detailed information about these datasets is provided in Appendix E.1. 
+
+Black Sea CHL (Black Sea Chlorophyll-a Dataset) [ 8]. This dataset offers daily multi-sensor obser-vations of the Black Sea at a 1-km resolution, fundamentally measuring and visualizing chlorophyll-a concentration. We compiled a dataset consisting of approximately 10,000 samples. 
+
+Baltic Sea NANO (Baltic Sea Nano-Phytoplankton Dataset) [ 8]. This dataset provides daily Baltic Sea ocean plankton observations at a 1-km resolution. It specifically measures and visualizes the nano-phytoplankton concentration, an essential metric for analyzing marine ecological structures and phytoplankton community dynamics. Our dataset comprises roughly 5,000 samples. 
+
+Global Ocean SSS (Global Sea Surface Salinity Dataset) [ 8]. This dataset provides global, daily satellite observations at a 25-km resolution, explicitly measuring and visualizing Sea Surface Salinity, which is a crucial variable for oceanographic and climate studies. We picked up around 6,000 samples as our dataset. 
+
+4.3 Experimental Results Evaluation. We evaluate the model performance by overlaying another mask over the existing observations. Specifically, we extract another observation mask ˜M from the remaining dataset. Overlay it onto the existing observations Meval , and use the intersection of ˜M ⊙ Meval as the new 7Table 1: Performance comparison on physical dynamics imputation tasks with the resolution of 
+
+64 × 64 across three real-world datasets.                                                      
+
+> Method Black Sea CHL Baltic Sea NANO Global Ocean SSS
+> MSE ↓PSNR ↑CBGD MSE ↓PSNR ↑CBGD MSE ↓PSNR ↑CBGD AmbientDiff 0.228 17.717 1.013 0.365 15.466 0.906 0.286 18.022 0.774 DINDiff 0.306 15.355 0.757 0.322 15.788 0.695 0.408 16.373 0.748 MissDiff 0.606 13.575 0.843 0.579 13.672 0.858 0.413 16.644 0.748
+> Ours 0.193 17.825 1.146 0.294 16.101 1.161 0.276 18.192 0.846
+
+observation mask M . The model will then predict the remaining portion given M and M ⊙ uobs .The evaluation will be conducted in the region Meval ⊙ (1 − M ) where real values naturally exist as evaluation criteria. To assess reconstruction quality, we use three physically meaningful metrics: 
+
+MSE Loss measures the mean squared error on masked observed regions using random real-mask overlays. PSNR assesses global signal fidelity. Cross-Boundary Gradient Discrepancy (CBGD) 
+
+quantifies edge artifacts by comparing Sobel gradient ratios across mask boundaries. The closer this value is to 1, the smoother the generated image will be at the boundary of the observation area. 
+
+Results. Tab. 1 presents the quantitative evaluation of our framework against established diffusion-based imputation baselines in three real-world oceanographic datasets. In addition to the experiments at 64×64 resolution, we also scaled up to 128 × 128 and 256 × 256 resolution (see Tab. 7 and Tab. 8). Our method consistently achieves superior performance, yielding the lowest MSE Loss and the highest PSNR across all evaluated scenarios. While baselines such as AmbientDiff suffer from severe structural information gaps due to their reliance on random spatial masking, and approaches like DIN-Diff and MissDiff struggle to maintain global fidelity under severe sparsity, our framework robustly reconstructs complex physical dynamics. By leveraging our proposed context-query partitioning strategy, the model efficiently concentrates its learning capacity on critical missing regions, success-fully bridging deterministic observed anchors with highly coherent, physically realistic generated structures. 
+
+4.4 Uncertainty Quantification of Query Distribution 0.0  
+
+> 0.2
+> 0.4
+> 0.6
+> 0.8
+> 1.0
+> (a) Ours 0.0
+> 0.2
+> 0.4
+> 0.6
+> 0.8
+> 1.0 (b) Random Select
+
+Figure 1: Query probability distributions of our method and naive random selection strategy. Table 2: Comparison of different context-query partitioning strategies. Here the baseline “Unconditional” refers to BFN unconditional generation which reflects the result of Theorem 1. Methods MSE ↓ PSNR ↑
+
+Pixel-level 0.228 17.72 Block-wise 0.248 16.41 Saliency-driven 0.317 16.28 Empirical 0.225 16.62 Unconditional 0.216 16.78 Ours 0.193 17.83 
+
+To validate that our observation-aligned guided partitioning strategy strictly preserves the positivity of query probabilities as established in Theorem 2, we design an empirical study to quantify the spatial distribution of query assignments. 
+
+Experiment design. We first train a binary classifier to learn to predict the probability of each pixel being assigned to the query region given only the context mask Mctx . Then we repeatedly sample from our conditionally guided Bayesian Flow Network (BFN) under the intersection constraint Ck
+
+(regulated by our retention ratio ρ). By generating an ensemble of context-query partitions for the same observation field, we compute the empirical query probability, denoted as P (( Mqry )i = 1 |Ck),across the entire spatial domain. 8Black Sea CHL    
+
+> (a) GT (b) Imputation
+> Global Ocean SSS
+> (a) GT (b) Imputation
+> Baltic Sea NANO
+> (a) GT (b) Imputation
+
+Figure 2: Visualization of data imputation results on Black Sea CHL, Global Ocean SSS, and Baltic Sea NANO with the resolution of 64 × 64 (grouped from left to right). For each dataset, the left panel shows the ground truth (GT) and the right panel displays our imputation result. The gray areas represent land, and the white areas represent the missing regions. The area outlined in black is the visible input region for the model, while the areas framed in red indicate the region used to evaluate the reconstruction results. 
+
+Verification of strictly positive query probabilities. To explicitly demonstrate the effectiveness of our partitioning mechanism, we compare the mean P (qry ) spatial distribution of our method against a naive random selection baseline in Fig. 1. As shown, the naive strategy yields a highly fragmented distribution plagued by “zero-query” regions (where P (qry ) approaches 0), which inevitably leads to localized generative collapse. In contrast, it demonstrates that the query probability distribution of our method is strictly positive throughout the spatial domain. This empirical evidence directly corroborates Theorem 2: by dynamically anchoring mask generation to the learned physical prior without perfectly memorizing the deterministic constraints, our framework mathematically and practically guarantees that no valid spatial dimension is systematically ignored during the partitioning process. An extended comparative analysis across additional datasets is provided in Appendix E.9. 
+
+Heuristic reliability indicator. In Appendix D, we detail the relationship between query probability and gradient updates, illustrating that the P (qry ) distribution can provide a heuristic indication of the reconstruction reliability during inference. 
+
+4.5 Ablation Study Context mask selection strategy comparison. Proper selection of Mctx is crucial to prevent information gaps. Tab. 2 reveals that existing baselines face a critical trade-off: heuristic partitions (Pixel/Block-wise) lose physical coherence, non-adaptive methods ignore spatial topology, and saliency-driven approaches sacrifice large-scale structural anchors, worsening global PSNR. Our strategy resolves these trade-offs via cross-entropy guidance, which adaptively optimizes context proportion and placement to balance global anchors with local dynamics for superior reconstruction (details in Appendix E.5). 
+
+Sampling method comparison. To reconstruct complete ocean dynamics from sparse observations, the sampling strategy must effectively bridge the deterministic observed regions and the stochastic generated regions. We evaluate our approach against several sampling methods in Appendix E.6. 
+
+# 5 Conclusion 
+
+This paper introduces Observation-Aligned Mask Priors, a novel framework for learning physical dynamics directly from incomplete data with authentic, structured occlusions. Instead of relying on predefined or heuristic masking, our approach uses a Bayesian Flow Network to learn the distribution of real observation masks, guiding the generation to align with specific sparse observations to construct dynamic context-query partitions. We mathematically prove that this intersection-based partitioning guarantees a strictly positive query probability for every valid observed dimension, effectively eliminating zero-query dead zones and preventing local generative collapse. Extensive experiments on three real-world oceanographic datasets across multiple resolutions demonstrate that our method consistently outperforms strong diffusion baselines in reconstruction accuracy and global signal fidelity. Ultimately, this work establishes that learning data-driven occlusion priors is a highly effective alternative to heuristic masking for reconstructing complex physical fields without access to fully observed training data. 9References 
+
+[1] Alexander Barth, Julien Brajard, Aida Alvera-Azcárate, Bayoumy Mohamed, Charles Troupin, and Jean-Marie Beckers. Ensemble reconstruction of missing satellite data using a denoising diffusion model: application to chlorophyll a concentration in the black sea. Ocean Science , 20 (6):1567–1584, 2024. [2] Scott A Martin, Georgy E Manucharyan, and Patrice Klein. Generative data assimilation for surface ocean state estimation from multi-modal satellite observations. Journal of Advances in Modeling Earth Systems , 17(8):e2025MS005063, 2025. [3] Kaifeng Bi, Lingxi Xie, Hengheng Zhang, Xin Chen, Xiaotao Gu, and Qi Tian. Accurate medium-range global weather forecasting with 3d neural networks. Nature , 619(7970):533–538, 2023. [4] Remi Lam, Alvaro Sanchez-Gonzalez, Matthew Willson, Peter Wirnsberger, Meire Fortunato, Ferran Alet, Suman Ravuri, Timo Ewalds, Zach Eaton-Rosen, Weihua Hu, et al. Learning skillful medium-range global weather forecasting. Science , 382(6677):1416–1421, 2023. [5] Wan-Lu Hsu, Ying-Lei Lin, Jung-Pin Lai, Yu-Hui Liu, and Ping-Feng Pai. Forecasting corporate financial performance using deep learning with environmental, social, and governance data. 
+
+Electronics , 14(3):417, 2025. [6] Muhammad Ashfaq, Imran Khan, Dilawar Shah, Shujaat Ali, and Muhammad Tahir. Predicting wheat yield using deep learning and multi-source environmental data. Scientific Reports , 15(1): 26446, 2025. [7] Yuluo Chen, Qiang Chen, Han Ma, Shuailong Chen, and Qingguo Fei. Transfer machine learning framework for efficient full-field temperature response reconstruction of thermal protection structures with limited measurement data. International Journal of Heat and Mass Transfer , 242:126785, 2025. [8] Py Letraon, A. Ali, E. Alvarez Fanjul, L. Aouf, L. Axell, R. Aznar, M. Ballarotta, A. Behrens, M. Benkiran, A. Bentamy, L. Bertino, P. Bowyer, V. Brando, L. A. Breivik, B. Buongiorno Nardelli, S. Cailleau, S. A. Ciliberti, S. Colella, N. Mc Connell, G. Coppini, G. Cossarini, T. Dabrowski, M. de Alfonso Alonsomuñoyerro, E. O’dea, C. Desportes, F. Dinessen, M. Drevil-lon, Y. Drillet, M. Drudi, R. Dussurget, Y. Faugère, V. Forneris, C. Fratianni, O. Le Galloudec, I. Garcia Hermosa, M. García Sotillo, P. Garnesson, G. Garric, I. Golbeck, J. Gourrion, M. L. Grégoire, S. Guinehut, E. Gutknecht, C. Harris, F. Hernandez, V. Huess, J.A. Johannessen, S. Kay, R. Killick, R. King, J. De Kloe, G. Korres, P. Lagemaa, R. Lecci, J.F. Legeais, J. M. Lel-louche, B. Levier, P. Lorente, A. Mangin, M. Martin, A. Melet, J. Murawski, E. Özsoy, A. Pala-zov, S. Pardo, L. Parent, A. Pascual, J. Paul, E. Peneva, C. Perruche, D. Peterson, L. Petit de La Villeon, N. Pinardi, S. Pouliquen, M. I. Pujol, R. Rainaud, Pierre Rampal, G. Reffray, C. Regnier, A. Reppucci, A. Ryan, S. Salon, A. Samuelsen, R. Santoleri, Andrew Saulter, J. She, C. Solidoro, E. Stanev, J. Staneva, A. Stoffelen, A. Storto, P. Sykes, T. Szekely, G. Taburet, B. Taylor, J. Tin-tore, C. Toledano, M. Tonani, L. Tuomi, G. Volpe, H. Wedhe, T. Williams, L. Vandendbulcke, D. Van Zanten, K. Von Schuckmann, J. Xie, A. Zacharioudaki, and H. Zuo. THE COPERNICUS MARINE ENVIRONMENTAL MONITORING SERVICE: MAIN SCIENTIFIC ACHIEVE-MENTS AND FUTURE PROSPECTS. Research Report 56, MERCATOR OCEAN, September 2017. URL https://hal.univ-grenoble-alpes.fr/hal-03405376 .[9] Zihan Zhou, Chenguang Wang, Hongyi Ye, Yongtao Guan, and Tianshu Yu. Incomplete data, complete dynamics: A diffusion approach. arXiv preprint arXiv:2509.20098 , 2025. [10] Giannis Daras, Kulin Shah, Yuval Dagan, Aravind Gollakota, Alexandros G. Dimakis, and Adam Klivans. Ambient diffusion: Learning clean distributions from corrupted data, 2023. URL https://arxiv.org/abs/2305.19256 .[11] Harris Abdul Majid, Giannis Daras, Francesco Tudisco, and Steven McDonagh. Ambient physics: Training neural pde solvers with partial observations, 2026. URL https://arxiv. org/abs/2602.13873 .10 [12] Alex Graves, Rupesh Kumar Srivastava, Timothy Atkinson, and Faustino Gomez. Bayesian flow networks, 2025. URL https://arxiv.org/abs/2308.07037 .[13] Zihan Zhou, Xiaoxue Wang, and Tianshu Yu. Generating physical dynamics under priors. arXiv preprint arXiv:2409.00730 , 2024. [14] Kaiwen Zheng, Cheng Lu, Jianfei Chen, and Jun Zhu. Improved techniques for maximum likelihood estimation for diffusion odes. In International Conference on Machine Learning ,pages 42363–42389. PMLR, 2023. [15] Yidong Ouyang, Liyan Xie, Chongxuan Li, and Guang Cheng. Missdiff: Training diffusion models on tabular data with missing values, 2023. URL https://arxiv.org/abs/2307. 00467 .[16] Huseyin Tuna Erdinc, Rafael Orozco, and Felix J. Herrmann. Generative geostatistical modeling from incomplete well and imaged seismic observations with diffusion models, 2024. URL 
+
+https://arxiv.org/abs/2406.05136 .[17] Dengyi Liu, Honggang Wang, and Hua Fang. Impute-macfm: Imputation based on mask-aware flow matching, 2025. URL https://arxiv.org/abs/2509.23126 .[18] Jiahao Yu, Qizhen Ying, Leyang Wang, Ziyue Jiang, and Song Liu. Missing data imputation by reducing mutual information with rectified flows, 2025. URL https://arxiv.org/abs/ 2505.11749 .[19] Guojun Liang, Najmeh Abiri, Atiye Sadat Hashemi, Jens Lundström, Stefan Byttner, and Prayag Tiwari. Latent space score-based diffusion model for probabilistic multivariate time series imputation, 2024. URL https://arxiv.org/abs/2409.08917 .[20] Emiel Hoogeboom, Didrik Nielsen, Priyank Jaini, Patrick Forré, and Max Welling. Argmax flows and multinomial diffusion: Learning categorical distributions, 2021. URL https:// arxiv.org/abs/2102.05379 .[21] Jacob Austin, Daniel D. Johnson, Jonathan Ho, Daniel Tarlow, and Rianne van den Berg. Structured denoising diffusion models in discrete state-spaces, 2023. URL https://arxiv. org/abs/2107.03006 .[22] Itai Gat, Tal Remez, Neta Shaul, Felix Kreuk, Ricky T. Q. Chen, Gabriel Synnaeve, Yossi Adi, and Yaron Lipman. Discrete flow matching, 2024. URL https://arxiv.org/abs/2407. 15595 .[23] Kaiwen Xue, Yuhao Zhou, Shen Nie, Xu Min, Xiaolu Zhang, Jun Zhou, and Chongxuan Li. Unifying bayesian flow networks and diffusion models through stochastic differential equations. 
+
+arXiv preprint arXiv:2404.15766 , 2024. [24] Keyue Qiu, Yuxuan Song, Jie Yu, Hongbo Ma, Ziyao Cao, Zhilong Zhang, Yushuai Wu, Mingyue Zheng, Hao Zhou, and Wei-Ying Ma. Empower structure-based molecule optimization with gradient guided bayesian flow networks. arXiv preprint arXiv:2411.13280 , 2024. [25] Zongyi Li, Nikola Kovachki, Kamyar Azizzadenesheli, Burigede Liu, Kaushik Bhattacharya, Andrew Stuart, and Anima Anandkumar. Fourier neural operator for parametric partial differen-tial equations, 2021. URL https://arxiv.org/abs/2010.08895 .[26] Salva Rühling Cachay, Bo Zhao, Hailey Joren, and Rose Yu. Dyffusion: A dynamics-informed diffusion model for spatiotemporal forecasting, 2023. URL https://arxiv.org/abs/2306. 01984 .[27] Phillip Lippe, Bastiaan S. Veeling, Paris Perdikaris, Richard E. Turner, and Johannes Brand-stetter. Pde-refiner: Achieving accurate long rollouts with neural pde solvers, 2023. URL 
+
+https://arxiv.org/abs/2308.05732 .[28] Jan-Hendrik Bastek, WaiChing Sun, and Dennis M. Kochmann. Physics-informed diffusion models, 2025. URL https://arxiv.org/abs/2403.14404 .11 [29] Jiahe Huang, Guandao Yang, Zichen Wang, and Jeong Joon Park. Diffusionpde: Generative pde-solving under partial observation, 2024. URL https://arxiv.org/abs/2406.17763 .[30] Aliaksandra Shysheya, Cristiana Diaconu, Federico Bergamin, Paris Perdikaris, José Miguel Hernández-Lobato, Richard E. Turner, and Emile Mathieu. On conditional diffusion models for pde simulations, 2024. URL https://arxiv.org/abs/2410.16415 .[31] Ashish Bora, Eric Price, and Alexandros G. Dimakis. Ambientgan: Generative models from lossy measurements. In International Conference on Learning Representations , 2018. URL 
+
+https://api.semanticscholar.org/CorpusID:3481010 .[32] Chicago Y. Park, Shirin Shoushtari, Hongyu An, and Ulugbek S. Kamilov. Measurement score-based diffusion model, 2025. URL https://arxiv.org/abs/2505.11853 .[33] Alexey Dosovitskiy, Lucas Beyer, Alexander Kolesnikov, Dirk Weissenborn, Xiaohua Zhai, Thomas Unterthiner, Mostafa Dehghani, Matthias Minderer, Georg Heigold, Sylvain Gelly, Jakob Uszkoreit, and Neil Houlsby. An image is worth 16x16 words: Transformers for image recognition at scale, 2021. URL https://arxiv.org/abs/2010.11929 .[34] Tero Karras, Miika Aittala, Jaakko Lehtinen, Janne Hellsten, Timo Aila, and Samuli Laine. Analyzing and improving the training dynamics of diffusion models, 2024. URL https: //arxiv.org/abs/2312.02696 .[35] Andreas Lugmayr, Martin Danelljan, Andres Romero, Fisher Yu, Radu Timofte, and Luc Van Gool. Repaint: Inpainting using denoising diffusion probabilistic models. In Proceedings of the IEEE/CVF conference on computer vision and pattern recognition , pages 11461–11471, 2022. 
+
+# A Related Work 
+
+A.1 Learning from Incomplete Data 
+
+Recent generative approaches for incomplete data face critical limitations when applied to complex physical dynamics. Diffusion methods like MissDiff [ 15 ] and Generative Geostatistical Modeling [ 16 ]rely on heuristic masking strategies that implicitly assume Missing At Random (MAR) conditions. Lacking a physics-guided context-query partitioning mechanism, they struggle to capture essential long-range spatial correlations. Similarly, continuous-time mask-aware paradigms such as Impute-MACFM [ 17 ] are tailored for tabular data, missing the structural inductive biases required for global fluid continuity. Furthermore, theoretically complex frameworks encounter hard boundaries in physical scenarios. For example, MIRI [ 18 ] relies on a strict MAR assumption that fundamentally fails in non-random (MNAR) oceanographic occlusions, while incurring prohibitive computational costs. In addition, latent-space diffusion models, such as LSSDM [ 19 ], depend entirely on pre-trained Variational Autoencoders, which currently cannot losslessly encode high-dimensional ocean states without violating governing physical conservation laws. Furthermore, [ 9] propose a fundamental framework for learning physical systems from incomplete observations by dividing valid regions into context and query components. A more detailed technical overview of this framework is provided in Sec. 2. 
+
+A.2 Discrete Generation via Diffusion and Flow Models 
+
+Classic generative models for categorical spaces often struggle to incorporate smooth, gradient-based guidance due to their hard discrete transitions. To address discrete generation, several advanced diffu-sion and flow frameworks have recently emerged. Multinomial diffusion [ 20 ] extends the standard continuous diffusion framework to categorical distributions by iteratively adding categorical noise through uniform transition matrices. Generalizing this approach, structured discrete diffusion models (D3PM) [ 21 ] introduce specialized transition matrices, such as absorbing and discretized Gaussian states, allowing the forward process to explicitly respect domain priors and ordinal relationships between categories. Concurrently, discrete flow matching [ 22 ] introduces a probability path frame-work utilizing continuous-time Markov chains (CTMCs) to define a probability velocity field for categorical data. 12 Despite their theoretical elegance, adapting these explicitly discrete frameworks for zero-shot physical imputation is restricted. These discrete frameworks fundamentally rely on classifier-free guidance which strictly necessitates conditional labels during training, or otherwise lack a native, differentiable continuous latent space. Bayesian Flow Networks (BFNs) [ 12 ] solve this hard discrete transition problem by modeling discrete data with continuous parameters on a probability simplex. Recent works [ 23 ] further unify BFNs with stochastic differential equations to highlight their continuous dynamics. However, standard BFNs mostly focus on unconditional generation. In physical dynamic imputation tasks, the model must dynamically align with sparse observations. While some gradient-guided BFNs exist [ 24 ], they rely on heavy historical trajectory corrections. Therefore, existing discrete generation frameworks lack a mechanism for instantaneously gradient-based guidance, making it difficult to seamlessly guide discrete mask generation with real physical observations. 
+
+A.3 Diffusion for PDE Problem 
+
+Generative modeling for partial differential equations (PDEs) has shifted from purely data-driven mapping to physics-informed diffusion frameworks. Standard models like Fourier Neural Operator (FNO) [ 25 ] effectively learn solution operators in frequency domains but typically require complete, high-resolution training data to capture the underlying physical dynamics. To improve long-term rollouts and capture high-frequency details, diffusion-based solvers such as Dyffusion [ 26 ] and PDE-Refiner [ 27 ] leverage score-based generation and multi-step refinement, enhancing the statistical fidelity of complex fluid forecasting. Furthermore, Physics-Informed Diffusion Models (PIDMs) [ 28 ]explicitly embed PDE constraints directly into the generative process, reducing residual errors by ensuring that the sampled trajectories strictly adhere to governing physical laws. For inverse problems and partial observations, approaches like DiffusionPDE [ 29 ] and conditional score-based assimilation models [ 30 ] incorporate physics-informed losses and observation likelihoods to guide the denoising process. Recent frameworks like Ambient Physics [ 11 ] further attempt to learn the joint distribution of coefficient-solution pairs directly from partial observations by randomly masking known measurements during training. However, these methods primarily treat sparse inputs as static constraints and often depend on pre-defined, idealistic masking patterns. However, when faced with the complex, non-random occlusions typical of oceanographic data, they lack the adaptive partitioning needed to maintain physical consistency across unknown boundaries. Consequently, bridging the gap between unstructured sparse measurements and structured latent dynamics remains a significant challenge for existing PDE-based diffusion frameworks. 
+
+# B Methodological Connections and Distinctions 
+
+This section contextualizes our proposed mask generation module within the broader landscape of probabilistic generative models, specifically detailing its theoretical connections to and differences from the original BFNs and their recent continuous-time reinterpretation. 
+
+B.1 Connections and Differences with Original BFNs 
+
+Our mask generation module is fundamentally inspired by BFNs introduced by [12]. 
+
+Theoretical connections. 
+
+• Continuous modeling of discrete data: Both frameworks address the challenge of modeling discrete variables (such as our binary masks) by operating on a continuous parameter space. In the original BFN, the network inputs for discrete data lie on the probability simplex, making the process natively differentiable. We similarly project our noisy latent variables onto the probability simplex, ensuring the network processes continuous probabilities softmax( xt)
+
+rather than discrete tokens. • Data Prediction Objective: Original BFNs train the network to output the parameters of a clean distribution based on Bayesian-updated input parameters. Our framework adopts a mathematically analogous data prediction formulation, directly outputting predicted class probabilities ˆeθ to estimate the clean discrete categories. 13 Key differences. 
+
+• Forward process formulation: The original BFN framework defines the generative process strictly through Bayesian inference, iteratively updating the parameters of an input distribution based on noisy “sender” samples. In contrast, our framework explicitly recasts these dynamics into a continuous diffusion-style forward process. We treat the discrete categories as continuous targets using a scaled logit representation x0 = Kec and directly corrupt this continuous target by injecting Gaussian noise. • Guidance and intervention: BFNs were primarily formulated to optimize data compression via maximum likelihood. Our reinterpretation is specifically designed to facilitate gradient-based intervention in the latent space during sampling. This allows us to introduce a classifier guidance mechanism that dynamically aligns the generated masks with sparse physical observations, a capability not natively explored in the standard BFN formulation. 
+
+B.2 Connections and Differences with SDE-Unified BFNs 
+
+Our continuous reformulation of BFNs shares conceptual similarities with recent work by [ 23 ], which unifies BFNs and Diffusion Models (DMs) through SDEs. 
+
+Theoretical connections. 
+
+• Latent Variable Perspective: [ 23 ] demonstrates that BFNs on discrete data implicitly operate as a linear SDE on a set of continuous latent variables z(t), which the original BFN formulation marginalizes out. Our formulation explicitly adopts this continuous latent perspective, defining a forward diffusion process xt on scaled logits. • Alignment with Diffusion Objectives: [ 23 ] formally prove that the continuous-time regression loss of a discrete BFN is a reparameterized Denoising Score Matching (DSM) loss. Our framework embraces this alignment, explicitly reparameterizing the noise matching objective into a direct discrete data matching objective LDM-discrete .
+
+Key differences. 
+
+• Primary Objective: The primary goal of [ 23 ]’s SDE unification is to derive specialized, high-order ODE and SDE solvers (BFN-Solvers) to significantly accelerate the sampling speed of BFNs with a limited number of function evaluations. Conversely, our continuous formulation is not engineered for sampling acceleration, but rather to provide a principled pathway for physics-guided conditioning. • Application in the Pipeline: While [ 23 ] aims to improve BFNs as standalone generative models for general text and image datasets, our framework utilizes the BFN specifically as a dynamic spatial partitioning engine. The outputs of our guided BFN dictate the context ( Mctx ) and query (Mqry ) regions for a secondary continuous diffusion model. This ensures the primary model focuses its learning capacity on reconstructing missing physical dynamics rather than simply matching unstructured data. 
+
+B.3 Connections and Differences with Gradient-Guided BFNs (MolJO) 
+
+Recently, [ 24 ] proposed MolJO, which extends BFNs with gradient-based guidance for structure-based molecule optimization (SBMO). While both works leverage BFN’s capacity for guided genera-tion, our objectives and architectural choices diverge significantly. 
+
+Theoretical connections. 
+
+• Gradient guidance in θ space: Both methods capitalize on the insight that BFN’s Bayesian posterior parameter θ constitutes a continuous, differentiable space naturally suited for gradient-based optimization. We similarly exploit this property to apply classifier guidance during sampling, allowing the incorporation of external constraints into the mask generation process. • Hybrid continuous-discrete modeling: MolJO addresses the challenge of jointly optimizing continuous coordinates and discrete atom types by guiding their respective θ components. 14 Analogously, our framework represents discrete binary masks via continuous probability simplex parameters (logits), enabling seamless gradient flow for discrete structure generation. 
+
+Key differences. 
+
+• Guidance objective and domain: MolJO targets multi-objective molecular property optimiza-tion (e.g., binding affinity, synthesizability) within 3D protein pockets. In contrast, our guidance is physics-driven, designed to align spatial mask sampling with sparse physical observations (e.g., scattered ocean sensor measurements) for scientific data imputation, rather than drug-like property enhancement. • Temporal dependency and correction: MolJO introduces a sophisticated backward correction 
+
+strategy with a sliding window mechanism to align gradients across generative steps and preserve SE(3)-equivariance for molecular geometries. Our framework eschews such historical correction; instead, we focus on instantaneous physics-guided conditioning to dynamically partition spatial contexts for downstream reconstruction. • System integration: While MolJO serves as the terminal generative model producing final molecular structures, our guided BFN operates as a spatial routing module within a larger pipeline. The generated masks explicitly dictate context ( Mctx ) and query ( Mqry ) regions for a secondary continuous diffusion model, rather than constituting the end-product themselves. 
+
+# C Theorems and Proofs 
+
+C.1 Representational Sufficiency of the Softmax Projection 
+
+In Sec. 3.3, we model discrete binary masks using a continuous diffusion-style formulation with scaled logit representations x0 = Kee. A critical property of this representation is its inherent 
+
+shift invariance : adding any scalar constant to all logits leaves the resulting softmax probabilities unchanged. To eliminate this redundancy and ensure the network processes only the essential geom-etry of the probability distribution, we explicitly project noisy latent variables onto the probability simplex, feeding softmax( xt) rather than raw xt into the network. The following theorem provides the theoretical foundation for this architectural choice. It establishes that any function satisfying shift invariance can be uniquely decomposed as a composition with the softmax function, thereby proving that our projection onto the simplex is well-defined and incurs no loss of representational capacity: 
+
+Theorem 3. Let h : Rn → Rm satisfy the translation invariance property h(x + c1) = h(x), ∀x ∈
+
+Rn, c ∈ R. Then there exists a unique function s : ∆ n−1 → Rm such that h(x) = s(softmax( x)) ,
+
+∀x ∈ Rn, where ∆n−1 = {p ∈ Rn : pi ≥ 0, Pni=1 pi = 1 } is the probability simplex. Proof. Note that for any finite x ∈ Rn, we strictly have softmax( x)i > 0. Thus, the image of Rn under the softmax function is the relative interior of the probability simplex, denoted as 
+
+int(∆ n−1) = {p ∈ ∆n−1 : pi > 0}.
+
+Existence. We explicitly construct the function s on the interior of the simplex. For any p ∈
+
+int(∆ n−1), we define s(p) as: 
+
+s(p) := h(ln p), (12) where ln p denotes the element-wise natural logarithm, meaning (ln p)i = ln( pi). We now verify that this construction satisfies h(x) = s(softmax( x)) for all x ∈ Rn. Let p = softmax( x). Taking the natural logarithm of the i-th component yields: 
+
+ln( pi) = ln exp( xi)
+
+Pnj=1 exp( xj )
+
+!
+
+= xi − ln 
+
+
+
+> n
+
+X
+
+> j=1
+
+exp( xj )
+
+ . (13) Let c = − ln 
+
+Pnj=1 exp( xj )
+
+
+
+. Since c is a scalar dependent only on x, we can express this in vector form as: 
+
+ln p = x + c1. (14) Substituting this back into our definition of s, we obtain: 
+
+s(softmax( x)) = s(p) = h(ln p) = h(x + c1). (15) 15 By the premise, h is translation invariant ( h(x + c1) = h(x) for any scalar c ∈ R). Therefore, we conclude: 
+
+s(softmax( x)) = h(x). (16) This proves the existence of s.
+
+Uniqueness. Suppose there exist two functions, s1 and s2, defined on int(∆ n−1) such that for all 
+
+x ∈ Rn:
+
+s1(softmax( x)) = h(x) and s2(softmax( x)) = h(x). (17) This trivially implies that for all x ∈ Rn:
+
+s1(softmax( x)) = s2(softmax( x)) . (18) Let p ∈ int(∆ n−1) be an arbitrary point in the relative interior of the simplex. Because the softmax function is surjective onto int(∆ n−1), there exists at least one x ∈ Rn such that softmax( x) = p
+
+(for example, x = ln p). Substituting this x into the equality above, we obtain: 
+
+s1(p) = s2(p), ∀p ∈ int(∆ n−1). (19) Thus, s is strictly unique on the image of the softmax function. 
+
+C.2 Reparameterization of BFN from Noise Matching to Discrete Data Matching 
+
+We derive how the standard noise matching objective is reparameterized into the discrete data matching objective LDM-discrete (Eq. (5)). We represent a discrete category c ∈ { 1, . . . , K } via the continuous target x0 = Kec, where 
+
+ec ∈ RK is the one-hot encoding. The forward diffusion process corrupts this target as: 
+
+xt = αtx0 + σtϵ, ϵ ∼ N (0, I). (20) Applying the noise matching and data matching approaches [14]: 
+
+Jnoise (θ) = Et, x0,ϵ
+
+h
+
+w(t) ∥ϵθ (t, xt) − ϵ∥2i
+
+, ϵ∗ 
+
+> θ
+
+(t, xt) = −σt∇x log pt (xt) ; (21a) 
+
+Jdata (θ) = Et, x0,ϵ
+
+h
+
+w(t) ∥xθ (t, xt) − x0∥2i
+
+, x∗ 
+
+> θ
+
+(t, xt) = 1
+
+αt
+
+xt + σ2
+
+> t
+
+αt
+
+∇x log pt (xt) . (21b) As established in Theorem 3, the scaled logit representation x0 = Kec is shift invariant, and consequently so is the score ∇xt log pt(xt). By Theorem 3, any shift-invariant function admits a unique decomposition as a composition with the softmax map. We may therefore reparameterize the noise predictor without loss of representational capacity as 
+
+ϵθ (t, xt) = ˜ ϵθ (t, softmax( xt)) , (22) where ˜ϵθ takes inputs on the probability simplex. The shift redundancy is thereby eliminated by construction, and the noise matching objective becomes 
+
+Jnoise (θ) = Et,c, ϵ
+
+h
+
+wNM (t) ∥˜ϵθ (t, softmax( xt)) − ϵ∥2i
+
+. (23) From Eqs. (21a) and (21b) , the noise and data predictors are mutually determined through the score function: 
+
+x∗ 
+
+> θ
+
+(t, xt) = xt − σt ϵ∗ 
+
+> θ
+
+(t, xt)
+
+αt
+
+. (24) Substituting this relation into xt = αtx0 + σtϵ yields 
+
+xθ (t, xt) − x0 = σt
+
+αt
+
+ ϵ − ϵθ (t, xt), (25)                 
+
+> Remark on Domain: Strictly speaking, the equation h(x) = s(softmax( x)) only constrains son the image of the softmax, which is int(∆ n−1). If evaluated on the boundary ∂∆n−1(where some pi= 0 ), scan be defined arbitrarily without violating the condition, unless one additionally assumes continuity of hand s, in which case the unique mapping continuously extends to the boundary.
+
+16 so that data matching and noise matching differ only by a time-dependent reweighting factor σ2 
+
+> t
+
+/α 2
+
+> t
+
+and are strictly equivalent up to that reweighting. Since the shift-invariance argument depends only on the score (and not on the specific parameterization), the same conclusion applies to the data predictor: the optimal x∗ 
+
+> θ
+
+is shift invariant and admits the softmax decomposition 
+
+xθ (t, xt) = ˜ xθ (t, softmax( xt)) . (26) Plugging this into Eq. (21b) gives the data matching objective with softmax projection: 
+
+Jdata (θ) = Et,c, ϵ
+
+
+
+wNM (t) · α2
+
+> t
+
+σ2
+
+> t
+
+∥ ˜xθ (t, softmax( xt)) − x0∥2
+
+
+
+, (27) where the prefactor α2 
+
+> t
+
+/σ 2 
+
+> t
+
+arises from the noise/data reweighting derived above. Since x0 = Kec, it is natural to parameterize the data predictor as 
+
+˜xθ (t, softmax( xt)) = K ˆeθ (t, softmax( xt)) , (28) i.e., the network directly outputs a probability vector ˆeθ ∈ ∆K−1. Pulling the constant K out of the squared norm yields exactly a similar optimal solution. We recover the discrete data matching objective stated in the main text: 
+
+LDM-discrete = Et,c, ϵ
+
+h
+
+w(t) ∥ˆeθ (t, softmax( xt)) − ec∥2i
+
+. (29) This establishes that training a data predictor on simplex-projected inputs is equivalent to standard noise matching, up to a time-dependent reweighting w(t). The trained discrete data predictor ˆeθ
+
+yields an estimate of the denoised target ˆx0(t, xt) = K ˆeθ (t, softmax( xt)) . By Tweedie’s formula, this establishes the relation to the score function: 
+
+∇xt log pt(xt) = αt ˆx0(t, xt) − xt
+
+σ2
+
+> t
+
+= αtK ˆeθ (t, softmax( xt)) − xt
+
+σ2
+
+> t
+
+. (30) This allows direct use of standard diffusion sampling ODEs for discrete mask generation. 
+
+C.3 Strict Positivity of Query Probabilities via Mask Intersection Assumption 1 (Intersection Coverage Completeness) . Let S = {x ∈ { 0, 1}d | P (x) > 0} denote the support of the distribution P (M ). For any valid context mask m (i.e., ∃x, y ∈ S such that 
+
+x ⊙ y = m) and any spatial dimension i where mi = 0 , there exists at least one pair of masks 
+
+(Ma, Mb) ∈ S × S such that: 1. Ma ⊙ Mb = m (Intersectability) 2. (Ma)i = 1 (Local Coverage) 
+
+Theorem 1 (Strict Positivity of Query Probabilities via Mask Intersection) . Let M1, M2 ∈ { 0, 1}d
+
+be independently sampled binary masks from the same underlying distribution p(M ). Define the context mask as Mctx = M1 ⊙ M2 and the query mask as Mqry = M1 ⊙ (1 − Mctx ). Under Assumption 1, for any valid context mask m and any unobserved dimension i (where mi = 0 ), the conditional probability of dimension i being selected as a query is strictly positive: 
+
+P (( Mqry )i = 1 | Mctx = m) > 0. (3) 
+
+Proof. By the definition of conditional probability, we can expand the target expression as: 
+
+P (( Mqry )i = 1 | Mctx = m) = P (( Mqry )i = 1 and Mctx = m)
+
+P (Mctx = m) (31) First, we establish that the denominator is strictly positive. Since m is defined as a valid context mask, there exist x, y ∈ S such that x ⊙ y = m. By the definition of the support set S, P (x) > 0
+
+and P (y) > 0. By independence condition, the probability of this specific combination is: 
+
+P (M1 = x, M2 = y) = P (x)P (y) > 0 (32) Therefore, the marginal probability of the context mask is bounded from below by this specific combination, implying P (Mctx = m) > 0.17 Next, we analyze the numerator, which represents the joint probability of two events occurring simultaneously: M1 ⊙ M2 = m and (Mqry )i = 1 . We substitute the definition of the query mask into the second condition: 
+
+(Mqry )i = ( M1)i · (1 − (Mctx )i) (33) Given the condition Mctx = m and the premise that we are evaluating an unobserved dimension where mi = 0 , the equation simplifies to: 
+
+(Mqry )i = ( M1)i · (1 − 0) = ( M1)i (34) Thus, the numerator fundamentally computes the probability of the joint event: {M1 ⊙ M2 =
+
+m and (M1)i = 1 }.By Assumption 1, because m is a valid context mask and mi = 0 , there is guaranteed to exist a specific pair of masks (Ma, Mb) ∈ S × S satisfying Ma ⊙ Mb = m and (Ma)i = 1 .Since Ma ∈ S and Mb ∈ S, their independent marginal probabilities are strictly positive ( P (Ma) >
+
+0 and P (Mb) > 0). Under the independence condition, the probability of sampling this exact pair is: 
+
+P (M1 = Ma, M2 = Mb) = P (Ma)P (Mb) > 0 (35) Because we have found at least one valid combination of masks in the distribution that perfectly satisfies the conditions of the numerator, and the probability of sampling this combination is strictly greater than zero, the total probability of the numerator must also be strictly positive: 
+
+P (( Mqry )i = 1 and Mctx = m) ≥ P (M1 = Ma, M2 = Mb) > 0 (36) Finally, dividing a strictly positive numerator by a strictly positive denominator yields a strictly positive result: 
+
+P (( Mqry )i = 1 and Mctx = m)
+
+P (Mctx = m) > 0 (37) Hence, P (( Mqry )i = 1 | Mctx = m) > 0, completing the proof. 
+
+C.4 Strict Positivity of Query Probabilities under Ratio-Guided Partitioning Assumption 2 (Constrained Coverage Completeness) . Let M ∈ { 0, 1}d be a fixed incomplete observation mask. Let Ck denote the hard constraint that a conditionally generated mask ˆM must share exactly k valid intersecting pixels with the observation, i.e., | ˆM ⊙ M | = k, where 0 < k < 
+
+|M |. Let Sguided = { ˆM ∈ { 0, 1}d | P ( ˆM | Ck) > 0} be the support set of the conditionally guided mask distribution. We assume that the physical mask prior does not deterministically collapse on any single spatial coordinate under this volume constraint. Specifically, for any spatial dimension i
+
+where Mi = 1 , there exists at least one mask ˆMa ∈ Sguided such that ( ˆMa)i = 0 .
+
+This assumption is physically well-founded. In authentic oceanographic observations, missing patterns, such as those driven by dynamic cloud cover or shifting satellite trajectories, exhibit immense spatial diversity. Constraining the intersection volume k merely restricts the capacity of the context region without eliminating the inherent stochasticity of the physical prior. A well-trained generative model naturally synthesizes multiple distinct, physically plausible occlusion topologies that satisfy the exact same volume constraint, ensuring that no single spatial dimension is deterministically anchored across all valid generations. 
+
+Theorem 2 (Strict Positivity of Query Probabilities under Ratio-Guided Partitioning) . Let M ∈{0, 1}d be a fixed observation mask. Let the conditionally generated mask ˆM ∈ { 0, 1}d be sampled from the guided distribution P ( ˆM | Ck) satisfying the intersection constraint Ck as defined in Assumption 2. Define the context mask as Mctx = ˆM ⊙ M and the query mask as Mqry =
+
+M ⊙ (1 − Mctx ). Under Assumption 2, for any valid observed dimension i (where Mi = 1 ), the marginal probability of dimension i being assigned as a query region is strictly positive: P (( Mqry )i =1 | Ck) > 0.                 
+
+> The condition shifts from Mctx (Theorem 1) to Ckto reflect the algorithmic transition from random partitioning to observation-anchored generation. Guaranteeing the marginal probability P(( Mqry )i= 1 |Ck)>0is mathematically sufficient to ensure a strictly positive query frequency ( pi>0in Eq. (45) ) across epochs. See Remark 1 in Appendix for a detailed discussion.
+
+18 Proof. By the definitions of the context and query masks, we can explicitly express the query mask 
+
+Mqry in terms of the fixed observation M and the conditionally generated mask ˆM :
+
+Mqry = M ⊙ (1 − ˆM ⊙ M ) (38) Since M is a binary mask (i.e., Mi ∈ { 0, 1}), the element-wise multiplication yields M ⊙ M = M .Thus, the equation simplifies to: 
+
+Mqry = M ⊙ (1 − ˆM ) (39) We are evaluating a specific spatial dimension i where the authentic observation is valid, meaning 
+
+Mi = 1 . Substituting this into the simplified query equation for dimension i, we obtain: 
+
+(Mqry )i = Mi · (1 − ˆMi) = 1 · (1 − ˆMi) = 1 − ˆMi (40) This deterministic relationship reveals that under a fixed observation M , the event {(Mqry )i = 1 } is mathematically equivalent to the event { ˆMi = 0 }. Consequently, their probabilities under the guided distribution are identical: 
+
+P (( Mqry )i = 1 | Ck) = P ( ˆMi = 0 | Ck) (41) According to Assumption 2, because 0 < k < |M |, the constrained support set Sguided preserves sufficient generative diversity. Therefore, there exists at least one valid mask ˆMa ∈ Sguided that satisfies ( ˆMa)i = 0 .By the definition of the support set Sguided , any mask within it has a strictly positive probability of being sampled: 
+
+P ( ˆM = ˆMa | Ck) > 0 (42) The marginal probability P ( ˆMi = 0 | Ck) is formulated as the sum of the probabilities of all generated masks in Sguided where the i-th dimension equals 0. Since ˆMa is a member of this set and possesses a strictly positive probability, the entire sum must be strictly bounded away from zero: 
+
+P ( ˆMi = 0 | Ck) = X 
+
+> ˆm∈Sguided ,ˆmi=0
+
+P ( ˆM = ˆ m | Ck) ≥ P ( ˆM = ˆMa | Ck) > 0 (43) It trivially follows that: 
+
+P (( Mqry )i = 1 | Ck) > 0 (44) This completes the proof. 
+
+Remark 1 (Connection to Expected Gradients and Theorem 1) . Readers may notice a subtle shift in the condition from Mctx in Theorem 1 to Ck in Theorem 2. This reflects the fundamental architectural shift from random bipartite splitting to observation-anchored generation. In the unconditional case (Theorem 1), Mctx is highly stochastic, so we must mathematically guarantee that any valid randomly formed context leaves a non-zero query probability to avoid zero-gradient dead zones. However, under the guided framework, the actual observation M is fixed for a given data sample. Both Mctx 
+
+and Mqry are jointly and deterministically derived from a single generated mask ˆM subject to the guidance constraint Ck. Therefore, guaranteeing the marginal probability P (( Mqry )i = 1 | Ck) > 0
+
+is mathematically sufficient. It ensures that across multiple training epochs, every valid observation point has a strictly positive frequency of being queried ( pi > 0 in Eq. (45) ), thereby satisfying the prerequisite for non-vanishing expected gradients. 
+
+# D Learning Dynamics Basis and Analysis 
+
+Preliminary property. As illustrated in previous work [ 9], Eq. (2) is fundamentally dictated by the learning dynamics, where the expected squared gradient magnitude for feature i scales linearly with its query probability: 
+
+E
+
+" ∂L
+
+∂(uϕ)i
+
+2#
+
+= 4 piE
+
+h
+
+(( uϕ)i − (uobs )i)2 (Mqry )i = 1 
+
+i
+
+, (45) where pi = P (( Mqry )i = 1 |Mctx ) directly controls the frequency of parameter updates. If pi = 0 , the given dimension receives no gradient updates, causing the model to predict arbitrary and meaningless values in that region. 19 Heuristic reliability indicator. As established in our Eq. (45) , the expected gradient update for a specific feature dimension scales linearly with its query probability. This dictates a direct relationship between sampling probability and learning frequency: regions with a higher P (qry ) are exposed to the loss function more frequently during training.Because the prediction model is optimized more heavily in these high-frequency regions, the P (qry ) distribution effectively captures the model’s spatial familiarity with the data. Although not a formally calibrated statistical uncertainty metric, 
+
+P (qry ) acts as a strong proxy for epistemic confidence. During inference, regions that exhibited high query probabilities in the training phase can generally be interpreted as having higher predictive reliability. Consequently, this distribution provides an accessible and heuristic indicator to assess the relative trustworthiness of the reconstructed physical fields across different spatial domains. 
+
+# E Supplementary Experiments 
+
+E.1 Dataset Settings 
+
+All real-world oceanographic datasets utilized in our experiments are sourced from the E.U. Coper-nicus Marine Environment Monitoring Service (CMEMS). We specifically selected Level-3 (L3) satellite observation products. Unlike Level-4 (L4) products, which are already synthetically inter-polated and gap-filled, L3 products contain unadulterated, authentic missingness patterns caused by real-world physical constraints such as cloud occlusions, sensor swath gaps, and orbital trajecto-ries. This makes them ideal testbeds for evaluating the imputation of complex, structured missing dynamics. 
+
+Black Sea CHL (Black Sea Chlorophyll-a Dataset) [ 8]. This dataset is derived from the CMEMS product OCEANCOLOUR_BLK_BGC_L3_MY_009_153 (https://doi.org/10.48670/moi-00303 ). It provides daily multi-sensor merged objective observations of Chlorophyll-a (CHL) concentration in the Black Sea at a 1-km spatial resolution. Chlorophyll-a distributions exhibit highly complex, non-linear spatial gradients driven by mesoscale eddies and coastal currents. Coupled with the extensive and contiguous cloud occlusions typical of the Black Sea region, this dataset challenges an imputation model’s ability to recover fine-grained, localized ecological structures from sparse and fragmented observations. 
+
+Baltic Sea NANO (Baltic Sea Nano-Phytoplankton Dataset) [ 8]. Sourced from the CMEMS prod-uct OCEANCOLOUR_BAL_BGC_L3_MY_009_133 (https://doi.org/10.48670/moi-00296 ), this dataset provides daily regional ocean color observations, specifically targeting nano-phytoplankton concentrations at a 1-km resolution. The Baltic Sea possesses a highly irregular topology with numerous archipelagos and narrow straits. Consequently, the missingness patterns are governed not only by atmospheric occlusions but also by complex, rigid coastal boundaries. This presents a unique challenge for imputation tasks, requiring models to reconstruct physically plausible dynamics that strictly respect intricate geographical constraints rather than applying naive spatial smoothing across landmasses. 
+
+Global Ocean SSS (Global Sea Surface Salinity Dataset) [ 8]. This dataset utilizes the CMEMS global product MULTIOBS_GLO_PHY_SSS_L3_MYNRT_015_014 (https://doi.org/10.48670/ mds-00368 ). It offers daily global Sea Surface Salinity measurements at a coarser 25-km spa-tial resolution. In contrast to regional datasets, this global dataset involves macroscopic spatial correlations dominated by large-scale ocean circulation and climatic forcing. Furthermore, the missingness typology fundamentally shifts from primarily cloud-induced irregular holes to distinct satellite orbital tracks and systematic inter-swath gaps. This dataset is ideal for validating the scalabil-ity of imputation algorithms and their capacity to maintain global physical consistency under highly structured, geometry-driven masking topologies. 
+
+E.2 Baseline and Method Comparison 
+
+Here we also considered other baselines but ultimately omitted them from direct empirical compar-isons. We excluded AmbientGAN [ 31 ] because adversarial training suffers from severe instability, making it exceedingly difficult to converge on highly sparse datasets. Furthermore, we reviewed recent generative frameworks tailored for partial observations, including Ambient Physics [ 11 ], MSM [ 32 ], and the context-query diffusion approach [ 9 ]. However, a direct comparison with these methods is infeasible because they fundamentally rely on overly simplistic or manually designed mask 20 distributions (e.g., uniform random dropout or regular block masking). These idealistic assumptions fail to capture the complex, missing-not-at-random (MNAR) topology of authentic physical occlu-sions. Nevertheless, their core idea can be demonstrated by comparing different masking strategies in Sec. 4.5. A more direct and comprehensive comparison with the most related methods is shown in Tab. 3. Table 3: Comparison with the most related methods. We use × to denote that it cannot be achieved or is extremely costly or engineering-difficult. And use ✓ to indicate that this can be achieved. 
+
+Methods Complete Data Free High Dimensional Non-heuristic ImputeMACFM [17] ✓ × ×
+
+MIRI [18] ✓ × ×
+
+LSSDM [19] ✓ × ✓
+
+AmbientDiff [10] ✓ ✓ ×
+
+MissDiff [15] ✓ ✓ ×
+
+DINDiff [1] ✓ ✓ ✓
+
+Ambient Physics [11] ✓ ✓ ×
+
+MSM [32] ✓ ✓ ×
+
+Ours ✓ ✓ ✓
+
+E.3 Implementation Details 
+
+In all experiments, considering both the stability of the guidance and the diversity of the generated data, we empirically set ρ = 0 .8. Setting the value of ρ too high will result in insufficient diversity of conditional generation, while setting it too low will make it difficult to align with the guidance target. Regarding BFN sampling steps n, we find that 10 to 20 ODE sampling steps are usually sufficient to achieve the desired effect. As the number of sampling steps increases, the improvement in effect becomes relatively limited. For guidance scale wg , a moderate interval is between 80 and 200 and usually needs to be adapted to the selected sampling steps. The value of the guidance scale seems larger than that in traditional classifier guidance because we perform global normalization on our guidance objective. This parameter is not particularly sensitive, a reasonable setting is sufficient. Also, to explore the best performance of the baseline AmbientDiff, we attempt several combinations of context and query ratio in Tab. 4. Table 4: Exploration of suitable parameters for AmbientDiff on the Black Sea CHL dataset with the resolution of 64 × 64 .                                                                    
+
+> Context Ratio Query Ratio Black Sea CHL Baltic Sea NANO Global Ocean SSS
+> MSE ↓PSNR ↑CBGD MSE ↓PSNR ↑CBGD MSE ↓PSNR ↑CBGD 10% 10% 0.243 16.775 1.159 0.376 15.652 1.057 0.294 17.992 0.826 30% 30% 0.228 17.717 1.013 0.365 15.466 0.906 0.286 18.022 0.774 50% 50% 0.275 16.926 0.997 0.439 14.776 0.849 0.292 17.957 0.795 70% 70% 0.344 16.171 0.910 0.495 14.323 0.914 0.323 17.596 0.803 90% 90% 0.428 15.439 0.860 0.619 13.488 0.922 0.344 17.363 0.767
+
+E.4 Ablation Study Sampling method comparison. We conduct a comprehensive comparison of our approach with various sampling methods. • Direct Projection: Perform a single-step projection to approximate the conditional expectation 
+
+E[u0|uobs , M ]. By mapping the uncorrupted partial observations directly onto the data manifold via ensemble averaging, it minimizes global reconstruction error but often produces blurry results in high-frequency regions. • Proximal Prediction: A variant of the single-step approach that applies an infinitesimal noise level before projection. This initial noise injection acts as a proximal constraint that aligns with the diffusion model’s prior, while the final step still tightly anchors the solution to the 21 Table 5: Performance comparison of different sampling strategies on the 64×64 Black Sea CHL Dataset. Methods MSE ↓ PSNR ↑ CBGD Direct Projection 0.193 17.825 1.146 Proximal Prediction 0.189 17.669 1.114 Iterative Conditioning 0.199 18.330 0.916 Resampling Inpainting 0.199 18.330 0.915 Recursive Jump Inpainting 0.199 18.359 0.912 
+
+Table 6: Backbone performance comparison on the Black Sea CHL dataset with the resolution of 
+
+64 × 64 .Methods MSE ↓ PSNR ↑ CBGD Vit 0.225 16.701 1.094 Unet 0.193 17.825 1.146 deterministic manifold of the observed data, better mitigating blurriness and ensuring higher fidelity to local pixel values. • Iterative Conditioning: Decomposes the complex conditional expectation into a diffusion expectation capturing the global prior and an imputation expectation enforcing structural con-straints. By blending the two components through a monotonically increasing weight schedule over multiple steps, it effectively balances global physical dynamics with local observation consistency. • Resampling Inpainting: Harmonize observation boundaries by alternating between denoising and a resampling step where noise is added back to the current estimate. This iterative loop allows the model to better align the generated content with the fixed observed regions through multiple stochastic trials. • Recursive Jump Inpainting: An extension of the Resampling Inpainting framework that utilizes profound temporal jumps back to earlier noise levels. By re-injecting significant variance, the model alleviates local boundary inconsistencies and more effectively reconciles the global physical dynamics with the sparse observation constraints. The quantitative results in Tab. 5 demonstrate a fundamental trade-off between minimizing global expectation error and preserving physical boundary coherence. The single-step methods achieve the lowest global reconstruction loss as theoretically established in [ 9 ]. However, this deterministic averaging inherently smooths out high-frequency variations, leading to noticeable boundary artifacts between observed and unobserved regions, as evidenced by their poor CBGD scores. In contrast, iterative approaches, such as Iterative Conditioning and Resampling Inpainting, significantly im-prove both PSNR and boundary consistency CBGD, albeit at a slight cost to the global loss. This improvement aligns with the theoretical foundation of Resampling Inpainting, that is, the iterative forward-backward diffusion process continuously harmonizes the joint distribution of the known context and the generated content. Notably, the Recursive Jump Inpainting achieves the best overall structural fidelity (highest PSNR and lowest CBGD). By introducing large noise jumps, this profound re-injection strategy prevents the model from settling into local boundary inconsistencies, ultimately yielding the most seamless and physically natural transitions across the mask boundaries. Detailed algorithm implementation for all sampling methods are provided in Appendix G. 
+
+Backbone architecture. To assess the generalizability of our guided partitioning strategy across different neural architectures, we evaluate our method using two distinct backbones: Vision Trans-former (ViT) [ 33 ] and Karras UNet [ 34 ]. The results presented in Tab. 6 indicate that while both architectures achieve comparable performance on the Black Sea Chlorophyll-a Dataset at a resolution of 64×64, while UNet achieves superior performance, producing a lower MSE and a higher PSNR compared to ViT. This performance gap suggests that the hierarchical inductive bias of UNet is well-suited for capturing the multi-scale spatial dependencies inherent in oceanic physical dynamics. 22 E.5 Context Mask Selection Strategy Comparison. 
+
+We conduct a comprehensive comparison of our approach with various context mask selection strategies here. • Pixel-level Partition: Each pixel in the observed region is independently sampled using a Bernoulli distribution with a constant probability p (where p is the ratio of required points to total points), producing a spatially uniform subset as Mctx .• Block-wise Partition: The observed region is partitioned into a grid of non-overlapping blocks. A subset of these blocks is randomly sampled with a constant probability p (where p is the ratio of selected blocks to total blocks), and their intersection with the ground-truth mask produces a subset as Mctx .• Saliency-driven Partition: This heuristic strategy relies on sorting local gradient magnitudes to allocate the available context points. Sample half of Mctx from high-gradient regions and the other half from low-gradient regions. • Empirical Distribution Partition: Randomly sample a real observation mask from the remain-ing dataset, then consider the intersection of this mask and Mreal as Mctx .• Unconditional Prior Partition: It employs a mask sampled unconditionally by a BFN which was pre-trained to capture the dataset’s observation mask distribution (Sec. 3.3). The intersection of this sampled mask and Mreal is used as Mctx .• Ours: Our framework introduces a cross-entropy guidance mechanism during the BFN sampling phase to dynamically anchor the generation process (Sec. 3.4). This produces a tailored mask specific to the current data point, and Mctx is the intersection of this conditionally generated mask and Mreal .
+
+E.6 Sampling Method Comparison. 
+
+We conduct a comprehensive comparison of our approach with various sampling methods here. • Direct Projection: Perform a single-step projection to approximate the conditional expectation 
+
+E[u0|uobs , M ]. By mapping the uncorrupted partial observations directly onto the data manifold via ensemble averaging, it minimizes global reconstruction error but often produces blurry results in high-frequency regions. • Proximal Prediction: A variant of the single-step approach that applies an infinitesimal noise level before projection. This initial noise injection acts as a proximal constraint that aligns with the diffusion model’s prior, while the final step still tightly anchors the solution to the deterministic manifold of the observed data, better mitigating blurriness and ensuring higher fidelity to local pixel values. • Iterative Conditioning: Decomposes the complex conditional expectation into a diffusion expectation capturing the global prior and an imputation expectation enforcing structural con-straints. By blending the two components through a monotonically increasing weight schedule over multiple steps, it effectively balances global physical dynamics with local observation consistency. • Resampling Inpainting: Harmonize observation boundaries by alternating between denoising and a resampling step where noise is added back to the current estimate. This iterative loop allows the model to better align the generated content with the fixed observed regions through multiple stochastic trials. • Recursive Jump Inpainting: An extension of the Resampling Inpainting framework that utilizes profound temporal jumps back to earlier noise levels. By re-injecting significant variance, the model alleviates local boundary inconsistencies and more effectively reconciles the global physical dynamics with the sparse observation constraints. The quantitative results in Tab. 5 demonstrate a fundamental trade-off between minimizing global expectation error and preserving physical boundary coherence. The single-step methods achieve the lowest global reconstruction loss as theoretically established in [ 9 ]. However, this deterministic averaging inherently smooths out high-frequency variations, leading to noticeable boundary artifacts between observed and unobserved regions, as evidenced by their poor CBGD scores. In contrast, 23 iterative approaches, such as Iterative Conditioning and Resampling Inpainting, significantly im-prove both PSNR and boundary consistency CBGD, albeit at a slight cost to the global loss. This improvement aligns with the theoretical foundation of Resampling Inpainting, that is, the iterative forward-backward diffusion process continuously harmonizes the joint distribution of the known context and the generated content. Notably, the Recursive Jump Inpainting achieves the best overall structural fidelity (highest PSNR and lowest CBGD). By introducing large noise jumps, this profound re-injection strategy prevents the model from settling into local boundary inconsistencies, ultimately yielding the most seamless and physically natural transitions across the mask boundaries. Detailed algorithm implementation for all sampling methods are provided in Appendix G. 
+
+E.7 Complete Results 
+
+To further demonstrate the scalability and robustness of our framework across different spatial scales, we provide additional experimental results at 128 × 128 and 256 × 256 resolutions on all three datasets in Tab. 7 and 8. This demonstrates that our method remains effective even at high resolutions. Table 7: Performance comparison on physical dynamics imputation tasks with the resolution of 
+
+128 × 128 across three real-world datasets.                                                      
+
+> Method Black Sea CHL Baltic Sea NANO Global Ocean SSS
+> MSE ↓PSNR ↑CBGD MSE ↓PSNR ↑CBGD MSE ↓PSNR ↑CBGD AmbientDiff 0.268 20.432 0.942 0.466 15.648 0.825 0.440 19.165 0.662 DINDiff 0.275 18.800 0.789 0.385 16.275 0.642 0.578 17.967 0.676 MissDiff 0.706 16.702 0.870 0.753 13.480 0.887 0.683 17.342 0.578
+> Ours 0.210 21.020 1.092 0.333 16.730 0.958 0.379 19.799 0.841
+
+Table 8: Performance comparison on physical dynamics imputation tasks with the resolution of 
+
+256 × 256 across three real-world datasets.                                                      
+
+> Method Black Sea CHL Baltic Sea NANO Global Ocean SSS
+> MSE ↓PSNR ↑CBGD MSE ↓PSNR ↑CBGD MSE ↓PSNR ↑CBGD AmbientDiff 0.256 20.523 0.959 0.487 16.234 0.847 0.524 20.578 0.694 DINDiff 0.266 21.389 0.703 0.449 17.222 0.658 0.567 19.610 0.555 MissDiff 0.655 16.887 0.960 0.818 14.147 1.022 0.731 19.187 0.773
+> Ours 0.160 21.889 1.004 0.320 17.616 0.942 0.441 20.801 0.879
+
+E.8 Visualization of Generated Samples 
+
+By statistically analyzing the masks within the dataset, we defined positions where no valid observa-tions were ever recorded as “land”, and represented them in gray during visualization to distinguish them from the unobserved fields, which are depicted in white. The areas enclosed by the red and black wireframes together constitute the observable region of the sample. During evaluation, the area enclosed by the black wireframe is the visible part provided to the model, which performs global reconstruction based on it. The red area is an artificially masked region used to evaluate the model’s reconstruction performance. Here we provide visual comparison with the resolution of 64 × 64 ,
+
+128 × 128 and 256 × 256 respectively in Fig. 3, Fig. 4 and Fig. 5 
+
+E.9 Uncertainty Quantification of Query Distribution 
+
+To further validate the efficacy of our partitioning mechanism, we conduct a comparative analysis of the spatial query probability distribution between our proposed method and a naive random selection baseline across all three datasets. We set the number of ensemble samplings to 16. As shown in Fig. 6, a naive random selection strategy yields a highly fragmented query distribution with numerous “dead zones” where the selection probability approaches zero. These “dead zones” receive virtually no updates, often leading to localized generative collapse. In contrast, our proposed method dynamically anchors mask generation to learned physical priors, substantially reducing the occurrence of these 24 (a) GT (b) GT (c) GT 
+
+(d) AmbientDiff (e) AmbientDiff (f) AmbientDiff 
+
+(g) DINDiff (h) DINDiff (i) DINDiff 
+
+(j) MissDiff (k) MissDiff (l) MissDiff 
+
+(m) Ours (n) Ours (o) Ours 
+
+Figure 3: Visualization of imputation results on Black Sea CHL, Global Ocean SSS, and Baltic Sea NANO with the resolution of 64 × 64 (from left to right). 25 (a) GT (b) GT (c) GT 
+
+(d) AmbientDiff (e) AmbientDiff (f) AmbientDiff 
+
+(g) DINDiff (h) DINDiff (i) DINDiff 
+
+(j) MissDiff (k) MissDiff (l) MissDiff 
+
+(m) Ours (n) Ours (o) Ours 
+
+Figure 4: Visualization of imputation results on Black Sea CHL, Global Ocean SSS, and Baltic Sea NANO with the resolution of 128 × 128 (from left to right). 26 (a) GT (b) GT (c) GT 
+
+(d) AmbientDiff (e) AmbientDiff (f) AmbientDiff 
+
+(g) DINDiff (h) DINDiff (i) DINDiff 
+
+(j) MissDiff (k) MissDiff (l) MissDiff 
+
+(m) Ours (n) Ours (o) Ours 
+
+Figure 5: Visualization of imputation results on Black Sea CHL, Global Ocean SSS, and Baltic Sea NANO with the resolution of 256 × 256 (from left to right). 27 dead zones. By ensuring that every spatial point maintains a strictly positive probability of being assigned as a query, our approach allows all points to receive consistent gradient updates. This reliable update frequency effectively broadens the model’s learning capacity across the physical field. 
+
+(a) Ours 0.0  
+
+> 0.2
+> 0.4
+> 0.6
+> 0.8
+> 1.0
+
+(b) Ours 0.0  
+
+> 0.2
+> 0.4
+> 0.6
+> 0.8
+> 1.0
+
+(c) Ours 0.0 
+
+> 0.2
+> 0.4
+> 0.6
+> 0.8
+> 1.0
+
+(d) Random Select 0.0  
+
+> 0.2
+> 0.4
+> 0.6
+> 0.8
+> 1.0
+
+(e) Random Select 0.0  
+
+> 0.2
+> 0.4
+> 0.6
+> 0.8
+> 1.0
+
+(f) Random Select 0.0 
+
+> 0.2
+> 0.4
+> 0.6
+> 0.8
+> 1.0
+
+Figure 6: Comparison of spatial query probability distributions between our proposed method and naive random selection strategy across the Black Sea CHL, Global Ocean SSS, and Baltic Sea NANO datasets with the resolution of 64 × 64 (from left to right). 
+
+E.10 Effectiveness of Stochastic Anchor 
+
+To demonstrate the effectiveness of the stochastic anchor construction mechanism, we conduct a comparison analysis on ρ = 1 (i.e. do not use this mechanism ), ρ = 0 .8 and ρ = 0 .6 respectively. As shown in Fig. 7 , we visualize the mean and variance of the mask conditionally generated by the BFN after ensemble sampling 16 times. It is easy to observe that without stochastic anchor ( p = 1 .0), the sampled masks exhibit minimal variance, which severely limits the spatial diversity of the samples. While, when p is set to 0.6, the proportion of the context region is reduced, resulting in insufficient information to guide the model effectively. Balancing the need for spatial diversity and sufficient context information, p = 0 .8 provides a better trade-off, ensuring adequate mask variance while preserving enough information. 
+
+# F Implementation of Context Mask Selection Strategies 
+
+We provide concrete algorithmic implementations of those context mask selection strategies men-tioned in Sec. 4.5. Algorithm 3 presents the Pixel-level Partition strategy, where each point in the observation mask M is independently selected as context or query through Bernoulli sampling with ratios rctx = 0 .3 and rqry = 0 .3 here. Algorithm 4 shows the Block-wise Partition strategy, where a subset of blocks is randomly sampled with ratios rctx = 0 .5 and rqry = 0 .5 here, and their intersection with the observation mask M forms the context and query masks, respectively. Algorithm 5 outlines the Saliency-driven Partition strategy, a heuristic approach that allocates context points based on sorting local gradient magnitudes. Algorithm 6 details the Empirical Distribution Partition strategy, which samples a real observation mask from the dataset to intersect with the current observation. 28 (a) Mean 0.0  
+
+> 0.2
+> 0.4
+> 0.6
+> 0.8
+> 1.0
+
+(b) Mean 0.0  
+
+> 0.2
+> 0.4
+> 0.6
+> 0.8
+> 1.0
+
+(c) Mean 0.0 
+
+> 0.2
+> 0.4
+> 0.6
+> 0.8
+> 1.0
+
+(d) Std 0.0  
+
+> 0.1
+> 0.2
+> 0.3
+> 0.4
+> 0.5
+
+(e) Std 0.0  
+
+> 0.1
+> 0.2
+> 0.3
+> 0.4
+> 0.5
+
+(f) Std 0.0 
+
+> 0.1
+> 0.2
+> 0.3
+> 0.4
+> 0.5
+
+Figure 7: Comparison of different setting of ρ in conditional BFN sampling on the 64 × 64 Black Sea CHL dataset. The value of ρ is set to be 1, 0.8, 0.6 from left to right. Algorithm 7 demonstrates the Unconditional Prior Partition strategy, employing an unconditionally sampled mask from a pre-trained BFN to intersect with the current observation. As for Our Proposed Partition strategy, we have provided the implementation in Algorithm 1 and Algorithm 2. 
+
+Algorithm 3 Pixel-level Partition 
+
+Require: observation mask M ∈ { 0, 1}d, context ratio rctx ∈ (0 , 1) , query ratio rqry ∈ (0 , 1) 
+
+Ensure: context mask Mctx , query mask Mqry 
+
+1: initialize Mctx ← 0, Mqry ← 0
+
+2: for each spatial index i ∈ { 1, . . . , d } do 
+
+3: if Mi = 1 then 
+
+4: sample u ∼ Uniform(0 , 1) 
+
+5: if u < r ctx then 
+
+6: (Mctx )i ← 1
+
+7: end if 
+
+8: sample v ∼ Uniform(0 , 1) 
+
+9: if v < r qry then 
+
+10: (Mqry )i ← 1
+
+11: end if 
+
+12: end if 
+
+13: end for 
+
+14: return Mctx , Mqry 
+
+29 Algorithm 4 Block-Wise Partition 
+
+Require: mask grid M ∈ { 0, 1}H×W ; block grid dimensions d; context ratio rctx ∈ (0 , 1] , query ratio rqry ∈ (0 , 1] .
+
+Ensure: context mask Mctx , query mask Mqry . 
+
+> 1:
+
+initialize Mctx ← 0H×W , Mqry ← 0H×W 
+
+> 2:
+
+partition the H × W mask M into a d × d grid of blocks {Bi,j }di,j =1  
+
+> 3:
+
+total number of blocks: K ← d × d 
+
+> 4:
+
+the number of context blocks to select: Nctx ← ⌊ rctx × K⌋ 
+
+> 5:
+
+the number of query blocks to select: Nqry ← ⌊ rqry × K⌋ 
+
+> 6:
+
+uniformly sample a subset Sctx of Nctx blocks from the K blocks without replacement:  
+
+> 7:
+
+Sctx ← Sample ({Bi,j }di,j =1 , N ctx ) 
+
+> 8:
+
+uniformly sample a subset Sqry of Nqry blocks from the K blocks without replacement:  
+
+> 9:
+
+Sqry ← Sample ({Bi,j }di,j =1 , N qry ) 
+
+> 10:
+
+for each block Bi,j ∈ S ctx do  
+
+> 11:
+
+Mctx [region of Bi,j ] ← M [region of Bi,j ] 
+
+> 12:
+
+end for  
+
+> 13:
+
+for each block Bi,j ∈ S qry do  
+
+> 14:
+
+Mqry [region of Bi,j ] ← M [region of Bi,j ] 
+
+> 15:
+
+end for  
+
+> 16:
+
+return Mctx , Mqry 
+
+Algorithm 5 Saliency-driven Partition 
+
+Require: observation mask M ∈ { 0, 1}d, observed image data xobs , context ratio rctx ∈ (0 , 1) 
+
+Ensure: context mask Mctx , query mask Mqry  
+
+> 1:
+
+initialize Mctx ← 0, Mqry ← 0 
+
+> 2:
+
+Sobs ← { i ∈ { 1, . . . , d } | Mi = 1 } 
+
+> 3:
+
+Nobs ← | Sobs | 
+
+> 4:
+
+Nctx ← ⌊ rctx · Nobs ⌋ 
+
+> 5:
+
+Nhalf ← ⌊ Nctx /2⌋ 
+
+> 6:
+
+compute local gradient magnitudes Gi = ∥∇ xobs ,i ∥ for all i ∈ Sobs  
+
+> 7:
+
+sort Sobs in descending order based on Gi into an ordered list L 
+
+> 8:
+
+Shigh ← first half of elements in L 
+
+> 9:
+
+Slow ← second half of elements in L 
+
+> 10:
+
+randomly sample a subset Sctx_high ⊆ Shigh of size Nhalf  
+
+> 11:
+
+randomly sample a subset Sctx_low ⊆ Slow of size (Nctx − Nhalf ) 
+
+> 12:
+
+Sctx ← Sctx_high ∪ Sctx_low  
+
+> 13:
+
+for each spatial index i ∈ { 1, . . . , d } do  
+
+> 14:
+
+if Mi = 1 then  
+
+> 15:
+
+if i ∈ Sctx then  
+
+> 16:
+
+(Mctx )i ← 1 
+
+> 17:
+
+else  
+
+> 18:
+
+(Mqry )i ← 1 
+
+> 19:
+
+end if  
+
+> 20:
+
+end if  
+
+> 21:
+
+end for  
+
+> 22:
+
+return Mctx , Mqry 
+
+30 Algorithm 6 Empirical Distribution Partition 
+
+Require: observation mask M ∈ { 0, 1}d, dataset of real observation masks Dmask 
+
+Ensure: context mask Mctx , query mask Mqry  
+
+> 1:
+
+sample a real observation mask Msample ∼ D mask  
+
+> 2:
+
+initialize Mctx ← 0, Mqry ← 0 
+
+> 3:
+
+for each spatial index i ∈ { 1, . . . , d } do  
+
+> 4:
+
+if Mi = 1 then  
+
+> 5:
+
+if (Msample )i = 1 then  
+
+> 6:
+
+(Mctx )i ← 1 
+
+> 7:
+
+else  
+
+> 8:
+
+(Mqry )i ← 1 
+
+> 9:
+
+end if  
+
+> 10:
+
+end if  
+
+> 11:
+
+end for  
+
+> 12:
+
+return Mctx , Mqry 
+
+Algorithm 7 Unconditional Prior Partition 
+
+Require: observation mask M ∈ { 0, 1}d, pre-trained BFN model Bmask 
+
+Ensure: context mask Mctx , query mask Mqry  
+
+> 1:
+
+unconditionally sample a Msample ∼ B mask  
+
+> 2:
+
+initialize Mctx ← 0, Mqry ← 0 
+
+> 3:
+
+for each spatial index i ∈ { 1, . . . , d } do  
+
+> 4:
+
+if Mi = 1 then  
+
+> 5:
+
+if (Msample )i = 1 then  
+
+> 6:
+
+(Mctx )i ← 1 
+
+> 7:
+
+else  
+
+> 8:
+
+(Mqry )i ← 1 
+
+> 9:
+
+end if  
+
+> 10:
+
+end if  
+
+> 11:
+
+end for  
+
+> 12:
+
+return Mctx , Mqry 
+
+# G Implementation of Sampling Methods 
+
+We provide detailed algorithmic implementations of various sampling methods evaluated in Sec. 4.5. Inspired by the methodologies introduced in [ 9], we first present three fundamental approaches. Algorithm 8 demonstrates the Direct Projection method, which performs a one-step projection to minimize global reconstruction error. Algorithm 9 details Proximal Prediction method, introducing a single step denoising process with an infinitesimal noise level to better align with the diffusion prior and mitigate blurriness. Algorithm 10 details the Iterative Conditioning method. Notably, to heuristically blend the diffusion expectation and imputation expectation, we employ a simple linear schedule ( ωs = s) as the time-varying weight. Furthermore, drawing inspiration from the resampling mechanisms proposed in RePaint [ 35 ], we present two advanced sampling strategies. Algorithm 11 describes the implementation of Resampling Inpainting method, which harmonizes observation boundaries by alternating between denoising and stochastic resampling steps. Algo-rithm 12 demonstrates the Recursive Jump Inpainting method, which utilizes profound temporal jumps to re-inject significant variance, effectively reconciling global physical dynamics with sparse observation constraints. 31 Algorithm 8 Direct Projection 
+
+Require: partially observed data xobs , mask M , trained model xϕ, ensemble size K
+
+Ensure: imputed complete data x0
+
+1: Generate K random context masks {M (k) 
+
+> ctx
+
+}Kk=1 ⊆ M
+
+2: x∗ ← 1
+
+> K
+
+PKk=1 xϕ
+
+
+
+M (k) 
+
+> ctx
+
+⊙ xobs , M (k)
+
+> ctx
+
+
+
+3: x0 ← M ⊙ xobs + (1 − M ) ⊙ x∗
+
+4: return x0
+
+Algorithm 9 Proximal Prediction 
+
+Require: partially observed data xobs , mask M , trained model xϕ, minimal timestep δ ≪ 1,ensemble size K
+
+Ensure: imputed complete data x0
+
+1: ϵ ∼ N (0 , I )
+
+2: xobs ,δ ← αδ xobs + σδ ϵ
+
+3: Generate K random context masks {M (k) 
+
+> ctx
+
+}Kk=1 ⊆ M
+
+4: xδ ← 1
+
+> K
+
+PKk=1 xϕ
+
+
+
+δ, M (k) 
+
+> ctx
+
+⊙ xobs ,δ , M (k)
+
+> ctx
+
+
+
+5: x0 ← M ⊙ xobs + (1 − M ) ⊙ xδ
+
+6: return x0
+
+Algorithm 10 Iterative Conditioning 
+
+Require: partially observed data xobs , mask M , trained model xϕ, ensemble size K, weight schedule ωs = s
+
+Ensure: imputed complete data x0
+
+1: Generate K random context masks {M (k) 
+
+> ctx
+
+}Kk=1 ⊆ M
+
+2: Eimp ← 1
+
+> K
+
+PKk=1 xϕ
+
+
+
+M (k) 
+
+> ctx
+
+⊙ xobs , M (k)
+
+> ctx
+
+
+
+3: initialize: xT ∼ N (0, I)
+
+4: for diffusion steps from s to t do 
+
+5: sample a Mctx 
+
+6: Ediff ← xϕ (s, Mctx ⊙ xs, Mctx )
+
+7: ˆx0 ← ωsEdiff + (1 − ωs)Eimp 
+
+8: ϵunobs ← xs−αs ˆx0
+
+> σs
+
+9: ϵobs ← xs−αsxobs 
+
+> σs
+
+10: ϵfull ← M ⊙ ϵobs + (1 − M ) ⊙ ϵunobs 
+
+11: xt ← DiffusionODE (s, t, xs, ϵfull )
+
+12: end for 
+
+13: x0 ← M ⊙ xobs + (1 − M ) ⊙ xt
+
+14: return x0
+
+32 Algorithm 11 Resampling Inpainting 
+
+Require: partially observed data xobs , mask M , trained model xϕ, ensemble size K, weight schedule ωs = s, jump length j, jump frequency f
+
+Ensure: imputed complete data x0
+
+1: Generate K random context masks {M (k) 
+
+> ctx
+
+}Kk=1 ⊆ M
+
+2: Eimp ← 1
+
+> K
+
+PKk=1 xϕ
+
+
+
+M (k) 
+
+> ctx
+
+⊙ xobs , M (k)
+
+> ctx
+
+
+
+3: initialize: xT ∼ N (0 , I )
+
+4: s ← T
+
+5: c ← 0
+
+6: while s > 0 do 
+
+7: t ← s − 1
+
+8: sample a Mctx 
+
+9: Ediff ← xϕ(s, Mctx ⊙ xs, Mctx )
+
+10: ˆx0 ← ωsEdiff + (1 − ωs)Eimp 
+
+11: ϵunobs ← xs−αs ˆx0
+
+> σs
+
+12: ϵobs ← xs−αsxobs 
+
+> σs
+
+13: ϵfull ← M ⊙ ϵobs + (1 − M ) ⊙ ϵunobs 
+
+14: xt ← DiffusionODE (s, t, xs, ϵfull )
+
+15: c ← c + 1 
+
+16: if c % f == 0 and t > 0 then 
+
+17: snew ← min( t + j, T )
+
+18: xsnew ← ForwardDiffusion (t, s new , xt)
+
+19: s ← snew 
+
+20: else 
+
+21: s ← t
+
+22: end if 
+
+23: end while 
+
+24: x0 ← M ⊙ xobs + (1 − M ) ⊙ xt
+
+25: return x0
+
+33 Algorithm 12 Recursive Jump Inpainting 
+
+Require: partially observed data xobs , mask M , trained model xϕ, ensemble size K, weight schedule ωs = s, total jump stages n
+
+Ensure: imputed complete data x0 
+
+> 1:
+
+Generate K random context masks {M (k) 
+
+> ctx
+
+}Kk=1 ⊆ M 
+
+> 2:
+
+Eimp ← 1
+
+> K
+
+PKk=1 xϕ
+
+
+
+M (k) 
+
+> ctx
+
+⊙ xobs , M (k)
+
+> ctx
+
+ 
+
+> 3:
+
+initialize: xT ∼ N (0 , I ) 
+
+> 4:
+
+s ← T 
+
+> 5:
+
+k ← n − 1 {initialize schedule index}  
+
+> 6:
+
+while s > 0 do  
+
+> 7:
+
+t ← s − 1 
+
+> 8:
+
+sample a Mctx  
+
+> 9:
+
+Ediff ← xϕ(s, Mctx ⊙ xs, Mctx ) 
+
+> 10:
+
+ˆx0 ← ωsEdiff + (1 − ωs)Eimp  
+
+> 11:
+
+ϵunobs ← xs−αs ˆx0 
+
+> σs
+> 12:
+
+ϵobs ← xs−αsxobs  
+
+> σs
+> 13:
+
+ϵfull ← M ⊙ ϵobs + (1 − M ) ⊙ ϵunobs  
+
+> 14:
+
+xt ← DiffusionODE (s, t, xs, ϵfull ) 
+
+> 15:
+
+if t == 0 and k > 0 then  
+
+> 16:
+
+Tjump ← ⌊ kn T ⌋ 
+
+> 17:
+
+xTjump ← ForwardDiffusion (0 , T jump , xt) 
+
+> 18:
+
+s ← Tjump  
+
+> 19:
+
+k ← k − 1 
+
+> 20:
+
+else  
+
+> 21:
+
+s ← t 
+
+> 22:
+
+end if  
+
+> 23:
+
+end while  
+
+> 24:
+
+x0 ← M ⊙ xobs + (1 − M ) ⊙ xt 
+
+> 25:
+
+return x0
+
+# H Limitations 
+
+Although our framework demonstrates strong capabilities for imputation tasks in real-world datasets, we acknowledge that there are several limitations: • Pretraining Computational Overhead: The framework relies on a separate pre-training stage for the Bayesian Flow Network (BFN) model to capture realistic occlusion topologies for different datasets. • Hyperparameter Sensitivity: The guidance mechanism requires empirical tuning of parameters such as the retention ratio ρ, guidance scale wg , and sampling steps n. Although the guidance scale and retention ratios are not overly sensitive within appropriate intervals, automated hyper-parameter selection could improve the ease of deployment across new datasets. 
+
+# I LLM Usage Statement 
+
+We utilized large language models during the preparation of this paper. Specifically, they helped us proofread the text for clarity and grammar, format the LaTeX code for our math and tables, check our proofs for logical consistency, and correct typos throughout the document. 34

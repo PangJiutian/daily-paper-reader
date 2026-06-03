@@ -1,0 +1,984 @@
+Title: DANTE: Physics-Informed Neural Operator for DAS-to-Velocity Waveform Reconstruction Without Co-located Seismometers
+
+URL Source: https://arxiv.org/pdf/2605.18375v1
+
+Published Time: Tue, 19 May 2026 02:32:27 GMT
+
+Number of Pages: 15
+
+Markdown Content:
+# DANTE: Physics-Informed Neural Operator for DAS-to-Velocity Waveform Reconstruction Without Co-located Seismometers 
+
+Isao Kurosawa May 19, 2026 
+
+Abstract 
+
+Distributed Acoustic Sensing (DAS) converts existing fibre-optic cables into dense seismic arrays at near-zero deployment cost, but measures strain rate rather than particle velocity—the quantity required by virtually all seismological analysis tools. Converting strain rate to particle velocity by numerical integration is ill-posed: the integration constant is undefined and noise accumulates without bound. We present DANTE (DAS-to-velocity via physics-informed neural operator for 
+
+Acoustic-wave reco Nstruction in he TE rogeneous media), a Fourier Neural Opera-tor (FNO) trained entirely on synthetic data that enforces two physics constraints: (i) the exact kinematic relation between DAS strain rate and the spatial gradient of particle velocity, and (ii) the one-dimensional elastic wave equation. These con-straints resolve the undetermined integration constant and suppress noise without requiring co-located seismometers. On a test set of 200 heterogeneous synthetic wavefields, DANTE achieves a mean output SNR of 15 .3 ± 8.8 dB, Pearson correla-tion r = 0 .907, and SSIM = 0 .976, corresponding to a mean SNR improvement of approximately +15 dB over the best conventional baseline (trace stacking, n = 10, 0.02 ± 0.06 dB), and up to +28 .8 dB on the most challenging samples. Zero-shot in-ference on seven real microseismic events from the Utah FORGE 2019 DAS dataset yields a kinematic residual of 0 .003–0 .005, five times lower than the synthetic test baseline, confirming generalisation to real field data with no fine-tuning and no seismometers. 
+
+Keywords: Distributed Acoustic Sensing, Fourier Neural Operator, Physics-Informed Machine Learning, Particle Velocity Reconstruction, Seismic Monitoring, EGS 1
+
+> arXiv:2605.18375v1 [physics.geo-ph] 18 May 2026
+
+## 1 Introduction 
+
+Distributed Acoustic Sensing (DAS) interrogates standard single-mode optical fibre to measure axial strain rate at metre-scale spatial intervals along the entire cable length [Parker et al., 2014, Lindsey and Martin, 2021]. Because telecommunications infrastruc-ture already spans approximately 1.4 million kilometres of submarine cable and compara-ble lengths on land, DAS offers a pathway to seismic monitoring at densities and spatial coverages unreachable by conventional seismometer networks [Zhan, 2020, Marra et al., 2018, Ajo-Franklin et al., 2019]. Despite this promise, a fundamental mismatch exists between what DAS measures and what seismology requires. DAS records strain rate ˙ ε(x, t )—the temporal derivative of fibre elongation per unit gauge length—whereas ground-motion models, intensity scales, source parameter inversions, and early warning systems are formulated in terms of particle velocity v(x, t ) [Trabant et al., 2012, Lindsey and Martin, 2021]. Nominal conversion through spatial integration, 
+
+v(x, t ) = 
+
+Z x
+
+> 0
+
+˙ε(x′, t ) dx ′ + C(t), (1) is ill-posed: the constant of integration C(t) is a free function of time that cannot be deter-mined from DAS data alone, and spatial integration amplifies noise monotonically with distance. The standard engineering workaround—spatial stacking of adjacent traces— reduces noise at the cost of a ten-fold degradation in spatial resolution (from 900 to 90 effective channels for typical array geometries). Several deep learning approaches have been proposed for DAS signal enhancement and denoising [Wang et al., 2022, Liu et al., 2023], but the task of recovering particle velocity without co-located seismometers has received limited attention. A recent architecture combining Fourier Neural Operators with bidirectional LSTM and attention mechanisms achieves high-fidelity velocity recovery in a supervised setting [Al-Qadasi et al., 2026], but requires ground-truth seismometer recordings at training time and is therefore restricted to instrumented sites. We propose DANTE, a physics-informed Fourier Neural Operator that solves this problem without any seismometer data. The key insight is that two physical laws—the kinematic relation between DAS and particle velocity, and the one-dimensional elastic wave equation—together uniquely constrain the velocity field that is consistent with an observed DAS record, resolving both the integration constant and the noise amplification problem. DANTE is trained once on synthetic wavefields, then applied zero-shot to real field data. 22 Method 
+
+2.1 FNO2d Architecture 
+
+DANTE is built on the Fourier Neural Operator (FNO) [Li et al., 2021], which learns mappings between function spaces by parameterising integral operators in the Fourier domain. The operator Gθ maps a DAS strain-rate record ˙ ε(x, t ) ∈ RNt×Nx and an auxiliary velocity model c(x) to particle velocity v(x, t ) ∈ RNt×Nx , processing the entire spatial array simultaneously in a single forward pass. The architecture consists of: (i) a linear lifting layer mapping 4 input channels (DAS, velocity model, and two positional encodings) to a hidden width dhidden = 32; (ii) four FNO layers, each comprising a spectral convolution (retaining the lowest 12 Fourier modes in both space and time) followed by a pointwise linear residual path and GELU activa-tion; and (iii) a two-layer MLP projection to the scalar output. The full model contains 2.37 million trainable parameters. 
+
+2.2 Physics-Informed Loss Functions 
+
+Let vpred denote the model output and vtrue the ground-truth velocity. Training minimises a composite loss, 
+
+L = λd Ldata + λk Lkin + λdy Ldyn , (2) where the three terms are defined as follows. 
+
+Data loss. 
+
+Ldata = vpred − vtrue 
+
+> 22
+
+. (3) 
+
+Kinematic loss. The fundamental DAS measurement equation states that the inter-rogator records the spatial gradient of particle velocity integrated over the gauge length, ˙εobs (x, t ) = ∂v (x, t )
+
+∂x . (4) We enforce this exact physical relation via 
+
+Lkin = ˙εobs − ∂v pred 
+
+∂x 
+
+> 22
+
+. (5) This constraint directly resolves the undetermined integration constant C(t) in Eq. (1) because it forces the predicted velocity gradient to match the DAS observation everywhere, making C(t) ≡ 0 the unique consistent solution. 3Dynamic loss. Seismic waves in a one-dimensional elastic medium obey 
+
+∂v ∂t = c2(x) ∂ε ∂x , (6) where c(x) is the local P-wave velocity. The corresponding loss 
+
+Ldyn = ∂v pred 
+
+∂t − c2(x) ∂ε ∂x 
+
+> 22
+
+(7) eliminates physically impossible wavefields and provides an additional regularisation that suppresses noise. Loss weights are set to λd = 1 .0, λk = 0 .10, λdy = 0 .05, with physics weights ramped linearly from zero over the first 200 epochs (progressive warm-up) to prevent premature penalisation before the model has learned approximate solutions. 
+
+## 3 Synthetic Experiments 
+
+3.1 Dataset and Training 
+
+We generated paired DAS–velocity wavefields using a one-dimensional staggered-grid finite-difference elastic wave simulator. Synthetic velocity models were drawn as piecewise-linear profiles with P-wave speeds in [1500 , 4000] m/s and spatial standard deviations up to 827 m/s. Source signals were band-limited (5–45 Hz), with additive Gaussian noise yielding input SNR in [5 , 30] dB. All simulations used Nx = 900 channels at ∆ x = 10 m and Nt = 512 samples at ∆ t = 2 ms (500 Hz). The dataset contains 2,000 training, 400 validation, and 200 test samples. Training used AdamW (lr = 10 −3, weight decay 10 −4) with a cosine learning-rate schedule and early stopping (patience 200 epochs) on an NVIDIA A100 40 GB GPU for 1,000 epochs (13.3 hours). The best validation loss of 0.073 was achieved at epoch 941. 
+
+3.2 Quantitative Results 
+
+Table 1 compares DANTE against two conventional baselines: (i) Stacking (n = 10), which averages adjacent traces and applies single integration, and (ii) Integration , direct numerical integration of the DAS strain rate. DANTE achieves an SNR improvement of +28 .8 dB over the stacking baseline on the single hardest test sample (Fig. 1), and a mean improvement of approximately +15 dB across the full test set. The Pearson correlation of 0.907 is maintained across the full input-SNR range from 5 to 30 dB (Fig. 3), demonstrating robustness to noise. 4Table 1: Reconstruction performance on the synthetic test set ( N = 200). Best values are shown in bold . SNR: signal-to-noise ratio. RelL2: relative ℓ2 error. r: Pearson correlation coefficient. Method SNR [dB] RelL2 Pearson r SSIM 
+
+DANTE (ours) 15 .3 ± 8.8 0.280 0.907 0.976 
+
+Stacking ( n = 10) 0.02 ± 0.06 0.997 0.200 0.637 Integration −31 .3 ± 5.6 45 .96 0.462 0.050 
+
+3.3 Qualitative Analysis 
+
+Figure 1 shows a representative test sample (input SNR = 18 .9 dB). DANTE recovers the two-dimensional wavefield structure with negligible residual (SNR = 28 .9 dB), whereas stacking produces a noisy, spatially blurred reconstruction (SNR = 0 .1 dB) and integration (not shown) diverges. Individual trace comparisons (Fig. 4) confirm that DANTE recovers the phase of every cycle, not merely the envelope: RMS residual per channel is 0.073 versus 2.537 for stacking, a 35-fold reduction. The kinematic residual | ˙εobs − ∂v pred /∂x | (Fig. 7) quantifies physics consistency inde-pendently of ground truth. DANTE achieves a mean kinematic residual of 0.236, com-pared with 0.328 for stacking, a 28 % improvement in physics consistency that holds across the six most strongly heterogeneous velocity models in the test set (spatial σ up to 827 m/s, Fig. 5). For subsequent comparison with real field data, we report the synthetic kinematic-residual baseline averaged over the full test set ( N = 200): ⟨| ˙εobs − ∂v pred /∂x |⟩ test =0.024. The higher value of 0.236 quoted above refers exclusively to the six most strongly heterogeneous models (Fig. 5) and is presented to demonstrate robustness on the hardest cases. 
+
+## 4 Real Data: Utah FORGE 2019 
+
+4.1 Dataset 
+
+To assess generalisation to real field data, we applied the trained DANTE model—without any fine-tuning—to DAS recordings from the Utah Frontier Observatory for Research in Geothermal Energy (FORGE) [Moore et al., 2019]. Data were acquired by a Silixa Carina P11 interrogator connected to a fibre permanently installed in monitoring well 78-32 at 1.02 m channel spacing and a sampling rate of 2,000 Hz. We selected seven seismic event files from the S27EVENT dataset (stimulation stage 27, April 2019), totalling 1,280 active channels and 30,000 samples per event. The gauge length of the FORGE 2019 deployment (10 m) matches the training configu-ration exactly. Preprocessing comprised the following sequential steps: (i) singular-value 5decomposition (SVD) filtering, removing the two leading components that capture the dominant horizontal noise stripes characteristic of the FORGE interrogator; (ii) active-channel selection via RMS thresholding ( < 5× median), followed by extraction of the longest contiguous block of below-threshold channels (minimum length 100 channels); (iii) zero-phase Butterworth bandpass filtering (10–150 Hz); (iv) frequency–wavenumber (f –k) filtering, designed to suppress near-zero-wavenumber horizontal noise and low-apparent-velocity events incompatible with the propagation geometry of microseismic P
+
+phases; (v) temporal decimation 2 ,000 → 500 Hz, with an anti-aliasing IIR filter applied in zero-phase mode; (vi) spatial group-averaging 1 .02 → 10 .2 m (factor of ten, matched to the DANTE training grid); (vii) selection of a 1.024 s window ( Nt = 512 samples) centred on the peak of the smoothed channel-mean energy envelope; (viii) zero-padding of the active channel dimension to Nx = 900 to match the DANTE input tensor shape; and (ix) z-score normalisation using the DANTE training statistics. The cascade of preprocessing steps (ii) and (vi) reduces the effective channel count from the original 1,280 as follows. RMS thresholding admits approximately 950 channels below 5 × the median; the longest contiguous block of admissible channels covers approx-imately 470 adjacent channels at 1.02 m spacing, corresponding to a contiguous 0.48 km fibre segment. Spatial group-averaging by a factor of ten then reduces this to 47 ac-tive channels at ∼ 10 m spacing, matching the DANTE training resolution. The retained 0.48 km segment is centred on the strongest coherent arrival; channels excluded by RMS thresholding—dominated by instrument noise or located outside the source illumination zone—do not contribute to inference. Each raw FORGE event record contains 30,000 samples at 2,000 Hz (15 s duration). After temporal decimation to 500 Hz (7,500 samples), a 1.024 s window of Nt = 512 samples is extracted, centred on the time of peak energy in the smoothed channel-mean energy trace (smoothing kernel: 30 samples, equivalent to 60 ms at 500 Hz). The window length matches the training tensor shape and captures the full P -wave arrival and the early coda for each event. Because DANTE was trained with a fixed spatial extent of Nx = 900 channels, the active 47-channel FORGE segment is symmetrically zero-padded to the full model input shape prior to inference. The forward pass therefore operates on a tensor of shape (1 , N t =512 , N x = 900) in which only ∼ 5 % of channels carry physical signal and the remainder are exact zeros. All evaluation quantities reported in Section 4.2 and Figs. 6–7, including the kinematic residual ⟨| ˙εobs − ∂v pred /∂x |⟩ , are computed exclusively over the active 47-channel region. We verified that the model output on the zero-padded region remains numerically negligible ( |vpred | < 10 −3 in normalised units), confirming that the padding does not contaminate the active-region statistics. Extending DANTE to accept variable channel counts—using shape-agnostic operator formulations [Li et al., 2021]—is left for a future model iteration. 6The auxiliary P -wave velocity model c(x) required as a DANTE input was set to a linear gradient from 3,000 to 4,000 m/s along the fibre, representative of the crystalline basement encountered at the Utah FORGE site (well 78-32, granitoid intrusive). This prior is derived from regional well-log compilations and is independent of the DAS record-ings analysed here; it therefore does not constitute the use of a co-located ground-motion sensor and preserves the seismometer-free deployment requirement. 
+
+4.2 Zero-Shot Inference Results 
+
+Ground-truth particle velocity is unavailable for field DAS data. We therefore assess re-construction quality through the kinematic residual, which measures the self-consistency of the predicted velocity field with the DAS observation according to Eq. (4), indepen-dently of any reference sensor. Table 2 summarises results across all seven events. Two events (UTC 175108 and UTC 175123) exhibit clear inclined seismic arrivals consistent with microseismic propaga-tion (Fig. 6). For these events, DANTE produces coherent velocity wavefields in which the inclined moveout is preserved and horizontal noise stripes are suppressed. Table 2: Kinematic residual ⟨| ˙εobs − ∂v/∂x |⟩ for all seven FORGE 2019 events. Lower values indicate better physics consistency. The synthetic test-set baseline is 0.024. Event (UTC) Kinematic residual Signal quality 171923 0.0035 weak 174338 0.0039 weak 174753 0.0040 weak 174923 0.0042 moderate 175108 0.0048 clear 
+
+175123 0.0054 clear 
+
+175823 0.0048 moderate Mean 0.0044 —All seven events achieve kinematic residuals between 0.0035 and 0.0054, uniformly below the synthetic test-set baseline of 0.024 ( ∼ 5× lower on average; Fig. 7). This apparent improvement over the synthetic baseline must be interpreted with caution. The comparison conflates two distinct effects: (i) the intrinsic physics consistency of DANTE on real microseismic data, and (ii) amplitude rescaling induced by the SVD, bandpass, and 
+
+f –k preprocessing applied to the FORGE records, which compresses the dynamic range of ˙εobs relative to the synthetic baseline computed from raw training-set statistics. Acontrolled comparison in which identical preprocessing is applied to a synthetic ensemble is deferred to future work. The conservative interpretation of Table 2 is that DANTE achieves real-data kinematic residuals well within the regime established by its synthetic 7validation distribution, with no parameter adjustment and without recourse to co-located ground-motion sensors. 
+
+## 5 Discussion 
+
+Comparison with supervised methods. The principal distinction between DANTE and prior work [Al-Qadasi et al., 2026] is the absence of co-located seismometers. Su-pervised DAS-to-velocity converters require ground-truth velocity recordings acquired simultaneously with DAS at the same location. Such co-located pairs exist only at a small number of instrumented research sites; the vast majority of operational DAS de-ployments (telecommunications cables, wellbore monitoring, urban infrastructure) have no associated seismometer array. DANTE is the first method to achieve particle-velocity reconstruction using physics laws alone as supervisory signal, making it deployable on any existing fibre. 
+
+Physical interpretation. The kinematic loss (Eq. 5) enforces the measurement equa-tion of the DAS interrogator, which is an exact physical identity rather than an approxima-tion. This constraint simultaneously resolves the integration constant C(t) and prevents the noise amplification intrinsic to numerical integration. The dynamic loss (Eq. 7) ad-ditionally constrains the temporal evolution to follow Newton’s second law, eliminating physically impossible solutions that could otherwise minimise the data loss. 
+
+Limitations. The current model assumes one-dimensional wave propagation, which is appropriate for the near-fibre wavefield but may introduce errors for strongly three-dimensional source geometries. DAS sensitivity is geometry-dependent: for a borehole fibre, sensitivity is maximum for waves propagating along the fibre axis and negligible for horizontally polarised S-waves ( SH ) propagating vertically. The synthetic training distribution (1,500–4,000 m/s P -wave velocity, 5–45 Hz source band) is narrower than the full frequency content of real microseismic data in fractured crystalline basement, which routinely extends to 150 Hz and beyond. The bandpass filter (10–150 Hz) applied during FORGE preprocessing therefore admits a frequency range that exceeds the training distribution by approximately a factor of three. Effective inference is in practice restricted to the ∼ 10–45 Hz band common to both domains; higher-frequency content is passed through but is not physically constrained by the training prior. Extending the training band to 150 Hz with a crystalline-basement velocity range ( Vp up to 6,000 m/s) is the primary target for the next model iteration (DANTE v1.5), which is planned to use the FORGE 2024 Neubrex dataset [Jurick et al., 2024] for which CMT-derived ground truth is available. 86 Conclusion 
+
+We introduced DANTE, a physics-informed Fourier Neural Operator that converts DAS strain rate to particle velocity without co-located seismometers. The two physics con-straints in the loss function—the kinematic DAS measurement equation and the one-dimensional wave equation—resolve the ill-posed integration problem that has blocked di-rect DAS-to-velocity conversion. On 200 heterogeneous synthetic test wavefields, DANTE achieves Pearson r = 0 .907 and a mean SNR improvement of approximately +15 dB over stacking, reaching +28 .8 dB on the hardest samples. Zero-shot transfer to Utah FORGE 2019 real DAS data yields kinematic residuals five times lower than the synthetic baseline, confirming generalisation with no fine-tuning. DANTE enables any existing fibre-optic cable to produce particle-velocity seismograms compatible with the full ecosystem of seismological analysis tools, without requiring new sensors or co-located instrumentation. Future work will extend the training band to 150 Hz using FORGE 2024 Neubrex data with CMT-derived ground truth, and will incorporate simultaneous velocity-model estimation. 
+
+## Code and Data Availability 
+
+Training code and the best-model checkpoint will be released at https://github.com/ ivxa/dante upon acceptance. The Utah FORGE 2019 DAS data are publicly available at the Geothermal Data Repository ( https://gdr.openei.org ). 
+
+## Acknowledgements 
+
+The Utah FORGE dataset was funded by the U.S. Department of Energy, Office of Energy Efficiency and Renewable Energy. 
+
+## References 
+
+J. B. Ajo-Franklin et al. Distributed acoustic sensing using dark fiber for near-surface characterization and broadband seismic event detection. Scientific Reports , 9(1):1328, 2019. doi: 10.1038/s41598-018-36675-8. B. Al-Qadasi, Y. Cui, U. Bin Waheed, and H. F. Wang. A novel deep-learning model to convert DAS strain to geophone particle velocity: application to Poro-Tomo data from the Brady geothermal field. Scientific Reports , 16, 2026. doi: 10.1038/s41598-026-37888-y. 9D. Jurick, A. Guzik, and W. Fishback. Utah FORGE: Neubrex well 16b(78)-32 DAS data – April 2024. Geothermal Data Repository, 2024. Z. Li, N. B. Kovachki, K. Azizzadenesheli, B. Liu, K. Bhattacharya, A. M. Stuart, and A. Anandkumar. Fourier neural operator for parametric partial differential equations. In International Conference on Learning Representations , 2021. URL https://arxiv. org/abs/2010.08895 .N. J. Lindsey and E. R. Martin. Fiber-optic seismology. Annual Review of Earth and Planetary Sciences , 49:309–336, 2021. doi: 10.1146/annurev-earth-072420-065213. W. Liu et al. Self-supervised denoising for distributed acoustic sensing seismic data. 
+
+Geophysics , 88(3):WB71–WB85, 2023. doi: 10.1190/geo2022-0288.1. G. Marra, C. Clivati, R. Luckett, A. Tampellini, J. Kronj¨ ager, L. Wright, A. Mura, F. Levi, S. Robinson, A. Xuereb, B. Baptie, and D. Calonico. Ultrastable laser interferometry for earthquake detection with terrestrial and submarine cables. Science , 361(6401): 486–490, 2018. doi: 10.1126/science.aat4458. J. Moore, J. McLennan, K. Pankow, S. Simmons, R. Podgorney, P. Wannamaker, C. Jones, W. Rickard, and P. Xing. The Utah frontier observatory for research in geothermal energy (FORGE): an international laboratory for enhanced geothermal sys-tem technology development. Proceedings, 44th Workshop on Geothermal Reservoir Engineering , 2019. T. Parker, S. Shatalin, and M. Farhadiroushan. Distributed acoustic sensing – a new tool for seismic applications. First Break , 32(2):61–69, 2014. C. Trabant, A. R. Hutko, M. Bahavar, R. Karstens, T. Ahern, and R. Aster. Data products at the IRIS DMC: Stepping stones for research and other applications. Seismological Research Letters , 83(5):846–854, 2012. doi: 10.1785/0220120032. X. Wang et al. Deep learning for distributed acoustic sensing denoising in urban railway environments. IEEE Transactions on Geoscience and Remote Sensing , 60:1–12, 2022. doi: 10.1109/TGRS.2022.3143889. Z. Zhan. Distributed acoustic sensing turns fiber-optic cables into sensitive seismographs. 
+
+Seismological Research Letters , 91(1):1–15, 2020. doi: 10.1785/0220190112. 10 0 2 4 6 8
+
+Distance [km] 
+
+> 0.0
+> 0.2
+> 0.4
+> 0.6
+> 0.8
+> 1.0
+> Time [s]
+
+DAS Strain-Rate 
+
+(Input, Noisy)     
+
+> −4
+> −2
+> 0
+> 2
+> 4
+> 02468
+
+Distance [km] 
+
+True Particle Velocity 
+
+(Ground Truth)     
+
+> −4
+> −2
+> 0
+> 2
+> 4
+> 02468
+
+Distance [km] 
+
+DANTE Prediction 
+
+(Ours)     
+
+> −4
+> −2
+> 0
+> 2
+> 4
+> 02468
+
+Distance [km] 
+
+Stacking Baseline 
+
+(n=10 traces)     
+
+> −4
+> −2
+> 0
+> 2
+> 4
+> 02468
+
+Distance [km] 
+
+> 0.0
+> 0.2
+> 0.4
+> 0.6
+> 0.8
+> 1.0
+> Time [s]
+
+DANTE Residual 
+
+(SNR = 28.9 dB)     
+
+> −4
+> −2
+> 0
+> 2
+> 4
+> 02468
+
+Distance [km] 
+
+Stacking Residual 
+
+(SNR = 0.1 dB) 
+
+> −4
+> −2
+> 0
+> 2
+> 4
+
+Test Sample #73 | Input SNR: 18.9 dB 
+
+DANTE SNR: 28.9 dB 
+
+Stacking SNR: 0.1 dB 
+
+DANTE improvement: +28.8 dB 
+
+Wavefield Comparison — Heterogeneous Medium (Sample #73, Input SNR = 18.9 dB) Figure 1: Wavefield comparison on the most challenging synthetic test sample (input SNR = 18 .9 dB). Left to right: DAS strain-rate input (noisy); ground-truth particle velocity; DANTE prediction (SNR = 28 .9 dB); stacking baseline ( n = 10, SNR = 0 .1 dB). Lower two panels show absolute residuals. DANTE improvement: +28 .8 dB. 11 0 200 400 600 800 1000 
+
+Epoch 
+
+10 −1 
+
+10 0
+
+> Total Loss (log)
+> Best
+> ep=941
+> 0.0734
+
+Total Loss 
+
+Train 
+
+Validation 
+
+0 200 400 600 800 1000 
+
+Epoch 
+
+10 −1 
+
+10 0
+
+> Loss (log)
+
+Loss Components (Train) 
+
+Total 
+
+Data MSE 
+
+Kinematic 
+
+Dynamic 
+
+0 200 400 600 800 1000 
+
+Epoch 
+
+0.2 
+
+0.3 
+
+0.4 
+
+0.5 
+
+0.6 
+
+0.7 
+
+0.8 
+
+0.9 
+
+1.0 
+
+> Relative L2 Error
+
+Relative L2 Error 
+
+Train 
+
+Validation 
+
+DANTE Training History Figure 2: Training history. Left: total loss (log scale); best epoch 941, best validation loss 0.073. Centre: decomposition of the training loss into data, kinematic, and dynamic components. Right: relative ℓ2 error on train and validation sets. DANTE 
+
+(Ours) 
+
+Stacking 
+
+(n=10) 
+
+Spatial 
+
+Integration 
+
+> −40
+> −30
+> −20
+> −10
+> 0
+> 10
+> 20
+> 30
+> Output SNR [dB]
+> 16.1 dB
+> 0.0 dB
+> -30.3 dB
+
+Reconstruction SNR Comparison 
+
+(Test Set, N=200) 
+
+(a) Output SNR distribution. 5 10 15 20 25 30 
+
+Input DAS SNR [dB] 
+
+> 0.0
+> 0.2
+> 0.4
+> 0.6
+> 0.8
+> 1.0
+> Pearson Correlation Coefficient
+> mean=0.907
+> mean=0.200
+
+Reconstruction Fidelity vs. Input Noise Level  
+
+> DANTE (ours)
+> Stacking (n=10)
+
+(b) Pearson r vs. input SNR. 
+
+Figure 3: Quantitative results on the synthetic test set ( N = 200). (a) Box plots of output SNR for DANTE and both baselines. (b) DANTE (blue) maintains r > 0.8 across the full 5–30 dB input-SNR range; stacking (red) remains near zero. 12 0.0 0.2 0.4 0.6 0.8 1.0 
+
+Time [s] 
+
+−7.5 
+
+−5.0 
+
+−2.5 
+
+0.0 
+
+2.5 
+
+5.0 
+
+7.5 
+
+10.0 
+
+12.5 
+
+> Velocity [norm.]
+
+Channel 225 (2.2 km) 
+
+−6 
+
+−4 
+
+−2 
+
+0
+
+2
+
+4
+
+> DAS [norm.]
+
+0.0 0.2 0.4 0.6 0.8 1.0 
+
+Time [s] 
+
+−10 
+
+−5 
+
+0
+
+5
+
+> Residual
+
+Residual (Pred − True) 
+
+DANTE rms=0.073 
+
+Stacking rms=2.537 
+
+0.0 0.2 0.4 0.6 0.8 1.0 
+
+Time [s] 
+
+−5.0 
+
+−2.5 
+
+0.0 
+
+2.5 
+
+5.0 
+
+7.5 
+
+10.0 
+
+12.5 
+
+Channel 450 (4.5 km) 
+
+−4 
+
+−2 
+
+0
+
+2
+
+4
+
+> DAS [norm.]
+
+0.0 0.2 0.4 0.6 0.8 1.0 
+
+Time [s] 
+
+−12.5 
+
+−10.0 
+
+−7.5 
+
+−5.0 
+
+−2.5 
+
+0.0 
+
+2.5 
+
+5.0 
+
+Residual (Pred − True) 
+
+DANTE rms=0.062 
+
+Stacking rms=2.298 
+
+0.0 0.2 0.4 0.6 0.8 1.0 
+
+Time [s] 
+
+−0.06 
+
+−0.04 
+
+−0.02 
+
+0.00 
+
+0.02 
+
+0.04 
+
+0.06 
+
+Channel 675 (6.8 km) 
+
+True velocity 
+
+DANTE (ours) 
+
+Stacking 
+
+DAS input 
+
+−0.2 
+
+−0.1 
+
+0.0 
+
+0.1 
+
+0.2 
+
+> DAS [norm.]
+
+0.0 0.2 0.4 0.6 0.8 1.0 
+
+Time [s] 
+
+−0.06 
+
+−0.04 
+
+−0.02 
+
+0.00 
+
+0.02 
+
+0.04 
+
+0.06 
+
+Residual (Pred − True) 
+
+DANTE rms=0.001 
+
+Stacking rms=0.022 
+
+Temporal Waveform Comparison — Heterogeneous Medium (Sample #73) Figure 4: Temporal waveform comparison at three channels (2.2, 4.5, 6.8 km) for the same test sample as Fig. 1. Each panel shows the DAS input (purple), DANTE prediction (blue), and ground-truth velocity (green), with residuals below. DANTE RMS residuals: 0.073, 0.062, 0.001 (channels 1–3); stacking: 2.537, 2.298, 0.022. 0 2 4 6 8
+
+Distance [km] 
+
+1500 
+
+2000 
+
+2500 
+
+3000 
+
+3500 
+
+4000 
+
+> Vp [m/s]
+
+Model #74 (std=827 m/s) 
+
+0 2 4 6 8
+
+Distance [km] 
+
+1500 
+
+2000 
+
+2500 
+
+3000 
+
+3500 
+
+4000 
+
+> Vp [m/s]
+
+Model #25 (std=814 m/s) 
+
+0 2 4 6 8
+
+Distance [km] 
+
+1500 
+
+2000 
+
+2500 
+
+3000 
+
+3500 
+
+4000 
+
+> Vp [m/s]
+
+Model #133 (std=794 m/s) 
+
+0 2 4 6 8
+
+Distance [km] 
+
+1500 
+
+2000 
+
+2500 
+
+3000 
+
+3500 
+
+4000 
+
+> Vp [m/s]
+
+Model #146 (std=784 m/s) 
+
+0 2 4 6 8
+
+Distance [km] 
+
+1500 
+
+2000 
+
+2500 
+
+3000 
+
+3500 
+
+4000 
+
+> Vp [m/s]
+
+Model #160 (std=743 m/s) 
+
+0 2 4 6 8
+
+Distance [km] 
+
+1500 
+
+2000 
+
+2500 
+
+3000 
+
+3500 
+
+4000 
+
+> Vp [m/s]
+
+Model #65 (std=676 m/s) 
+
+Most Heterogeneous Velocity Models — Test Set 
+
+(Selected by spatial standard deviation of c(x)) 
+
+(a) Six most heterogeneous velocity models. 0.0 0.2 0.4 0.6 0.8 
+
+Kinematic Residual |e_obs - dv_pred/dx| 
+
+0.0 
+
+0.5 
+
+1.0 
+
+1.5 
+
+2.0 
+
+2.5 
+
+3.0 
+
+3.5 
+
+4.0 
+
+> Probability Density
+
+Physics Consistency: Kinematic Residual 
+
+(lower = better agreement with DAS observation) 
+
+DANTE mean=0.2356 
+
+Stacking mean=0.3276 (b) Kinematic residual. 
+
+Figure 5: Physics consistency on strongly heterogeneous media. (a) P-wave velocity profiles selected by spatial standard deviation (up to 827 m/s). (b) Kinematic residual distribution: DANTE mean = 0 .236 vs. stacking mean = 0 .328 (28 % improvement). 13 0.0 0.1 0.2 0.3 0.4 
+
+Distance [km] 
+
+0.0 
+
+0.2 
+
+0.4 
+
+0.6 
+
+0.8 
+
+1.0 
+
+> Time [s]
+
+UTC 175108.sgy 
+
+DAS Strain-Rate (47 ch) 
+
+0.0 0.1 0.2 0.3 0.4 
+
+Distance [km] 
+
+DANTE Prediction 
+
+(Particle Velocity, Normalised) 
+
+0.0 0.2 0.4 
+
+Distance [km] 
+
+Kinematic Residual 
+
+|ε̇ − ∂v/∂x| mean=0.0048 
+
+0.0 0.2 0.4 0.6 0.8 1.0 
+
+Time [s] 
+
+−0.02 
+
+0.00 
+
+0.02 
+
+0.04 
+
+0.06 
+
+0.08 
+
+0.10 
+
+0.12 
+
+> Amplitude + offset
+
+0.07 km 
+
+0.23 km 
+
+0.40 km 
+
+Event: UTC 175108.sgy 
+
+Active channels: 47 
+
+Coverage: 0.48 km 
+
+Kin. residual: 0.0048 
+
+(Synth. baseline: 0.024) 
+
+Waveform Traces 
+
+(DAS vs DANTE) 
+
+DAS input 
+
+DANTE prediction 
+
+0.0 0.1 0.2 0.3 0.4 
+
+Distance [km] 
+
+0.0 
+
+0.2 
+
+0.4 
+
+0.6 
+
+0.8 
+
+1.0 
+
+> Time [s]
+
+UTC 175123.sgy 
+
+DAS Strain-Rate (47 ch) 
+
+0.0 0.1 0.2 0.3 0.4 
+
+Distance [km] 
+
+DANTE Prediction 
+
+(Particle Velocity, Normalised) 
+
+0.0 0.2 0.4 
+
+Distance [km] 
+
+Kinematic Residual 
+
+|ε̇ − ∂v/∂x| mean=0.0054 
+
+0.0 0.2 0.4 0.6 0.8 1.0 
+
+Time [s] 
+
+−0.02 
+
+0.00 
+
+0.02 
+
+0.04 
+
+0.06 
+
+0.08 
+
+0.10 
+
+0.12 
+
+> Amplitude + offset
+
+0.07 km 
+
+0.23 km 
+
+0.40 km 
+
+Event: UTC 175123.sgy 
+
+Active channels: 47 
+
+Coverage: 0.48 km 
+
+Kin. residual: 0.0054 
+
+(Synth. baseline: 0.024) 
+
+Waveform Traces 
+
+(DAS vs DANTE) 
+
+DAS input 
+
+DANTE prediction 
+
+−0.015 
+
+−0.010 
+
+−0.005 
+
+0.000 
+
+0.005 
+
+0.010 
+
+0.015 
+
+> Strain Rate [norm.]
+
+−0.010 
+
+−0.005 
+
+0.000 
+
+0.005 
+
+0.010 
+
+> Velocity [norm.]
+
+0.000 
+
+0.002 
+
+0.004 
+
+0.006 
+
+0.008 
+
+0.010 
+
+0.012 
+
+−0.02 
+
+−0.01 
+
+0.00 
+
+0.01 
+
+0.02 
+
+> Strain Rate [norm.]
+
+−0.010 
+
+−0.005 
+
+0.000 
+
+0.005 
+
+0.010 
+
+> Velocity [norm.]
+
+0.000 
+
+0.002 
+
+0.004 
+
+0.006 
+
+0.008 
+
+0.010 
+
+0.012 
+
+0.014 
+
+DANTE Zero-Shot Inference — Best Events 
+
+FORGE 2019, Well 78-32, Utah FORGE EGS Figure 6: Zero-shot inference on Utah FORGE 2019 real DAS data (well 78-32, Silixa Carina P11, April 2019). Two clearest events (UTC 175108 and UTC 175123). Each row: DAS strain-rate input (47 active channels after preprocessing), DANTE particle-velocity prediction, kinematic residual, and representative waveform traces. DANTE suppresses horizontal noise stripes and recovers the inclined seismic arrival without any fine-tuning or co-located seismometer. Kinematic residuals: 0.0048 and 0.0054 (5 × below synthetic baseline 0.024). 14 0.0 0.1 0.2 0.3 0.4 
+
+Distance [km] 
+
+0.005 
+
+0.010 
+
+0.015 
+
+0.020 
+
+0.025 
+
+> Mean Kinematic Residual  |ε̇ − ∂v/∂x|
+
+UTC 171923.sgy mean=0.0035 
+
+UTC 174338.sgy mean=0.0039 
+
+UTC 174753.sgy mean=0.0040 
+
+UTC 174923.sgy mean=0.0042 
+
+UTC 175108.sgy ★ mean=0.0048 
+
+UTC 175123.sgy ★ mean=0.0054 
+
+UTC 175823.sgy mean=0.0048 
+
+Synthetic data baseline (0.024) 
+
+FORGE 2019 — Spatial Kinematic Residual Profile 
+
+(Physics Consistency: lower = DANTE better satisfies DAS) Figure 7: Spatial kinematic residual profile for all seven FORGE 2019 events (mean over time). All events achieve residuals well below the synthetic test baseline (dashed grey line, 0.024), confirming physics-consistent reconstruction across the active 0.48 km fibre section. 15

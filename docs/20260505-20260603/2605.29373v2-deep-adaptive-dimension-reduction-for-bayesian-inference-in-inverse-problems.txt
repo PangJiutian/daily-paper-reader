@@ -1,0 +1,923 @@
+Title: Deep Adaptive Dimension Reduction for Bayesian Inference in Inverse Problems
+
+URL Source: https://arxiv.org/pdf/2605.29373v2
+
+Published Time: Mon, 01 Jun 2026 01:04:09 GMT
+
+Number of Pages: 25
+
+Markdown Content:
+DEEP ADAPTIVE DIMENSION REDUCTION FOR BAYESIAN INFERENCE IN INVERSE PROBLEMS 
+
+YUEYANG WANG ∗, XILI WANG ∗, KEJUN TANG † , XIAOLIANG WAN ‡ , TAO ZHOU § , 
+
+> AND
+
+CHAO YANG ∗
+
+Abstract. Solving high-dimensional PDE-governed inverse problems is often challenging due to complex non-Gaussian posterior distributions, expensive forward model evaluations, and misspecified prior information. To address these issues, we propose a deep adaptive dimension-reduction Bayesian inference framework based on the Variational Flow (VF) model. Since standard normalizing flows are restricted by bijective mappings and cannot directly reduce dimensions, VF overcomes this lim-itation by integrating VAE-based nonlinear dimension reduction with dual normalizing flows for the latent prior and encoder. This design provides a strictly higher evidence lower bound than VAE and allows more flexible approximation of complex posterior distributions. We further introduce an iterative prior updating strategy that gradually moves the prior mean toward high-probability posterior regions, avoiding manual prior tuning. These components form a closed adaptive loop together with an adaptively fine-tuned Fourier Neural Operator (FNO) surrogate: VF generates posterior-concentrated samples to refine the surrogate, while the updated surrogate further improves posterior inference. Numerical experiments on a 100-dimensional Rosenbrock problem and three standard PDE-governed inverse problems show that our method delivers competitive or superior accuracy compared with MCMC, UKI, and SVGD baselines across all tested configurations, with the most pronounced advantages emerging in challenging scenarios such as high-noise observations and high-dimensional parameter spaces. 
+
+Key words. Bayesian inverse problems; variational inference; adaptive sampling; deep genera-tive models; neural surrogates. 
+
+AMS subject classifications. 62F15, 35R30, 68T07, 65C20 
+
+1. Introduction. Bayesian inverse problems governed by partial differential equations (PDEs) arise widely in science and engineering, including subsurface flow modeling, medical imaging, and climate science [30, 34]. The primary task is to recover unknown parameters from noisy, incomplete observations by characterizing the pos-terior distribution. In practice, the parameters are often high-dimensional, while the posterior is induced by a nonlinear and expensive PDE forward map and is typically non-Gaussian. This makes accurate and efficient posterior approximation a central challenge. Existing methods face clear limitations: MCMC methods [29, 11, 8] are computationally expensive, Kalman-based methods such as EKI [13] and UKI [12] rely on Gaussian approximations, and particle-based variational inference (VI) methods such as SVGD [24] often degrade in high-dimensional spaces. Forward evaluation is often the dominant computational bottleneck in Bayesian inverse problems. Neural operators such as FNO [23] and DeepONet [26] provide efficient surrogates, but models trained on prior samples can incur large out-of-distribution (OOD) errors in posterior regions. A related and often overlooked is-sue is the use of a static prior: in high-dimensional spaces lacking explicit domain knowledge, a static prior can rigidly confine inference to its initial subspace [15, 7]. A narrow prior restricts the search space and may miss the true posterior, whereas an overly broad prior provides insufficient regularization, exacerbates ill-posedness, and 
+
+> ∗
+
+School of Mathematical Sciences, Peking University. (wangyueyang@stu.pku.edu.cn, xili-wang@stu.pku.edu.cn, chao yang@pku.edu.cn). Correspondence to: Chao Yang. 
+
+> †
+
+School of Sciences, Great Bay University. (tangkj@gbu.edu.cn). 
+
+> ‡
+
+Department of Mathematics, Louisiana State University. (xlwan@lsu.edu). 
+
+> §
+
+SKLMS & Institute of Computational Mathematics and Scientific/Engineering Computing, Academy of Mathematics and Systems Science, Chinese Academy of Sciences. (tzhou@lsec.cc.ac.cn). 1
+
+> arXiv:2605.29373v2 [cs.LG] 29 May 2026
+
+2 Y. WANG, X. WANG, K. TANG, X. WAN, T. ZHOU AND C. YANG 
+
+can push PDE solvers into unphysical regimes. This motivates a posterior-informed view of prior construction: a useful prior should be compatible with the structure of the posterior induced by the data and the forward model. Recent adaptive surrogate methods [9] partially address distribution shift, but they typically rely on Gaussian posterior approximations (via UKI) and expensive sample-selection procedures. To address these challenges, we propose a deep adaptive dimension-reduction Bayesian inference framework with three components. First, we introduce Vari-ational Flow (VF), a latent-variable model that combines nonlinear dimension reduc-tion with flow-based density modeling to approximate complex non-Gaussian posteri-ors. Second, we develop an iterative prior updating strategy that progressively shifts the prior mean toward the posterior, improving stability and reducing prior mis-specification. Third, we use adaptive surrogate fine-tuning based on local perturba-tions around posterior-concentrated VF samples, avoiding expensive sample-selection heuristics. These components form a mutually reinforcing loop: VF guides the sur-rogate toward the posterior region, while the refined surrogate improves posterior inference. 
+
+1.1. Related Work. 
+
+Bayesian inference for PDE-governed inverse problems. Classical MCMC meth-ods, such as preconditioned Crank–Nicolson (pCN) [29] and affine-invariant ensem-ble samplers [11, 8], provide asymptotically exact posterior samples but are often prohibitively expensive for PDE-constrained inverse problems due to costly forward solves. Kalman-based methods, including the Ensemble Kalman Inversion (EKI) [13] and the Unscented Kalman Inversion (UKI) [12], are more efficient but rely on Gaus-sian posterior structure, limiting accuracy for multimodal or strongly nonlinear poste-riors. Stein variational gradient descent (SVGD) [25, 24] offers a flexible particle-based alternative, yet its reliance on gradient information and diminishing particle efficiency in high-dimensional spaces limit its applicability. 
+
+Neural operator surrogates and adaptive training. Neural operators, including FNO [23], DeepONet [26], and related architectures [36, 21], provide efficient surro-gates for PDE forward evaluations. However, surrogates trained only on prior samples often suffer from distribution shift and generalize poorly in posterior regions. Adap-tive retraining or fine-tuning of the surrogate can mitigate this issue [9, 37, 2, 33, 22]. A closely related work [9] initializes the surrogate on prior samples, then alternates between UKI-based posterior estimation and surrogate refinement by selecting an observation-matching anchor from posterior samples and greedily adding nearby yet prediction-diverse samples for retraining. 
+
+Deep generative models. Deep generative models have been widely applied to complex problems such as image generation [4, 1], protein conformation [14, 38, 39], statistical physics [40, 32], and probability approximation [31, 27]. Variational autoen-coders (VAEs) [19] are scalable but can be limited by Gaussian assumptions. Conse-quently, many dimension-reduction approaches for inverse problems [42, 10, 41] per-form inference in a latent space following the VAE framework. Normalizing flows [28] support exact density evaluation and have also been applied to inverse problems [27]. Importantly, normalizing flows have been shown to be universal probability approx-imators [35, 20], but their bijective structure generally does not provide intrinsic dimensionality reduction. The VAE-flow model [18] focuses on improving latent ex-pressiveness with autoregressive flow. Our Variational Flow (VF) model leverages a dual-flow structure to enhance not only the latent distribution but also the encoder’s flexibility, and is compatible with our theoretical analysis. DEEP ADAPTIVE DIMENSION REDUCTION FOR BAYESIAN INFERENCE 3
+
+1.2. Main Contributions. The main contributions of this paper are: 
+
+• We propose Variational Flow (VF) , a flow-enhanced latent model for non-linear dimension reduction and expressive posterior approximation. We not only theoretically prove that VF achieves strictly higher ELBO than VAE, but show it can capture complex non-Gaussian posteriors, including on a 
+
+100D Rosenbrock benchmark .
+
+• We propose an iterative prior updating strategy that adaptively refines the prior mean during inference, mitigating prior misspecification without requiring problem-specific prior design. 
+
+• We propose a deep adaptive dimension-reduction Bayesian inference framework alternating between VF updating and surrogate fine-tuning, which achieves superior performance on PDE-governed inverse problems 
+
+like Darcy flow and Navier-Stokes equations. 
+
+1.3. Organization. The remainder of this paper is organized as follows. Section 2 introduces the preliminaries on Bayesian inverse problems. Section 3 details the proposed Variational Flow model. In Section 4, we present the deep adaptive Bayesian inference framework, including iterative prior updating and adaptive surrogate fine-tuning. Section 5 demonstrates the numerical performance of our framework. Finally, we conclude the paper in Section 6. 
+
+2. Preliminaries. 2.1. Bayesian Inverse Problems. Let Ω s ⊂ Rn be a bounded spatial domain and ξ ∈ Ωp ⊂ Rd be the unknown parameter vector. We consider physical systems governed by parametric partial differential equations: 
+
+L(u(x; mξ(x)); mξ(x)) = s(x), ∀(x, ξ) ∈ Ωs × Ωp,(2.1) 
+
+B(u(x; mξ(x)); mξ(x)) = g(x), ∀(x, ξ) ∈ ∂Ωs × Ωp,(2.2) where mξ(x) is the coefficient field characterized by ξ. Here, L and B denote the differential and boundary operators respectively, while s and g specify the source and boundary conditions. For any ξ ∈ Ωp, we assume the system (2.1)-(2.2) is well-posed, admitting a unique solution u in a state space U.The goal of inverse problems is to infer the unknown parameters ξ ∈ Ωp from noisy measurements y ∈ Rm. Let S : Ω p → U be the forward parameter-to-state map, and O : U → Rm be the observation operator. The composite parameter-to-observation map is defined as G = O ◦ S . We consider the additive Gaussian noise model: (2.3) y = G(ξ) + η, η ∼ N (0, Ση ).
+
+The negative log-likelihood function is defined as: (2.4) Φ( ξ, y) := 12 Σ−1/2 
+
+> η
+
+(y − G (ξ)) 2
+
+.
+
+Since typically m ≪ d, the inverse problem is ill-posed. The Bayesian framework regularizes this by modeling parameters as random variables and introducing a prior distribution, assumed here to be a Gaussian π0(ξ) = N (μ0, Σ0) supported on Ω p.4 Y. WANG, X. WANG, K. TANG, X. WAN, T. ZHOU AND C. YANG 
+
+According to Bayes’ theorem, the posterior distribution is: 
+
+π(ξ|y) = 1
+
+Z exp ( −Φ( ξ, y)) π0(ξ),
+
+∝ exp 
+
+
+
+− 12 Σ− 12 
+
+> η
+
+(y − G (ξ)) 2
+
+− 12 Σ− 12 
+
+> 0
+
+(ξ − μ0) 2
+
+,
+
+(2.5) where Z = R 
+
+> Ωp
+
+exp( −Φ( ξ, y)) π0(ξ)dξ is the intractable normalization constant (model evidence). To achieve numerical tractability, we parameterize the spatially dependent Gaus-sian random field mξ(x) using a truncated Karhunen-Lo` eve (KL) expansion, which maps a finite-dimensional parameter vector ξ = ( ξ1, . . . , ξ d)⊤ ∈ Rd to the continuous field. The detailed formulation of the covariance operator and the KL expansion is provided in Appendix A. 
+
+3. Variational Flow. 3.1. Background: VAEs and Normalizing Flows. 3.1.1. Variational Autoencoder (VAE). To approximate the true distribu-tion px of data x ∈ Rd, VAE [19] introduces a latent variable z ∈ Rk (k < d for dimension reduction) and optimizes the Evidence Lower Bound (ELBO): (3.1) Lθ,ϕ(x) = −DKL 
+
+ qz|x,ϕ pz
+
+ +
+
+Z
+
+qz|x,ϕ log px|z,θ dz,
+
+where the decoder, encoder, and prior of VAE are respectively defined as: 
+
+px|z,θ = N  μde ,θ (z), diag( σ2de ,θ (z))  ,(3.2) 
+
+qz|x,ϕ = N  μen ,ϕ(x), diag( σ2en ,ϕ(x))  ,(3.3) 
+
+pz = N (0, I),(3.4) with mean and variance μde ,θ , σ2de ,θ , μen ,ϕ, σ2en ,ϕ parameterized by neural networks. While these structural choices enable tractable optimization, they fundamentally limit the model’s expressiveness: the standard Gaussian prior distribution assigned to the latent variable z cannot capture complex structures in the latent space, and the diagonal Gaussian encoder cannot represent multimodal or highly correlated dis-tributions, both common in high-dimensional Bayesian inference. 
+
+3.1.2. Normalizing Flow. A normalizing flow [28, 27] constructs a complex probability distribution through an invertible, differentiable transformation f : Rk →
+
+Rk that maps variable z ∈ Rk to a simple base variable v = f (z) with known density 
+
+pv (v) (typically N (0, I)). By the change-of-variables formula, the density of z is: (3.5) pz (z) = pv (f (z)) |det ∇z f (z)| .
+
+In practice, f is composed of K invertible layers f = fK ◦ · · · ◦ f1, each designed so that the Jacobian determinant is efficiently computable. This yields: (3.6) pz (z) = pv (vK )
+
+> K
+
+Y
+
+> k=1
+
+det ∇vk−1 fk(vk−1) ,
+
+where v0 = z and vk = fk(vk−1). DEEP ADAPTIVE DIMENSION REDUCTION FOR BAYESIAN INFERENCE 5
+
+Affine coupling layers. A key building block of normalizing flows is the affine coupling layer [5, 6]. Given an input v ∈ Rk, it is split into two disjoint partitions 
+
+v = [ vA, vB ], and the transformation is defined as: (3.7) vA 
+
+> out
+
+= vA, vB 
+
+> out
+
+= vB ⊙ exp  s(vA) + t(vA),
+
+where s(·) and t(·) are scale and translation functions parameterized by neural net-works, and ⊙ denotes element-wise multiplication. Since vA is unchanged, the Ja-cobian of this transformation is lower-triangular, and its log-determinant reduces to P 
+
+> j
+
+sj (vA). More expressive variants, such as Glow [17], further incorporate invertible 1 × 1 convolutions and actnorm layers to improve flexibility. 
+
+Universal approximation. Crucially, normalizing flows have been shown to be 
+
+universal probability approximators : given sufficient depth and width, coupling-based invertible networks can approximate any diffeomorphism and thus any continuous tar-get distribution to arbitrary precision [35, 20]. This universal approximation property is the theoretical foundation underlying the expressiveness guarantees of the Varia-tional Flow model. 
+
+3.1.3. Conditional Normalizing Flow. A Conditional Normalizing Flow (CNF) [43] extends the standard normalizing flow by conditioning each invertible transformation on an external variable, here the data x.
+
+Architecture. The CNF is constructed by composing K invertible conditional layers. Starting from z0 = z, each layer applies (3.8) zk = f (k)(zk−1; x), k = 1 , . . . , K. 
+
+Each f (k)(· ; x) is invertible with respect to zk−1 for any fixed x. Typical imple-mentations use conditional affine coupling layers, in which the scale and translation functions s(· ; x) and t(· ; x) take both the passthrough partition and x as inputs. 
+
+Base distribution. The final output zK = u follows a conditional Gaussian base distribution: (3.9) pu(u; x) = N  μ(x), diag( σ2(x))  ,
+
+where the mean μ(x) and variance σ2(x) are parameterized by neural networks. This data-dependent base distribution provides additional flexibility beyond a fixed standard Gaussian. 
+
+Density computation. By iteratively applying the change-of-variables formula, the conditional density is: (3.10) qz|x,α(z|x) = pu(u; x)
+
+> K
+
+Y
+
+> k=1
+
+det ∂f (k)(zk−1; x)
+
+∂zk−1
+
+.
+
+Since each conditional layer preserves the triangular Jacobian structure of affine cou-pling, the log-determinant remains computable. 
+
+3.2. Variational Flow Model. Normalizing flows provide expressive density models with exact likelihood evaluation, but their bijective structure requires equal input and output dimensions and thus does not support intrinsic dimensionality re-duction. VAEs naturally address this issue through latent-variable compression, but standard Gaussian priors and encoders can be restrictive. We therefore propose Vari-ational Flow (VF), which enriches both the latent prior and the encoder using nor-malizing flows. 6 Y. WANG, X. WANG, K. TANG, X. WAN, T. ZHOU AND C. YANG 
+
+Generalizing the prior. We replace the fixed Gaussian prior pz = N (0, I) with a normalizing flow prior. Specifically, we define a normalizing flow fpr ,β : Rk → Rk
+
+with trainable parameters β, which maps the latent variable z to a base variable 
+
+v = fpr ,β (z) with v ∼ pv = N (0, I). By the change-of-variables formula, the induced prior density on z is: (3.11) pz,β (z) = pv
+
+ fpr ,β (z) |det ∇z fpr ,β (z)| .
+
+Generalizing the encoder. We replace the diagonal Gaussian encoder qz|x,ϕ with a CNF. Specifically, we define a CNF fen ,α : Rk → Rk with trainable parameters α,which maps the latent variable z to a base variable u = fen ,α(z; x) with u ∼ pu(u; x). By the change-of-variables formula, the encoder density becomes: (3.12) qz|x,α(z|x) = pu(fen ,α(z; x); x) |det ∇z fen ,α(z; x)| .
+
+VF definition. Combining the above generalizations, the Variational Flow is de-fined by: 
+
+pz,β (z) = pv
+
+ fpr ,β (z) |det ∇z fpr ,β (z)| ,(3.13) 
+
+qz|x,α(z|x) = pu(fen ,α(z; x); x) |det ∇z fen ,α(z; x)| ,(3.14) 
+
+px|z,θ (x|z) = N  μde ,θ (z), diag( σ2de ,θ (z))  .(3.15) This “dual-flow” architecture addresses the main limitation of standard normalizing flows – the bijectivity constraint that prevents dimensionality reduction. It achieves this by using the encoder-decoder structure of VAE for latent compression and ap-plying flows to model the density in both the prior and encoder. 
+
+Theorem 3.1. Suppose the decoder px|z,θ in VAE is parameterized by nonlinear neural networks. If (a) the family of flow priors {pz,β }β induced by the bijection fpr ,β can approxi-mate any k-dimensional probability density function to arbitrary precision; (b) the family of conditional normalizing flow encoders {qz|x,α}α can approxi-mate any conditional distribution to arbitrary precision; suppose (ϕ∗, θ∗) are the optimal parameters for standard VAE: 
+
+(3.16) (ϕ∗, θ∗) = arg max  
+
+> ϕ,θ
+
+Epx [Lϕ,θ (x)] ,
+
+then the Variational Flow (VF) model achieves a strictly higher Evidence Lower Bound (ELBO) than standard VAE if either of the following conditions holds: (i) the aggregated posterior of the optimal encoder in the standard VAE does not equal the prior, i.e., qz,ϕ∗ = R qz|x,ϕ∗ pxdx̸ = pz ;(ii) there exists a set of positive measure with respect to px such that the model posterior pz|x,θ∗ = px|z,θ∗ pz / R px|z,θ∗ pz dz of VAE is not a diagonal Gaus-sian distribution. Furthermore, when conditions (i) and (ii) hold simultaneously, the flow prior and the conditional normalizing flow encoder each provide a strictly positive improvement to the ELBO. Proof. Let (3.17) E0 := Epx [Lϕ∗,θ∗ (x)] = −Epx [DKL (qz|x,ϕ∗ ∥pz )] + Epx qz|x,ϕ∗ [log px|z,θ∗ ].DEEP ADAPTIVE DIMENSION REDUCTION FOR BAYESIAN INFERENCE 7
+
+Generalize the prior. Fixing the encoder qz|x,ϕ∗ and decoder px|z,θ∗ and replacing the prior pz with the normalizing flow prior pz,β , the ELBO becomes (3.18) Epx [Lϕ∗,θ∗,β (x)] = −Epx [DKL (qz|x,ϕ∗ ∥pz,β )] + Epx qz|x,ϕ∗ [log px|z,θ∗ ].
+
+Subtracting E0 yields (3.19) Epx [Lϕ∗,θ∗,β (x)] − E0 = Epx [DKL (qz|x,ϕ∗ ∥pz )] − Epx [DKL (qz|x,ϕ∗ ∥pz,β )] .
+
+Simplifying the right-hand side of the above equation, we note that 
+
+Epx [DKL (qz|x,ϕ∗ ∥p)] = 
+
+Z
+
+qz|x,ϕ∗ (z|x) px(x) log qz|x,ϕ∗ (z|x)
+
+p(z) dz dx
+
+=
+
+Z
+
+qz|x,ϕ∗ px log qz|x,ϕ∗ dz dx −
+
+Z
+
+qz,ϕ∗ (z) log p(z) dz,(3.20) where qz,ϕ∗ (z) = R qz|x,ϕ∗ (z|x) px(x) dx is the aggregated posterior. Thus, (3.19) simplifies to (3.21) Epx [Lϕ∗,θ∗,β (x)] − E0 = DKL (qz,ϕ∗ ∥pz ) − DKL (qz,ϕ∗ ∥pz,β ).
+
+By assumption (a), the flow prior pz,β can approximate qz,ϕ∗ to arbitrary precision. If condition (i) holds, i.e., qz,ϕ∗̸ = pz , then DKL (qz,ϕ∗ ∥pz ) > 0. By choosing ˜β such that DKL (qz,ϕ∗ ∥pz,˜β ) < D KL (qz,ϕ∗ ∥pz ), we have (3.22) E1 := Epx [Lϕ∗,θ∗,˜β (x)] > E 0.
+
+Generalize the encoder. Fixing the decoder px|z,θ∗ and the prior pz,˜β , we ex-tend the encoder from a diagonal Gaussian to a conditional normalizing flow qz|x,α.Utilizing the following decomposition of the ELBO: 
+
+Epx [Lα,θ∗,˜β (x)] = Epx
+
+Z 
+
+qz|x,α
+
+
+
+log px|z,θ∗ pz,˜β
+
+qz|x,α
+
+
+
+dz
+
+
+
+= Epx
+
+Z 
+
+qz|x,α
+
+
+
+log px,θ∗,˜β pz|x,θ∗,˜β
+
+qz|x,α
+
+
+
+dz
+
+
+
+= Epx [log px,θ∗,˜β (x)] − Epx [DKL (qz|x,α∥pz|x,θ∗,˜β )] ,(3.23) where (3.24) px,θ∗,˜β (x) = 
+
+Z
+
+px|z,θ∗ (x|z) pz,˜β (z) dz
+
+is the model evidence (independent of the encoder parameters), and (3.25) pz|x,θ∗,˜β (z|x) = px|z,θ∗ (x|z) pz,˜β (z)
+
+px,θ∗,˜β (x)is the true model posterior under the decoder px|z,θ∗ and the prior pz,˜β . From the decomposition (3.23), maximizing the ELBO with respect to the encoder is equiva-lent to minimizing Epx [DKL (qz|x,α∥pz|x,θ∗,˜β )]. In prior generalization, the encoder remains a diagonal Gaussian qz|x,ϕ∗ , and the corresponding ELBO is (3.26) E1 = Epx [log px,θ∗,˜β (x)] − Epx [DKL (qz|x,ϕ∗ ∥pz|x,θ∗,˜β )] .8 Y. WANG, X. WANG, K. TANG, X. WAN, T. ZHOU AND C. YANG 
+
+Since the decoder mean μde ,θ∗ (z) is a nonlinear function of z, the log model posterior log pz|x,θ∗,˜β (z|x) = log px|z,θ∗ (x|z) + log pz,˜β (z) − log px,θ∗,˜β (x)is generally not a quadratic function of z; thus, pz|x,θ∗,˜β is generally not a diagonal Gaussian distribution. If condition (ii) holds, the diagonal Gaussian encoder cannot accurately match the model posterior, i.e., (3.27) Epx [DKL (qz|x,ϕ∗ ∥pz|x,θ∗,˜β )] > 0.
+
+By assumption (b), the conditional normalizing flow encoder qz|x,α can approximate any conditional distribution to arbitrary precision. Therefore, there exists ˜ α such that (3.28) Epx [DKL (qz|x, ˜α∥pz|x,θ∗,˜β )] < Epx [DKL (qz|x,ϕ∗ ∥pz|x,θ∗,˜β )] .
+
+From (3.23) and (3.28), we have (3.29) E2 := Epx [L ˜α,θ∗,˜β (x)] > E 1.
+
+Combining the two steps. From (3.22) and (3.29), when both conditions (i) and (ii) hold, (3.30) E2 > E 1 > E 0.
+
+Since the optimal ELBO of the VF model is no lower than the ELBO value at any specific parameters, we have (3.31) sup   
+
+> α,θ,β
+
+Epx [Lα,θ,β (x)] ≥ E2 > E 0 = sup  
+
+> ϕ,θ
+
+Epx [Lϕ,θ (x)] .
+
+When only condition (ii) holds, one can directly choose ˜β in encoder generalization step to correspond to the identity mapping (i.e., the prior remains pz ), in which case the encoder improvement still provides a strict improvement. In summary, if either condition (i) or (ii) holds, a strict improvement in the ELBO is guaranteed. 
+
+Remark 3.2. Condition (i) is expected to hold for most non-degenerate VAEs in practice: if qz,ϕ∗ = pz = N (0, I), it implies that the marginal distribution of the latent variables across all training samples is exactly the standard Gaussian, which is almost impossible to achieve precisely in practice. Condition (ii) typically holds when the nonlinear decoder induces a non-quadratic log-likelihood in the latent variable: since the model posterior satisfies pz|x,θ∗ (z|x) ∝ px|z,θ∗ (x|z) pz (z), and log px|z,θ∗
+
+is generally non-quadratic with respect to z (as the decoder mean μde ,θ∗ (z) is a nonlinear function), the model posterior is generally non-Gaussian. 
+
+Remark 3.3. The proof reveals that ELBO improvement stems from two comple-mentary mechanisms: 
+
+• Prior matching : The flow prior eliminates the mismatch between the aggre-gated posterior qz,ϕ∗ and the prior pz , with a contribution of DKL (qz,ϕ∗ ∥pz )−
+
+DKL (qz,ϕ∗ ∥pz,˜β ) > 0; 
+
+• Posterior approximation : The CNF encoder narrows the variational gap, i.e., the difference in KL divergence between the encoder and the true model posterior: Epx [DKL (qz|x,ϕ∗ ∥pz|x,·)] − Epx [DKL (qz|x, ˜α∥pz|x,·)] > 0. The two work synergistically: the flow prior absorbs the burden of matching the aggregated posterior, freeing the CNF encoder to capture complex model posteriors (multimodality, asymmetry, etc.). DEEP ADAPTIVE DIMENSION REDUCTION FOR BAYESIAN INFERENCE 9
+
+3.3. Approximating Unnormalized Densities via Variational Flow. Be-yond standard generative modeling where VF is trained on observed data by maxi-mizing the ELBO (see Appendix B), VF can also approximate a target density ˆ p(x)that is known only up to a normalization constant C = R ˆp(x) dx. We minimize the KL divergence between the VF joint and a target joint constructed with the encoder: (3.32) DKL 
+
+
+
+px|z,θ pz,β qz|x,α
+
+ˆp(x)
+
+C
+
+
+
+=
+
+Z
+
+px|z,θ pz,β log 
+
+ px|z,θ pz,β
+
+qz|x,α ˆp(x)
+
+
+
+dz dx
+
++ log C. 
+
+Since log C is independent of the model parameters ( β, α, θ), we minimize only the first term via Monte Carlo: (3.33) LVF (β, α, θ) ≈ 1
+
+M
+
+> M
+
+X
+
+> i=1
+
+log px|z,θ (x(i)|z(i)) pz,β (z(i))
+
+qz|x,α(z(i)|x(i)) ˆ p(x(i))
+
+!
+
+,
+
+where z(i) ∼ pz,β and x(i) ∼ px|z(i),θ . In this work, we set ˆ p(x) = exp( −Φ( ξ, y)) π0(ξ)as the unnormalized posterior from Eq. (2.5) by identifying the VF data variable x
+
+with the unknown parameter vector ξ. Once trained, VF efficiently generates posterior samples ξ ∼ pVF (ξ) via (3.34) z = f −1pr ,β (v), v ∼ N (0, I) ⇒ ξ = μde ,θ (z) + σde ,θ (z) ⊙ ϵ, ϵ ∼ N (0, I),
+
+which are used to adaptively update the surrogate model as described in the next section. 
+
+4. Deep Adaptive Bayesian Inference. 4.1. Overall Framework. The deep adaptive framework addresses two coupled challenges: the out-of-distribution (OOD) inaccuracy of the surrogate and the diffi-culty of specifying an appropriate prior mean. We tackle both through an alternating optimization loop between the VF posterior approximation and the surrogate model fine-tuning, alongside a dynamic update of the prior mean. At each stage k, the framework executes three sequential steps: 
+
+• VF training : approximate the current unnormalized posterior ˆπ(ξ) ∝ exp( −Φ( ξ, y)) π(k)0 (ξ)via (3.33) and update the prior mean iteratively (see Section 4.2). 
+
+• Data replacement : sample {ξ(j)post }Mj=1 ∼ pVF (ξ), query the exact PDE solver for these samples, and construct a newly generated local dataset Dk as demonstrated in Subsection 4.3, discarding the historical data. 
+
+• Surrogate fine-tuning : fine-tune the surrogate model Fϑ exclusively on the new dataset Dk to align its accuracy with the current posterior region. The loop terminates when the relative change in data misfit evaluated at the prior mean, Φ( μ(k−1) prior , y) − Φ( μ(k)prior , y) /Φ( μ(k−1) prior , y) falls below a threshold ϵ. Algo-rithm 4.1 summarizes the procedure. In our implementation, we employ the Fourier Neural Operator (FNO) as the surrogate model. Details regarding its pre-training are provided in Appendix C. 10 Y. WANG, X. WANG, K. TANG, X. WAN, T. ZHOU AND C. YANG 
+
+Algorithm 4.1 Deep Adaptive Bayesian Inference 
+
+Require: Pre-trained FNO Fϑ(0) , initial dataset D0 sampled from π0(ξ) =
+
+N (μ0, Σ0), initial prior mean μ(0) prior = μ0, VF parameters ψ(0) , max stages K,inner epochs Ne, samples per stage M , coefficient α, perturbation strength γ,tolerance ϵ. 
+
+> 1:
+
+for k = 1 , 2, . . . , K do  
+
+> 2:
+
+for i = 1 , 2, . . . , N e do  
+
+> 3:
+
+Compute current VF mean estimate μ(k,i )post ; set μ(k,i )prior = α μ(k,i )post + (1 −
+
+α) μ(k−1) prior . 
+
+> 4:
+
+Set prior π(k,i )0 = N (μ(k,i )prior , Σ0).  
+
+> 5:
+
+Update VF to approximate ˆ π(ξ) ∝ exp( −Φ( ξ, y)) π(k,i )0 (ξ) by minimizing 
+
+LVF (3.33).  
+
+> 6:
+
+end for  
+
+> 7:
+
+Update prior mean: μ(k)prior ← μ(k,N e)prior . 
+
+> 8:
+
+if Φ( μ(k−1) prior , y) − Φ( μ(k)prior , y) / Φ( μ(k−1) prior , y) < ϵ then  
+
+> 9:
+
+break  
+
+> 10:
+
+end if  
+
+> 11:
+
+Sample {ξ(j)post }Mj=1 ∼ pVF (ξ); add perturbations ˆξ(j)
+
+= ξ(j)post + γ ν(j), ν(j) ∼N (0, I).  
+
+> 12:
+
+Solve PDE for each ˆξ(j)
+
+; update Dk ← { (mˆξ(j) , u (·, ˆξ(j)
+
+)) }Mj=1 . 
+
+> 13:
+
+Fine-tune FNO: ϑ(k) ← arg min ϑ LFNO (ϑ; Dk) (C.2).  
+
+> 14:
+
+end for Ensure: Trained VF ψ∗, FNO ϑ∗; posterior samples {ξ} ∼ pVF (ξ), μpost =
+
+EpVF (ξ)[ξ]. 
+
+4.2. Iterative Prior Updating. To overcome the limitation of a narrow initial guess and prevent the surrogate from querying unphysical regimes caused by overly broad priors, we seamlessly embed a dynamic prior updating strategy directly into the Variational Flow (VF) training loop. We dynamically recalibrate the mean of Gaussian prior π0(ξ) appearing in the posterior distribution (2.5) before the i-th epoch of stage k via a momentum-based moving average: (4.1) μ(k,i )prior = α μ(k,i )post + (1 − α) μ(k−1) prior .
+
+This scheme balances adaptability and stability across two time scales. At the epoch level , the posterior mean μ(k,i )post is estimated by averaging M samples drawn from the current VF model p(k,i −1) VF (i.e., the VF obtained after epoch i − 1 of stage k): (4.2) μ(k,i )post = 1
+
+M
+
+> M
+
+X
+
+> j=1
+
+ξ(j), ξ(j) ∼ p(k,i −1) VF (ξ).
+
+At the stage level , the anchor μ(k−1) prior remains fixed throughout stage k and is updated only at the end of the stage via μ(k)prior ← μ(k,N e)prior . Accordingly, the effective prior is π(k,i )0 (ξ) = N (μ(k,i )prior , Σ0), where α ∈ (0 , 1] controls the update strength. As noted in [12], smaller α yields stronger regularization, whereas α = 1 removes this DEEP ADAPTIVE DIMENSION REDUCTION FOR BAYESIAN INFERENCE 11 effect; that study further found that α ≈ 0.5 is close to optimal in general. Keeping the covariance fixed at Σ0 further prevents mode collapse and promotes stable exploration. We initialize with a standard isotropic Gaussian, i.e., μ0 = 0 and Σ0 = I, and then use Eq. (4.1) to gradually shift the prior toward posterior region. 
+
+4.3. Adaptive Surrogate Fine-tuning. Following each VF training stage, the FNO surrogate must be rectified to match the newly located posterior region. We draw a set of high-fidelity parameter samples {ξ(j)post }Mj=1 from the updated VF model 
+
+pVF (ξ). Because these samples tightly concentrate around the inferred posterior, we inject a Gaussian perturbation with controlled strength to maintain local support coverage and prevent the surrogate from overfitting to a degenerate region: (4.3) ˆξ(j)
+
+= ξ(j)post + γ ν(j), ν(j) ∼ N (0, I),
+
+where γ > 1 controls the perturbation strength. This perturbation is applied directly in the Karhunen-Lo` eve coefficient space, and its scale is defined relative to the prior standard deviation, since the prior is standard normal in this space. Instead of accumulating a growing historical dataset or relying on expensive greedy filtering, we adopt an aggressive replacement strategy. We generate new PDE solutions strictly for these perturbed samples and fine-tune the surrogate model exclu-sively on this newly generated data. This dynamic replacement directly rectifies the OOD problem by continuously shifting the surrogate’s effective training distribution from the initial broad prior to the highly localized posterior support, ensuring local surrogate accuracy with minimal computational overhead. 
+
+5. Numerical Experiments. 5.1. Classes of Problem Studied. The performance of the proposed frame-work is evaluated on two types of problems. First, to specifically assess the posterior approximation capability of the VF model, we consider a challenging high-dimensional synthetic distribution. Second, to validate the complete framework, which incorpo-rates both the adaptive surrogate fine-tuning and iterative prior updating, we test it on three PDE-governed inverse problems of increasing complexity. 
+
+1. A 100-dimensional Rosenbrock inverse problem: In Subsection 5.2, we utilize this problem to evaluate the capability of various methods in ap-proximating complex, non-Gaussian posterior distributions. To isolate the generative performance of the models, the iterative prior updating module is not employed in this example. The numerical results demonstrate that our approach achieves superior posterior approximation accuracy compared to the baseline methods. Notably, it significantly outperforms the vanilla VAE, which empirically corroborates our theoretical result. 
+
+2. PDE-governed inverse problem: In Subsections 5.3, 5.4, and 5.5, we evaluate our framework on three PDE-governed inverse problems, where ob-servations are corrupted by relative Gaussian noise: (5.1) y = G(ξref ) + δ max |G (ξref )| η, η ∼ N (0, I),
+
+with noise amplitude δ ∈ { 1% , 5% , 10% }. The unknown field mξ(x) is mod-eled as a Gaussian random field parameterized via a truncated Karhunen-Lo` eve (KL) expansion. To evaluate robustness, the reference field mξref is generated using 256 KL modes with coefficients i.i.d. drawn from U[−10 , 10] (rather than the Gaussian prior), while the inversion targets only the first 12 Y. WANG, X. WANG, K. TANG, X. WAN, T. ZHOU AND C. YANG 
+
+d ∈ { 32 , 64 } modes. Since the FNO surrogate is pre-trained on standard Gaussian prior samples, adaptive fine-tuning is essential to capture the shifted posterior. We compare our approach against pCN with the exact Finite Dif-ference Method (FDM), UKI-FDM, UKI-FNO, and SVGD-FNO. For both UKI and our iterative prior updating scheme, the scaling parameter is set to 
+
+α = 0 .5. Each experiment is repeated 3 times and the reported results corre-spond to the averaged outcomes. Further experimental details are provided in Appendix D. Finally, the performance is assessed using two quantitative metrics. The first is the relative inversion error, which measures the accuracy of the recon-structed parameter field: (5.2) eI = ∥mμpost − mξref ∥L2(Ω s)
+
+∥mξref ∥L2(Ω s)
+
+,
+
+where μpost denotes the posterior mean estimate obtained from Algorithm 4.1. The second metric is the relative surrogate fitting error eS , designed to eval-uate the accuracy of the FNO surrogate in the high-probability region sur-rounding the true solution. We construct a local test set of N = 100 sam-ples by applying standard Gaussian perturbations to the exact parameter, 
+
+ξ(i) = ξref + η(i) with η(i) ∼ N (0, I). Letting u(·; mξ(i) ) denote the corre-sponding high-fidelity state field obtained via the FDM, the surrogate error is computed as the average relative L2 discrepancy: (5.3) eS = 1
+
+N
+
+> N
+
+X
+
+> i=1
+
+Fϑ(mξ(i) ) − u(·; mξ(i) ) L2(Ω s)
+
+u(·; mξ(i) ) L2(Ω s)
+
+.
+
+5.2. Posterior Approximation: Rosenbrock Problem. To evaluate the representational capacity of the VF model for complex distributions, we consider a 100D inverse problem with a bimodal, banana-shaped posterior [3]. Let ξ =[ξ1, ξ 2, ξc] ∈ R100 where ξ1, ξ 2 ∈ R are the primary parameters of interest and ξc ∈ R98 
+
+denotes the complementary high-dimensional parameters. The forward map and ob-servation are defined by 
+
+F(ξ1, ξ 2) = 
+
+log  100( ξ2 − ξ21 )2 + (1 − ξ1)2 /0.3
+
+ξ1
+
+ξ2
+
+ and y =
+
+
+
+log(101) 00
+
+ .
+
+We consider the regularized least-squares objective: (5.4) Φ( ξ) = 12 ∥F(ξ1, ξ 2) − y∥22 + 12 ∥ξc − Kξ∥22,
+
+where K ∈ R98 ×100 is the all-ones matrix. In this problem, we compare our pro-posed model against several baselines. Notably, we include a vanilla VAE baseline derived by ablating the novel components of our architecture, ensuring an equivalent parameter count. We additionally compare against affine-invariant MCMC utilizing the emcee package [8], SVGD, and UKI. Further implementation details are deferred to Appendix D.2. We draw 20,000 samples for each method, with the comparative results depicted in Figure 1. As illustrated in Figure 1a, the posterior distribution is bimodal and banana-shaped. Since UKI relies on a Gaussian approximation, it fails to capture the true DEEP ADAPTIVE DIMENSION REDUCTION FOR BAYESIAN INFERENCE 13 2.0 1.5 1.0 0.5 0.0 0.5 1.0 1.5 2.0 
+
+> 1
+> 1.5
+> 1.0
+> 0.5
+> 0.0
+> 0.5
+> 1.0
+> 1.5
+> 2.0
+> 2.5
+> 3.0
+> 2
+
+(a) Reference 2.0 1.5 1.0 0.5 0.0 0.5 1.0 1.5 2.0  
+
+> 1
+> 1.5
+> 1.0
+> 0.5
+> 0.0
+> 0.5
+> 1.0
+> 1.5
+> 2.0
+> 2.5
+> 3.0
+> 2
+
+(b) VF (ours) (c) VAE 2.0 1.5 1.0 0.5 0.0 0.5 1.0 1.5 2.0 
+
+> 1
+> 1.5
+> 1.0
+> 0.5
+> 0.0
+> 0.5
+> 1.0
+> 1.5
+> 2.0
+> 2.5
+> 3.0
+> 2
+
+(d) MCMC 2.0 1.5 1.0 0.5 0.0 0.5 1.0 1.5 2.0  
+
+> 1
+> 1.5
+> 1.0
+> 0.5
+> 0.0
+> 0.5
+> 1.0
+> 1.5
+> 2.0
+> 2.5
+> 3.0
+> 2
+
+(e) SVGD 3 2 1 0 1 2 3 
+
+> 1
+> 3
+> 2
+> 1
+> 0
+> 1
+> 2
+> 2
+
+(f) UKI 
+
+Fig. 1: Comparison of the 2D marginal posterior distributions on the ξ1-ξ2 plane for the Rosenbrock inverse problem. Panel (a) shows the ground truth reference den-sity, while panels (b)-(f) display the sampling results obtained by VF, VAE, MCMC, SVGD, and UKI, respectively. posterior geometry. In contrast, VF successfully recovers the curved bimodal struc-ture and produces a posterior approximation that closely matches the MCMC result, which serves as a high-fidelity sampling baseline, and it better captures the com-plex posterior geometry than the SVGD baseline. Furthermore, unlike standard VAE which struggles to capture the complete curved bimodal structure, VF demonstrates superior fitting capacity through its flow-enhanced architecture. 
+
+5.3. 1D Darcy Flow. We consider the steady-state 1D Darcy Flow on the domain Ω = [0 , 1]. The forward model is to find the pressure field p(x) in a porous medium defined by a positive permeability field mξ(x): 
+
+− ddx 
+
+
+
+exp( mξ(x)) dp dx 
+
+
+
+= f (x), x ∈ (0 , 1) ,(5.5) 
+
+p(0) = p(1) = 0 ,(5.6) with constant source term f (x) ≡ 1. The log-permeability field mξ(x) is modeled as a Gaussian random field with covariance operator C = σ2(−∆ + τ 2)−l, where ∆ is the 1D Laplacian with homogeneous Neumann boundary conditions. We set the parameters as σ = 2, τ = 1, and l = 2. The truncated Karhunen-Lo` eve expansion of 
+
+mξ(x) is then (5.7) mξ(x) = 
+
+dX
+
+k=1 
+
+pλk ξk ψk(x),
+
+with the eigenfunctions and eigenvalues given explicitly by (5.8) ψk(x) = √2 cos( kπx ), λk = σ2(k2π2 + τ 2)−l.14 Y. WANG, X. WANG, K. TANG, X. WAN, T. ZHOU AND C. YANG 
+
+Table 1: Relative inversion error eI of 1D Darcy Flow problem under different noise amplitudes and d values. Lower is better. Results are averaged over 3 runs per experiment.                                        
+
+> Method d= 32 d= 64
+> 1% 5% 10% 1% 5% 10%
+> pCN 0.3164 0.5036 0.5301 0.3160 0.5199 0.5282 SVGD-FNO 0.3092 0.5188 0.5275 0.3072 0.5189 0.5274 UKI-FDM 0.3306 0.4924 0.4514 0.2843 0.4809 0.4633 UKI-FNO 0.2525 0.4444 0.4441 0.2982 0.4473 0.4487
+> Ours 0.2292 0.3569 0.4076 0.2073 0.3569 0.4098
+
+The vector ξ ∈ Rd forms the finite-dimensional parameter space for inference. In our experiments, we infer the log-permeability field from 31 uniformly spaced pressure observations across the domain. The high-fidelity forward solver is implemented using the Finite Difference Method (FDM) on a 1024-point spatial grid. 
+
+Fig. 2: Surrogate fitting error eS across adaptive stages of 1D Darcy Flow problem. Columns: noise levels δ ∈ { 1% , 5% , 10% }. Solid/dashed lines: d = 64 /32. Overall, our method converges to lower errors in fewer stages. Table 1 reports the relative inversion error eI under varying noise amplitudes ( δ ∈{1% , 5% , 10% }) and truncation dimensions ( d ∈ { 32 , 64 }). The proposed framework consistently achieves the lowest inversion error across all scenarios. Notably, the improvement is especially pronounced at moderate-to-high noise levels, such as the 5% and 10% cases, demonstrating the robustness of our dual-flow architecture in highly uncertain regimes where standard Gaussian approximations (as in UKI) or particle-based methods (SVGD) struggle. Figure 2 tracks the surrogate fitting error eS over the adaptive training stages. Our approach converges to a lower fitting error in fewer stages compared to the baselines, highlighting the efficiency of the adaptive fine-tuning process guided by the VF posterior samples. Figure 3 illustrates the qualitative reconstructions for the 1D Darcy Flow problem with d = 64 under different noise levels. As the noise level increases, the posterior dis-tribution becomes increasingly challenging to characterize. The proposed VF method effectively captures the dominant spatial variations in the log-permeability field, pro-ducing pressure fields that closely follow the reference solutions. In comparison, the baseline methods, including pCN, SVGD, and UKI, show larger deviations from the reference, and overall the VF reconstructions achieve higher accuracy than all base-lines, particularly under higher noise amplitudes. DEEP ADAPTIVE DIMENSION REDUCTION FOR BAYESIAN INFERENCE 15 
+
+(a) Noise level δ = 1% 
+
+(b) Noise level δ = 5% 
+
+(c) Noise level δ = 10% 
+
+Fig. 3: Qualitative comparison for the 1D Darcy Flow problem with d = 64 under different noise levels. For each noise level, the first row shows the reconstructed coefficient fields m and the second row shows the corresponding pressure fields p.From left to right: pCN, SVGD, UKI-FDM, UKI-FNO, and our proposed VF method. 
+
+5.4. 2D Darcy Flow. We extend the steady-state Darcy Flow to the 2D domain Ω = [0 , 1] 2:
+
+−∇ · (exp( mξ(x)) ∇p(x)) = f (x), x ∈ Ω,(5.9) 
+
+p(x) = 0 , x ∈ ∂Ω,(5.10) where the source term is piecewise constant to induce strong heterogeneity: (5.11) f (x1, x 2) = 
+
+
+
+1000 , 0 ≤ x2 ≤ 46 ,
+
+2000 , 46 < x 2 ≤ 56 ,
+
+3000 , 56 < x 2 ≤ 1.16 Y. WANG, X. WANG, K. TANG, X. WAN, T. ZHOU AND C. YANG 
+
+Table 2: Relative inversion error eI of 2D Darcy Flow problem under different noise amplitudes and d values. Lower is better. Results are averaged over 3 runs per experiment. 
+
+Method d = 32 d = 64 
+
+1% 5% 10% 1% 5% 10% 
+
+pCN 0.2623 0.4075 0.6044 0.2650 0.4206 0.6116 SVGD-FNO 0.2602 0.4115 0.6100 0.2620 0.4115 0.6110 UKI-FDM 0.2119 0.3891 0.4161 0.2169 0.3757 0.4067 UKI-FNO 0.2153 0.3851 0.4225 0.2151 0.3869 0.4332 
+
+Ours 0.2238 0.3331 0.3578 0.2206 0.3372 0.3504 
+
+The log-permeability field mξ(x) is modeled as a Gaussian random field with co-variance operator C = σ2 (−∆+ τ 2)−l, where ∆ is the 2D Laplacian with homogeneous Neumann boundary conditions. We set σ = 1, τ = 2, and l = 3. The truncated Karhunen-Lo` eve expansion of mξ(x) is (5.12) mξ(x) = X
+
+> k
+
+pλk ξk ψk(x),
+
+with eigenfunctions and eigenvalues given explicitly by (5.13) 
+
+ψk(x) = 
+
+
+
+√2 cos( πk 1x1), k2 = 0 ,
+
+√2 cos( πk 2x2), k1 = 0 ,
+
+2 cos( πk 1x1) cos( πk 2x2), otherwise ,λk = σ2 π2(k21 + k22 ) + τ 2−l.
+
+The vector ξ ∈ Rd forms the finite-dimensional parameter space for inference. Here, we infer the log-permeability field from 36 uniformly spaced pressure observa-tions. The forward PDE is solved numerically using a 71 × 71 spatial grid. 
+
+Fig. 4: Surrogate fitting error eS across adaptive stages of 2D Darcy Flow problem. Columns: noise levels δ ∈ { 1% , 5% , 10% }. Solid/dashed lines: d = 64 /32. Overall, our VF method converges to lower errors in fewer stages. The quantitative inversion results for the 2D Darcy problem are summarized in Table 2. In this highly heterogeneous setting, The proposed method achieves the best performance in most medium- and high-noise cases, while remaining competitive in the low-noise regime. The iterative prior updating scheme effectively mitigates prior misspecification, allowing the model to locate the true posterior even when the reference field is drawn from an out-of-distribution uniform distribution. The evolution of the surrogate fitting error eS , depicted in Figure 4, further con-firms the stability of our method. The VF-guided adaptive training rapidly reduces DEEP ADAPTIVE DIMENSION REDUCTION FOR BAYESIAN INFERENCE 17       
+
+> (a) Noise level δ= 1%
+> (b) Noise level δ= 5%
+> (c) Noise level δ= 10%
+
+Fig. 5: Qualitative comparison for the 2D Darcy Flow problem with d = 64 under different noise levels. For each noise level, the first row shows the reconstructed coefficient fields m and the second row shows the corresponding pressure fields p.From left to right: reference ground truth, pCN, SVGD, UKI-FDM, UKI-FNO, and our proposed VF method. the surrogate error, outperforming both UKI-FDM and UKI-FNO in terms of con-vergence speed and final accuracy. Figure 5 presents qualitative comparisons for the 2D Darcy Flow problem with 
+
+d = 64 under different noise levels. Compared with the 1D case, the 2D coefficient field exhibits substantially more complex spatial structures and heterogeneous pat-terns. The proposed VF method consistently reconstructs the high-contrast regions of the permeability field while preserving high-frequency spatial features and avoid-ing the spurious artifacts observed in the pCN and SVGD results. In particular, the 18 Y. WANG, X. WANG, K. TANG, X. WAN, T. ZHOU AND C. YANG 
+
+reconstructions produced by pCN and SVGD exhibit significant discrepancies in scale compared with the reference field, as these methods lack the iterative prior updating mechanism and therefore tend to generate parameter fields concentrated around the initial prior distribution N (0, I). In contrast, UKI-based methods and our proposed framework are able to better capture the overall magnitude and spatial range of the reference coefficient field. However, UKI tends to overestimate the extreme values and appears to exhibit more fine-scale details than our framework. In reality, these apparent details correspond to errors introduced by the Gaussian-based assumptions in UKI, resulting in lower reconstruction accuracy compared with our VF method. Consequently, the pressure fields produced by VF remain highly consistent with the reference solutions, whereas the baseline methods – including UKI, pCN, and SVGD – either produce oversmoothed reconstructions or distorted local structures. 
+
+5.5. 2D Navier-Stokes. We consider the vorticity formulation of the 2D NS equations on Ω = [0 , 1] 2 with periodic boundary conditions: 
+
+∂tω + u · ∇ ω = ν∆ω + f (x), x ∈ Ω, t ∈ (0 , T ],(5.14) 
+
+∇ · u = 0 , x ∈ Ω, t ∈ [0 , T ],(5.15) 
+
+ω(x, 0) = mξ(x), x ∈ Ω,(5.16) where the viscosity is ν = 10 −2, final time T = 1, and the forcing term is (5.17) f (x) = 0 .1 sin(2 π(x1 + x2)) + cos(2 π(x1 + x2)) .
+
+The initial vorticity field mξ(x) is modeled as a Gaussian random field with covariance operator C = σ2(−∆ + τ 2)−l, where ∆ is the 2D Laplacian with periodic boundary conditions. We set the parameters as σ = 25, τ = 2, and l = 2 .5. The truncated Karhunen-Lo` eve expansion of mξ(x) is (5.18) mξ(x) = X
+
+> k∈K
+
+pλk ξc 
+
+> (k)
+
+ψck(x) + pλk ξs 
+
+> (k)
+
+ψsk(x),
+
+where K = {(kx, k y ) | ky > 0 or ( ky = 0 and kx > 0) }, and the basis functions and eigenvalues are (5.19) ψck(x) = √2 cos(2 πk · x), ψsk(x) = √2 sin(2 πk · x),λk = σ2 4π2(k2 
+
+> x
+
++ k2 
+
+> y
+
+) + τ 2−l.
+
+The vector of coefficients ξ ∈ Rd forms the finite-dimensional parameter space for inference. The goal is to recover the initial vorticity field ω0 from 36 uniformly spaced sparse observations of the final state ω(x, 1) at T = 1. The forward solver operates on a 128 × 128 spatial grid. Table 3 details the relative inversion errors for the 2D Navier-Stokes equations. This problem is particularly challenging due to the highly nonlinear time-dependent dynamics over time. Despite these difficulties, the VF framework achieves the lowest 
+
+eI across all tested truncation dimensions and noise levels. Figure 6 illustrates the surrogate fitting error eS . The FNO surrogate, when fine-tuned using the posterior-concentrated samples generated by the VF model, adapts rapidly to the complex fluid dynamics, achieving a lower error plateau than the UKI-driven adaptive surrogates. Visual comparisons of the reconstructed initial vorticity fields and the correspond-ing final states under different noise levels are shown in Figure 7. Similar to the 2D DEEP ADAPTIVE DIMENSION REDUCTION FOR BAYESIAN INFERENCE 19 Table 3: Relative inversion error eI of 2D Navier-Stokes problem under different noise amplitudes and d values. Lower is better. Results are averaged over 3 runs per experiment.                                        
+
+> Method d= 32 d= 64
+> 1% 5% 10% 1% 5% 10%
+> pCN 0.4910 0.4560 0.5387 0.4686 0.4634 0.5514 SVGD-FNO 0.3720 0.4591 0.5413 0.3723 0.4572 0.5407 UKI-FDM 0.2948 0.3777 0.4571 0.3082 0.3756 0.4598 UKI-FNO 0.2864 0.3778 0.4586 0.2951 0.3784 0.4618
+> Ours 0.2849 0.3647 0.4207 0.2879 0.3644 0.4184
+
+Fig. 6: Surrogate fitting error eS across adaptive stages of 2D Navier-Stokes problem. Columns: noise levels δ ∈ { 1% , 5% , 10% }. Solid/dashed lines: d = 64 /32. Overall, our VF method converges to lower errors in fewer stages. Darcy case, the VF method accurately captures the complex vortex structures in ω0
+
+and preserves their spatial distributions, resulting in final vorticity fields ω(·, T ) at 
+
+T = 1 that closely match the reference solutions. In contrast, the baseline methods either oversmooth the vortices or misestimate their magnitudes, with errors amplified under higher noise levels due to the lack of adaptive prior updating and expressive posterior modeling. 
+
+6. Conclusions. We present a deep adaptive dimension-reduction Bayesian in-ference framework for high-dimensional PDE-governed inverse problems, addressing non-Gaussian posteriors, surrogate out-of-distribution (OOD) errors, and prior mis-specification. Our core Variational Flow (VF) model integrates VAE-based dimen-sionality reduction with dual normalizing flows, achieving a strictly higher ELBO than VAE and capturing multimodal posteriors. Coupled with an iterative prior updat-ing scheme and an adaptively fine-tuned FNO surrogate, the framework establishes a mutually reinforcing loop for accurate posterior approximation. Empirically, our method achieves state-of-the-art accuracy on standard PDE benchmarks, particularly excelling under high noise and large dimensions. Future work will address the current lack of theoretical convergence guarantees and extend to multi-physics systems. 
+
+Acknowledgments. This work was supported by the National Natural Sci-ence Foundation of China (grants 12131002, 12501598, 12288201, and 12461160275), NSF Grant DMS-2513234, the high-level talent research start-up project funding of Henan Academy of Sciences (No. 232019024), and the Science Challenge Project (No. TZ2025006). 
+
+Appendix A. Karhunen-Lo` eve Expansion with Covariance Operator. 
+
+The Karhunen-Lo` eve (KL) expansion provides a systematic way to represent a spa-20 Y. WANG, X. WANG, K. TANG, X. WAN, T. ZHOU AND C. YANG       
+
+> (a) Noise level δ= 1%
+> (b) Noise level δ= 5%
+> (c) Noise level δ= 10%
+
+Fig. 7: Qualitative comparison for the 2D Navier-Stokes problem with d = 64 under different noise levels. For each noise level, the first row shows the reconstructed initial vorticity fields ω0 and the second row shows the corresponding vorticity fields ω(·, T )at T = 1. From left to right: reference ground truth, pCN, SVGD, UKI-FDM, UKI-FNO, and our proposed VF method. tially dependent Gaussian random field (GRF) as a spectral series. After truncation, it yields a finite-dimensional parameterization of the random field, forming the basis for representing the coefficient field in our PDE-governed inverse problems. 
+
+Covariance operator. Let m(x) be a GRF with mean ¯ m(x) and covariance kernel 
+
+k(x, x′). We define the corresponding covariance operator C : L2(Ω s) → L2(Ω s) as (A.1) (C ϕ)( x) = 
+
+Z
+
+> Ωs
+
+k(x, x′) ϕ(x′) d x′.DEEP ADAPTIVE DIMENSION REDUCTION FOR BAYESIAN INFERENCE 21 In many PDE-governed inverse problems, we parameterize the covariance via an el-liptic operator, e.g. (A.2) C = σ2 (−∆ + τ 2)−l,
+
+where ∆ is the Laplacian on Ω s with appropriate boundary conditions, σ > 0 controls the overall variance (amplitude) of the Gaussian random field, τ > 0 controls the inverse correlation length, and l > 0 controls the regularity of the field. This operator is symmetric, positive definite, and compact, ensuring the existence of a countable set of eigenpairs. Solving the eigenvalue problem C ϕj = λj ϕj yields eigenvalues λ1 ≥ λ2 ≥ · · · ≥ 0and orthonormal eigenfunctions {ϕj }∞ 
+
+> j=1
+
+in L2(Ω s). The GRF can then be represented as an infinite series mξ∞ (x) = ¯ m(x) + P∞
+
+> j=1
+
+pλj ξj ϕj (x), where ξj ∼ N (0 , 1). For numerical tractability, we truncate the series to the first d leading modes: (A.3) mξ(x) = ¯ m(x) + 
+
+> d
+
+X
+
+> j=1
+
+pλj ξj ϕj (x), ξ = ( ξ1, . . . , ξ d)⊤ ∈ Rd.
+
+This finite-dimensional parameterization defines the exact inference space Ω p over which our Variational Flow (VF) posterior approximation is constructed. 
+
+Appendix B. VF for Standard Generative Modeling. 
+
+Section 3.3 addresses the setting where the target density ˆ p(x) is known up to a normalization constant. Here we describe the complementary setting of standard generative modeling, where only i.i.d. samples {x(n)}Nn=1 ∼ px are available but px
+
+cannot be evaluated. In this case, we train VF by maximizing the ELBO of log px:(B.1) Lθ,α,β (x) = Eqz|x,α
+
+
+
+log px|z,θ pz,β
+
+qz|x,α
+
+
+
+≈ 1
+
+M
+
+> M
+
+X
+
+> i=1
+
+log px|z,θ (x|z(i)) pz,β (z(i))
+
+qz|x,α(z(i)|x) ,
+
+where {z(i)}Mi=1 are drawn from qz|x,α(z|x). The total training objective is (B.2) 1
+
+N
+
+> N
+
+X
+
+> n=1
+
+Lθ,α,β (x(n)).
+
+Appendix C. Pre-training of the Fourier Neural Operator Surrogate. 
+
+We adopt the Fourier Neural Operator (FNO) [23] as the surrogate. The FNO learns mappings between infinite-dimensional function spaces in the spectral domain, achieving discretization-invariant representations that generalize across different grids. 
+
+Dataset construction. Training samples {ξ(i)}Ni=1 are drawn from the prior π0 =
+
+N (μ0, Σ0), and the corresponding coefficient fields are generated via the truncated KL expansion (A.3) (see Appendix A for details). For each sample, the PDE system (2.1)-(2.2) is solved numerically to obtain the state field u(·; mξ(i) ), yielding the training dataset: (C.1) D =  mξ(i) (x), u  x; mξ(i)
+
+ Ni=1 .
+
+Training objective. Let ϑ denote the trainable parameters of the FNO, denoted 
+
+Fϑ : mξ 7 → u(·; mξ). The model is trained by minimizing the relative L2 loss: (C.2) LFNO (ϑ; D) = 1
+
+N
+
+> N
+
+X
+
+> i=1
+
+Fϑ(mξ(i) ) − u(·; mξ(i) ) L2(Ω s)
+
+u(·; mξ(i) ) L2(Ω s)
+
+.22 Y. WANG, X. WANG, K. TANG, X. WAN, T. ZHOU AND C. YANG 
+
+Once trained, the composite map ξ 7 → F ϑ(mξ) serves as the surrogate for the for-ward map throughout Bayesian inference. Specific hyperparameter settings (dataset size, learning rate schedule, training epochs) for each experiment are reported in Ap-pendix D. 
+
+Appendix D. Implementation Details. Computational Resources. All experiments were conducted on a single workstation equipped with an NVIDIA RTX 3090 GPU (24GB VRAM). The total computational time for a single run of each PDE-governed inverse problem (1D Darcy flow, 2D Darcy flow, and 2D Navier-Stokes) is approximately 20 minutes. The Rosenbrock inverse problem takes approximately 2 hours to complete. 
+
+D.1. PDE-governed Inverse Problems. The stopping threshold of the over-all framework is set to a tolerance of ϵ = 0 .01. For training the FNO as a surrogate model, the initial dataset size is set to 2,000, and the model is trained for 1,000 epochs with an initial learning rate of 0.001, using a decay rate of 0.5 applied every 50 epochs. During the adaptive fine-tuning of the FNO, 500 samples are drawn at each stage with a perturbation strength of γ = 3 (as defined in Eq. (4.3)), and the model is then fine-tuned for 100 epochs using a batch size of 25. The learning rate is initialized at 0.001 and decreased by a factor of 0.5 every 25 epochs, using the Adam optimizer [16]. For Variational Flow (VF) model, the data dimension is set to d and the latent dimension is 16 throughout all experiments. The flow-based prior employs 6 affine coupling layers, while the conditional normalizing flow encoder uses 2 affine coupling layers. Each flow subnetwork has a hidden width of 32, and the multiscale squeezing step is fixed at 4. The accompanying VAE-style decoder contains 5 hidden layers of width 64. In terms of VF training, we run at most 20 adaptive stages. At each stage the VF model is trained on 1024 samples with a batch size of 32 and a learning rate of 0.001 for 10 epochs. 
+
+D.2. Rosenbrock Problem. In this problem, we compare our proposed model with a vanilla VAE, MCMC, SVGD, and UKI. Our method and UKI do not employ iterative priors in this problem. The MCMC method is implemented using the em-cee Python package with 1,000 chains, a burn-in period of 50,000 steps, and 10,000 sampling steps. The SVGD method utilizes 20,000 particles and is run for 10,000 iterations. Our model and VAE model are trained with a learning rate of 0.001 on a dataset of 100,000 samples, using a batch size of 10,000, for 20,000 epochs. The UKI method is simulated for 500 steps. For all methods, the results are presented based on 20,000 samples. 
+
+D.3. Preconditioned Crank-Nicolson (pCN) MCMC. We implement the preconditioned Crank-Nicolson (pCN) MCMC method, a standard sampler whose efficiency does not degrade with parameter dimension. Assuming a Gaussian prior 
+
+m ∼ N (m0, C0), the proposal rule is (D.1) m∗ = p1 − β2 (mn − m0) + m0 + βη, η ∼ N (0, C0),
+
+with step size β ∈ (0 , 1]. Since the proposal preserves the prior measure, the accep-tance probability depends only on the likelihood: (D.2) a(mn, m∗) = min  1, exp  Φ( mn) − Φ( m∗) ,
+
+where Φ is the negative log-likelihood. We set β = 0 .1 and run 5,000 iterations of the high-fidelity FDM solver, discarding the first 20% as burn-in and thinning by a factor DEEP ADAPTIVE DIMENSION REDUCTION FOR BAYESIAN INFERENCE 23 of 10. 
+
+D.4. UKI. We implement the UKI algorithm of [9], based on the stochastic dynamical system Evolution: mn+1 = r0 + α(mn − r0) + ωn+1 , ωn+1 ∼ N (0, Σω ),
+
+Observation: yn+1 = G(mn+1 ) + ηn+1 , ηn+1 ∼ N (0, Ση ),(D.3) where mn+1 is the unknown parameter vector, yn+1 the observation, ωn+1 and ηn+1 
+
+are mutually independent zero-mean Gaussian errors, r0 is an arbitrary initial anchor, and α ∈ (0 , 1] is the regularization parameter, set to α = 0 .5. 
+
+D.5. SVGD with Adaptive Surrogate Fine-tuning. We implement Stein Variational Gradient Descent (SVGD) [25, 24] with the radial basis function (Gaus-sian) kernel (D.4) k(x, x′) = exp  −∥ x − x′∥2/h  ,
+
+whose bandwidth h is set via the median heuristic h = med 2/ log n, with med the median of pairwise particle distances and n the number of particles. We run 20 adaptive stages, alternating 50 SVGD updates with FNO fine-tuning at each stage; FNO fine-tuning uses perturbation strength γ = 3 (Eq. (4.3)) for adequate local coverage. 
+
+References. 
+
+[1] S. Bond-Taylor, A. Leach, Y. Long, and C. G. Willcocks , Deep gen-erative modelling: A comparative review of VAEs, GANs, normalizing flows, energy-based and autoregressive models , IEEE transactions on pattern analysis and machine intelligence, 44 (2021), pp. 7327–7347. [2] L. Cao, T. O’Leary-Roseberry, P. K. Jha, J. T. Oden, and O. Ghat-tas , Residual-based error correction for neural operator accelerated infinite-dimensional bayesian inverse problems , Journal of Computational Physics, 486 (2023), p. 112104. [3] B. Che, Y. Chen, Z. Huan, D. Z. Huang, and W. Wang , Stable derivative free gaussian mixture variational inference for bayesian inverse problems , SIAM Journal on Scientific Computing, 47 (2025), pp. A2583–A2608. [4] P. Dhariwal and A. Nichol , Diffusion models beat GANs on image synthesis ,Advances in Neural Information Processing Systems, 34 (2021), pp. 8780–8794. [5] L. Dinh, D. Krueger, and Y. Bengio , NICE: Non-linear independent com-ponents estimation , arXiv preprint arXiv:1410.8516, (2014). [6] L. Dinh, J. Sohl-Dickstein, and S. Bengio , Density estimation using real NVP , arXiv preprint arXiv:1605.08803, (2016). [7] M. M. Dunlop, M. A. Iglesias, and A. M. Stuart , Hierarchical bayesian level set inversion , Statistics and Computing, 27 (2017), pp. 1555–1584. [8] D. Foreman-Mackey, D. W. Hogg, D. Lang, and J. Goodman , emcee: the mcmc hammer , Publications of the Astronomical Society of the Pacific, 125 (2013), pp. 306–312. [9] Z. Gao, L. Yan, and T. Zhou , Adaptive operator learning for infinite-dimensional bayesian inverse problems , SIAM/ASA Journal on Uncertainty Quantification, 12 (2024), pp. 1389–1423. [10] H. Goh, S. Sheriffdeen, J. Wittmer, and T. Bui-Thanh , Solving bayesian inverse problems via variational autoencoders , arXiv preprint arXiv:1912.04212, (2019). 24 Y. WANG, X. WANG, K. TANG, X. WAN, T. ZHOU AND C. YANG 
+
+[11] J. Goodman and J. Weare , Ensemble samplers with affine invariance , Com-munications in applied mathematics and computational science, 5 (2010), pp. 65– 80. [12] D. Z. Huang, T. Schneider, and A. M. Stuart , Iterated kalman methodology for inverse problems , Journal of Computational Physics, 463 (2022), p. 111262. [13] M. A. Iglesias, K. J. Law, and A. M. Stuart , Ensemble kalman methods for inverse problems , Inverse Problems, 29 (2013), p. 045001. [14] G. Janson and M. Feig , Transferable deep generative modeling of intrinsi-cally disordered protein conformations , PLOS Computational Biology, 20 (2024), p. e1012144. [15] J. P. Kaipio and E. Somersalo , Statistical and computational inverse prob-lems , Springer, 2005. [16] D. P. Kingma and J. Ba , Adam: A method for stochastic optimization , arXiv preprint arXiv:1412.6980, (2014). [17] D. P. Kingma and P. Dhariwal , Glow: Generative flow with invertible 1 × 1
+
+convolutions , Advances in Neural Information Processing Systems, 31 (2018). [18] D. P. Kingma, T. Salimans, R. Jozefowicz, X. Chen, I. Sutskever, and M. Welling , Improved variational inference with inverse autoregressive flow ,Advances in Neural Information Processing Systems, 29 (2016). [19] D. P. Kingma and M. Welling , Auto-encoding variational Bayes , arXiv preprint arXiv:1312.6114, (2013). [20] Z. Kong and K. Chaudhuri , The expressive power of a class of normalizing flow models , in International conference on artificial intelligence and statistics, PMLR, 2020, pp. 3599–3609. [21] K. Kontolati, S. Goswami, G. E. Karniadakis, and M. D. Shields ,
+
+Learning in latent spaces improves the predictive accuracy of deep neural opera-tors , arXiv preprint arXiv:2304.07599, (2023). [22] Y. Li, Y. Wang, and L. Yan , Surrogate modeling for bayesian inverse problems based on physics-informed neural networks , Journal of Computational Physics, 475 (2023), p. 111841. [23] Z. Li, N. Kovachki, K. Azizzadenesheli, B. Liu, K. Bhattacharya, A. Stuart, and A. Anandkumar , Fourier neural operator for parametric partial differential equations , arXiv preprint arXiv:2010.08895, (2020). [24] Q. Liu , Stein variational gradient descent as gradient flow , Advances in Neural Information Processing Systems, 30 (2017). [25] Q. Liu and D. Wang , Stein variational gradient descent: A general purpose Bayesian inference algorithm , Advances in neural information processing sys-tems, 29 (2016). [26] L. Lu, P. Jin, G. Pang, Z. Zhang, and G. E. Karniadakis , Learning nonlinear operators via deeponet based on the universal approximation theorem of operators , Nature machine intelligence, 3 (2021), pp. 218–229. [27] G. Papamakarios, E. Nalisnick, D. J. Rezende, S. Mohamed, and B. Lakshminarayanan , Normalizing flows for probabilistic modeling and in-ference , Journal of Machine Learning Research, 22 (2021), pp. 1–64. [28] D. Rezende and S. Mohamed , Variational inference with normalizing flows ,in International conference on machine learning, PMLR, 2015, pp. 1530–1538. [29] D. Rudolf and B. Sprungk , On a generalization of the preconditioned crank– nicolson metropolis algorithm , Foundations of Computational Mathematics, 18 (2018), pp. 309–343. [30] A. M. Stuart , Inverse problems: a bayesian perspective , Acta numerica, 19 DEEP ADAPTIVE DIMENSION REDUCTION FOR BAYESIAN INFERENCE 25 (2010), pp. 451–559. [31] K. Tang, X. Wan, and Q. Liao , Deep density estimation via invertible block-triangular mapping , Theoretical and Applied Mechanics Letters, 10 (2020), pp. 143–148. [32] K. Tang, X. Wan, and Q. Liao , Adaptive deep density approximation for Fokker-Planck equations , Journal of Computational Physics, 457 (2022), p. 111080. [33] K. Tang, X. Wan, and C. Yang , DAS-PINNs: A deep adaptive sampling method for solving high-dimensional partial differential equations , Journal of Computational Physics, 476 (2023), p. 111868. [34] A. Tarantola , Inverse problem theory and methods for model parameter esti-mation , SIAM, 2005. [35] T. Teshima, I. Ishikawa, K. Tojo, K. Oono, M. Ikeda, and M. Sugiyama ,
+
+Coupling-based invertible neural networks are universal diffeomorphism approxi-mators , Advances in Neural Information Processing Systems, 33 (2020), pp. 3362– 3373. [36] S. Wang, H. Wang, and P. Perdikaris , Learning the solution operator of parametric partial differential equations with physics-informed deeponets , Science advances, 7 (2021), p. eabi8605. [37] X. Wang, K. Tang, J. Zhai, X. Wan, and C. Yang , Deep adaptive sampling for surrogate modeling without labeled data , Journal of Scientific Computing, 101 (2024), p. 77. [38] Y. Wang, K. Tang, X. Wang, X. Wan, W. Ren, and C. Yang , Estimating committor functions via deep adaptive sampling on rare transition paths , Journal of Computational Physics, (2025), p. 114439. [39] Y. Wang, L. Wang, Y. Shen, Y. Wang, H. Yuan, Y. Wu, and Q. Gu ,
+
+Protein conformation generation via force-guided SE(3) diffusion models , arXiv preprint arXiv:2403.14088, (2024). [40] H. Wu, J. K¨ ohler, and F. No´ e, Stochastic normalizing flows , Advances in Neural Information Processing Systems, 33 (2020), pp. 5933–5944. [41] Y. Xia, Q. Liao, and J. Li , VI-DGP: A variational inference method with deep generative prior for solving high-dimensional inverse problems , Journal of Scientific Computing, 97 (2023), p. 16. [42] Y. Xia and N. Zabaras , Bayesian multiscale deep generative model for the solution of high-dimensional inverse problems , Journal of Computational Physics, 455 (2022), p. 111008. [43] Y. Zhu, N. Zabaras, P.-S. Koutsourelakis, and P. Perdikaris , Physics-constrained deep learning for high-dimensional surrogate modeling and uncer-tainty quantification without labeled data , Journal of computational physics, 394 (2019), pp. 56–81.

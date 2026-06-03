@@ -1,0 +1,1058 @@
+Title: Amortized Energy-Based Bayesian Inference
+
+URL Source: https://arxiv.org/pdf/2605.15407v1
+
+Published Time: Mon, 18 May 2026 00:19:16 GMT
+
+Number of Pages: 25
+
+Markdown Content:
+AMORTIZED ENERGY-BASED BAYESIAN INFERENCE 
+
+HOJJAT KAVEH ∗, RICARDO BAPTISTA † , AND ANDREW M. STUART ‡
+
+Abstract. We consider the problem of amortized Bayesian inference for nonlinear inverse prob-lems in settings where only samples from the joint distribution of parameters and observations are available. Our framework also covers function-space inverse problems, where the unknown parameter belongs to a Banach space of functions. Classical approaches such as Markov chain Monte Carlo require solution of a new inference problem for each observation; this can be computationally pro-hibitive when posterior inference must be repeated for many different observations, especially when the parameter space is infinite-dimensional. Amortized Bayesian inversion addresses this issue by learning, in an offline training stage, a single map that can rapidly produce posterior samples for new observations. We propose a transport-based approach to amortized Bayesian inversion that learns an observation-dependent transport map that pushes forward a reference measure to approximate the posterior distribution, conditioned on the observation that is an input to the map. The model is trained by minimizing an averaged energy-distance objective between the true posterior and the learned pushforward. The averaging over observations allows for generalization across observation instances and efficient amortized inference. Furthermore, the formulation is likelihood-free, requir-ing only samples from the joint distribution and avoiding explicit evaluation of the likelihood. In addition, the use of an energy-distance objective removes the need for invertibility of the transport map and for computation of Jacobian determinants, enabling flexible parameterizations in high- and infinite-dimensional settings. Moreover, when the posterior is assumed to have density with respect to a Gaussian prior measure, we construct transport maps that take the form of the identity plus a learnable map taking values in the Cameron–Martin space of the prior. This guarantees that the learned posterior remains absolutely continuous with respect to the prior. In infinite dimensions, the transport map is parameterized using neural operators, enabling use at different grid resolutions. We illustrate the approach on a finite-dimensional problem and then consider two PDE-based inverse problems that arise in porous medium flow and seismic inversion. The results show that the learned transport accurately captures the posterior structure, including multimodality and dominant modes, while providing fast posterior sampling compared to traditional methods. 
+
+Key words. Bayesian inverse problems; Amortized inference; Likelihood-free inference; Trans-port maps; Infinite-dimensional inverse problems; Cameron–Martin space; Energy distance; Neural operators. 
+
+AMS subject classifications. 65J22, 62F15, 68T07, 62G05 
+
+1. Introduction. Inverse problems arise in many areas of science and engineer-ing [24, 11, 26], where one seeks to infer unknown parameter u ∈ U from indirect and noisy observation y ∈ Y . Examples include the estimation of unknown fields and model parameters in mechanics, medical imaging, and geophysics, where the available data are typically sparse, noisy, and indirectly related to the quantities of interest [15, 20, 1, 14, 16]. These challenges motivate probabilistic formulations of inverse problems that quantify the uncertainty in the inferred parameters rather than producing a single deterministic estimate. A common mathematical formulation is based on the stochastic forward model: (1.1) y = G(u, η ),
+
+where G : U × E → Y denotes the forward operator, mapping parameter u and noise η to the observation. In the Bayesian framework, the unknown parameter u is modeled as a random variable with prior distribution ρ. The forward model and the noise then induce a joint distribution γ on ( u, y ), with marginal distribution κ on the  
+
+> ∗
+
+California Institute of Technology (hkaveh@caltech.edu).  
+
+> †
+
+University of Toronto (r.baptista@utoronto.ca).  
+
+> ‡
+
+California Institute of Technology (astuart@caltech.edu) 1
+
+> arXiv:2605.15407v1 [math.NA] 14 May 2026
+
+2 H. KAVEH, R. BAPTISTA, AND A. STUART 
+
+observation space. For a realized observation y†, uncertainty in u is described by the posterior distribution π(· | y†). Given a likelihood function ℓ(y | u) that is defined by the conditional distribution for the observation y under the forward model (1.1), the posterior is defined by Bayes’ rule as 
+
+π(u | y†) = ℓ(y† | u)ρ(u)
+
+κ(y†) ,
+
+In infinite-dimensional settings, Bayes’ rule is interpreted through the Radon–Nikodym derivative of the posterior with respect to the prior. In many applications, posterior inference must be performed not for a single observation, but repeatedly for many different realizations of the data. This situation arises, for example, when analyzing many experimental configurations in experimental design [12] or many synthetic and observational data sets in uncertainty quantification, design, and real-time inference [23, 13]. Classical sampling methods such as Markov chain Monte Carlo (MCMC) [8], and infinite dimensional variants [10], require the solution of a new inverse problem for each observation y†. This repeated online cost can become computationally prohibitive. This motivates amortized Bayesian inference. The central idea is to replace re-peated, observation-specific inference with a reusable model learned during an offline training stage, which may be applied with any observation. Once trained, this model can be evaluated rapidly for any observation y†, producing approximate posterior samples without evaluation of the likelihood multiple times as would be required to deploy MCMC. Thus, amortization is particularly attractive when inference must be repeated many times for different observations. In this work, we pursue an amortized inference approach based on conditional transport maps. In particular, we seek an observation-dependent transport map 
+
+Tθ (· ; y) : U → U that pushes forward a reference measure μref to an approximation of the posterior distribution. That is, we choose parameter θ such that, for y drawn from the marginal κ,
+
+Tθ (· ; y)#μref ≈ π(· | y).
+
+After training, posterior samples for a new observation y† are obtained by drawing samples from the reference measure and evaluating the learned map Tθ (· ; y†) on those samples. Measure transport provides a natural framework for representing compli-cated probability distributions as pushforwards of simpler reference measures [27, 18]. In Bayesian inference, transport maps have been used to approximate posterior dis-tributions by constructing deterministic couplings between a tractable reference mea-sure and the target posterior [19]. Many existing approaches are based on objectives involving the Kullback–Leibler divergence [4, 9]. However, such formulations often require the map to be invertible and require evaluation of Jacobian determinants. These requirements are restrictive in high-dimensional problems and become espe-cially problematic in infinite-dimensional settings. Alternative approaches seek trans-ports by minimizing optimal transport distances [3, 5, 25], often requiring adversarial optimization, which is challenging to scale to high-dimensional settings. We address the limitations of existing transport-based methodologies for amor-tized inference by training the transport map using an averaged energy-distance objec-tive between the true posterior and the learned pushforward distribution. Specifically, for an observation y ∼ κ, we approximate the posterior π(· | y) by the pushforward distribution Bθ (· ; y) := Tθ (· ; y)#μref , and minimize the objective function (1.2) L(θ) = Ey∼κ
+
+D2
+
+> E
+
+ π(· | y), B θ (· ; y) .AMORTIZED ENERGY-BASED BAYESIAN INFERENCE 3Here DE denotes the energy distance that is defined for μ, ν ∈ P (U), two probability measures on U, by (1.3) D2 
+
+> E
+
+(μ, ν ) := 2 E(u,v )∼μ⊗ν ∥u − v∥ − E(u,u ′)∼μ⊗μ∥u − u′∥ − E(v,v ′)∼ν⊗ν ∥v − v′∥.
+
+For a probability measure ϱ ∈ P (U) and u ∈ U , the energy score [2] is defined as (1.4) ES (ϱ, u ) = Ev∼ϱ∥u − v∥ − 12 E(v,v ′)∼ϱ⊗ϱ∥v − v′∥.
+
+We will show that the objective defined in Eq. (1.2) is equivalent, up to terms indepen-dent of θ, to an averaged energy-score; this enables purely sample-based evaluation of the desired objective function. Chapter 5 of [2] lays out a general methodology for amortization in the solution of inverse problems using strictly proper scoring rules. Our energy distance-based approach is a specific example of the scoring rule method-ology. The energy distance defines a discrepancy between probability measures and is particularly amenable to settings in which the measures are available only through samples. Moreover, it does not require density evaluation, invertibility of the transport map, or computation of Jacobian determinants. We show that the resulting objective can be written entirely in terms of expectations over the joint distribution γ and its marginals. Consequently, the method is likelihood-free: it only requires samples from the joint distribution of parameters and observations, rather than explicit access to the likelihood function or the posterior density. Our likelihood-free formulation is related to Sequential Neural Likelihood methods, which also use simulator-generated samples to avoid explicit likelihood evaluation, but differs in that our method learns an observation-amortized posterior-generating transport map, whereas SNL learns a neural surrogate for the likelihood [21, 22]. Flow-matching posterior estimation also trains an amortized posterior sampler from joint simulator samples [28], but it rep-resents the posterior through an ODE flow and learns the corresponding conditional velocity field. In contrast, our approach trains a direct pushforward map by mini-mizing an energy-distance discrepancy between posterior measures, without requiring invertibility, density evaluation, Jacobian determinants, or divergence computations. When the parameter u is a function, this transport-map perspective must also re-spect the measure-theoretic structure of Bayesian inverse problems in function space. In typical Bayesian inverse problems, the posterior measure is absolutely continuous with respect to the prior [24]; in particular, the posterior and prior cannot be mu-tually singular. In infinite-dimensional problems, it is a delicate issue to avoid such mutual singularity. For example, Gaussian measures are mutually singular unless the conditions of the Feldman-Hajek theorem are met [11, Theorem 37]. We address this issue in the context of inverse problems in Banach space, with Gaussian priors. We construct transport maps that respect the measure-theoretic structure of Gaussian priors on function spaces [6, 7]. Motivated by the Cameron–Martin theorem [11, Theorem 32], we write the map as an identity perturbation 
+
+Tθ (u; y) = u + Hθ (u; y),
+
+where the architecture is designed so that the perturbation Hθ (u; y) lies in the Cameron– Martin space associated with the prior. In our work, the map Hθ is represented using a neural operator [17], with its output constrained through the covariance structure of the Gaussian prior. This construction builds on the measure-theoretic underpinnings 4 H. KAVEH, R. BAPTISTA, AND A. STUART 
+
+of Gaussian measures in Banach space and is designed to ensure that the learned posterior Bθ (· ; y) is absolutely continuous with respect to the prior measure ρ.The main contributions of this paper are as follows: (C1) We formulate an amortized approach to Bayesian inverse problems based on minimizing an averaged energy-distance objective between the true posterior and a learned pushforward distribution. This avoids the need for invertibility of the transport map and the computation of Jacobian determinants. (C2) We show that the objective can be expressed using only samples from the joint distribution of parameters and observations and its marginals. The result-ing method is therefore likelihood-free and is applicable in simulation-based inverse problems where the likelihood is unavailable or difficult to evaluate. (C3) We design transport maps for infinite-dimensional Bayesian inverse prob-lems by parameterizing them as identity perturbations in the Cameron– Martin space of the Gaussian prior. This construction preserves the measure-theoretic structure of the posterior and is implemented using neural operators. (C4) We demonstrate the method on a finite-dimensional nonlinear inverse problem and on two PDE-constrained inverse problems: a Darcy flow inverse problem and a wave-equation inverse problem. The numerical results show that the learned transport maps capture posterior structure, including multimodality and dominant KL modes, while enabling fast posterior sampling for new observations. The remainder of the paper is organized as follows. Section 2 develops the method-ology corresponding to Contributions (C1)–(C3). In particular, Subsection 2.1 in-troduces the averaged energy-distance objective in (C1), derives its sample-based likelihood-free form in (C2), and relates the objective to the energy score. Subsec-tion 2.2 describes the transport-map architecture and the Cameron–Martin-informed parameterization used for infinite-dimensional Bayesian inverse problems, correspond-ing to (C3). Section 3 addresses (C4) by presenting numerical experiments on a finite-dimensional nonlinear inverse problem, a Darcy flow inverse problem, and a wave-equation inverse problem. Section 4 summarizes the main findings, discusses the computational advantages of the proposed amortized approach, and outlines open directions. The paper ends with four appendices. Appendix A reviews the Gaussian measure and Cameron–Martin space background needed for the construction used in (C3). Appendices B and C contain proofs of technical lemmas underlying Subsec-tion 2.1. Appendix D discusses the scaling of the methodology with respect to both data and model size. 
+
+2. Methodology. This section introduces the proposed amortized transport methodology. Section 2.1 defines the averaged energy-distance objective used to learn conditional pushforward approximations of the posterior distributions, derives a sample-based form involving only the joint distribution of parameters and obser-vations, and relates the objective to the energy score. Section 2.2 then describes the transport-map architecture; in the setting of an unknown parameter in a Hilbert space, the architecture is further constrained by means of a Cameron–Martin-informed construction that is natural when Gaussian priors are adopted on the function space. 
+
+2.1. Objective Function. Given the Bayesian inverse problem defined by the equation (1.1) our goal is to approximate the posterior distribution π(u | y). We employ a parametric family Bθ (u; y) for the approximation, aiming to amortize over 
+
+y ∼ κ and to choose θ to optimize this approximation. We represent the approximate posterior Bθ (u; y) as the pushforward of a reference measure μref under a transport AMORTIZED ENERGY-BASED BAYESIAN INFERENCE 5map Tθ (· ; y), that is, 
+
+Bθ (· ; y) = Tθ (· ; y)#μref .
+
+Variable θ denotes the parameters of a neural network or neural operator employed to define Tθ (· ; y). A key aspect of our approach is the use of the energy distance to quantify the discrepancy between distributions, resulting in the objective function defined by Eq. (1.2). In contrast to approaches based on the Kullback–Leibler divergence, this choice does not require the transport map to be invertible, nor does it require evalu-ation of Jacobian determinants. This allows for flexible parameterizations and makes the method applicable in high-dimensional and infinite-dimensional settings. Moreover, the averaged energy distance admits a representation in terms of ex-pectations with respect to distributions that are directly accessible in practice, namely the joint distribution γ and its marginal κ. Since the energy distance is naturally com-patible with sample-based approximation, this representation enables training using only samples from the joint distribution, without requiring explicit knowledge of the prior or the likelihood. The resulting formulation is therefore likelihood-free. Using the definition of the energy distance in Eq. 1.3, the following lemma rewrites the objective Eq. 1.2 entirely in terms of expectations over γ and its marginal κ. The proof is given in Appendix B. 
+
+Lemma 2.1. Minimizing the objective function L(θ) in Eq. (1.2) is equivalent to minimizing J(θ) where 
+
+J(θ) = 2 E
+
+ p, (u′,y ′)
+
+∼
+
+ μref ⊗γ
+
+
+
+∥Tθ (p; y′) − u′∥− E
+
+ p,p ′,y ′′ 
+
+∼
+
+ μref ⊗μref ⊗κ
+
+
+
+∥Tθ (p; y′′ ) − Tθ (p′; y′′ )∥.(2.1) 
+
+⋄
+
+Remark 2.2 ( Choice of reference measure). Throughout this paper, we pri-marily take the reference measure μref to be the prior distribution ρ. However, the energy-distance objective does not require this particular choice. For example, one could first construct a tractable approximation to the posterior, such as a Gaussian approximation obtained by variational inference, and then learn a transport map from this reference measure to the true posterior. More generally, μref need not be defined on U; it may be a measure on a latent space, provided that the transport map takes values in U; indeed in Appendix D we illustrate an example of such a choice: measure 
+
+μref is taken to be the joint distribution of parameters and observations. ⋄
+
+We now show that the objective in Eq. (1.2) is equivalent, up to terms independent of θ, to an averaged energy-score objective, with the energy score defined in Eq. (1.4). 
+
+Lemma 2.3 ( Equivalence between averaged energy distance and expected energy score). Let γ ∈ P (U × Y ) be the joint law of (u, y ), with marginal κ on Y
+
+and conditional law π(· | y) on U. Let Bθ (· ; y) be a family of probability measures on 
+
+U. Then 
+
+(2.2) Ey∼κh
+
+D2
+
+> E
+
+ π(· | y), B θ (· ; y)i
+
+= 2 E(u,y )∼γ h
+
+ES  Bθ (· ; y), u i
+
+− C, 
+
+where 
+
+C := Ey∼κh
+
+E(u,u ′)∼π(·| y)⊗π(·| y)∥u − u′∥
+
+i6 H. KAVEH, R. BAPTISTA, AND A. STUART 
+
+is independent of θ. Consequently, minimizing the expected energy score is equivalent to minimizing the objective defined in Eq. (1.2) . ⋄
+
+Remark 2.4 ( Generalized energy distances). In this paper, we focus on the energy distance with exponent β = 1. More generally, one may replace the norm terms in Eq. 1.3 and Eq. 1.4 by ∥ · ∥ β , for suitable choices of β. This leads to the generalized energy distance and corresponding energy score. We restrict attention to 
+
+β = 1 in the numerical experiments. 
+
+⋄
+
+Throughout this paper, we will work under the following assumption about the data used to train our amortized Bayesian inference model: 
+
+Data Assumption 2.5. We are given N i.i.d. samples 
+
+{(u(i), y (i))}Ni=1 ∼ γ, 
+
+where γ is the joint distribution of parameters and observations. ⋄
+
+The following proposition provides an empirical approximation of the objective function J(θ). 
+
+Proposition 2.6. Under Data Assumption 2.5, with the reference measure μref 
+
+taken to be the prior distribution, we approximate J(θ) empirically by 
+
+(2.3) 
+
+JN (θ) = 2
+
+N (N − 1) 
+
+> N
+
+X 
+
+> i,j =1
+> i̸=j
+
+Tθ
+
+ u(i); y(j) − u(j)
+
+− 1
+
+N (N − 1)( N − 2) 
+
+> N
+
+X   
+
+> i,j,k =1
+> i̸=j, i ̸=k, j ̸=k
+
+Tθ
+
+ u(i); y(k) − Tθ
+
+ u(j); y(k) .
+
+The first term encourages Tθ (u(i); y(j)) to match the target u(j), while the second promotes spread in the transported samples for each fixed conditioning value y(k). ⋄
+
+2.2. Parameterization of the Transport Map. To complete the formula-tion, we specify the class of transport maps Tθ . In finite dimensions, we use standard deep neural network architectures. But while the objective function applies to general measurable maps, the infinite-dimensional setting imposes structural constraints that we build into the architecture via inductive bias. Since the posterior is absolutely con-tinuous with respect to the prior, it is desirable that the approximation preserves this property. In infinite-dimensional spaces, this is restrictive: arbitrary perturbations of 
+
+u can lead to pushforward measures that are singular with respect to the prior. We focus on Gaussian priors, and the detailed background on this topic may be found in Appendix A. Motivated by the Cameron–Martin theorem explained in Appendix A, we param-eterize the transport map as (2.4) Tθ (u; y) = u + C1/2 Sθ (u; y),
+
+where C is the covariance operator of the Gaussian prior. Provided that Sθ (· , y ) maps 
+
+U into itself for each fixed y in the support of κ, this construction ensures that the perturbation lies in the Cameron–Martin space. This, in turn, guarantees that the pushforward remains absolutely continuous with respect to the prior. AMORTIZED ENERGY-BASED BAYESIAN INFERENCE 7The map Sθ is implemented using a neural operator, allowing us to represent non-linear maps between functions in a way that is consistent with the infinite-dimensional structure of the problem. In the PDE-based inverse problem (Experiments 2 and 3), which we will discuss in Section 3, the latent field u is defined on (0 , 1) with homoge-neous Neumann boundary conditions. The covariance operator 
+
+C = σ2(−∆ + τ 2I)−α
+
+is diagonalized by the cosine basis, corresponding to the eigenfunctions of the Lapla-cian with Neumann boundary conditions. To respect this structure, we parameterize 
+
+Sθ using a Fourier neural operator adapted to Neumann boundary conditions, imple-mented via the discrete cosine transform (DCT). This ensures that both the covariance operator and the neural parameterization share the same spectral structure. The action of C1/2 is implemented spectrally. Let {(λk, ϕ k)}k≥1 denote the eigen-pairs of the covariance operator C. Writing 
+
+Sθ (u; y) = X
+
+> k
+
+sθ,k (u; y) ϕk,
+
+we apply C1/2 by scaling each coefficient according to 
+
+C1/2Sθ (u; y) = X
+
+> k
+
+pλk sθ,k (u; y) ϕk.
+
+Since the eigenvalues λk decay to zero as k → ∞ , the operator C1/2 attenuates high-frequency modes and therefore acts as a smoothing operator. This ensures that the perturbation lies in a more regular subspace, consistent with the Cameron–Martin structure. For comparison, we also consider numerical experiments using the baseline parameterization (2.5) Tθ (u; y) = u + Sθ (u; y),
+
+which, hence, does not enforce this Cameron–Martin structure. 
+
+3. Numerical Experiments. This section evaluates the proposed amortized transport methodology on a sequence of inverse problems of increasing complexity. The purpose of these experiments is to illustrate the main ideas of the proposed methodology rather than to provide a comprehensive benchmarking study. The prob-lems are not at the edge of computational feasibility, but rather are chosen to be tractable via MCMC methodology in order to demonstrate the benefits of our ap-proach in comparison. In particular, we show that: (i) use of the energy-distance objective leads to efficient observation-dependent posterior approximations that out-perform MCMC when multiple observation instances are encountered; and that (ii) the Cameron–Martin-informed parameterization is beneficial in function-space set-tings, analogously to the benefits of function-space formulations of MCMC. We consider a finite-dimensional nonlinear example with a tractable reference posterior, followed by two PDE-based inverse problems defined by Darcy flow and wave propagation respectively. In the Darcy problem, we recover a log-normal per-meability field, and in the wave propagation problem, a piecewise constant wavespeed field, defined via thresholding a Gaussian random field. Both these examples can be formulated in terms of a Gaussian random field prior, and thus the structure from 8 H. KAVEH, R. BAPTISTA, AND A. STUART 
+
+Subsection 2.2 can be employed. In all three sets of experiments, we work with an inverse problem in which the noise is additive and replace (1.1) by, for G : U → Y ,(3.1) y = G(u) + η. 
+
+And throughout, we work under Data Assumption 2.5. For the two PDE-based inverse problems, we compare our method with the pCN method [10] since this is designed for function-space inference. 
+
+3.1. Experiment 1. We consider a finite-dimensional inverse problem for which the posterior distribution can be accurately approximated using a quadrature rule and hence we can find the scaling of the errors in the objective with respect to training data and the number of parameters of the model. This example serves two purposes. First, it provides a clear illustration of the amortized inverse problem framework, where a single learned map is used to approximate posterior distributions corresponding to different observations. Second, despite its low dimensionality, this example is non-trivial: for certain ranges of the observation, the posterior distribution is bimodal, whilst for others it is unimodal; this makes the amortization challenging. Consider (3.1) with U = E = Y = R and G(u) = u2. The prior and observational noise are given by 
+
+u ∼ N (m0, σ 20 ), η ∼ N (0 , σ 2).
+
+By Bayes’ theorem, the posterior density is given by 
+
+π(u | y) = 1
+
+Z(y) exp 
+
+
+
+− (u − m0)2
+
+2σ20
+
+− (y − G (u)) 2
+
+2σ2
+
+
+
+,
+
+where the normalizing constant Z(y) is 
+
+Z(y) = 
+
+Z
+
+> R
+
+exp 
+
+
+
+− (u − m0)2
+
+2σ20
+
+− (y − G (u)) 2
+
+2σ2
+
+
+
+du. 
+
+In the numerical experiments below, we consider the specific parameter values 
+
+m0 = 0 , σ0 = 1 , σ = 1 .
+
+For this experiment, the transport map Tθ (u; y) is parameterized as 
+
+Tθ (u; y) = u + Sθ (u; y),
+
+where Sθ (u; y) is a multilayer perceptron (MLP), with hyperparameters summarized in Table 1. After training, the learned map Tθ (u; y†) can be used to generate posterior samples for different realizations of observations y†. In this example, the posterior distribution is bimodal for y† > 0, but unimodal for y† ≤ 0. The posterior is continuous in y† [24] and the learned approximate posterior is able to capture the smooth transition from uni- to bimodality. In Fig. 1, we plot the pushforward distribution Tθ (· ; y†)#ρ and compare it with the true posterior distribution π(u | y†). Since training in this experiment is computationally inexpensive compared to the other experiments, we use this setting to study the scaling of the empirical estimate of the error 
+
+Ey∼κ
+
+D2
+
+> E
+
+ π(· | y), B θ (· ; y) 
+
+with respect to the number of parameters and the size of the training dataset. This scaling study is presented in Appendix D. AMORTIZED ENERGY-BASED BAYESIAN INFERENCE 9
+
+Table 1 
+
+Training and model settings for the numerical experiments. 
+
+Experiment 1 Experiment 2 Experiment 3 Neural network MLP FNO FNO Data size 6 × 10 5 1 × 10 6 1.5 × 10 6
+
+Network depth 8 5 5Width 150 80 100 Modes (FNO) – 32 32 Batch size 1000 150 80 Epochs 60 60 15 Trigger time – 20 –Optimizer Adam Adam Adam Learning rate 1 × 10 −3 1 × 10 −3 1 × 10 −3
+
+Fig. 1 . Comparison between the true posterior π(u|y†) and T (. ; y†)#ρ(u) for different y†.
+
+3.2. Experiment 2. Darcy Flow Inverse Problem. Consider the one-dimensional Darcy flow equation with homogeneous Dirichlet boundary conditions: 
+
+− ddx 
+
+
+
+a(x) dp dx (x)
+
+
+
+= 1 , x ∈ (0 , 1) ,p(0) = 0 , p(1) = 0 .
+
+Here p(x) denotes the pressure field and a(x) > 0 denotes the permeability. We are interested in the inverse problem of determining a, given measurements of p.However, to enforce positivity of a, we parameterize through the log-permeability 10 H. KAVEH, R. BAPTISTA, AND A. STUART 
+
+field u(x) = log a(x). We place a Gaussian prior on the log-permeability field, 
+
+u ∼ N (0 , C ), C = σ2(−∆ + τ 2I)−α,
+
+where −∆ is the one-dimensional Laplacian on (0 , 1) with homogeneous Neumann boundary conditions. The covariance operator is diagonal in the cosine basis. In particular, after excluding the constant mode, its eigenfunctions and eigenvalues are given by 
+
+ϕk(x) = cos( kπx ), λk = σ2 (kπ )2 + τ 2−α, k ∈ N.
+
+In this experiment, we use (3.3) τ = 3 , α = 2 , σ = 1 .
+
+The observation operator consists of pressure measurements at eight equally spaced interior points x1, . . . , x 8. Thus, (3.4) G(u) =  p(x1; u), . . . , p (x8; u) ∈ R8.
+
+The observed data are generated according to Eq. (3.1) where the observational noise is Gaussian, 
+
+η ∼ N (0 , σ 2obs I), σobs = 1 × 10 −3.
+
+The inverse problem is to infer the conditional distribution π(· | y) of the log-permeability field from noisy pressure observations. Since u is a function on (0 , 1), this defines an infinite-dimensional Bayesian inverse problem. To train the transport map, we generate samples from the joint distribution of ( u, y ). Specifically, we first draw 
+
+ui ∼ N (0 , C ), solve the Darcy flow equation using a second-order finite-difference dis-cretization on a uniform grid with 64 spatial points, and then generate observations using Eq. (3.4) with additive Gaussian noise. This yields training pairs as in Data Assumption 2.5. Using this data, we minimize the empirical objective (2.3) to train a transport map of the form (2.4). Table 1 summarizes the hyperparameters used for the transport map. For each observation y, the learned map defines the approximate posterior 
+
+Tθ (· ; y)#ρ ≈ π(· | y).
+
+Since the transport map is trained in an amortized fashion, a single trained model can be used to approximate the posterior for many different observation realizations. Fig. 2 shows this behavior for three representative observations y†. In each row, the left panel shows the noisy pressure observations, while the right panel shows the corresponding posterior reconstruction of the log-permeability field u(x). The true field used to generate the data is shown in red. The learned pushforward posterior 
+
+Tθ (· ; y†)#ρ is shown in green through its mean and one standard deviation, and is compared with a reference posterior obtained using pCN, shown in blue. For each observation y†, the reference posterior is obtained by running an inde-pendent pCN Markov chain [10] with 10 6 samples, after discarding 2 × 10 5 burn-in samples. In contrast, the learned transport map is reused without retraining or run-ning a new sampler. Across the three observation instances, the pushforward posterior closely matches the pCN posterior in both mean and standard deviation. AMORTIZED ENERGY-BASED BAYESIAN INFERENCE 11 To further compare the learned posterior with the pCN reference, we project the posterior samples onto the eigenfunctions of the prior covariance operator C. This provides a mode-by-mode comparison of the marginal posterior distributions in the Karhunen–Lo` eve basis. For brevity, we show this comparison for the observation instance corresponding to the first row of Fig. 2; similar behavior is observed for the other observation instances. Fig. 3 compares the marginal distributions of the first six KL coefficients for the prior, the pCN posterior, and the learned pushforward posterior. The pushforward posterior closely matches the pCN posterior in the leading modes, where the data have the strongest influence. In higher modes, both the pCN posterior and the pushforward posterior approach the prior distribution, indicating that these modes are only weakly informed by the observations. As discussed in Section 2.2, our main parameterization uses a Cameron–Martin-informed transport map, in which the neural-operator output is smoothed by the square root of the prior covariance operator. This construction encourages the per-turbation to lie in the Cameron–Martin space associated with the prior, and is there-fore consistent with the absolute-continuity structure of the Bayesian posterior. To assess the effect of this structure, we compare it with a baseline parameterization that uses the same neural-operator architecture but omits the application of C1/2. This comparison isolates the role of the Cameron–Martin smoothing in the transport map. To quantify the effect of the Cameron–Martin-informed parameterization, we project samples from both learned posteriors onto the eigenfunctions of C. For each mode, we compute the Wasserstein distance between the one-dimensional marginal distribution of the learned posterior and the corresponding marginal distribution of the pCN reference posterior. The resulting per-mode errors are shown in Fig. 4. The Cameron–Martin-informed map yields consistently smaller errors than the baseline map, with the improvement most visible in the higher modes. This indicates that applying C1/2 helps control the small-scale components of the transported field and improves agreement with the reference posterior in directions that are weakly informed by the data. This comparison also highlights the role of excluding the constant mode from the function space. Since the prior is supported on zero-mean fields, posterior samples should also have zero spatial mean. The Cameron–Martin-informed parameterization preserves this structure by construction. In contrast, the baseline map can generate fields with a nonzero projection onto the constant mode, leading to samples that are not consistent with the support of the prior. 
+
+3.3. Experiment 3. Wave Equation Inverse Problem. As a representa-tive hyperbolic PDE-constrained inverse problem, we consider wave propagation in a heterogeneous one-dimensional medium. The goal is to infer the spatially varying wavespeed from indirect observations of the propagating wavefield. In contrast to the Darcy flow example, the unknown coefficient in this experiment is piecewise con-stant and contains sharp interfaces. The forward model is the one-dimensional wave equation 
+
+ptt (x, t ) − c(x)2pxx (x, t ) = f (x, t ), x ∈ (0 , 1) ,
+
+with homogeneous Neumann boundary conditions and zero initial conditions. Here 
+
+p(x, t ) denotes the wavefield, c(x) > 0 is the wavespeed, and f (x, t ) is a localized source term. In this experiment, the source is a Ricker wavelet localized near the center of the spatial domain. The unknown wavespeed is parameterized through a 12 H. KAVEH, R. BAPTISTA, AND A. STUART 
+
+Fig. 2 . Posterior reconstruction in physical space across multiple realizations of the noisy ob-servations y†. Each row corresponds to a distinct realization of y†. For each realization, the pCN sampler is initialized and run independently to approximate the posterior, whereas a single learned pushforward map T (· ; y†)#ρ is reused across all realizations to produce posterior estimates. Within each row, the left panel shows the noisy observations and the right panel shows the reconstruction. The true field u is shown in red, the pushforward approximation in green (mean ± standard de-viation), and the pCN posterior in blue (mean ± standard deviation). Note the close agreement between the pushforward approximation and the pCN posterior. AMORTIZED ENERGY-BASED BAYESIAN INFERENCE 13 
+
+Fig. 3 . Projection onto the KL modes of the posterior distribution. Shown are the first six modes for the pCN posterior (blue) and the pushforward T (· ; y†)#ρ (red), together with the prior (black). Both pCN and pushforward distributions closely agree in the leading modes, while for higher modes they approach the prior, indicating limited information from the data. 
+
+Fig. 4 . Per-mode Wasserstein error between the learned pushforward posterior and the pCN reference posterior in the KL basis of the prior covariance. The Cameron–Martin-informed map yields smaller errors than the baseline without C1/2, especially in higher modes. 
+
+latent Gaussian field. We draw 
+
+u ∼ N (0 , C ),
+
+where 
+
+C = σ2(−∆ + τ 2I)−α,14 H. KAVEH, R. BAPTISTA, AND A. STUART 
+
+and −∆ is the one-dimensional Laplacian on (0 , 1) with homogeneous Neumann boundary conditions. As in the Darcy flow experiment, the covariance operator is diagonal in the cosine basis. We exclude the constant mode so that the latent field has zero spatial mean. In this experiment, we use 
+
+τ = 5 , α = 2 , σ = 10 .
+
+The physical wavespeed is obtained from the latent field through a binary level-set map: 
+
+c(x) = 
+
+(
+
+chigh , u(x) > 0,clow , u(x) ≤ 0,
+
+where 
+
+chigh = exp(0 .27) , clow = exp( −0.27) .
+
+This construction produces piecewise-constant wave-speed profiles whose interfaces are determined by the zero level set of u. Thus, although the prior is placed on a smooth latent Gaussian field, the physical coefficient entering the PDE is discontinu-ous. The observations consist of first-arrival times recorded at a collection of receiver locations x1, . . . , x Nr . For each receiver, the arrival time is defined as the first time at which the magnitude of the recorded signal exceeds a prescribed fraction of its maximum amplitude. This defines a nonlinear observation operator 
+
+G(u) =  s1(u), . . . , s Nr (u) ∈ RNr ,
+
+where sj (u) denotes the first-arrival time at receiver xj . The observed data are gen-erated according to (3.1), with additive Gaussian observational noise 
+
+η ∼ N (0 , σ 2obs I), σobs = 5 × 10 −3.
+
+The inverse problem is to infer the conditional distribution π(· | y) of the latent field 
+
+u, and hence of the induced wavespeed c(x), from noisy arrival-time observations. To generate training data, we draw samples ui ∼ N (0 , C ), map each sample to a binary wavespeed ci(x), solve the wave equation using a finite-difference discretization, and extract first-arrival times at the receiver locations. Additive Gaussian noise is then applied to the arrival times, producing joint samples as in Data Assumption 2.5. These samples are used to train the Cameron–Martin-informed transport map (2.4) by minimizing the empirical objective (2.3). The hyperparameters of the transport map are summarized in Table 1. Once trained, the map defines the approximate posterior Tθ (· ; y)#ρ for any new arrival-time observation y.Fig. 5 shows the spatiotemporal evolution of the wavefield p(x, t ) for the realiza-tion corresponding to the first row of Fig. 6. The vertical dashed lines indicate the receiver locations, where first-arrival times are extracted and used as observations. We then evaluate the learned transport map on multiple realizations of the noisy arrival-time observations. The results are shown in Fig. 6. In each row, the left panel shows the noisy arrival-time observations, and the right panel compares the poste-rior reconstruction of the wavespeed. The true wave speed used to generate the data is shown in red, the learned pushforward posterior is shown in green, and the pCN posterior is shown in blue. For each realization, the same trained transport map is AMORTIZED ENERGY-BASED BAYESIAN INFERENCE 15     
+
+> Fig. 5 .Spatiotemporal evolution of p. Vertical dashed lines denote the location of the receivers xj.
+
+reused to generate approximate posterior samples, whereas the pCN reference poste-rior is obtained by running a separate Markov chain. For each observation y†, the pCN reference posterior is obtained by running an independent Markov chain with 2.5 × 10 6 samples, after discarding 1 × 10 5 samples as burn-in. The learned posterior agrees well with the pCN reference over most of the domain, with larger discrepancies occurring near sharp interfaces in the wavespeed. We now compare posterior distributions, going beyond pointwise summaries of the wavespeed. To this end, we examine the posterior over the latent field u in the KL basis of the prior covariance. Fig. 7 shows the marginal distributions of the first six KL coefficients for the observation instance corresponding to the first row of Fig. 6. Although the physical wavespeed is obtained through a discontinuous level-set map, the inference is performed on the latent Gaussian field u. In this latent representation, the learned pushforward posterior closely matches the pCN reference in the dominant modes. We also quantify the mode-by-mode discrepancy between the learned posterior and the pCN reference. Since the prior is placed on the latent field u, we compute these errors in the KL basis of the prior covariance rather than directly in the binary wave-speed variable c(x). For each mode, we compute the Wasserstein distance between the one-dimensional marginal distribution of the learned posterior and the corresponding marginal of the pCN posterior. The results are shown in Fig. 8. The Cameron–Martin-informed map yields smaller errors than the baseline with-out the C1/2 smoothing, with the improvement most visible in the higher modes. In addition, the baseline map produces a nonzero projection onto the constant mode, even though this mode is excluded from the prior and the latent field is restricted to have zero spatial mean. This indicates that the Cameron–Martin-informed parame-terization not only improves agreement with the pCN reference in the KL coordinates, but also better preserves the support structure of the prior. 
+
+4. Conclusion. We have proposed an amortized transport-based approach for Bayesian inverse problems; furthermore, we have proposed specific adaptations of the approach that are relevant when the unknown parameter belongs to an infinite-dimensional function space. The method learns a conditional transport map that pushes forward a reference distribution to approximate the posterior distribution cor-responding to a given observation. The map is trained by minimizing an averaged, over observations, energy-distance objective, which can be expressed using samples from the joint distribution of parameters and observations. This formulation avoids 16 H. KAVEH, R. BAPTISTA, AND A. STUART         
+
+> Fig. 6 .Posterior reconstruction for the wave-equation inverse problem across multiple real-izations of the noisy arrival-time observations ( y†). Each row corresponds to one realization. The learned pushforward approximation ( T(·;y†)#ρ) is compared with an independently run pCN pos-terior. The true field is shown in red. The mean curves show the binary wave speed obtained by thresholding the posterior mean latent field; the dashed bands show the binary fields obtained by thresholding at the ( ±1σ) contours of the latent field, indicating uncertainty in the interface loca-tion. The pushforward posterior is shown in green and the pCN posterior in blue. There is close agreement between the pushforward approximation and the pCN posterior in mean response, how-ever, the uncertainties differ near the interfaces.
+
+the need to evaluate likelihoods, construct inverse maps, or compute Jacobian deter-minants, and therefore permits flexible neural-operator parameterizations. A central feature of the proposed construction is the use of Cameron–Martin-informed transport maps. In the infinite-dimensional setting, posterior measures aris-ing in Bayesian inverse problems are absolutely continuous with respect to the prior under standard assumptions. The learned approximation should therefore preserve this measure-theoretic structure. By parameterizing the transport map as the identity plus a perturbation in the Cameron–Martin space, implemented through the action of C1/2, the proposed map is designed to respect the support and absolute-continuity properties of the prior. The numerical experiments show that this structure improves agreement with pCN reference posteriors, particularly in higher KL modes, and pre-AMORTIZED ENERGY-BASED BAYESIAN INFERENCE 17 
+
+Fig. 7 . Projection of the wave-equation posterior samples onto the first six KL modes. The pCN posterior is shown in blue, the pushforward posterior T (· ; y†)#ρ in red, and the prior in black. The close agreement between pCN and the pushforward approximation indicates that the learned map captures the dominant posterior structure. 
+
+Fig. 8 . Per-mode Wasserstein error for the wave-equation inverse problem, computed in the KL basis of the latent Gaussian prior. The Cameron–Martin-informed map gives smaller errors than the baseline without C1/2, especially in higher modes. 
+
+vents the learned map from introducing components outside the support of the prior, such as the excluded constant mode in the PDE examples. The numerical results demonstrate the proposed methodology in application to a finite-dimensional nonlinear inverse problem and on two PDE-constrained inverse problems: a Darcy flow inverse problem and a wave-equation inverse problem. In the finite-dimensional example, the learned pushforward captures multimodal poste-18 H. KAVEH, R. BAPTISTA, AND A. STUART 
+
+rior structure. In the PDE examples, the learned transport map produces posterior samples that agree well with pCN reference posteriors in physical space and in the dominant KL modes of the prior. These results indicate that the proposed energy-distance-based training objective, together with the Cameron–Martin-informed pa-rameterization, can provide accurate amortized posterior approximations for nonlin-ear inverse problems involving function-valued unknowns. The main computational benefit of the approach arises in settings where posterior inference must be performed repeatedly for many different observations. The training phase requires an upfront cost: one must generate joint samples, solve the forward model many times, and optimize the parameters of the transport map. However, this cost is paid only once. After training, posterior samples for a new observation y† are obtained by drawing samples from the prior and evaluating the learned map Tθ (· ; y†). This online sampling procedure is much cheaper than running a new MCMC chain, which would require many additional forward solves for each new observation. Thus, the amortized approach is particularly attractive in applications involving repeated inference, such as uncertainty quantification across many data realizations, real-time or near real-time inverse problems, and simulation-based experimental design. 
+
+Appendix A. Gaussian Measure on Hilbert Space. The goal of this sec-tion is to introduce the measure-theoretic background needed to formulate transport maps for infinite-dimensional Bayesian inverse problems, with particular emphasis on Gaussian measures, Cameron–Martin spaces, and absolute continuity with respect to the prior. Let U be a separable Hilbert space with inner product ⟨· , ·⟩ U . A U-valued random variable u is called Gaussian if, for every g ∈ U , the scalar random variable 
+
+⟨g, u ⟩U is Gaussian in R. If E[u] = 0, we say that u is centered. The covariance operator C : U → U is defined by 
+
+⟨g, Ch ⟩U = E⟨g, u ⟩U ⟨h, u ⟩U
+
+, for all g, h ∈ U .
+
+Then C is a self-adjoint, positive semidefinite, and compact operator. By the spectral theorem, there exists an orthonormal basis {ek}k≥1 of U and a sequence of nonnegative eigenvalues {λk}k≥1 with λk → 0 such that Ce k = λkek. For u ∈ U we write 
+
+uk = ⟨u, e k⟩U , and similarly for other elements in U. In this basis, a Gaussian random variable u ∼ N (0 , C ) admits the Karhunen–Lo` eve (KL) expansion [11] 
+
+u =
+
+> ∞
+
+X
+
+> k=1
+
+pλk ξk ek, ξk ∼ N (0 , 1) i.i.d. .
+
+We denote the law of u by N (0 , C ). Associated with ρ = N (0 , C ) is a Hilbert space H ⊂ U , called the Cameron– Martin space, defined by 
+
+H := Range( C1/2).
+
+Equivalently, since C1/2 is a bounded operator on U, the space H consists exactly of elements of the form 
+
+h = C1/2v, v ∈ U ,
+
+and we may hence define the inner product 
+
+⟨h1, h 2⟩H = ⟨C−1/2h1, C −1/2h2⟩U .
+
+In the eigenbasis of C, the Cameron–Martin space can be written as 
+
+H =
+
+(
+
+h =
+
+> ∞
+
+X
+
+> k=1
+
+hkek :
+
+> ∞
+
+X
+
+> k=1
+
+h2
+
+> k
+
+λk
+
+< ∞
+
+)
+
+,AMORTIZED ENERGY-BASED BAYESIAN INFERENCE 19 If 
+
+h =
+
+> ∞
+
+X
+
+> k=1
+
+hkek, g =
+
+> ∞
+
+X
+
+> k=1
+
+gkek,
+
+then the Cameron–Martin inner product is 
+
+⟨h, g ⟩H =
+
+> ∞
+
+X
+
+> k=1
+
+hkgk
+
+λk
+
+,
+
+and in particular 
+
+∥h∥2 
+
+> H
+
+=
+
+> ∞
+
+X
+
+> k=1
+
+h2
+
+> k
+
+λk
+
+.
+
+Since λk → 0, the condition 
+
+> ∞
+
+X
+
+> k=1
+
+h2
+
+> k
+
+λk
+
+< ∞
+
+requires the coefficients hk to decay faster than those of a typical element of U for which {hk}k∈N need only be square summable. Indeed H is compactly embedded into 
+
+U. Consequently, elements of the Cameron–Martin space exhibit smoother behavior than typical realizations drawn from N (0 , C ) and a draw u ∼ N (0 , C ) belongs to H
+
+with probability zero. In the following lemma, we motivate the role of the Cameron– Martin space. Informally, the result shows that if ρh is the translation of ρ by h, then 
+
+ρh is absolutely continuous with respect to ρ only if the shift h lies in the Cameron– Martin space associated with ρ. The proof of the lemma can be found in [6]. 
+
+Lemma A.1 (Cameron–Martin theorem). Let ρ = N (0 , C ) on a separable Hilbert space U, and let h ∈ U . Define the translated measure ρh by 
+
+ρh(A) = ρ(A − h), A ⊂ U Borel .
+
+Then ρh is absolutely continuous with respect to ρ if and only if h ∈ H , where H is the Cameron–Martin space associated with ρ. ⋄
+
+Lemma A.1 identifies the Cameron–Martin space as the class of shifts that pre-serve absolute continuity with respect to the Gaussian prior; Lemma A.2 then recalls that the Bayesian posterior itself is absolutely continuous with respect to the prior, motivating transport maps whose perturbations lie in the Cameron–Martin space. 
+
+Lemma A.2 (Posterior is absolutely continuous with respect to the prior). Let 
+
+ρ ∈ P (U) be the prior, and let ℓ(y† | u) be the likelihood for a fixed observation y† ∈ Y .Assume that 
+
+Z(y†) := 
+
+Z
+
+> U
+
+ℓ(y† | u) ρ(du ) ∈ (0 , ∞).
+
+Then the posterior measure π(· | y†) is absolutely continuous with respect to ρ, and its Radon-Nikodym derivative is 
+
+dπ (· | y†)
+
+dρ (u) = ℓ(y† | u)
+
+Z(y†) .
+
+In particular, for every Borel set A ⊂ U ,
+
+π(A | y†) = 
+
+R 
+
+> A
+
+ℓ(y† | u) ρ(du )
+
+R 
+
+> U
+
+ℓ(y† | u) ρ(du ) .
+
+⋄20 H. KAVEH, R. BAPTISTA, AND A. STUART 
+
+For the proof of this lemma, see [11][Theorem 14]. 
+
+Appendix B. Proof of Lemma 2.1. 
+
+Proof. We begin from the definition of L(θ): 
+
+L(θ) = Ey∼κ
+
+D2
+
+> E
+
+ π(· | y), B θ (· ; y) 
+
+= Ey∼κ
+
+h
+
+2 E(u,u ′)∼π(·| y)⊗Bθ (· ;y)
+
+∥u − u′∥
+
+− E(u,u ′)∼π(·| y)⊗π(·| y)
+
+∥u − u′∥
+
+− E(u,u ′)∼Bθ (· ;y)⊗Bθ (· ;y)
+
+∥u − u′∥i
+
+.
+
+For clarity, we write the objective in integral form: 
+
+L(θ) = 2 
+
+Z
+
+> Y
+
+Z
+
+> U
+
+Z
+
+> U
+
+∥u − u′∥ π(du | y′) Bθ (du ′, y ′) κ(dy ′)
+
+−
+
+Z
+
+> Y
+
+Z
+
+> U
+
+Z
+
+> U
+
+∥u − u′∥ π(du | y′) π(du ′ | y′) κ(dy ′)
+
+−
+
+Z
+
+> Y
+
+Z
+
+> U
+
+Z
+
+> U
+
+∥u − u′∥ Bθ (du, y ′) Bθ (du ′, y ′) κ(dy ′).
+
+We simplify the three terms of the objective function separately. The first term can be written as: 2
+
+Z
+
+> Y
+
+Z
+
+> U
+
+Z
+
+> U
+
+∥u − u′∥ Bθ (du, y ′) γ(du ′, dy ′).
+
+Using the pushforward representation 
+
+Bθ (du, y ′) = Tθ (· ; y′)# μref (dp ),
+
+this becomes 2
+
+Z
+
+> Y
+
+Z
+
+> U
+
+Z
+
+> U
+
+∥Tθ (p; y′) − u′∥ μref (dp ) γ(du ′, dy ′) ,
+
+which is 2E
+
+ p, (u′,y ′)
+
+∼
+
+ μref ⊗γ
+
+
+
+∥Tθ (p; y′) − u′∥
+
+The second term in L(θ) does not depend on θ. The third term in L(θ) can be rewritten using the same pushforward representation: 
+
+−
+
+Z
+
+> Y
+
+Z
+
+> U
+
+Z
+
+> U
+
+∥Tθ (p; y′′ ) − Tθ (p′; y′′ )∥ μref (dp ) μref (dp ′) κ(dy ′′ ),
+
+which is 
+
+−E
+
+ p,p ′,y ′′ 
+
+∼
+
+ μref ⊗μref ⊗κ
+
+
+
+∥Tθ (p; y′′ ) − Tθ (p′; y′′ )∥
+
+Since the second term is constant with respect to θ, minimizing L(θ) is equivalent to minimizing the functional Eq. 2.1. 
+
+Appendix C. Proof of Lemma 2.3. AMORTIZED ENERGY-BASED BAYESIAN INFERENCE 21 
+
+Proof. We begin by expanding the definition of the expected squared energy dis-tance: 
+
+Ey∼κh
+
+D2
+
+> E
+
+ π(· | y), B θ (· ; y)i
+
+= 2 
+
+Z
+
+> Y
+
+Z
+
+> U
+
+Z
+
+> U
+
+∥u − v∥ π(du | y) Bθ (dv ; y) κ(dy )
+
+−
+
+Z
+
+> Y
+
+Z
+
+> U
+
+Z
+
+> U
+
+∥u − u′∥ π(du | y) π(du ′ | y) κ(dy )
+
+−
+
+Z
+
+> Y
+
+Z
+
+> U
+
+Z
+
+> U
+
+∥v − v′∥ Bθ (dv ; y) Bθ (dv ′; y) κ(dy ).
+
+The second term depends only on the true posterior distribution and is independent of θ. We denote it by 
+
+C = Ey∼κh
+
+E(u,u ′)∼π(·| y)⊗π(·| y)∥u − u′∥
+
+i
+
+.
+
+We now simplify the first and third terms. Using the disintegration identity 
+
+γ(du, dy ) = π(du | y)κ(dy ),
+
+the first term can be rewritten as 2
+
+Z
+
+> Y
+
+Z
+
+> U
+
+Z
+
+> U
+
+∥u − v∥ π(du | y) Bθ (dv ; y) κ(dy )= 2 
+
+Z
+
+> U×Y
+
+Z
+
+> U
+
+∥u − v∥ Bθ (dv ; y) γ(du, dy )= 2 E(u,y )∼γ h
+
+Ev∼Bθ (· ;y)∥u − v∥
+
+i
+
+.
+
+Similarly, since the third term depends on y but not on the outer sample u, we may insert an expectation over u ∼ π(· | y) without changing its value. Equivalently, using again γ(du, dy ) = π(du | y)κ(dy ), we obtain 
+
+Z
+
+> Y
+
+Z
+
+> U
+
+Z
+
+> U
+
+∥v − v′∥ Bθ (dv ; y) Bθ (dv ′; y) κ(dy )=
+
+Z
+
+> Y
+
+Z
+
+> U
+
+Z
+
+> U
+
+Z
+
+> U
+
+∥v − v′∥ π(du | y) Bθ (dv ; y) Bθ (dv ′; y) κ(dy )=
+
+Z
+
+> U×Y
+
+Z
+
+> U
+
+Z
+
+> U
+
+∥v − v′∥ Bθ (dv ; y) Bθ (dv ′; y) γ(du, dy )= E(u,y )∼γ h
+
+E(v,v ′)∼Bθ (· ;y)⊗Bθ (· ;y)∥v − v′∥
+
+i
+
+.
+
+Substituting these identities into the expansion of the expected squared energy distance gives 
+
+Ey∼κh
+
+D2
+
+> E
+
+ π(· | y), B θ (· ; y)i
+
+= 2 E(u,y )∼γ h
+
+Ev∼Bθ (· ;y)∥u − v∥
+
+i
+
+− E(u,y )∼γ h
+
+E(v,v ′)∼Bθ (· ;y)⊗Bθ (· ;y)∥v − v′∥
+
+i
+
+− C. 22 H. KAVEH, R. BAPTISTA, AND A. STUART 
+
+We can now group the first two terms inside the same outer expectation: 
+
+Ey∼κh
+
+D2
+
+> E
+
+ π(· | y), B θ (· ; y)i
+
+= 2 E(u,y )∼γ
+
+"
+
+Ev∼Bθ (· ;y)∥u − v∥ − 12 E(v,v ′)∼Bθ (· ;y)⊗Bθ (· ;y)∥v − v′∥
+
+#
+
+− C. 
+
+By the definition of the energy score 
+
+ES (ϱ, u ) = Ev∼ϱ∥u − v∥ − 12 E(v,v ′)∼ϱ⊗ϱ∥v − v′∥,
+
+and therefore, with ϱ = Bθ (· ; y), 
+
+ES  Bθ (· ; y), u  = Ev∼Bθ (· ;y)∥u − v∥ − 12 E(v,v ′)∼Bθ (· ;y)⊗Bθ (· ;y)∥v − v′∥.
+
+Thus, 
+
+Ey∼κh
+
+D2
+
+> E
+
+ π(· | y), B θ (· ; y)i
+
+= 2 E(u,y )∼γ h
+
+ES  Bθ (· ; y), u i
+
+− C. 
+
+Since C is independent of θ, minimizing the expected energy score is equivalent to minimizing the objective defined in Eq. (1.2). 
+
+Appendix D. Scaling with Data and Model Size. 
+
+We investigate how the accuracy of the learned transport map scales with (i) the size of the training dataset and (ii) the number of parameters in the neural network model. The accuracy is measured by the expected squared energy distance between the learned pushforward distribution and the true posterior distribution, averaged over observations y† ∼ κ:
+
+E = Ey†∼κ
+
+D2
+
+> E
+
+ π(· | y†), B θ (· ; y) .
+
+Here ˜ πθ (· | y†) denotes the posterior approximation produced by the learned transport map. In the main text, we use the prior ρ as the reference measure and learn a map of the form 
+
+Tθ (· ; y)#ρ ≈ π(· | y).
+
+In this appendix, we also compare with an alternative construction in which the reference samples are drawn from the joint distribution γ. In this case, the map takes both the reference pair and the target observation as input and is trained to push forward samples from the joint distribution toward the posterior corresponding to y†.Thus, the scaling study compares two transport formulations: one using the prior as the reference measure and one using the joint distribution as the reference measure. 
+
+Scaling with data size. We first fix the neural network architecture and vary the number of training samples K. Fig. 9 shows the error as a function of K for several model architectures and for both choices of reference measure. In both cases, the error decreases approximately as a power law in the number of training samples, with behavior consistent with 
+
+E(K) ∝ K−1/2.
+
+This is the typical statistical convergence rate associated with Monte Carlo-type es-timators and empirical risk minimization. The observed scaling therefore suggests that, for the specific fixed model architecture considered here and for the range of KAMORTIZED ENERGY-BASED BAYESIAN INFERENCE 23       
+
+> Fig. 9 .Scaling of the validation energy-distance error with the number of training samples K.Results are shown for several neural network architectures. The error decreases approximately at the Monte Carlo rate K−1/2, indicating that, for the specific fixed model architecture considered here and for the range of Kstudied here, the dominant error is statistical error from finite training data of size K.
+
+studied here, the dominant error is statistical error from finite training data of size 
+
+K. 
+
+Scaling with model size. We next fix the training set size and vary the number of trainable parameters by increasing the width of the neural network while keeping the depth fixed. Fig. 10 shows the validation error as a function of the number of parameters, again comparing the two reference-measure choices. For small models, increasing the number of parameters reduces the error, indicating that the approx-imation capacity of the neural network is limiting performance. Beyond a certain model size, the error saturates, suggesting that the error is no longer dominated by approximation error but instead by the finite amount of training data. Together, these experiments suggest two distinct regimes. When the model is too small, the error is approximation-limited, and increasing the number of parameters substantially improves the posterior approximation. Once the model is sufficiently expressive, the error becomes data-limited, and increasing the number of parameters provides little additional benefit unless the number of training samples is also in-creased. These results highlight the trade-off between model complexity and dataset size in learning transport maps for Bayesian inference. They also show that the two choices of reference measure considered here—the prior and the joint distribution of parameters and observations—lead to similar errors, suggesting that both choices provide comparable posterior approximations in this example. 
+
+Acknowledgments. RB is supported by the NSERC Discovery Grant program. AMS is supported by a Department of Defense (DoD) Vannevar Bush Faculty Fel-lowship (award N00014-22-1-2790), which also supports HK.                        
+
+> REFERENCES [1] S. Arridge, P. Maass, O. ¨Oktem, and C.-B. Sch¨ onlieb ,Solving inverse problems using data-driven models ,Acta Numerica, 28 (2019), pp. 1–174, https://doi.org/10.1017/S0962492919000059, https://www.cambridge.org/core/ journals/acta-numerica/article/solving-inverse-problems-using-datadriven-models/ CE5B3725869AEAF46E04874115B0AB15?utm source=chatgpt.com (accessed 2026-05-03).
+
+24 H. KAVEH, R. BAPTISTA, AND A. STUART 
+
+Fig. 10 . Scaling of the validation energy-distance error with the number of trainable parameters. For fixed training set sizes, the error decreases as the model size increases and then saturates, indicating a transition from an approximation-limited regime to a data-limited regime. 
+
+[2] E. Bach, R. Baptista, D. Sanz-Alonso, and A. Stuart , Machine Learning for Inverse Problems and Data Assimilation , Oct. 2025, https://doi.org/10.48550/arXiv.2410.10523, http://arxiv.org/abs/2410.10523 (accessed 2025-11-14). arXiv:2410.10523 [stat]. [3] R. Baptista, B. Hosseini, N. B. Kovachki, and Y. M. Marzouk , Conditional sampling with monotone GANs: From generative models to likelihood-free inference , SIAM/ASA Journal on Uncertainty Quantification, 12 (2024), pp. 868–900. [4] R. Baptista, Y. Marzouk, and O. Zahm , On the representation and learning of mono-tone triangular transport maps , Foundations of Computational Mathematics, 24 (2024), pp. 2063–2108. [5] R. Baptista, A.-A. Pooladian, M. Brennan, Y. Marzouk, and J. Niles-Weed , Condi-tional simulation via entropic optimal transport: Toward non-parametric estimation of conditional Brenier maps , in International Conference on Artificial Intelligence and Statis-tics, PMLR, 2025, pp. 4807–4815. [6] V. Bogachev , Gaussian Measures , vol. 62 of Mathematical Surveys and Monographs, Ameri-can Mathematical Society, Providence, Rhode Island, Sept. 1998, https://doi.org/10.1090/ surv/062, https://www.ams.org/surv/062 (accessed 2026-04-28). [7] V. I. Bogachev, A. V. Kolesnikov, and K. V. Medvedev , Triangular trans-formations of measures , Sbornik: Mathematics, 196 (2005), p. 309, https: //doi.org/10.1070/SM2005v196n03ABEH000882, https://iopscience.iop.org/article/ 10.1070/SM2005v196n03ABEH000882/meta (accessed 2025-09-03). [8] S. Brooks, A. Gelman, G. Jones, and X.-L. Meng , Handbook of Markov Chain Monte Carlo ,CRC press, 2011. [9] L. Cao, J. Chen, M. Brennan, T. O’Leary-Roseberry, Y. Marzouk, and O. Ghattas ,
+
+LazyDINO: Fast, Scalable, and Efficiently Amortized Bayesian Inversion via Structure-Exploiting and Surrogate-Driven Measure Transport , Journal of Machine Learning Re-search, 27 (2026), pp. 1–71, http://jmlr.org/papers/v27/25-0858.html (accessed 2026-04-08). [10] S. L. Cotter, G. O. Roberts, A. M. Stuart, and D. White , MCMC Meth-ods for Functions: Modifying Old Algorithms to Make Them Faster , Sta-tistical Science, 28 (2013), pp. 424–446, https://doi.org/10.1214/13-STS421, https://projecteuclid.org/journals/statistical-science/volume-28/issue-3/ MCMC-Methods-for-Functions--Modifying-Old-Algorithms-to-Make/10.1214/ 13-STS421.full (accessed 2025-07-16). [11] M. Dashti and A. M. Stuart , The Bayesian Approach to Inverse Problems , in Hand-book of Uncertainty Quantification, Springer, Cham, 2017, pp. 311–428, https://doi.org/ 10.1007/978-3-319-12385-1 7, https://link.springer.com/rwe/10.1007/978-3-319-12385-1 7 (accessed 2025-07-23). [12] X. Huan, J. Jagalur, and Y. Marzouk , Optimal experimental design: For-mulations and computations , Acta Numerica, 33 (2024), pp. 715–840, https: //doi.org/10.1017/S0962492924000023, https://www.cambridge.org/core/journals/ acta-numerica/article/optimal-experimental-design-formulations-and-computations/ AMORTIZED ENERGY-BASED BAYESIAN INFERENCE 25 
+
+38BBD0DC1A0386FDF306B6C0167DF7D9 (accessed 2026-05-14). [13] S. Karumuri and I. Bilionis , Learning to solve Bayesian inverse problems: An amortized variational inference approach using Gaussian and Flow guides , Journal of Computational Physics, 511 (2024), p. 113117, https://doi.org/10.1016/j.jcp.2024.113117, http://arxiv. org/abs/2305.20004 (accessed 2026-05-03). arXiv:2305.20004 [stat]. [14] H. Kaveh, J. P. Avouac, and A. M. Stuart , Data assimilation in machine-learned reduced-order model of chaotic earthquake sequences , Geophysical Journal International, 244 (2026), p. ggaf518, https://doi.org/10.1093/gji/ggaf518, https://doi.org/10.1093/gji/ ggaf518 (accessed 2026-04-08). [15] H. Kaveh, P. Batlle, M. Acosta, P. Kulkarni, S. J. Bourne, and J. P. Avouac , Induced Seismicity Forecasting with Uncertainty Quantification: Application to the Groningen Gas Field , Seismological Research Letters, 95 (2023), pp. 773–790, https://doi.org/10.1785/ 0220230179, https://doi.org/10.1785/0220230179 (accessed 2025-04-04). [16] H. Kaveh, O. Dunbar, J.-P. Avouac, and A. M. Stuart , Bayesian Calibration of dynamic models of earthquake sequences using observations from past large earthquakes , (2026), https://eartharxiv.org/repository/view/12419/ (accessed 2026-04-08). [17] Z. Li, N. Kovachki, K. Azizzadenesheli, B. Liu, K. Bhattacharya, A. Stuart, and A. Anandkumar , Fourier Neural Operator for Parametric Partial Differential Equations ,May 2021, https://doi.org/10.48550/arXiv.2010.08895, http://arxiv.org/abs/2010.08895 (accessed 2024-03-12). arXiv:2010.08895 [cs, math]. [18] Y. Marzouk, T. Moselhy, M. Parno, and A. Spantini , An introduction to sampling via measure transport , 2016, pp. 1–41, https://doi.org/10.1007/978-3-319-11259-6 23-1, http: //arxiv.org/abs/1602.05023 (accessed 2026-04-27). arXiv:1602.05023 [stat]. [19] T. A. E. Moselhy and Y. M. Marzouk , Bayesian Inference with Optimal Maps , Journal of Computational Physics, 231 (2012), pp. 7815–7850, https://doi.org/10.1016/j.jcp.2012.07. 022, http://arxiv.org/abs/1109.1516 (accessed 2026-04-27). arXiv:1109.1516 [stat]. [20] H. Mousavi and J. D. Eldredge , Bayesian Inference for Estimating Heat Sources Through Temperature Assimilation , ASME Journal of Heat and Mass Transfer, 147 (2024), https: //doi.org/10.1115/1.4066749, https://doi.org/10.1115/1.4066749 (accessed 2026-04-08). [21] G. Papamakarios , Neural density estimation and likelihood-free inference , arXiv preprint arXiv:1910.13233, (2019). [22] G. Papamakarios, D. C. Sterratt, and I. Murray , Sequential Neural Likelihood: Fast Likelihood-free Inference with Autoregressive Flows , Jan. 2019, https://doi. org/10.48550/arXiv.1805.07226, http://arxiv.org/abs/1805.07226 (accessed 2026-04-28). arXiv:1805.07226 [stat]. [23] S. T. Radev, U. K. Mertens, A. Voss, L. Ardizzone, and U. K¨ othe , BayesFlow: Learning complex stochastic models with invertible neural networks , Mar. 2020, https://arxiv.org/ abs/2003.06281v4 (accessed 2026-04-28). [24] A. M. Stuart , Inverse problems: A Bayesian perspective , Acta Numerica, 19 (2010), pp. 451–559, https://doi.org/10.1017/S0962492910000061, https://www.cambridge. org/core/journals/acta-numerica/article/abs/inverse-problems-a-bayesian-perspective/ 587A3A0D480A1A7C2B1B284BCEDF7E23 (accessed 2026-04-28). [25] A. Taghvaei and B. Hosseini , An optimal transport formulation of Bayes’ law for nonlinear filtering algorithms , in 2022 IEEE 61st Conference on Decision and Control (CDC), IEEE, 2022, pp. 6608–6613. [26] A. Tarantola , Inverse Problem Theory and Methods for Model Parameter Estimation ,Other Titles in Applied Mathematics, Society for Industrial and Applied Mathematics, Jan. 2005, https://doi.org/10.1137/1.9780898717921, https://epubs.siam.org/doi/book/ 10.1137/1.9780898717921 (accessed 2026-04-27). [27] C. Villani , Optimal Transport , vol. 338 of Grundlehren der mathematischen Wissenschaften, Springer, Berlin, Heidelberg, 2009, https://doi.org/10.1007/978-3-540-71050-9, http:// link.springer.com/10.1007/978-3-540-71050-9 (accessed 2026-04-27). [28] J. Wildberger, M. Dax, S. Buchholz, S. Green, J. H. Macke, and B. Sch¨ olkopf , Flow matching for scalable simulation-based inference , Advances in Neural Information Process-ing Systems, 36 (2023), pp. 16837–16864.

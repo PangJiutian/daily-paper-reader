@@ -1,0 +1,371 @@
+Title: Actionable World Representation
+
+URL Source: https://arxiv.org/pdf/2605.18743v1
+
+Published Time: Tue, 19 May 2026 03:05:00 GMT
+
+Number of Pages: 19
+
+Markdown Content:
+2026-5-19 
+
+# Actionable World Representation 
+
+Kunqi Xu q1, Jitao Li 2, Jianglong Ye 3, Tianshu Tang 1, Isabella Liu 3, Sifei Liu 4 and Xueyan Zou q1
+
+> 1
+
+Tsinghua University - IEI Lab, 2CalTech, 3UC San Diego, 4NVIDIA, 
+
+q Equal contribution https://worldstring-iei.github.io/ 
+
+Inspired by the emergent behaviors in large language models that generalized human intelligence, the research community is pursuing similar emergent capabilities within world models, with a emphasis on modeling the physical world. Within the scope of physical world model, objects are the fundamental primitives that constitute physical reality. From humans to computers, nearly everything we interact with is an object. These objects are rarely static; they are actionable entities with varying states determined by their intrinsic properties. While current methods approach object action states either via video generation or dynamic scene reconstruction, none explicitly model this basic element in a unified, principled way to build an actionable object representation. We propose WorldString, a neural architecture capable of modeling the state manifold of real-world objects by learning directly from point clouds or RGB-D video streams. Serving as a versatile digital twin, it acts as a foundational building block for physical world models; thus, we name it WorldString. Sweetly, its fully differentiable structure seamlessly enables future integration with policy learning and neural dynamics. 
+
+Figure 1 | Our method WorldString is a Neural based Interactive Digital Twin of Skinning, Articulable, and Soft objects with state as the prompt input and 3D point cloud as output. 
+
+## 1. Introduction 
+
+Recent breakthroughs in large models have demonstrated strong conceptual-world modeling, but this does not automatically yield grounded physical understanding—motivating the exploration of physical world model. A physical world model serves as an agent’s internal representation of its environment, capturing action-conditioned dynamics to predict future states and observations for planning, reasoning, and action [ 19 ,45 , 46 ]. As illustrated in Fig. 2, the conceptual pipeline of a physical world model fundamentally consists 
+
+Contributions: Kunqi Xu led the data preparation pipeline for the Articulable, Skinning, and Soft Object tasks, including model integration, and conducted all experiments except the Dr.Robot baseline. Xueyan Zou led model development and validation on articulable objects. Jitao Li conducted the Dr.Robot baseline experiments. Sifei Liu, Jianglong Ye, and Isabella Liu contributed to early idea formulation with expertise in 3D representation and robot learning. Tianshu Tang developed the theoretical formulation in the methods section. 
+
+> arXiv:2605.18743v1 [cs.AI] 18 May 2026
+
+of: force interaction, world composition, and the underlying physics engine. Within this hierarchy, the object representation clearly state as the building blocks for physical world model. Physical world models are commonly approached via video generation, neural 3D reconstruction, or physics simulation. Video models deliver high-fidelity, semantically rich rollouts [ 11 , 21 ] but often lack robust physical/3D consistency and controllability [ 5 , 56 ]. Reconstruction models provide 3D-consistent scene representations [ 29 ] yet struggle with dynamic, contact-rich interactions and generalization [33 , 57 ]. Simulation offers physically grounded interventions [ 35 , 54 ] but faces parameterization and sim-to-real gaps [4, 53]. Thus, we seek a representation that is controllable and action-conditioned with minimal sim-to-real gap, while retaining structured rollouts, 3D consistency, and physically grounded interventions. Because physical rollouts are ultimately driven by discrete object states and object–object interactions, we adopt an object-aligned representation as the foundational core of world model. In this paper, we introduce WorldString , a novel actionable world representation designed as a digital twin of the physical environment. We define “actionable” as the inherent capacity to act, interact, and reason. Conceived as a fundamental building block of physical reality, WorldString provides a unified framework capable of modeling the dynamic states of diverse entities—including articulated, skinning, and soft objects—learned directly from real-world data. In summary, we claim the following contributions: 
+
+• We introduce WorldString, an actionable world representation that learns digital twins of real-world objects directly from point clouds or RGB-D video. 
+
+• The WorldString framework provides a novel and unified pipeline that generalizes across articulated, skinning, and soft objects. 
+
+• Extensive quantitative and qualitative evaluations prove WorldString’s effectiveness in actionable object representation and the physical interpretability of its components. 
+
+Figure 2 | Position of object representation under the scope of physical world model. We position object representation 
+
+> 2
+
+## 2. Related Works 
+
+World Models. World models were introduced as learned latent simulators for prediction and control [ 18 ], and continue to scale to diverse domains [ 20 ]. Physical world models extend this idea toward action-conditioned, simulator-like “digital twins” for physical AI [ 1]. Existing approaches are broadly either 
+
+top-down generative , learning to synthesize future experience or interactive worlds [ 12 , 55 ], or bottom-up reconstructive , inferring explicit 3D state for prediction and manipulation [ 37 ], with recent work targeting deformable digital twins from video [ 24 , 52 ]. However, these methods typically model dynamics implicitly (generation) or via dense warps/primitive trajectories (reconstruction), and none explicitly capture object deformation in a correct, unified, and controllable way across articulated, skinned, and soft regimes. 
+
+Dynamic 3D Reconstruction. Neural scene reconstruction via radiance fields was popularized by NeRF [ 40 ] and later accelerated by explicit primitives such as 3D Gaussian Splatting (3DGS) [ 28 ]. While both are effective for learning 3D representations from video under static-scene assumptions, real scenes are often dynamic, prompting many dynamic extensions. Dynamic NeRFs broadly fall into temporal 
+
+methods that condition on time and learn continuous deformations [ 34 , 43 ] and structured-motion 
+
+methods that introduce kinematic priors or structured latents (notably for humans/articulations) [ 13 , 42 ]. Dynamic Gaussian methods similarly include temporal formulations with time-varying Gaussians or persistent tracking [ 38 , 50 ] and more structured/controllable variants via editing or sparse control [ 14 ,22 ]. Overall, these approaches typically model motion as time-/pose-conditioned warps or per-primitive trajectories from a canonical representation, rather than explicit state-transition dynamics. 
+
+Figure 3 | Position of WorldString under the current related work scope. 
+
+Classical Object Modeling. Classical object mod-els range from rigid geometry to increasingly struc-tured deformation. Static rigid shapes are repre-sented by meshes, point clouds, voxels, or implicit fields [ 8, 10 , 17 , 23 ]. Articulated rigid objects are mod-eled as kinematic trees of links and joints (e.g., URDF), with motion parameterized by low-DoF joint config-urations [ 2 , 39 , 47 ]. Skinned objects add a skeleton and skinning weights (e.g., LBS) to map joint motion to surface deformation [ 3 , 41 ]. Soft/non-rigid objects exhibit high-DoF, sometimes topology-changing defor-mations and are traditionally handled by physics-based simulation (continuum mechanics/FEM or constraint-based dynamics), which is often costly and hard to infer from vision [ 6 , 9, 16 , 58 ]. Recent physics-informed, video-based digital twins reconstruct de-formable geometry with simulatable physical parameters for forward prediction [ 24 , 52 ]. Overall, these formulations span kinematics, skinning, and physics/elasticity-based deformation, motivating learned models that bridge structure and flexibility [10, 16, 41]. 
+
+## 3. Method 
+
+3.1. Background 
+
+Under the traditional computer vision taxonomy, an image is composed of “things” and “stuff.” In the world-model narrative, a scene is instead partitioned into objects and background; typically, objects are 
+
+> 3
+
+Figure 4 | Visualization of object categories. This figure illustrates the different types of objects modeled in our framework, displaying the ground-truth point clouds and corresponding keypoints selected for each category. actionable, whereas the background remains static. Formally, we can define an actionable object using the following notation: let Ω∗ ⊂ ℝ3 denote the object’s current occupancy in Cartesian space, and let 
+
+Ω0 ⊂ ℝ3 represent its occupancy in canonical base state. An object transition from base state to the state 
+
+𝑢 ∈ U (e.g., joint positions) requires a deformation mapping Φ, where we could formally write as: 
+
+Φ𝑢 : Ω0 → Ω∗, 𝑥 = Φ𝑢 ( 𝑦 ),
+
+which sends a point 𝑦 ∈ Ω0 in the base configuration to its world-space location 𝑥 ∈ Ω∗ under state 𝑢 .In the real world, actionable objects could be summarized into three categories: Articulated Objects ,
+
+Skinned Objects , Soft Objects . Each of the object kind has its own state transition form as shown in Fig. 4. 
+
+Forward Kinematics (FK). An articulated rigid object is a kinematic tree with joint positions 𝑞 ∈ ℝ𝑑 𝑞 , i.e., 
+
+𝑢 = 𝑞 . For link 𝑖 , let 𝐴 𝑖 (𝑞 𝑖 ) ∈ 𝑆𝐸 (3) be the transform from its parent to 𝑖 , and 𝑇 𝑗 (𝑞 ) = Î𝑖 ∈ P ( 𝑗 ) 𝐴 𝑖 (𝑞 𝑖 ) the world transform of link 𝑗 , where P ( 𝑗 ) is the path from root 0 to 𝑗 . With rest pose 𝑞 0 and Ω0 partitioned into link-attached subsets Ω( 𝑗 ) 
+
+> 0
+
+, forward kinematics yields the piecewise-rigid deformation: 
+
+Φ𝑢 ( 𝑦 ) =  𝑇 𝑗 (𝑞 )𝑇 𝑗 (𝑞 0)−1 ⊙ 𝑦, 𝑦 ∈ Ω( 𝑗 ) 
+
+> 0
+
+,
+
+mapping 𝑦 from world to link 𝑗 ’s local frame via 𝑇 𝑗 (𝑞 0)−1 and back via 𝑇 𝑗 (𝑞 ).
+
+Linear Blend Skinning (LBS). A skinned object is driven by the same bone transforms {𝑇 𝑗 (𝑞 )} as FK, along with skinning weights 𝑤 𝑗 : Ω0 → [ 0, 1] satisfying Í𝑗 𝑤 𝑗 ( 𝑦 ) = 1. LBS deforms a point as the weighted sum of its rigidly transformed positions under each bone: 
+
+Φ𝑢 ( 𝑦 ) =∑︁ 
+
+> 𝑗
+
+𝑤 𝑗 ( 𝑦 )  𝑇 𝑗 (𝑞 ) 𝑇 𝑗 (𝑞 0)−1 ⊙ 𝑦, 𝑦 ∈ Ω0.
+
+Soft Object Jacobian. The deformation of a soft object is described by a state 𝑢 ∈ ℝ𝑛 𝑢 (e.g., nodal displacements in FEM). As Φ𝑢 obtained from physics simulation typically has no closed form, a classical 
+
+> 4
+
+Figure 5 | WorldString model pipeline. Our fully differentiable architecture learns an actionable world representation by optimizing canonical embeddings and cascaded transformers to reconstruct the target object state. approximation is the first-order Taylor linearization around a nominal state ¯𝑢 : 
+
+> Φ¯𝑢 +Δ𝑢
+
+( 𝑦 ) ≈ Φ¯𝑢 ( 𝑦 ) + 𝐽 Φ ( 𝑦 ; ¯ 𝑢 ) Δ𝑢, 
+
+where 𝐽 Φ ( 𝑦 ; 𝑢 ) ≜ 𝜕 Φ𝑢 ( 𝑦 )/ 𝜕𝑢 ∈ ℝ3×𝑛 𝑢 is the Jacobian, measuring how the world-space position of the material point 𝑦 changes linearly under an infinitesimal perturbation of the soft state. 
+
+3.2. Formulation 
+
+To model actionable objects from 3D or RGB-D data, we translate the physical formulation into a fully differentiable architecture: the canonical base state Ω0 is parameterized as learnable embeddings  
+
+> 𝜔 0
+
+∈ ℝ𝑙 1 ×𝑑 1 (𝑙 is embedding number, and 𝑑 is embedding dimension), the dynamic state 𝑢 as sparse structural keypoints 𝐾 ∈ ℝ𝑙 2 ×𝑑 1 , and the deformation mapping Φ𝑢 as learnable transformer layers Φ.The deformation logic Φ is factorized into a two-stage transformer architecture. First, the State Trans-former Φ𝑠 utilizes cross-attention to condition the canonical base embeddings 𝜔 0 on the dynamic keypoint state 𝐾 , computing the intermediate state embeddings 𝑍 𝑠 ∈ ℝ𝑙 1 ×𝑑 2 : 𝑍 𝑠 = Φ𝑠 (𝜔 0, 𝐾 ). This operation injects localized keypoint constraints, effectively grounding the canonical geometry in the current pose. Subsequently, to propagate these localized deformations and enforce global structural coherence across the object manifold, the Object Transformer Φ𝑜 applies self-attention over 𝑍 𝑠 : 𝑍 obj = Φ𝑜 (𝑍 𝑠 ), yielding the structured embeddings 𝑍 obj ∈ ℝ𝑙 1 ×𝑑 3 , which comprehensively encapsulate the fully deformed object within the latent space. While the structured embeddings 𝑍 obj implicitly capture the deformed state, they reside in an uninter-pretable latent space. To recover the explicit object geometry in Cartesian space Ω∗, we employ the Voxel Transformer Φ𝑣 . We construct spatial queries 𝑄 (𝑥 ) from continuous 3D coordinates 𝑥 ∈ ℝ3 via positional encoding. The Voxel Transformer cross-attends these spatial queries with 𝑍 obj to predict the continuous occupancy field: 𝑂 (𝑥 ) = Φ𝑣 (𝑄 (𝑥 ), 𝑍 obj ), where 𝑂 (𝑥 ) ∈ [ 0, 1] represents the probability that the point 𝑥 
+
+belongs to the object. By densely querying the workspace, we can extract the explicit voxel grid of the deformed object. During training, we randomly sample a set of spatial points 𝑥 𝑖 ∈ ℝ3 within the workspace, whereas during evaluation, we exhaustively query a dense voxel grid to reconstruct the complete object geometry. The framework is optimized end-to-end using a Binary Cross-Entropy (BCE) loss. Through this continuous occupancy prediction, we complete the fully differentiable pipeline, successfully mapping the implicit canonical base state Ω0 and sparse keypoints to the explicitly rendered target state Ω∗.
+
+> 5
+
+3.3. Generalization 
+
+In the following paragraphs, we demonstrate that the proposed WorldString model serves as a unified generalization of Forward Kinematics (FK), Linear Blend Skinning (LBS), and soft object Jacobians. 
+
+Sufficiency of Keypoints for Geometry Recovery We attach 𝐾 keypoints to the canonical object at locations {𝜉 𝑖 }𝐾 𝑖 =1 ⊂ Ω0 and observe their world positions Φ𝑢 (𝜉 𝑖 ) ∈ ℝ3 under state 𝑢 .For FK and LBS, Φ𝑢 is determined by per-link/bone rigid transforms, which are uniquely identified from at least 3 non-collinear keypoints per link/bone. For soft objects, let 𝑑 𝑢 ( 𝑦 ) = Φ𝑢 ( 𝑦 ) − 𝑦 be the displacement field, assumed 𝐿 -Lipschitz: ∥𝑑 𝑢 ( 𝑦 ) − 𝑑 𝑢 ( 𝑦 ′)∥ ≤ 
+
+𝐿 ∥ 𝑦 − 𝑦 ′ ∥ for all 𝑦, 𝑦 ′ ∈ Ω0. If {𝜉 𝑖 }𝐾 𝑖 =1 form a 𝛿 -net of Ω0 (every 𝑦 is within distance 𝛿 of some 𝜉 𝑖 ), then nearest-keypoint approximation ˜𝑑 𝑢 ( 𝑦 ) = 𝑑 𝑢 (𝜉 𝑖 ( 𝑦 ) ) satisfies sup 𝑦 ∈Ω0 ∥𝑑 𝑢 ( 𝑦 ) − ˜𝑑 𝑢 ( 𝑦 )∥ ≤ 𝐿𝛿. Hence, keypoints determine the soft deformation up to an 𝑂 (𝐿𝛿 ) approximation error. 
+
+A unified operator view and attention as its relaxation 
+
+Articulated, skinned, and soft objects share a unified displacement form: a convex combination of keypoint-induced updates. For any point 𝑦 ∈ Ω0,
+
+Φ𝑢 ( 𝑦 ) = 𝑦 +
+
+> 𝐾
+
+∑︁ 
+
+> 𝑖 =1
+
+𝛼 𝑖 ( 𝑦 ; 𝑢 ) 𝑣 𝑖 ( 𝑦 ; 𝑢 ), 𝛼 𝑖 ( 𝑦 ; 𝑢 ) ≥ 0,
+
+> 𝐾
+
+∑︁ 
+
+> 𝑖 =1
+
+𝛼 𝑖 ( 𝑦 ; 𝑢 ) = 1,
+
+where 𝑣 𝑖 ( 𝑦 ; 𝑢 ) ∈ ℝ3 is the displacement contribution from keypoint 𝑖 . FK uses one-hot 𝛼 𝑖 selecting the owning link, and LBS uses fixed 𝛼 𝑖 = 𝑤 𝑖 ( 𝑦 ). For soft objects, while the Jacobian increment 𝐽 Φ ( 𝑦 ; ¯𝑢 )Δ𝑢 
+
+is not convex in general, keypoint sufficiency motivates convex interpolation of the displacement field from keypoint displacements (e.g., FEM shape functions), 𝑑 𝑢 ( 𝑦 ) ≈ Í𝐾 𝑖 =1 𝛼 𝑖 ( 𝑦 ) 𝑑 𝑢 (𝜉 𝑖 ) with 𝛼 𝑖 ( 𝑦 ) ≥ 0 and 
+
+Í𝑖 𝛼 𝑖 ( 𝑦 ) = 1, which fits (3.3) with 𝑣 𝑖 ( 𝑦 ; 𝑢 ) ≡ 𝑑 𝑢 (𝜉 𝑖 ).Cross-attention is a relaxation of (3.3) : it keeps convex mixing but replaces analytic (𝛼 𝑖 , 𝑣 𝑖 ) by learned, state-dependent ones. With 𝑞 ( 𝑦 ) and {𝑘 𝑖 (𝑢 ), ˜𝑣 𝑖 ( 𝑦 ; 𝑢 )} ,
+
+Attn ( 𝑦 ; 𝑢 ) =
+
+> 𝐾
+
+∑︁ 
+
+> 𝑖 =1
+
+˜𝛼 𝑖 ( 𝑦 ; 𝑢 ) ˜𝑣 𝑖 ( 𝑦 ; 𝑢 ), ˜𝛼 𝑖 ( 𝑦 ; 𝑢 ) = softmax 𝑖 
+
+ ⟨𝑞 ( 𝑦 ), 𝑘 𝑖 (𝑢 )⟩ ,
+
+With the residual connection, attention naturally implements the additive form Φ𝑢 ( 𝑦 ) = 𝑦 + Δ( 𝑦 ).
+
+3.4. Application: Real-World Data Acquisition 
+
+To ground the differentiable representation in reality, we develop a pipeline that maps raw multi-view RGB-D observations O = {𝐼 𝑡 , 𝐷 𝑡 }𝑇 𝑡 =0, where 𝐼 𝑡 and 𝐷 𝑡 denote the RGB images and depth maps at frame 𝑡 ,to a sequence of paired volumetric states and keypoints S = {(V 𝑡 , K𝑡 )} 𝑇 𝑡 =0.
+
+Dense 3D Tracking. Following PhysTwin [25], we segment the object using Grounded-SAM2[44] and track dense pixels via CoTracker[ 26 ]. By unprojecting these 2D trajectories into 3D using the depth maps 
+
+𝐷 𝑡 and camera intrinsics, we obtain a temporal sequence of dense 3D point clouds P𝑡 = {p𝑖,𝑡 ∈ ℝ3}𝑁 𝑖 =1.Here, 𝑖 denotes the identity index of a consistently tracked point across all frames, ensuring temporal correspondence. 
+
+Geometric Initialization and Anchoring. For the initial frame 𝑡 = 0, a canonical mesh M0 is generated via TRELLIS[ 51 ] and refined to fit P0 through coarse-to-fine registration. We define the structural anchors 
+
+> 6
+
+Figure 6 | WorldString model learning from RGB-D video data. The figure shows the processed data from PhysTwin [ 24 ], including the raw video frames, depth maps, and masked object correspondences. by selecting a sparse set of keypoints K0 ⊂ P 0 via Farthest Point Sampling (FPS). These keypoints K𝑡 are naturally propagated through time following the tracked displacements in P𝑡 , ensuring a fixed relative topology on the object manifold. 
+
+Vertex Warping and Voxelization. The sequence of dense volumetric targets V𝑡 is generated by warping the canonical mesh M0 to each frame 𝑡 . For each vertex v ∈ M 0, its position at time 𝑡 is computed via displacement interpolation: v𝑡 = v0 +∑︁  
+
+> 𝑗 ∈ N ( v)
+> 𝑤 𝑗
+
+(p𝑗,𝑡 − p𝑗, 0)
+
+where N ( v) denotes indexs of the 𝑘 -nearest tracking points in P0 for v, and 𝑤 𝑗 are skinning weights derived from inverse-distance weighting. The warped mesh M𝑡 is then voxelized to form the occupancy target V𝑡 ∈ { 0, 1}𝑅 3
+
+.
+
+Cross-Sequence Alignment. To aggregate diverse videos, we enforce cross-sequence consistency of K
+
+using RoMa[ 15 ]. By establishing pixel correspondences between initial frames of different sequences, we anchor a unified keypoint set across the entire dataset, enabling the AWR model to learn from various interaction trajectories within a consistent structural coordinate system. 
+
+## 4. Experiments 
+
+4.1. Reconstruction of Complex 3D Rigid Shapes 
+
+To evaluate WorldString’s fundamental geometric modeling capacity, we first assess the reconstruction of complex rigid objects, including the Utah Teapot , Stanford Bunny , Armadillo , and Lucy [ 7, 30 , 31 , 49 ]. While this setup involves only a single pose, it serves as a rigorous test for fitting intricate topologies. As visualized in Table 1, our model accurately captures the global manifold and distinctive features of these benchmarks. In the error gradient maps, blue regions indicate near-perfect alignment with the ground truth, while pink highlights localized spatial deviations. The results demonstrate that WorldString recovers the overall structure with high fidelity, with minor discrepancies appearing only in extremely fine-grained crevices and high-curvature furrows. This provides a solid geometric foundation for the subsequent experiments. 
+
+> 7
+
+Table 1 | Results of WorldString rigid shape reconstruction.                                           
+
+> Utah Teapot Stanford Bunny Armadillo Lucy Object Easy Medium Hard Hard
+> Ground Truth
+> Qualitative
+> Quantitative IoU ↑𝐹 1↑P ↑ R ↑ IoU ↑𝐹 1↑P ↑ R ↑ IoU ↑𝐹 1↑P ↑ R ↑ IoU ↑𝐹 1↑P ↑ R ↑
+> 92.17 95.92 92.66 99.42 75.38 85.96 75.87 99.15 67.36 80.50 67.76 99.12 70.20 82.49 70.74 98.93
+
+4.2. Baselines 
+
+In baseline selection, we implement two retrieval-based baselines for all kinds of objects, Dr. Robot for Articulated objects, NSDP for Skinning-based humans and animals, and HALO for human hand: 
+
+• Nearest Neighbor (NN): We compress the training set by clustering the keypoint trajectories into 𝐾 
+
+centroids using the K-means algorithm. For each centroid, the training frame closest to the cluster center is stored. The total disk space occupied by the stored states in the baselines is restricted to not exceed the size of our trained WorldString model weights. At test time, given a new keypoint input, the model retrieves the shape point cloud from the stored state that has the most similar keypoint configuration. 
+
+• Optimized NN (Optim. NN): Building upon the NN baseline, this approach further refines the retrieved shape to accommodate unseen poses. After identifying the nearest stored state, we apply Inverse Distance Weighting(IDW) to interpolate the deformation field across the entire shape. 
+
+• Dr. Robot [32 ]: A differentiable articulated robot renderer that represents appearance with 3D Gaussian splatting in a canonical configuration and deforms it with kinematics-aware linear blend skinning and differentiable forward kinematics. We use it for articulated rigid objects. 
+
+• NSDP [48 ]: Neural Shape Deformation Priors predicts mesh deformations from sparse user handles by learning a composition of local surface deformations with transformer-based deformation networks and latent codes anchored in 3D space. We use it as a learned deformation prior for skinning-based humans and animals. 
+
+• HALO [ 27 ]: A skeleton-driven neural occupancy model that maps 3D hand joint locations to an implicit surface of the posed hand, enabling dense geometry from skeletal input alone. We adopt it for human hand experiments. 
+
+> 8
+
+Figure 7 | Qualitative comparison of geometric fidelity between WorldString and a Gaussian Splatting-based approach ( Dr. Robot ) on articulated object reconstruction. 
+
+4.3. Articulated Objects and Robots 
+
+In this section, we verify the how WorldString performs on articulated objects(Xhand, Airbot Play and two IKEA Cabinets). As summarized in Table 2, WorldString consistently outperforms both retrieval-based baselines across various articulated categories. WorldString’s continuous neural field effectively captures the piecewise rigid kinematics of articulated joints. The high IoU and F1-scores indicate that our model maintains the structural integrity of rigid parts during rotation and translation, providing a more coherent representation of joint limits and connectivity compared to baselines. Table 2 | Performance on Articulated Objects. Robot 1 Hand Robot 2 Arm Furniture 21 Furniture 09 Type Articulated Articulated Articulated Articulated Visualization                                                                                     
+
+> Metrics IoU ↑𝐹 1↑P ↑ R ↑ IoU ↑𝐹 1↑P ↑ R ↑ IoU ↑𝐹 1↑P ↑ R ↑ IoU ↑𝐹 1↑P ↑ R ↑
+> NN 60.71 75.39 75.63 75.20 30.29 45.52 45.21 45.87 74.21 85.16 85.20 85.13 49.21 65.17 64.69 65.68 Optim. NN 73.41 84.58 85.36 83.88 47.25 63.19 61.94 64.57 31.62 46.65 47.68 45.74 38.18 54.31 52.61 56.19 Dr. Robot 28.53 44.31 48.47 40.84 57.43 72.94 67.87 78.90 57.36 72.90 70.92 75.01 35.84 52.76 54.91 50.78 WorldString 90.28 94.89 90.87 99.28 77.00 87.01 79.55 96.01 90.17 94.83 90.49 99.61 88.98 94.17 89.51 99.35
+
+Comparison with Dr. Robot. WorldString significantly outperforms Dr. Robot in all quantitative geometric metrics. While Dr. Robot captures the general motion of robotic arms, its representation is composed of a collection of discrete Gaussian kernels, which leads to noisy surfaces and difficulty in representing thin, sharp mechanical structures. As shown in Fig. 7, WorldString produces clean surfaces that precisely align with the mechanical components, whereas Dr. Robot exhibits redundant point clusters and hollow regions within the structure. 
+
+4.4. Skinning-based Humans and Animals 
+
+The quantitative results for humans and animals (Table 3) further demonstrate WorldString’s exceptional modeling fidelity. For these categories, we specifically select keypoints that correspond to the skeletal 
+
+> 9
+
+Figure 8 | Qualitative error-map comparison between HALO and WorldString on hand reconstruction. 
+
+Gray: correct occupancy prediction; red: false positives; blue: false negatives. joint positions defined by the SMPL [ 36 ] and SMAL [ 59 ] models. This deliberate alignment of input (skeletal joints) and output (shape of human or animal) spaces enables WorldString to function as a 
+
+direct neural surrogate for these classic parametric models. Our high scores across all benchmarks suggest that WorldString can effectively serve as a topology-agnostic and highly flexible alternative for complex biological skinning. Table 3 | Performance on Skinning-based Humans and Animals. Male Female Horse Hippo Type Skeleton Skeleton Skeleton Skeleton Visualization                                                                                     
+
+> Metrics IoU ↑𝐹 1↑P ↑ R ↑ IoU ↑𝐹 1↑P ↑ R ↑ IoU ↑𝐹 1↑P ↑ R ↑ IoU ↑𝐹 1↑P ↑ R ↑
+> NN 40.31 57.22 57.17 57.29 43.61 60.49 60.23 60.77 35.52 51.55 51.68 51.43 41.21 57.38 57.71 57.07 Optim. NN 55.64 71.29 72.34 70.29 60.35 75.13 75.55 74.72 74.85 85.58 86.15 85.02 79.33 88.43 89.40 87.50 NSDP 67.41 80.46 87.02 75.03 70.13 82.38 93.89 73.45 76.25 86.51 81.69 91.95 86.82 92.91 95.52 90.46 WorldString 83.47 90.99 88.37 93.78 87.83 93.52 91.29 95.86 90.54 95.04 93.70 96.41 92.40 96.05 95.96 96.15
+
+Table 4 | Performance on Hand. Hand Type Skeleton Visualization              
+
+> Metrics IoU ↑𝐹 1↑P ↑ R ↑
+> HALO 96.62 98.28 98.15 98.40 WorldString 96.24 98.08 97.43 98.74
+
+Comparison with NSDP and HALO. NSDP [ 48 ] predict mesh defor-mations from sparse user “handles” which reduce to part of surface shape and position at limb tips and the head. WorldString achieves higher volumetric scores than NSDP across human and animal cat-egories, indicating that a single keypoint-conditioned occupancy decoder transfers more readily across bipeds and quadrupeds than deformation priors centered on handle-driven quadruped setups. HALO [ 27 ] use 3D joint locations drive a skeleton-conditioned neural occupancy field for the posed hand. Table 4 shows that WorldString matches HALO within a narrow margin on IoU, 𝐹 1,precision, and recall—both models attain excellent hand occupancy fidelity under comparable supervision. Fig. 8 complements Table 4 with a qualitative error-map visu-alization on matched hand poses. The remaining red and blue points for both method are sparse and concentrated in fine-scale regions. The practical difference is therefore generality : HALO is restricted to human hands, whereas WorldString applies the same architecture to all kinds of objects and deformation types. 
+
+> 10
+
+4.5. Real World Soft Bodies 
+
+WorldString demonstrates robust performance in modeling high DoF non-linear manifolds. We provide a detailed description in the Appendix for real world data acquisition. In Table 5, we observe a nuanced result for the Rope category: The Optim. NN baseline achieves competitive scores in certain metrics. This is attributed to the relatively low-dim deformation space of a short rope, where the combination of state retrieval and IDW-based local refinement can accurately approximate simple bending motions. However, for more complex soft interactions where deformation is non-homogeneous, WorldString ’s learned implicit representation proves more capable of preserving volume and surface consistency. Table 5 | Performance on Soft Objects. Doll Cloth Rope Type Deformable Deformable Deformable Visualization                                                    
+
+> Metrics IoU ↑𝐹 1↑P ↑ R ↑ IoU ↑𝐹 1↑P ↑ R ↑ IoU ↑𝐹 1↑P ↑ R ↑
+> NN 44.90 59.78 60.00 59.76 46.80 61.58 62.42 61.59 61.27 74.55 74.22 74.89 Optim. NN 61.58 75.22 74.13 76.68 41.91 56.47 58.50 54.71 79.64 88.65 87.80 89.55 WorldString 82.80 90.59 84.92 97.07 68.68 81.43 71.20 95.09 78.34 87.85 81.94 94.68
+
+4.6. Effectiveness and Robustness on Noisy Sensor Observations 
+
+Figure 9 | Qualitative visualization of structural completion in our gap study. A critical concern is whether the real world data acquisition pipeline introduces significant noise or systematic bias that hinders the model’s learning. If the WorldString cannot handle such inherent sen-sor imperfections, scaling up to real-world objects would be completely infeasible. To address this, we evaluate WorldString’s robustness through a pro-gressive analysis: from an in-silico gap study to real-world observations. 
+
+Quantifying the Sensor Gap and Structural Com-pletion. 
+
+Since obtaining perfect ground-truth (GT) geometry in real-world settings is physically impossible, we first conduct a validation study. We replicate the multi-view RGB-D capture pipeline within a physics simulator to generate "Sim-Sensor" data, which is then compared against the simulator’s native "Sim-GT" geometry using a robot arm. As presented in Table 6, we evaluate the quantitative performance of WorldString trained on these two data sources. Crucially, while the sensor-fusion process inevitably introduces discretization artifacts, the 𝐹 1 score does 
+
+> 11
+
+Figure 10 | Visualization of WorldString’s robust predictions on real-world cloth sequences. Green, red, and blue denote true positives, false positives, and false negatives, respectively. The visualization shows that some of the false positives points are an auto completion of the missing parts. not suffer a catastrophic collapse. This indicates that the model successfully avoids representation collapse and still captures the essential actionable manifold despite the degraded input. Table 6 | Quantitative in-silico gap study evaluating the impact of sensor noise. Robot Arm Type Articulated Metrics IoU ↑ 𝐹 1 ↑ P ↑ R ↑         
+
+> Sim-Sensor 60.20 75.15 61.82 95.81 Sim-GT 77.00 87.01 79.55 96.01
+
+Furthermore, our gap study yields an important qualitative find-ing regarding structural completion . As shown in the visualization of the robot arm (Fig. 9), the simulated cameras fail to capture certain parts of the geometry due to self-occlusion. However, WorldString’s prediction successfully completes these missing structures. This demonstrates that training on noisy sensor data actually triggers the model’s emergent capability to recover un-observed geometries. 
+
+Robustness and Material Completion on Real Data. Fig. 10 presents an error map analysis on real-world cloth sequences. The almost complete absence of blue points confirms that the model robustly remembers the full object structure without omissions. More interestingly, we observe a second, distinct type of completion phenomenon. A significant amount of red points are scattered uniformly across the fabric regions. Because real-world RGB-D sensors inherently produce sparse point clouds, the captured "ground truth" used for evaluation often contains artificial "holes" on what is actually a dense material. The presence of these red predictions indicates that WorldString recognizes that the cloth is a continuous, solid fabric and actively fills in the missing sensory gaps, reconstructing a dense manifold that reflects the physical reality. This dual capability—structural completion for occlusions (as seen in the robot arm) and material completion for sensory sparsity (as seen in the cloth)—proves that WorldString leverages its representation to robustly infer physical reality. 
+
+4.7. Interpretability of 3D Shape Tokens Visualization Mechanism. The core of our interpretability analysis lies in attributing each predicted occupancy point to its most influential query tokens. During inference, for any spatial query point s, we identify the top-5 query tokens that assign the highest attention weights to s in the cross-attention layer. To visualize this relationship, we assign a unique, fixed color to each query token in the canonical space. The final color of a predicted 3D point is computed as a weighted sum of the colors of these top-5 tokens, where the weights are derived from their respective normalized attention scores. 
+
+> 12
+
+Figure 11 | Interpretability of WorldString’s latent representation. Each predicted spatial point is colored based on a weighted sum of its top5-attending query tokens. 
+
+Pose-Invariant Part Specialization. As shown in Fig. 11, this visualization reveals a striking emergent property: semantic consistency across varied poses . Despite significant articulations, specific physical parts of the object consistently exhibit the similar color signatures. For instance, in the Xhand sequences, the outer surface of the thumb consistently maintains a pink hue regardless of the gesture. Similarly, in the Human Body reconstructions, both hands are consistently attributed a purple color signature across a wide range of diverse and complex postures. Table 7 | Ablation Study on Robot Arm. We inves-tigate the impact of attention layers ( 𝐿 ), hidden di-mension ( 𝐷 ), spatial resolution ( 𝑅 ), and keypoint density ( 𝐾 ). Model Parameters Metrics                                                                               
+
+> 𝐿 𝐷 𝑅 𝐾 IoU ↑𝐹 1↑P ↑ R ↑
+> 2128 512 377.00 87.01 79.55 96.01 2128 512 15 83.51 91.02 84.79 99.46
+> 1128 512 371.16 83.15 72.61 97.28 1192 512 368.78 81.50 72.34 93.32 264 512 372.54 84.09 74.07 97.24 2192 512 372.86 84.30 74.85 96.49 364 512 373.03 84.41 74.67 97.09 3128 512 370.95 83.01 76.02 91.41 2128 768 374.42 85.33 75.97 97.32 2128 256 382.37 90.33 85.31 95.98
+
+Discussion on Structural Anchoring. These ob-servations provide strong evidence that the World-String model does not treat the object as a holistic, unstructured volume. Instead, each query token learns to specialize in representing a relatively fixed, localized segment of the object’s canoni-cal geometry. This emergent part-based decom-position is a direct result of the cross-attention mechanism between shape tokens and input key-points. By attending to the structural keypoints, the latent queries are effectively "anchored" to the underlying physical manifold. This experiment confirms that our keypoint-driven input provides a robust structural prior, enabling the model to learn a disentangled and interpretable represen-tation of complex actionable objects. 
+
+4.8. Ablation study 
+
+We conduct ablation experiments to analyze the impact of keypoint density, voxel resolution, and network capacity on WorldString’s performance. The quantitative results are summarized in Table 7. 
+
+Keypoint Density. We observe that increasing the number of keypoints per component (e.g., to 15 points) improves reconstruction accuracy. While theoretically three non-collinear points are sufficient 
+
+> 13
+
+to determine the 6-DoF pose of a rigid part, denser keypoints provide redundant but crucial geometric structural information. This extra supervision makes it easier for the model to "anchor" the shape tokens to the underlying manifold, facilitating the learning of intricate local geometries. 
+
+Voxel Resolution. The results indicate that higher spatial resolutions increase the complexity of the occupancy learning task. We observe a slight performance degradation as the voxel resolution increases; however, this decline is marginal. This suggests that while finer grids impose stricter requirements on the model’s boundary-fitting capability, WorldString maintains robust convergence across a reasonable range of resolutions. 
+
+Network Capacity. Interestingly, the ablation study reveals that merely increasing the network’s overall parameter count or architectural depth does not monotonically yield better results for specific object categories. For instance, as detailed in Table 7, elevating the hidden dimension ( 𝐷 ) from 128 to 192, or increasing the number of attention layers ( 𝐿 ) from 2 to 3, actually degrades overall performance across key metrics like Intersection over Union (IoU) and 𝐹 1 scores. This implies that for a given actionable manifold, there exists an optimal capacity threshold. Pushing the model beyond this limit introduces unnecessary complexity, which likely leads to diminishing returns or subtle overfitting—where the network begins to memorize specific training configurations rather than learning generalizable, robust geometric features. Consequently, our current baseline architecture strikes a highly favorable balance; it secures the necessary representation power to accurately model complex object interactions while preserving the computational efficiency required for practical deployment. 
+
+## 5. Conclusion 
+
+In this paper, we introduced WorldString, a unified, keypoint-driven actionable object representation. By mathematically demonstrating that classical kinematics (FK), linear blend skinning (LBS), and soft-body Jacobians can all be relaxed into a unified residual attention mechanism, we bridged the gap between rigorous physical priors and flexible neural implicit fields. Extensive experiments demonstrate that WorldString successfully models the intricate deformation manifolds of all kinds of objects under a single, topology-agnostic transformer architecture. Furthermore, our model exhibits remarkable robustness against real-world sensor noise and demonstrates emergent capabilities in structural completion and interpretable part-specialization. 
+
+## References 
+
+[1] Cosmos world foundation model platform for physical ai. Technical report, NVIDIA, 2025. Technical report; available as arXiv:2501.03575. [2] Urdf (unified robot description format). ROS 2 Documentation and ROS Wiki, 2026. 
+
+https://docs.ros.org/en/humble/Tutorials/Intermediate/URDF/URDF-Main.html 
+
+and https://wiki.ros.org/urdf/XML/model (accessed: 2026-03-04). [3] T. Akenine-Möller, E. Haines, N. Hoffman, A. Pesce, M. Iwanicki, and S. Hillaire. Real-Time Rendering .Taylor & Francis, 4th edition, 2018. ISBN 978-1-138-62700-0. [4] E. Aljalbout, J. Xing, A. Romero, I. Akinola, C. R. Garrett, E. Heiden, A. Gupta, T. Hermans, Y. Narang, 
+
+> 14
+
+D. Fox, D. Scaramuzza, and F. Ramos. The reality gap in robotics: Challenges, solutions, and best practices, 2025. URL https://arxiv.org/abs/2510.20808 .[5] H. Bansal, Z. Lin, T. Xie, Z. Zong, M. Yarom, Y. Bitton, C. Jiang, Y. Sun, K.-W. Chang, and A. Grover. Videophy: Evaluating physical commonsense for video generation, 2024. URL https://arxiv. org/abs/2406.03520 .[6] K.-J. Bathe. Finite Element Procedures . K. J. Bathe, Watertown, MA, second edition edition, 2014. [7] J. F. Blinn and M. E. Newell. Texture and reflection in computer generated images. Commun. ACM , 19(10):542–547, Oct. 1976. ISSN 0001-0782. doi: 10.1145/360349.360353. URL https: //doi.org/10.1145/360349.360353 .[8] J. Bloomenthal and C. Bajaj, editors. Introduction to Implicit Surfaces . Morgan Kaufmann, 1997. ISBN 1-55860-233-X. [9] J. Bonet and R. D. Wood. Nonlinear Continuum Mechanics for Finite Element Analysis . Cambridge University Press, 2nd edition, 2008. [10] M. Botsch, L. Kobbelt, M. Pauly, P. Alliez, and B. Lévy. Polygon Mesh Processing . A K Peters, Natick, 2010. [11] J. Bruce, M. D. Dennis, A. Edwards, J. Parker-Holder, Y. Shi, E. Hughes, M. Lai, A. Mavalankar, R. Steigerwald, C. Apps, Y. Aytar, S. M. E. Bechtle, F. Behbahani, S. C. Chan, N. Heess, L. Gonzalez, S. Osindero, S. Ozair, S. Reed, J. Zhang, K. Zolna, J. Clune, N. D. Freitas, S. Singh, and T. Rocktäschel. Genie: Generative interactive environments. In R. Salakhutdinov, Z. Kolter, K. Heller, A. Weller, N. Oliver, J. Scarlett, and F. Berkenkamp, editors, Proceedings of the 41st International Conference on Machine Learning , volume 235 of Proceedings of Machine Learning Research , pages 4603–4623. PMLR, 21–27 Jul 2024. URL https://proceedings.mlr.press/v235/bruce24a.html .[12] J. Bruce, M. D. Dennis, A. Edwards, J. Parker-Holder, Y. Shi, E. Hughes, M. Lai, A. Mavalankar, R. Steigerwald, C. Apps, Y. Aytar, S. M. E. Bechtle, F. Behbahani, S. C. Y. Chan, N. Heess, L. Gonzalez, S. Osindero, S. Ozair, S. Reed, J. Zhang, K. Zolna, J. Clune, N. De Freitas, S. Singh, and T. Rocktäschel. Genie: Generative interactive environments. In Proceedings of the 41st International Conference on Machine Learning , volume 235 of Proceedings of Machine Learning Research , pages 4603–4623, 2024. [13] X. Chen, Y. Zheng, M. J. Black, O. Hilliges, and A. Geiger. Snarf: Differentiable forward skinning for animating non-rigid neural implicit shapes. In Proceedings of the IEEE/CVF International Conference on Computer Vision (ICCV) , 2021. [14] Y. Chen, Z. Chen, C. Zhang, F. Wang, X. Yang, Y. Wang, Z. Cai, L. Yang, H. Liu, and G. Lin. Gaussianeditor: Swift and controllable 3d editing with gaussian splatting. In Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR) , 2024. [15] J. Edstedt, Q. Sun, G. Bökman, M. Wadenbäck, and M. Felsberg. RoMa: Robust Dense Feature Matching. In IEEE Conference on Computer Vision and Pattern Recognition , 2024. [16] K. Erleben, J. Sporring, K. Henriksen, and H. Dohlmann. Physics-based Animation . Charles River Media, Hingham, Mass., 2005. ISBN 1-58450-380-7. 
+
+> 15
+
+[17] M. Gross and H. Pfister, editors. Point-Based Graphics . Morgan Kaufmann, 2007. ISBN 978-0-12-370604-1. [18] D. Ha and J. Schmidhuber. World models, 2018. [19] D. Hafner, J. Pasukonis, J. Ba, and T. Lillicrap. Mastering diverse domains through world models. 
+
+arXiv preprint arXiv:2301.04104 , 2023. URL https://arxiv.org/abs/2301.04104 .[20] D. Hafner, J. Pasukonis, J. Ba, and T. P. Lillicrap. Mastering diverse control tasks through world models. Nature , 640(8059):647–653, 2025. [21] S. Huang, J. Wu, Q. Zhou, S. Miao, and M. Long. Vid2world: Crafting video diffusion models to interactive world models, 2025. URL https://arxiv.org/abs/2505.14357 .[22] Y.-H. Huang, Y.-T. Sun, Z. Yang, X. Lyu, Y.-P. Cao, and X. Qi. Sc-gs: Sparse-controlled gaussian splatting for editable dynamic scenes. In Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR) , 2024. [23] J. F. Hughes, A. van Dam, M. McGuire, D. F. Sklar, J. D. Foley, S. K. Feiner, and K. Akeley. Computer Graphics: Principles and Practice . Addison-Wesley, 3rd edition, 2014. ISBN 978-0-321-39952-6. [24] H. Jiang, H.-Y. Hsu, K. Zhang, H.-N. Yu, S. Wang, and Y. Li. Phystwin: Physics-informed reconstruc-tion and simulation of deformable objects from videos. In Proceedings of the IEEE/CVF International Conference on Computer Vision (ICCV) , 2025. [25] H. Jiang, H.-Y. Hsu, K. Zhang, H.-N. Yu, S. Wang, and Y. Li. Phystwin: Physics-informed reconstruc-tion and simulation of deformable objects from videos, 2025. URL https://arxiv.org/abs/ 2503.17973 .[26] N. Karaev, I. Makarov, J. Wang, N. Neverova, A. Vedaldi, and C. Rupprecht. Cotracker3: Simpler and better point tracking by pseudo-labelling real videos. In Proc. arXiv:2410.11831 , 2024. [27] K. Karunratanakul, A. Spurr, Z. Fan, O. Hilliges, and S. Tang. A skeleton-driven neural occupancy representation for articulated hands. In International Conference on 3D Vision (3DV) , 2021. [28] B. Kerbl, G. Kopanas, T. Leimkühler, and G. Drettakis. 3d gaussian splatting for real-time radiance field rendering. ACM Transactions on Graphics , 2023. [29] B. Kerbl, G. Kopanas, T. Leimkühler, and G. Drettakis. 3d gaussian splatting for real-time radiance field rendering. ACM Transactions on Graphics , 42(4), July 2023. URL https://repo-sam. inria.fr/fungraph/3d-gaussian-splatting/ .[30] V. Krishnamurthy and M. Levoy. Fitting smooth surfaces to dense polygon meshes. In Proceedings of the 23rd Annual Conference on Computer Graphics and Interactive Techniques , SIGGRAPH ’96, page 313–324, New York, NY, USA, 1996. Association for Computing Machinery. ISBN 0897917464. doi: 10.1145/237170.237270. URL https://doi.org/10.1145/237170.237270 .[31] M. Levoy, K. Pulli, B. Curless, S. Rusinkiewicz, D. Koller, L. Pereira, M. Ginzton, S. Anderson, J. Davis, J. Ginsberg, J. Shade, and D. Fulk. The digital michelangelo project: 3d scanning of large statues. In Proceedings of the 27th Annual Conference on Computer Graphics and Interactive Techniques , SIGGRAPH ’00, page 131–144, USA, 2000. ACM Press/Addison-Wesley Publishing Co. 
+
+> 16
+
+ISBN 1581132085. doi: 10.1145/344779.344849. URL https://doi.org/10.1145/344779. 344849 .[32] R. Liu, A. Canberk, S. Song, and C. Vondrick. Differentiable robot rendering, 2024. URL https: //arxiv.org/abs/2410.13851 .[33] R. Liu, A. Canberk, S. Song, and C. Vondrick. Differentiable robot rendering. In P. Agrawal, O. Kroemer, and W. Burgard, editors, Proceedings of The 8th Conference on Robot Learning , volume 270 of Proceedings of Machine Learning Research , pages 117–129. PMLR, 06–09 Nov 2025. URL 
+
+https://proceedings.mlr.press/v270/liu25a.html .[34] Y.-L. Liu, C. Gao, A. Meuleman, H.-Y. Tseng, A. Saraf, C. Kim, Y.-Y. Chuang, J. Kopf, and J.-B. Huang. Robust dynamic radiance fields. In Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR) , 2023. [35] X. Long, Q. Zhao, K. Zhang, Z. Zhang, D. Wang, Y. Liu, Z. Shu, Y. Lu, S. Wang, X. Wei, W. Li, W. Yin, Y. Yao, J. Pan, Q. Shen, R. Yang, X. Cao, and Q. Dai. A survey: Learning embodied intelligence from physical simulators and world models, 2025. URL https://arxiv.org/abs/2507.00917 .[36] M. Loper, N. Mahmood, J. Romero, G. Pons-Moll, and M. J. Black. SMPL: A skinned multi-person linear model. ACM Trans. Graphics (Proc. SIGGRAPH Asia) , 34(6):248:1–248:16, Oct. 2015. [37] G. Lu, B. Jia, P. Li, Y. Chen, Z. Wang, Y. Tang, and S. Huang. Gwm: Towards scalable gaussian world models for robotic manipulation. In Proceedings of the IEEE/CVF International Conference on Computer Vision (ICCV) , pages 9263–9274, October 2025. [38] J. Luiten, G. Kopanas, B. Leibe, and D. Ramanan. Dynamic 3d gaussians: Tracking by persistent dynamic view synthesis. In International Conference on 3D Vision (3DV) , 2024. [39] K. M. Lynch and F. C. Park. Modern Robotics: Mechanics, Planning, and Control . Cambridge University Press, 2017. ISBN 978-1-108-50969-5. [40] B. Mildenhall, P. P. Srinivasan, M. Tancik, J. T. Barron, R. Ramamoorthi, and R. Ng. Nerf: Rep-resenting scenes as neural radiance fields for view synthesis. Communications of the ACM , 65(1): 99–106, 2021. [41] R. Parent. Computer Animation: Algorithms and Techniques . Morgan Kaufmann, 3rd edition, 2012. [42] S. Peng, Y. Zhang, Y. Xu, Q. Wang, Q. Shuai, H. Bao, and X. Zhou. Neural body: Implicit neural representations with structured latent codes for novel view synthesis of dynamic humans. In 
+
+Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR) , 2021. [43] A. Pumarola, E. Corona, G. Pons-Moll, and F. Moreno-Noguer. D-nerf: Neural radiance fields for dynamic scenes. In Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR) , 2021. [44] T. Ren, S. Liu, A. Zeng, J. Lin, K. Li, H. Cao, J. Chen, X. Huang, Y. Chen, F. Yan, Z. Zeng, H. Zhang, F. Li, J. Yang, H. Li, Q. Jiang, and L. Zhang. Grounded sam: Assembling open-world models for diverse visual tasks, 2024. 
+
+> 17
+
+[45] R. Sakagami, F. S. Lay, A. Dömel, M. J. Schuster, A. Albu-Schäffer, and F. Stulp. Robotic world models—conceptualization, review, and engineering best practices. Frontiers in Robotics and AI , 10, 2023. doi: 10.3389/frobt.2023.1253049. URL https://www.frontiersin.org/journals/ robotics-and-ai/articles/10.3389/frobt.2023.1253049/full .[46] M. R. Samsami, A. Zholus, J. Rajendran, and S. Chandar. Mastering memory tasks with world models. In The Twelfth International Conference on Learning Representations (ICLR) , 2024. URL 
+
+https://openreview.net/forum?id=1vDArHJ68h .[47] M. W. Spong, S. Hutchinson, and M. Vidyasagar. Robot Modeling and Control . John Wiley & Sons, 2006. [48] J. Tang, M. Lev, W. Bi, T. Justus, and M. Nießner. Neural shape deformation priors. In Advances in Neural Information Processing Systems , 2022. [49] G. Turk and M. Levoy. Zippered polygon meshes from range images. In Proceedings of the 21st Annual Conference on Computer Graphics and Interactive Techniques , SIGGRAPH ’94, page 311–318, New York, NY, USA, 1994. Association for Computing Machinery. ISBN 0897916670. doi: 10.1145/ 192161.192241. URL https://doi.org/10.1145/192161.192241 .[50] G. Wu, T. Yi, J. Fang, L. Xie, X. Zhang, W. Wei, W. Liu, Q. Tian, and X. Wang. 4d gaussian splatting for real-time dynamic scene rendering. In Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR) , 2024. [51] J. Xiang, Z. Lv, S. Xu, Y. Deng, R. Wang, B. Zhang, D. Chen, X. Tong, and J. Yang. Structured 3d latents for scalable and versatile 3d generation. arXiv preprint arXiv:2412.01506 , 2024. [52] Q. Xu, J. Liu, S. Yu, Y. Wang, Y. Zhou, J. Zhou, J. Cui, Y.-S. Ong, and H. Zhang. Neuspring: Neural spring fields for reconstruction and simulation of deformable objects from videos. In Proceedings of the AAAI Conference on Artificial Intelligence (AAAI) , 2026. arXiv:2511.08310. [53] W. Xu, H. Fu, H. Dong, Z. Zhou, and C. Chen. Deal: Diffusion evolution adversarial learning for sim-to-real transfer. In Advances in Neural Information Processing Systems (NeurIPS) , 2025. URL 
+
+https://openreview.net/forum?id=284GWLFtjU . Poster. [54] X. Yang, Z. Ji, and Y.-K. Lai. Differentiable physics-based system identification for robotic manipula-tion of elastoplastic materials, 2024. URL https://arxiv.org/abs/2411.00554 .[55] H.-X. Yu, H. Duan, C. Herrmann, W. T. Freeman, and J. Wu. Wonderworld: Interactive 3d scene generation from a single image. In Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR) , pages 5916–5926, June 2025. [56] C. Zhang, D. Cherniavskii, A. Tragoudaras, A. Vozikis, T. Nijdam, D. W. E. Prinzhorn, M. Bodracska, N. Sebe, A. Zadaianchuk, and E. Gavves. Morpheus: Benchmarking physical reasoning of video generative models with real physical experiments, 2025. URL https://arxiv.org/abs/2504. 02918 .[57] J. Zheng, Z. Zhu, V. Bieri, M. Pollefeys, S. Peng, and I. Armeni. Wildgs-slam: Monocular gaussian splatting slam in dynamic environments. In Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR) , pages 11461–11471, June 2025. 
+
+> 18
+
+[58] O. C. Zienkiewicz, R. L. Taylor, and D. D. Fox. The Finite Element Method for Solid and Structural Mechanics . Elsevier/Butterworth-Heinemann, Amsterdam, 7th edition, 2014. [59] S. Zuffi, A. Kanazawa, D. Jacobs, and M. J. Black. 3D menagerie: Modeling the 3D shape and pose of animals. In IEEE Conf. on Computer Vision and Pattern Recognition (CVPR) , July 2017.

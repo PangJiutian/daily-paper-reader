@@ -1,0 +1,3149 @@
+Title: Geometric Dictionary Learning of Dynamical Systems with Optimal Transport
+
+URL Source: https://arxiv.org/pdf/2605.18276v1
+
+Published Time: Tue, 19 May 2026 02:25:23 GMT
+
+Number of Pages: 46
+
+Markdown Content:
+# Geometric Dictionary Learning of Dynamical Systems with Optimal Transport 
+
+Thibaut Germain 
+
+CMAP, Ecole Polytechnique 
+
+thibaut.germain@polytechnique.edu 
+
+Sami Chemlal 
+
+CMAP, Ecole Polytechnique 
+
+samychemlal@yahoo.fr 
+
+Rémi Flamary 
+
+CMAP, Ecole Polytechnique 
+
+remi.flamary@polytechnique.edu 
+
+Vladimir R. Kostic 
+
+Istituto Italiano di Tecnologia & University of Novi Sad 
+
+vladimir.kostic@iit.it 
+
+Karim Lounici 
+
+CMAP, Ecole Polytechnique 
+
+karim.lounici@polytechnique.edu 
+
+## Abstract 
+
+Learning dynamical systems through operator-theoretic representations provides a powerful framework for analyzing complex dynamics, as spectral quantities such as eigenvalues and invariant structures encode characteristic time scales and long-term behavior. However, dynamical operators are typically estimated independently for each system, preventing the discovery of shared structure across related dynam-ics. To address this limitation, we posit that related dynamical systems lie near a low-dimensional manifold in spectral operator space. Based on this hypothesis, we introduce DOODL (Dynamical OperatOr Dictionary Learning ), a framework that learns a dictionary of characteristic spectral dynamics whose combinations ap-proximate this manifold and yield compact, interpretable embeddings of individual systems. Beyond representation learning, DOODL enables fast and interpretable operator estimation from short and partially observed trajectories by constrain-ing the estimation to the learned operator manifold. Experiments on metastable Langevin dynamics and turbulent plasma simulations demonstrate that DOODL scales to highly complex multiscale regimes while capturing characteristic spectral structure governing the dynamics rather than merely fitting trajectories, achieving errors one to two orders of magnitude lower than independent operator estimation methods in challenging low-data regimes. 
+
+## 1 Introduction 
+
+Understanding and modeling dynamical systems (DS) from data is a central problem across scientific and engineering domains. A fundamental challenge is that trajectories of such systems exhibit complex temporal and spatial patterns, arising from multiple interacting time scales and modes. Disentangling these patterns is essential for tasks such as system identification, stability analysis, and control, and is naturally addressed through spectral decomposition , which expresses dynamics 
+
+> Preprint.
+> arXiv:2605.18276v1 [stat.ML] 18 May 2026
+
+in terms of fundamental modes, frequencies, and invariant structures. Koopman operator-theoretic approaches provide a principled framework by describing nonlinear dynamics through linear operators acting on observables [ 31 ]. Spectral quantities such as eigenvalues and invariant subspaces encode meaningful information, including time scales and coherent structures. 
+
+Estimation of dynamical operators. Learning evolution operators and their spectral structure from data faces several challenges. First, accurate estimation typically requires long and informative trajec-tories. Second, the operator acts on an a priori unknown space of observables that is approximated in practice, for instance with finite non-linear embeddings or kernel methods [ 63 , 29 , 30 , 38 , 33 ]. As a result, different systems may rely on different observable spaces, and there is no canonical shared structure across systems, making comparison and transfer ill-posed. These challenges are exacerbated in practical settings with short and partial trajectories, often confined to metastable regions. In such regimes, tasks like system identification or long-term prediction become particularly difficult, especially in high-dimensional systems. 
+
+Dictionary learning. A natural strategy is to exploit shared structure across systems. Dictionary learning (DL) offers a principled framework for representing data as compositions of reusable atoms, yielding low-dimensional and often interpretable structure [ 58 , 45 , 44 , 50 ]. However, classical linear DL methods are designed for static, vector-valued data and do not readily apply to the non-Euclidean space of dynamical operators [ 26 ]. A prior work [ 26 ] partially addresses this limitation by proposing a DL approach for linear dynamical systems parameterized by symmetric matrices. Yet, this formulation is restricted in scope: it neither captures the broader class of dynamical operators nor accounts for their spectral structure. Related ideas have also been explored in Koopman-based approaches, where dictionaries of observables are learned within Extended Dynamic Mode Decomposition (EDMD) frameworks [ 42 ]. However, these methods remain system-specific, operate at the level of observables rather than operators, and do not explicitly learn shared structure across multiple systems. 
+
+The geometry of dynamical systems. In parallel, a growing body of work have investigated simi-larities between dynamical systems through their spectral properties [ 48 , 47 , 27 , 46 , 16 , 3, 62 , 10 ]. Notably, [ 17 ] introduced a geometry based on optimal transport between spectral components, en-abling meaningful notions of distance and interpolation. However, these approaches typically assume fully estimated operators and do not address the problem of learning shared structure from data. 
+
+Research gap. These lines of work expose a fundamental gap: existing methods either provide ex-pressive operator-level representations but remain instance-specific, or enable principled comparison without supporting the learning of shared structure. A unified framework that simultaneously captures shared operator structure while enabling transfer and geometric operations remains absent. 
+
+Contribution. We introduce DOODL ( Dynamical Operator Dictionary Learning ), a novel framework that operates on a population of related dynamical systems. We posit that related dynamical systems lie near a low-dimensional manifold in spectral operator space. DOODL learns a dictionary of characteristic dynamics (atoms) whose combinations approximate the population manifold and yield shallow vector embeddings of individual systems. DOODL leverages the spectral decomposition of operators to bind dynamical properties (modes, time scales, frequencies) to a smooth manifold, enabling interpolation and combination of dynamics while preserving dynamical properties. The dictionary is learned by minimizing an optimal transport loss and provides interpretable vector embeddings with physical insight that can be used for downstream tasks such as system identification. Beyond its embedding capability, DOODL also enables the estimation of dynamical operators from short trajectories by leveraging its learned representation of the population manifold. This behavior is formalized through an oracle inequality (Theorem 1). This estimator opens the door to new applications such as early system identification and detection of regime shifts. Through experiments on metastable Langevin dynamics and plasma turbulence, we show that DOODL captures characteristic spectral structure governing complex dynamics rather than merely fitting trajectories. The Langevin setting provides a controlled environment to study how learning the spectral manifold of related metastable systems improves the estimation of a new operator from short trajectories. The plasma experiments demonstrate that the learned spectral manifold remains effective in highly turbulent, multiscale regimes characterized by complex spectral interactions, where rapid identification from short trajectory prefixes is critical in fusion-relevant settings. 22 Background 
+
+Linear evolution operators & estimation from data. Let (Xt)t≥0 be a flow on a state space X with time-homogeneous dynamics. Under mild assumptions, it admits a linear operator representation on an observable space F ⊂ RX . The transfer operator At : F → F evolves an observable f as 
+
+[Atf ]( x) = E[f (Xt) | X0 = x]. The family (At)t≥0 forms a semigroup with infinitesimal generator 
+
+G = lim t→0+ (At − Id) /t , so that At = exp( tG ) [40, 53]. Assuming F is a separable Hilbert space and G has a discrete spectrum, it admits the decomposition 
+
+G = P 
+
+> j
+
+λj gj ⊗F fj , where (λj , f j , g j ) are eigen-triplets satisfying Gf j = λj fj , G∗gj = λj gj ,and ⟨fj , g j ⟩F = δij . Introducing the spectral projectors Pj = gj ⊗F fj , the evolution reads 
+
+[Atf ]( x) = P 
+
+> j
+
+eλj t⟨f, g j ⟩F fj (x), decomposing f into modes mfj = ⟨f, g j ⟩F fj that evolve as scalar oscillators with timescales τj = ℜ(λj )−1 and frequencies ωj = ℑ(λj )/(2 π). This decompo-sition provides interpretable insights into the system dynamics (e.g., stability, periodicity, mixing), while Pj characterize invariant subspaces and coherent structures. In practice, G is not observed and must be estimated from data. We consider finite-rank estimators bG ∈ S r (H) capturing the dominant spectral components. Details on estimation procedures are deferred to Appendix A.1. 
+
+Spectral comparison of operators via optimal transport. To compare operators, we propose to use the Spectral-Grassmann OT (SGOT) [ 17 ] framework to represent them through their spectral decompositions, capturing both their dynamical time scales and invariant subspaces. Let G ∈ S r (H)
+
+admit G = Pℓi=1 λiPi, where λi are eigenvalues, Pi the associated spectral projectors, and mi =rank( Pi) their multiplicities. We associate to G the spectral measure μ(G) = Pℓi=1  
+
+> mi
+> mtot
+
+δ(λi,P i),with mtot = P 
+
+> i
+
+mi.Given a divergence dE on projections and parameters η ∈ (0 , 1) , q ≥ 1, define the ground cost 
+
+Cqη (( λ, P ), (λ′, P ′)) = η|λ − λ′|q + (1 − η)dq 
+
+> E
+
+(P, P ′). The spectral optimal transport (SGOT) divergence between G and G′ is then 
+
+dS (G, G ′) = min 
+
+> π∈Π( μ(G),μ (G′))
+
+X
+
+> i,j
+
+πij Cqη
+
+ (λi, P i), (λ′ 
+
+> j
+
+, P ′ 
+
+> j
+
+), (1) where Π( μ(G), μ (G′)) denotes the set of couplings between spectral measures. This construction, introduced in [ 17 ], defines a geometry on operators that jointly captures spectral (eigenvalues) and geometric (invariant subspaces) information, enabling meaningful comparison and interpolation between dynamical systems. We refer to Appendix A.2 for further details and properties. 
+
+Dictionary learning. Dictionary learning aims at representing data points (xi)i∈[N ] in a space 
+
+X through a small number of atoms D = ( Dℓ)ℓ∈[K], using a decoding function B such that 
+
+xi ≈ B(αi; D) with αi ∈ RK . The dictionary and codes are typically learned by minimizing a reconstruction objective of the form min D, (αi)
+
+P 
+
+> i
+
+L(xi, B(αi; D)) + R(αi), where L is a data fitting loss and R a regularization term. In classical settings, X is a linear space and B is taken to be linear, B(α; D) = P 
+
+> ℓ
+
+αℓDℓ. While this paradigm has been extended to structured data (e.g., manifolds or probability measures) by replacing linear combinations with barycentric con-structions [ 25 , 22 , 60 , 61 , 54 ], such formulations have not been developed for dynamical systems represented through operators, whose intrinsic structure is spectral and operator-theoretic rather than Euclidean. See Appendix A.3 for more details. 
+
+## 3 Dynamical Operator Dictionary Learning with Optimal Transport 
+
+Problem setting and assumptions. We study dictionary learning of dynamical systems via non-defective operator representations. We assume access to a collection of generators estimated from sampled trajectories, and impose the following conditions: (A1) the relevant spectral components of all operators lie in a common finite-dimensional Hilbert space; (A2) all eigenvalues are simple (i.e., have multiplicity one). Assumption (A2) is standard in practice, since repeated eigenvalues occur with probability zero. Assumption (A1) introduces an approximation bias, which can be mitigated by increasing the expressivity of the function space (e.g., through additional Random Fourier Features or richer neural parameterizations). In the following, we first describe the Riemannian structure of spectral decompositions and the associated optimization tools. We then introduce the Dynamical Operator Dictionary Learning 3(DOODL) framework, and finally propose a dictionary-based estimator that improves performance on short trajectories while providing theoretical guarantees. 
+
+3.1 A Riemanian manifold of spectral decomposition 
+
+We provide a novel characterization of the manifold of spectral decompositions, and derive the tools required to perform gradient-based optimization on this space. While the differential geometry of classical matrix manifolds, including Stiefel and Grassmann manifolds, has been extensively studied and widely applied in optimization and machine learning [ 1, 7], the manifold structure induced by spectral decompositions has been, to the best of our knowledge, studied only in specific settings. The closest related works focus on real-valued symmetric matrices [ 2] or bi-orthogonal square matrices [ 20 ]; however, these settings differ fundamentally from ours, as we consider low-rank complex matrices, leading to a distinct geometric structure. 
+
+A geometric perspective on spectral decomposition. Let H be a complex p-dimensional Hilbert space and Sr (H) being the set of non defective operators with rank at most r and simple spectrum. Any G ∈ S r (H) admits a spectral decomposition with matrix representation: 
+
+G = R Diag( Λ)L∗ s.t. L∗R = Ir , (2) where Λ ∈ Cr are the eigenvalues, (L, R) ∈ (Cp×r )2 are the left/right eigenvectors satisfying the bi-orthogonal condition. However, operators’ spectral decomposition are not unique: under the simple spectrum assumption, eigenvectors are defined up to independent rescaling. This induces a natural equivalence relation on spectral decompositions, corresponding to component-wise actions of 
+
+(C∗)r on eigenvectors. We therefore view spectral decompositions as elements of a quotient space 
+
+M = N /(C∗)r s.t. N = {(Λ, L, R) | L∗R = Ir } , (3) where N denotes the space of eigenvalues and bi-orthogonal eigenvectors. Endowed with this quotient structure, M admits a smooth manifold structure, and Sr (H) can be identified with M. All technical details regarding the construction of N and M are deferred in Appendix B. 
+
+Optimization on the manifold of spectral decomposition. To enable optimization over M, we endow it with a Riemannian metric inherited from the ambient space N . We consider a metric that is invariant under the action of (C∗)r , ensuring that it is well defined on the quotient manifold M. This construction yields consistent notions of tangent spaces, gradients, and vector transports. In practice, optimization proceeds via Riemannian gradient methods: Euclidean gradients are projected onto the tangent space, and updates are mapped back to the manifold through a suitable retraction. From a computational standpoint, given the Euclidean gradient, a Riemannian gradient step has complexity 
+
+O(r3 + r2n2) corresponding to matrix inversions and multiplications. In the typical low-rank regime (r ≪ n), the inversion cost is negligible, and the overall complexity is effectively governed by the matrix multiplications, making the approach suited for large-scale optimization. We defer the explicit expressions of the metric, tangent space, gradient projection, and retraction to Appendix B. 
+
+3.2 Dynamical Operator Dictionary Learning (DOODL) 
+
+For conciseness of notation, we denote by G the matrix representation of an operator G ∈ S r (H),and by G = ( Λ, L, R) ∈ N its spectral decomposition 
+
+Problem formulation & data fitting loss. Given N operators with spectral decompositions 
+
+{Gi}i∈[N ] ⊂ N , we aim to learn a dictionary of d atoms G ∈ N d by solving 
+
+min    
+
+> {αi}i∈[N]⊂∆d−1,G∈N d
+
+1
+
+N
+
+X  
+
+> i∈[N]
+
+dS (B(αi, G), Gi) , (4) where αi ∈ ∆d−1 are the coefficients associated to the operator atom Gj in the dictionary G and 
+
+∆d−1 the (d−1) -simplex, and B is the model reconstructing the operator from its coefficients and the dictionary. The data fitting loss dS corresponds to the optimal transport divergence defined in eq. (1), with a cost function parametrized with q = 2 and a spectral projector divergence dE that can be chosen depending on the learning task. The dictionary learning problem 4 aims to minimize reconstruction error of operators parametrized and compared through their spectral decompositions. Unlike classical dictionary learning which includes a sparsity regularization term, we constrain coefficients to lie in the simplex, yielding convex combinations of atoms. 4Reconstruction model. The goal of the reconstruction model is to recover a spectral decomposition from coefficients α given a dictionary G. Classical DL approaches rely on a linear reconstruction, i.e., a weighted sum of dictionary atoms [ 45 , 44 ]. While natural and effective for linear operators, such models fail to capture the nature of evolution operator, as shown by our numerical experiments. In contrast, the SGOT divergence eq. (1) naturally compares evolution operators through their spectral decompositions [ 17 ] suggesting a nonlinear DL strategy at the level of distributions, where reconstruction is performed via Wasserstein barycenters. Such approaches, based on free-support optimal transport barycenters [ 14 ], have been explored in [ 54 ]. However, despite their geometric fidelity, these methods have substantial computational overhead limiting their practical applicability. A discussion on Wassersterin barycenter with SGOT can be found in Appendix C.1. In a similar fashion, DL methods on Riemannian manifolds [ 12 , 41 , 23 ], typically consider approximation of geodesic barycenters as reconstruction models to avoid the computational burden of Riemannian geometry [25]. Our approach combine the strength of existing methods; we propose a nonlinear model that performs a linear combination of spectral components followed by a projection onto the manifold of spectral decompositions N . This approach leverage efficiency of linear models and accounts for the underlying manifold. Formally, given a dictionary G ∈ N d and coefficients α ∈ ∆(d−1) , the reconstruction is: Bp(α; G) ≜ PN (P 
+
+> j∈[d]
+
+αj Λj , P 
+
+> j∈[d]
+
+αj Lj , P 
+
+> j∈[d]
+
+αj Rj ) . (5) The projection operator, PN (Λ, L, R) ≜ (Λ, arg min ˜L s.t. ˜L∗R=Ir ∥˜L − L∥2 
+
+> F
+
+, R), restores feasibility by projecting the left eigenvectors to satisfy the bi-orthogonality constraint. The construction is asymmetric, as it leaves eigenvalues and right eigenvectors unchanged. For dynamical systems, this asymmetry is often well-justified since right eigenvectors encode the dominant dynamic modes. In this sense, the model can be viewed as a smooth local retraction on N around (Λ, R), see Appendix B. Compared to Wasserstein barycenter-based reconstruction, the proposed model is not invariant to permutations of spectral components due to the linear aggregation step. In practice, this sensitivity can be mitigated by increasing the dictionary size, which reduces ordering effects. On the other hand, its main advantage is its computational efficiency: it avoids any inner optimization or optimal transport problem, while still incorporating manifold structure through a single projection step. 
+
+Optimization scheme. We adopt a stochastic inexact block-coordinate strategy similar to the one proposed in [45] for euclidean spaces. Given a batch of size b, we perform two successive steps: 1. Coefficient estimation: fix the dictionary and optimize {αi}i∈[b] via gradient descent (with softmax parametrization). Since the problem is not convex, we use an initialization of based on proximity to dictionary atoms, i.e. αi ∝ {− dS (Gi, Gj )}j∈[d] to start the optimization in a relevant region of the parameter space. 2. Dictionary update: fix the coordinates {αi}i∈[b] and update the dictionary with a Riemannian gradient step on N d from the objective on the batch. We leverage the envelope theorem to ignore implicit gradients through {αi}i∈[b].Further details on the optimization scheme can be found in Appendix C. Since operators are typically low-rank with parametrization on simplex, the main computational cost arises in the coefficient estimation , due to repeated evaluations of the reconstruction model. The DOODL framework integrates the strengths of existing DL methods. Its reconstruction model combines efficiency with geometric fidelity which enables the learning of operator dictionaries through Riemannian optimization, where gradients are guided by an optimal transport divergence that captures the geometry of spectral decompositions central to evolution operators. 
+
+3.3 Dictionary-based Operator Estimation from Short Trajectories 
+
+DOODL can be used to estimate operators from short trajectories by restricting the search space to the image of the reconstruction model Bp induced by a learned dictionary. This low-dimensional constraint regularizes estimation in low-data regimes where classical estimators are unreliable. Given a trajectory (Xt)t∈[n], we estimate the operator by solving 
+
+min α 1
+
+> n
+
+P 
+
+> t∈[n]
+
+∥zt+1 − Op [Bp(α; G)] ∗zt∥2 
+
+> H
+
+, (6) where zt = ϕ(Xt) denotes the feature representation of Xt in the Hilbert space H, and Op maps a spectral decomposition to its associated operator. This corresponds to empirical risk minimization 5constrained to the learned operator manifold. We provide statistical guarantees below showing improved estimation in short-trajectory regimes. 
+
+Statistical guarantees. Let ¯G∗ denote the optimal dictionary solving (4) , and ˆG its empirical estimate. Define Gα := Op [B(α; ˆG)] and G( ˆG) := {Gα : α ∈ ∆d−1}. Given a stationary test trajectory 
+
+(Xt)n+1  
+
+> t=1
+
+independent of the training data, we define the empirical and population risks 
+
+ℓt(G) := ∥zt+1 − G∗zt∥2
+
+> H
+
+, bR( α | ˆG) := 1
+
+> n
+
+Pnt=1 ℓt(Gα), R( α | ˆG) := Eπ [ℓt(Gα)] , (7) with minimizer ˆα ∈ arg min α bR( α | ˆG). We set κ := sup x ∥ϕ(x)∥H, M := sup j ∥Op [ ˆGj ]∥op ,
+
+m ≤ d − 1 the intrinsic dimension of G( ˆG) under ∥ · ∥ op (diameter ≤ 2M , since ∥Gα∥op ≤ M for all α), σ2¯G := sup G∈G ( ˆG) Var π (ℓt(G)) and ¯σ2 
+
+> G
+
+:= sup G∈G ( ˆG) Eπ [ℓt(G)2] the uniform loss variance and second moment. For β-mixing trajectories with block length τ , let neff := ⌊n/ (2 τ )⌋ and 
+
+¯σ2eff := σ2¯G + 4¯ σ2
+
+> G
+
+Pτ −1 
+
+> s=1
+
+β(s). We need the following assumption. 
+
+(WC) Well-conditioned dictionary: The right eigenvectors { ¯Rj }j∈[d] ⊂ Cp×r are in general position, i.e. no convex combination P 
+
+> j∈[d]
+
+αj ¯Rj is rank-deficient for α ∈ ∆d−1.This assumption is analogous to task diversity conditions in meta-learning [ 59 ], ensuring that the dominant dynamical modes span a sufficiently rich subspace. It implies the uniform lower bound 
+
+σmin (P 
+
+> j∈[d]
+
+αj ¯Rj ) ≥ c > 0 for all α ∈ ∆d−1. We denote by Ldec the Lipschitz constant of the decoder; bounds for B p is given in Lemma 6. 
+
+Theorem 1 (Oracle inequality) . Let (WC) be satisfied. Suppose the test trajectory (Xt)t∈[n+1] is stationary, β-mixing, and independent of the training data. Then for any δ ∈ (0 , 1) , with probability at least 1 − δ − 2( neff − 1) β(τ ),
+
+R( ˆ α | ˆG)−inf  
+
+> α
+
+R( α | ¯G) ≤ bias( ˆG)+ c′
+
+s
+
+¯σ2eff · m log  M L dec (1 + M )κ2√neff 
+
+ + log(1 /δ )
+
+neff 
+
+(8) 
+
+where c′ > 0 is a numerical constant and bias( ˆG) := inf α R( α | ˆG) − inf α R( α | ¯G∗) ≥ 0.
+
+Discussion. The bound separates two terms. The coordinate fitting term controls estimation of the low-dimensional embedding coefficients ˆα from short trajectories, with complexity governed by the intrinsic dimension m of the learned operator manifold rather than the ambient dictionary size 
+
+d. The learned dictionary therefore acts as a transferable inductive bias restricting estimation to dynamically plausible operators, which is particularly advantageous in short-trajectory regimes where unconstrained operator estimation is statistically unstable. The effective sample size neff reflects the mixing properties of the dynamics, while the variance term σ2¯G measures how well the learned manifold captures the observed dynamics. Finally, the dictionary bias quantifies the approximation gap induced by the learned manifold and vanishes asymptotically as ntrain → ∞ (Proposition 7). Full proofs are deferred to Appendix F. 
+
+## 4 Numerical Experiments 
+
+Our experiments are twofold: (i) metastable Langevin dynamics, where we study operator estimation from short non-equilibrium trajectories and detection of regime switches; and (ii) turbulent plasma dynamics relevant to nuclear fusion, where we investigate whether DOODL can turn high-dimensional turbulent simulations into low-dimensional spectral coordinates supporting operator recovery and early regime identification. 
+
+4.1 Dictionary Learning on Langevin dynamics Langevin dynamics in science. Langevin dynamics provides a fundamental framework for modeling stochastic systems driven by both deterministic forces and environmental noise. It plays a central role in scientific fields such as molecular dynamics and statistical physics, where key quantities are inherently dynamical and spectral: metastable states, transition pathways, relaxation timescales, and invariant distributions [ 55 , 56 ]. In practice, reliably estimating the associated evolution operators is challenging because trajectories are often short, high-dimensional, partially observed, and far from 62 1 0 1 2             
+
+> x
+> 0.0
+> 0.2
+> 0.4
+> 0.6
+> 0.8
+> 1.0
+> 1.2
+> Potential
+> U(x) = w4(x2w2)2
+> w: 0.5
+> w: 0.7
+> w: 0.8
+> w: 1.0
+> w: 1.2
+> T-SNE embeddings
+> 4th atom
+> 3rd atom
+> 2nd atom
+> 1st atom
+> 0.6 0.7 0.8 0.9 1.0 1.1
+> Width
+> 0.0
+> 0.2
+> 0.4
+> 0.6
+> 0.8
+> Coefficients
+> Atoms coefficients vs potential width parameter
+> 0.6
+> 0.8
+> 1.0
+
+Figure 1: (left) Two-wells Langevin potential for different widths. (middle) T-SNE with SGOT of dictionary atoms and training operators colored by width. (right) Average operators’ reconstruction coefficients depending on potential width. 10 1 10 2 10 3 10 4              
+
+> traj. length
+> 10 0
+> 10 1
+> 10 2
+> d (G, Gref )
+> 10 110 210 310 4
+> traj. length
+> 10 1
+> 10 0
+> 10 1
+> | 0 0,  ref  |
+> 0.6 0.7 0.8 0.9 1.0 1.1
+> Width
+> 2
+> 4
+> 6
+> avg.  d (G, Gref )
+> Avg. Op. error vs potential width
+> DOODL, d:5
+> DOODL, quartiles
+> RRR
+> RRR, quartiles
+> Operator and first eigenvalue estimation error on truncated trajectories
+> RRR DOODL, avg. DOODL, d=2 DOODL, d=5 Linear DL, d=5 Linear DL, d=10
+
+Figure 2: Comparison of operator estimator on truncated trajectories, including individual RRR, linear DL and DOODL. Error to ground truth in SGOT divergence between operators (left) and absolute error between first eigenvalues (middle). (right) Average SGOT error per potential width. equilibrium [ 6, 64 ]. In this experiment, we investigate whether the estimated manifold of dynamical systems through geometric dictionary learning can overcome these limitations. 
+
+Data simulation & operator estimation. We consider a one-dimensional damped Langevin dynamics governed by dXt = ∇Uw(Xt) + √2σdBt with {Bt}t> 0 a Brownian motion, σ > 0 its temperature, and a two well potential Uw(x) ≜ w−4(x2 − w2)2 where w > 0 controls the distance between the two wells and their respective width, see Fig.1(left). We uniformly sampled 256/256 train/test potential parameters w ∈ [0 .5, 1.2] and generates trajectories of 40k samples at 100Hz according to their Langevin dynamics. The operators are estimated via Reduced Rank Regression (RRR) [ 34 ] with a fixed rank fixed of three, and an observable space approximating the RBF kernel via 400 Random Fourier Features [4] on sliding windows of 50 samples. Settings are detailed Appendix D. 
+
+Learning the geometry of Langevin dynamics. On the training set, we learn DOODL dictionaries eq. (4) with 2 to 5 atoms, using the SGOT divergence with η = 0 .25 and the log-Martin metric for the spectral projector term. For four atoms, Figure 1 (middle) shows a 2D t-SNE embedding of SGOT distances of training operators and learned atoms, with samples colored by the potential width. Figure 1 (right) reports the corresponding activation coefficients. These results reveal that this family of one-parameter Langevin dynamics lies on a low-dimensional (approximately 1D) manifold in operator space. The learned DOODL atoms align along this structure, yielding smooth and ordered activations as the width parameter varies. This shows that DOODL recovers a coherent low-dimensional organization of the underlying dynamics, where nearby systems share smoothly varying operator representations. 
+
+Dictionary-based operator estimation from short trajectories. With previously trained dictionaries, we estimate operators from test trajectories truncated between 10 and 40k samples (20 log-spaced steps), with DOODL in eq. (6). We compare against individual RRR estimators, linear DL baselines, and the average reconstruction model on the training set eq. (5). Figure 2-(left,middle) reports reconstruction error with SGOT divergence and the error on the leading eigenvalue respectively. DOODL outperforms all baselines up to 10k samples, achieving a SGOT error up to two orders of magnitude lower in the short-trajectory regime. This shows that constraining estimation to the learned spectral manifold preserves physically meaningful dynamical structure rather than merely fitting trajectories. Note that for long enough trajectories direct operator estimation RRR performs better because of the bias term in Eq. (8) . Linear DL performs worst, suggesting that naive dictionary learning approaches that ignore the intrinsic geometry of operator space fail to recover dynamical properties. This trend is further confirmed in Figure 2-(right), where trajectory length is fixed to 1.2k samples: DOODL yields lower variance across all potential widths compared to RRR, indicating that the learned operator manifold stabilizes operator estimation. Further results are in Appendix D. 7Figure 3: Regime-switch detection from operator embeddings. (left) SGOT geometry of training operators and learned atoms. (right-top) Trajectory with three switches. (right-bottom) Rolling DOODL coefficient for different window lengths. (g, κ) = (0.0, 1.0) (g, κ) = (0.0, 3.5) (g, κ) = (0.5, 1.0) (g, κ) = (0.5, 3.5) 
+
+> −2
+> −1
+> 0
+> 1
+> 2
+
+Figure 4: Density fluctuations across plasma regimes for varying (g, κ ).
+
+System identification through dictionary-based operator embeddings. Estimating operators from short trajectories naturally enables the detection of regime changes. We illustrate this on a system alternating between two Langevin regimes with wide and narrow potential widths. Figure 3-(top right) shows a representative trajectory with switching events. Considering a DOODL dictionary with two atoms (Figure 3, left), we track the first embedding coefficient of operators estimated over sliding windows of length ℓ ∈ 10 , 100 , 1000 . The resulting coefficient trajectories (Figure 3, bottom right) exhibit sharp discontinuities at switching times, with reduced variance as ℓ increases. This demonstrates that the manifold approximation induces coordinate system capable of accurately tracking abrupt changes in the underlying dynamics directly from short trajectory windows. 
+
+4.2 Dictionary Learning on plasma dynamics Plasma dynamics and simulation. We consider a reduced two-field model for edge plasma turbu-lence with density and electrostatic potential. The parameter, g, controls the interchange coupling between density and vorticity while κ controls the imposed density-gradient drive [ 18 , 19 ]. Figure 4 shows examples of density fluctuations on different values of g and κ. Increasing κ changes the fluctuation scale and contrast, while increasing g makes the structures more distorted. See Appendix E.1 for details. Estimating such control parameters κ and g from plasma data is a challenge in practice. Turbulence, instabilities, and anomalous transport make quantitative modeling difficult [ 5]. Even in reduced 2D models, transport parameters require statistical calibration and can vary between regimes [ 13 ]. This motivates data-driven reduced-order representations that extract coherent dynamical structures from high-dimensional plasma trajectories [15, 57]. The goal of this experiment is to test whether DOODL can map high-dimensional turbulent Tokam2D [ 21 ] simulations into a low-dimensional spectral coordinate system that enables rapid system identifi-cation from short turbulent trajectories. We generate plasma dynamics with Tokam2D [ 21 ], a reduced 2D fluid solver that evolves density and vorticity fields in a plane transverse to the magnetic field [ 18 , 19 ]. In the gradient-driven configuration, we uniformly sample M = 400 dynamics with parameters (g, κ ) in [0 , 0.5] × [1 , 3.5] keeping other numerical parameters fixed. Each system is simulated on a 128 × 128 grid for T = 4093 time steps with ∆t = 0 .05 . We did 80 /20 train/test split over simulations. 
+
+Operator estimations from time series. The learning plasma dynamic operators is in two steps: (i) learning a common latent space for individual operator estimation, (ii) estimating the operator through 8−10 0 10             
+
+> t-SNE dim. 1
+> −20
+> −10
+> 0
+> 10
+> 20
+> t-SNE dim. 2
+> colored by g
+> Atoms
+> 0.1
+> 0.2
+> 0.3
+> 0.4
+> −10 010
+> t-SNE dim. 1
+> colored by κ
+> 1.5
+> 2.0
+> 2.5
+> 3.0
+> 0.00 0.25 0.50
+> True
+> 0.00
+> 0.25
+> 0.50
+> Predicted
+> R2= 0.81
+> g
+> 1.00 2.00 3.00
+> True
+> 1.00
+> 2.00
+> 3.00
+> Predicted
+> R2= 0.97
+> κ
+> T-SNE on the SGOT distance matrix System identification from α
+
+Figure 5: Geometry of turbulent plasma dynamics. Left: SGOT geometry organizes plasma regimes by (g, κ ). Right: regression of physical parameters from barycentric embeddings αm.their resolvent. The common latent space is learned from sampled trajectories that are first embedded with POSEIDON-B, a foundational model for PDE [ 24 ], then fed to two MLP heads applied to consecutive states. The first head produces a 64-dimensional latent state, while the second is only used during training. The heads are trained with a contrastive loss inspired by [ 36 ]. Since the systems have different turbulence levels and loss scales, we train the heads with a GradNorm-weighted multitask strategy [ 11 ]. From the resulting latent trajectories, we estimate a individual rank-40 operators with a generator-resolvent (GR) estimator [35]. Details are given in Appendix E. 
+
+Operator dictionary and recovered manifold. We apply DOODL on the learned operators with 
+
+d = 12 atoms and the SGOT divergence with log-Martin and η = 0 .9. Each system is represented by embeddings αm ∈ ∆d−1 which are used for regression on the parameters. T-SNE visualization in Figure 5 shows that the SGOT geometry recovers, only from data, the structure of the 2D manifold of the plasma regimes corresponding to changing both g and κ. The learned atoms lie on the envelope of this operator manifold, consistent with their role as dictionary prototypes. Regressing from the 
+
+αm gives R2 = 0 .81 for g and R2 = 0 .97 for κ on held-out regimes, showing that the DOODL embedding encode the physical parameters. 
+
+Early operator recovery and system identification. We test whether the learned dictionary helps recover the plasma operator from short trajectories. For each test trajectory length, we estimate the operator with DOODL and compare it to the reference operator estimated from the full trajectory. Figure 6 (top) shows that the constrained estimate has better perfor-mances compared to direct GR estimation for length up to 3k time steps. This demonstrates that constraining estimation to the learned spectral manifold enables reliable identification of 10 −2     
+
+> 10 −1
+> 10 0
+> dS(̂ G, Gref )
+> GR
+> DOODL, d= 12
+> 10 32 × 10 33 × 10 3
+> traj. length
+> 0.2
+> 0.4
+> 0.6
+> 0.8
+> 1.0
+> R2
+> g
+> κ
+
+Figure 6: Early operator recovery and parameter identification from short plasma trajectories. Top: op-erator estimation. Bottom: parame-ter regression from DOODL embed-dings. complex plasma regimes long before direct operator estima-tion becomes stable. Once the spectral manifold is learned, inference reduces to estimating a small number of barycen-tric coordinates rather than recovering an unconstrained high-dimensional operator from scratch, yielding a lightweight reduced-order representation of turbulent plasma dynamics. We now test whether DOODL coordinates estimated from short trajectories enables system identification. Figure 6 (bot-tom) reports the R2 obtained when predicting g and κ from coordinates estimated at each length. The two parameters behave differently. κ is recovered from short trajectories, sug-gesting that its effect is encoded in leading spectral modes that emerge rapidly. In contrast, g improves more gradually and requires longer trajectories, consistent with results in Ap-pendix E.6 where it is associated with slower and higher-order spectral components. This indicates that the learned operator geometry captures how physical parameters are distributed across spectral time scales in turbulent plasma dynamics. Such lightweight operator representations are particularly attractive in fusion-relevant turbulent plasma regimes where rapid identi-fication from short trajectory prefixes is critical. More broadly, our results support the view that turbulent physical systems admit a low-dimensional manifold representation. 95 Conclusion 
+
+We introduced DOODL, a geometric dictionary learning framework for dynamical systems based on the hypothesis that related systems lie near a low-dimensional spectral manifold in operator space. DOODL combines spectral theory with optimal transport and Riemannian dictionary learning to construct compact operator representations preserving key dynamical properties. DOODL constrains estimation to the learned spectral manifold, enabling fast, interpretable, and data-efficient reasoning about complex dynamics. Despite these promising results, several limitations remain. In particular, as is well known in dictionary learning, the underlying optimization problem is non-convex. In our setting, this challenge is further exacerbated by the manifold constraints, motivating the coefficient initialization strategy that we propose. As well, the learned manifold is static and does not adapt online to evolving systems or distribution shifts. Future work will investigate continual and adaptive variants of DOODL, as well as tighter integration between operator estimation and geometric representation learning. 
+
+## 6 Acknowledgments 
+
+This project received funding from the European Union’s Horizon Europe research and innovation program under grant agreement 101120237 (ELIAS), Fondation de l’Ecole Polytechnique, Hi! PARIS, the French National Research Agency (ANR) through France 2030 program (ANR-23-IACL-0005 and ANR-25-PEIA-0005), NextGenerationEU and MUR PNRR project PE0000013 CUP J53C22003010006 “Future Artificial Intelligence Research (FAIR)”. 
+
+## References 
+
+[1] P-A Absil. Optimization algorithms on matrix manifolds . Princeton University Press, 2008. [2] P-A Absil and Jérôme Malick. Projection-like retractions on matrix manifolds. SIAM Journal on Optimization , 22(1):135–158, 2012. [3] Bijan Afsari and René Vidal. Distances on spaces of high-dimensional linear stochastic processes: a survey. In Geometric Theory of Information , pages 219–242. Springer, 2014. [4] Haim Avron, Michael Kapralov, Cameron Musco, Christopher Musco, Ameya Velingker, and Amir Zandieh. Random fourier features for kernel ridge regression: Approximation bounds and statistical guarantees. In International conference on machine learning , pages 253–262. PMLR, 2017. [5] Jean-Pierre Boeuf and Andrei Smolyakov. Physics and instabilities of low-temperature E × B
+
+plasmas for spacecraft propulsion and other applications. Physics of Plasmas , 30(5):050901, 2023. [6] Peter G. Bolhuis, David Chandler, Christoph Dellago, and Phillip L. Geissler. Transition path sampling: Throwing ropes over rough mountain passes, in the dark. Annual Review of Physical Chemistry , 53(Volume 53, 2002):291–318, 2002. [7] Nicolas Boumal. An introduction to optimization on smooth manifolds . Cambridge University Press, 2023. [8] Romain Brault, Markus Heinonen, and Florence Buc. Random fourier features for operator-valued kernels. In Robert J. Durrant and Kee-Eung Kim, editors, Proceedings of The 8th Asian Conference on Machine Learning , volume 63 of Proceedings of Machine Learning Research ,pages 110–125, The University of Waikato, Hamilton, New Zealand, 16–18 Nov 2016. PMLR. [9] Steven L. Brunton, Marko Budiši´ c, Eurika Kaiser, and J. Nathan Kutz. Modern Koopman theory for dynamical systems. SIAM Review , 64(2):229–340, 2022. [10] Rizwan Chaudhry and René Vidal. Initial-state invariant binet-cauchy kernels for the comparison of linear dynamical systems. In 52nd IEEE Conference on Decision and Control , pages 5377– 5384. IEEE, 2013. 10 [11] Zhao Chen, Vijay Badrinarayanan, Chen-Yu Lee, and Andrew Rabinovich. Gradnorm: Gradient normalization for adaptive loss balancing in deep multitask networks. In Proceedings of the 35th International Conference on Machine Learning , volume 80 of Proceedings of Machine Learning Research , pages 794–803. PMLR, 2018. [12] Anoop Cherian and Suvrit Sra. Riemannian dictionary learning and sparse coding for positive definite matrices. IEEE transactions on neural networks and learning systems , 28(12):2859– 2871, 2016. [13] Reinart Coosemans, Wouter Dekeyser, and Martine Baelmans. Bayesian analysis of turbulent transport coefficients in 2d interchange dominated ExB turbulence involving flow shear. Journal of Physics: Conference Series , 1785:012001, 2021. [14] Marco Cuturi and Arnaud Doucet. Fast computation of wasserstein barycenters. In International conference on machine learning , pages 685–693. PMLR, 2014. [15] Farbod Faraji, Maryam Reza, Aaron Knoll, and J. Nathan Kutz. Dynamic mode decomposition for data-driven analysis and reduced-order modelling of E × B plasmas: I. extraction of spatiotemporally coherent patterns. Journal of Physics D: Applied Physics , 57:065201, 2024. [16] Tryphon T. Georgiou. Distances and riemannian metrics for spectral density functions. IEEE Transactions on Signal Processing , 55(8):3995–4003, 2007. [17] Thibaut Germain, Rémi Flamary, Vladimir R. Kostic, and Karim Lounici. A spectral-grassmann wasserstein metric for operator representations of dynamical systems. 2026. [18] P. Ghendrih, Y. Asahi, E. Caschera, G. Dif-Pradalier, P. Donnel, X. Garbet, C. Gillot, V. Grand-girard, G. Latu, Y. Sarazin, et al. Generation and dynamics of SOL corrugated profiles. Journal of Physics: Conference Series , 1125:012011, 2018. [19] Philippe Ghendrih, Guilhem Dif-Pradalier, Olivier Panico, Yanick Sarazin, Hugo Bufferand, Guido Ciraolo, Peter Donnel, Nicolas Fedorczak, Xavier Garbet, Virginie Grandgirard, et al. Role of avalanche transport in competing drift wave and interchange turbulence. Journal of Physics: Conference Series , 2397:012018, 2022. [20] Klaus Glashoff and Michael M Bronstein. Optimization on the biorthogonal manifold. arXiv preprint arXiv:1609.04161 , 2016. [21] GYSELAX Team. Tokam2D: A 2d spectral solver for turbulence schemes. https://github. com/gyselax/tokam2d , 2026. Accessed: 2026-05-01. [22] Mehrtash Harandi, Conrad Sanderson, Chunhua Shen, and Brian C Lovell. Dictionary learning and sparse coding on grassmann manifolds: An extrinsic solution. In Proceedings of the IEEE international conference on computer vision , pages 3120–3127, 2013. [23] Mehrtash T Harandi, Conrad Sanderson, Richard Hartley, and Brian C Lovell. Sparse coding and dictionary learning for symmetric positive definite matrices: A kernel approach. In European conference on computer vision , pages 216–229. Springer, 2012. [24] Maximilian Herde, Bogdan Raoni´ c, Tobias Rohner, Roger Käppeli, Roberto Molinaro, Em-manuel de Bézenac, and Siddhartha Mishra. Poseidon: Efficient foundation models for pdes, 2024. [25] Jeffrey Ho, Yuchen Xie, and Baba Vemuri. On a nonlinear generalization of sparse coding and dictionary learning. In International conference on machine learning , pages 1480–1488. PMLR, 2013. [26] Zhiwu Huang, Luc Van Gool, and Johan A. K. Suykens. Sparse coding and dictionary learning for linear dynamical systems. In Proceedings of the IEEE Conference on Computer Vision and Pattern Recognition , pages 543–550, 2016. [27] Issei Ishikawa, Keisuke Fujii, Masahiro Ikeda, Yuka Hashimoto, and Yoshinobu Kawahara. A metric on nonlinear dynamical systems with perron–frobenius operators. In Advances in Neural Information Processing Systems , volume 31, 2018. 11 [28] Hachem Kadri, Emmanuel Duflos, Philippe Preux, Stéphane Canu, Alain Rakotomamonjy, and Julien Audiffren. Operator-valued kernels for learning from functional response data. Journal of Machine Learning Research , 17(20):1–54, 2016. [29] Yoshinobu Kawahara. Dynamic mode decomposition with reproducing kernels for koopman spectral analysis. NeurIPS , 2016. [30] Stefan Klus, Feliks Nüske, Peter Koltai, Hao Wu, Ioannis G Kevrekidis, Christof Schütte, and Frank Noé. On the numerical approximation of the perron-frobenius and koopman operator. 
+
+Journal of Computational Dynamics , 2018. [31] Bernard O. Koopman. Hamiltonian systems and transformation in hilbert space. Proceedings of the National Academy of Sciences , 17(5):315–318, 1931. [32] V. R. Kostic, P. Novelli, R. Grazzi, K. Lounici, and M. Pontil. Learning invariant representations of time-homogeneous stochastic dynamical systems. In International Conference on Learning Representations , 2024. [33] Vladimir Kostic, Karim Lounici, Pietro Novelli, and Massimiliano Pontil. Sharp spectral rates for koopman operator learning. Advances in Neural Information Processing Systems ,36:32328–32339, 2023. [34] Vladimir Kostic, Pietro Novelli, Andreas Maurer, Carlo Ciliberto, Lorenzo Rosasco, and Massi-miliano Pontil. Learning dynamical systems via koopman operator regression in reproducing kernel hilbert spaces. Advances in Neural Information Processing Systems , 35:4017–4031, 2022. [35] Vladimir R. Kostic, Karim Lounici, Hélène Halconruy, Timothée Devergne, Pietro Novelli, and Massimiliano Pontil. Laplace transform based low-complexity learning of continuous markov semigroups. In Proceedings of the 42nd International Conference on Machine Learning ,volume 267 of Proceedings of Machine Learning Research . PMLR, 2025. [36] Vladimir R. Kostic, Karim Lounici, Grégoire Pacreau, Giacomo Turri, Pietro Novelli, and Massimiliano Pontil. Neural conditional probability for uncertainty quantification. In Advances in Neural Information Processing Systems , 2024. [37] Vladimir R. Kostic, Karim Lounici, and Massimiliano Pontil. Toeplitz based spectral methods for data-driven dynamical systems, 2026. [38] Vladimir Kosti´ c, Jean-Baptiste Fermanian, et al. Kernel methods for koopman operator learning. In NeurIPS , 2022. [39] Samuel Lanthaler and Nicholas H. Nelsen. Error bounds for learning with vector-valued random features. In Thirty-seventh Conference on Neural Information Processing Systems , 2023. [40] Andrzej Lasota and Michael C. Mackey. Chaos, Fractals, and Noise , volume 97 of Applied Mathematical Sciences . Springer New York, 1994. [41] Peihua Li, Qilong Wang, Wangmeng Zuo, and Lei Zhang. Log-euclidean kernels for sparse representation and dictionary learning. In Proceedings of the IEEE international conference on computer vision , pages 1601–1608, 2013. [42] Qianxiao Li, Felix Dietrich, Erik M. Bollt, and Ioannis G. Kevrekidis. Extended dynamic mode decomposition with dictionary learning: a data-driven adaptive spectral decomposition of the koopman operator. Chaos , 27(10):103111, 2017. [43] Yuying Liu, Aleksei Sholokhov, Hassan Mansour, and Saleh Nabi. Physics-informed koop-man network for time-series prediction of dynamical systems. In ICLR 2024 Workshop on AI4DifferentialEquations In Science , 2024. [44] Julien Mairal, Francis Bach, and Jean Ponce. Task-driven dictionary learning. IEEE transactions on pattern analysis and machine intelligence , 34(4):791–804, 2011. 12 [45] Julien Mairal, Francis Bach, Jean Ponce, and Guillermo Sapiro. Online dictionary learning for sparse coding. In Proceedings of the 26th annual international conference on machine learning ,pages 689–696, 2009. [46] Richard J Martin. A metric for arma processes. IEEE transactions on Signal Processing ,48(4):1164–1170, 2002. [47] Igor Mezi´ c. On comparison of dynamics of dissipative and finite-time systems using koopman operator methods. IFAC-PapersOnLine , 49(18):454–461, 2016. [48] Igor Mezi´ c and Andrzej Banaszuk. Comparison of systems with complex behavior. Physica D: Nonlinear Phenomena , 197(1-2):101–133, 2004. [49] Hà Quang Minh. Operator-valued bochner theorem, Fourier feature maps for operator-valued kernels, and vector-valued learning. arXiv preprint arXiv:1608.05639 , 2016. [50] Bruno A Olshausen and David J Field. Emergence of simple-cell receptive field properties by learning a sparse code for natural images. Nature , 381(6583):607–609, 1996. [51] Ali Rahimi and Benjamin Recht. Random features for large-scale kernel machines. In Advances in Neural Information Processing Systems , volume 20, 2007. [52] Emmanuel Rio. Covariance inequalities for strongly mixing processes. Annales de l’Institut Henri Poincaré, Probabilités et Statistiques , 29(4):587–597, 1993. [53] Sheldon M Ross. Stochastic Processes . John Wiley & Sons, 1995. [54] Morgan A Schmitz, Matthieu Heitz, Nicolas Bonneel, Fred Ngole, David Coeurjolly, Marco Cuturi, Gabriel Peyré, and Jean-Luc Starck. Wasserstein dictionary learning: Optimal transport-based unsupervised nonlinear dictionary learning. SIAM Journal on Imaging Sciences ,11(1):643–678, 2018. [55] Ch. Schütte, W. Huisinga, and P. Deuflhard. Transfer operator approach to conformational dynamics in biomolecular systems. In Bernold Fiedler, editor, Ergodic Theory, Analysis, and Efficient Simulation of Dynamical Systems , pages 191–223, Berlin, Heidelberg, 2001. Springer Berlin Heidelberg. [56] Christof Schütte, Stefan Klus, and Carsten Hartmann. Overcoming the timescale barrier in molecular dynamics: Transfer operators, variational principles and machine learning. Acta Numerica , 32:517–673, 2023. [57] Roy Taylor, J. Nathan Kutz, Kyle D. Morgan, and Brian A. Nelson. Dynamic mode decompo-sition for plasma diagnostics and validation. Review of Scientific Instruments , 89(5):053501, 2018. [58] Ivana Toši´ c and Pascal Frossard. Dictionary learning. IEEE Signal Processing Magazine ,28(2):27–38, 2011. [59] Nilesh Tripuraneni, Chi Jin, and Michael I. Jordan. Provable meta-learning of linear representa-tions. In Proceedings of the 38th International Conference on Machine Learning , 2021. [60] Hien Van Nguyen, Vishal M Patel, Nasser M Nasrabadi, and Rama Chellappa. Kernel dictionary learning. In 2012 IEEE International Conference on Acoustics, Speech and Signal Processing (ICASSP) , pages 2021–2024. IEEE, 2012. [61] Hien Van Nguyen, Vishal M Patel, Nasser M Nasrabadi, and Rama Chellappa. Design of non-linear kernel dictionaries for object recognition. IEEE Transactions on Image Processing ,22(12):5123–5135, 2013. [62] S. V. N. Vishwanathan, Alexander J. Smola, and René Vidal. Binet-cauchy kernels on dynamical systems and its application to the analysis of dynamic scenes. International Journal of Computer Vision , 73(1):95–119, 2007. [63] Matthew O Williams, Clarence W Rowley, and Ioannis G Kevrekidis. A kernel-based method for data-driven koopman spectral analysis. Journal of Computational Dynamics , 2015. 13 [64] Hao Wu, Feliks Nüske, Fabian Paul, Stefan Klus, Péter Koltai, and Frank Noé. Variational Koopman models: Slow collective variables and molecular kinetics from short off-equilibrium simulations. The Journal of Chemical Physics , 146(15):154104, 2017. 
+
+## A Operator-Theoretic Foundations 
+
+A.1 Operator representations and estimation Markov semigroup and transfer operator. Let (Xt)t≥0 be a time-homogeneous Markov process on a measurable state space X , and let F ⊂ L 2 
+
+> π
+
+(X ) be a Hilbert space of observables. The evolution of the system is described by the Markov semigroup (At)t≥0 acting on F, defined by 
+
+[Atf ]( x) = E[f (Xt) | X0 = x], f ∈ F . (9) The family (At)t≥0 is a strongly continuous semigroup satisfying 
+
+A0 = Id , At+s = AtAs, ∀t, s ≥ 0.
+
+Infinitesimal generator. The infinitesimal generator G associated with (At) is defined as 
+
+Gf = lim 
+
+> t→0+
+
+Atf − ft , (10) with domain D(G) ⊂ F . The generator is, in general, an unbounded linear operator on F and characterizes the semigroup through At = exp( tG ).
+
+Spectral decomposition via compact resolvent. The spectral analysis of G requires additional structure due to its infinite-dimensional and unbounded nature. Let π be an invariant measure of the process and consider the Hilbert space L2 
+
+> π
+
+(X ).We assume that G has compact resolvent, i.e., there exists μ0 ∈ ρ(G) such that (μ0 Id −G)−1 is compact on L2 
+
+> π
+
+(X ). Under this assumption, the spectrum of G is discrete and consists of isolated eigenvalues (λi)i∈N with finite multiplicity and no accumulation point except possibly at infinity. If, in addition, G is self-adjoint, there exists an orthonormal basis (fi)i∈N of L2 
+
+> π
+
+(X ) such that 
+
+Gf i = λifi. (11) For each isolated eigenvalue λi, the associated spectral projector Pi is defined as the orthogonal projector onto the corresponding eigenspace in L2 
+
+> π
+
+(X ).In the simple eigenvalue case, we have 
+
+Pif = ⟨f, f i⟩L2  
+
+> π(X)
+
+fi. (12) More generally, if λi has multiplicity mi and (fi,k )mi 
+
+> k=1
+
+is an orthonormal basis of the eigenspace, then 
+
+Pif =
+
+> mi
+
+X
+
+> k=1
+
+⟨f, f i,k ⟩L2  
+
+> π(X)
+
+fi,k . (13) The projectors satisfy 
+
+PiPj = δij Pi, X
+
+> i
+
+Pi = Id (14) on the spectral subspace. With this notation, the generator admits the spectral representation 
+
+Gf = X
+
+> i
+
+λiPif, (15) for all f ∈ D (G) for which the expansion is well-defined, and the semigroup diagonalizes as 
+
+Atf = X
+
+> i
+
+eλitPif. (16) 14 Spectral perturbation under RKHS estimation. The true spectral projectors are defined in the ambient space L2 
+
+> π
+
+(X ), whereas data-driven estimators are learned on an RKHS H whose geometry generally differs from that of L2 
+
+> π
+
+(X ). We therefore do not compare the generator G directly with its estimator in the L2 
+
+> π
+
+(X ) → L 2 
+
+> π
+
+(X ) operator norm. Instead, following the spectral perturbation framework of [ 33 ], we compare the resolvent of the generator after embedding the RKHS into the appropriate ambient space. Let μ > 0 and write 
+
+Rμ := ( μ Id −G)−1. (17) Let Zπ : H → L 2 
+
+> π
+
+(X ) denote the canonical injection into L2 
+
+> π
+
+(X ), and let 
+
+bRμ : H → H (18) be an estimator of the resolvent constructed from data. We measure the operator error by 
+
+E( bRμ) := ∥RμZπ − Zπ bRμ∥H→L 2  
+
+> π(X)
+
+. (19) Since spectral perturbation is evaluated in the ambient geometry, one must also control the distortion between the RKHS norm and the ambient norm. For h ∈ H , define 
+
+d(h) := ∥h∥H
+
+∥Zπ h∥L2  
+
+> π(X)
+
+. (20) Let bRμ admit spectral pairs 
+
+bRμ bhi = bρibhi, (21) where bρi approximates (μ − λi)−1. After embedding and normalization, define 
+
+bfi := Zπbhi
+
+∥Zπbhi∥L2  
+
+> π(X)
+
+. (22) If the corresponding eigenvalue ρi = ( μ − λi)−1 of Rμ is isolated with spectral gap gap i, then Davis–Kahan-type perturbation arguments yield 
+
+|ρi − bρi| ≤ E ( bRμ) d(bhi), (23) and 
+
+∥ bfi − fi∥2   
+
+> L2
+> π(X)
+
+≤ 2 E( bRμ) d(bhi)[gap i − E ( bRμ) d(bhi)] +
+
+. (24) Finally, generator eigenvalues are recovered via 
+
+bλi = μ − bρ−1 
+
+> i
+
+. (25) Thus, spectral estimation is controlled by two factors: the embedded operator error E( bRμ) and the metric distortion d(bhi).
+
+Learning initial generators via spectral filtering. The first step consists in learning a collection of initial generator atoms directly from trajectory data by estimating spectral components of the infinitesimal generator G. Rather than approximating G through finite differences of the form 
+
+(A∆t − I)/∆t, which is unstable at small time scales, we rely on spectral filtering based on Toeplitz representations of analytic functions of the generator. Let A∆t = e∆tG denote the transfer operator at time step ∆t. We consider a Toeplitz symbol 
+
+T (z) = X
+
+> j∈Z
+
+aj zj , (26) and define the associated filtered operator 
+
+F (G) = T (A∆t). (27) 15 Since Aj∆t = Aj
+
+> ∆t
+
+, the operator F (G) admits the representation 
+
+F (G) = X
+
+> j∈Z
+
+aj Aj
+
+> ∆t
+
+, (28) which can be approximated from data using time-lagged observations. In practice, we use a truncated expansion 
+
+Fℓ(G) = X
+
+> |j|≤ ℓ
+
+aj Aj
+
+> ∆t
+
+, (29) whose empirical action is represented by a banded Toeplitz matrix acting on the time-ordered data sequence. Thus, analytic functional calculus of the generator reduces to structured linear algebra on trajectory data. 
+
+Resolvent and exponential filters. To probe the spectrum of the generator G, we use families of analytic filters. The key object is the generator resolvent 
+
+Rμ = ( μI − G)−1 =
+
+Z ∞
+
+> 0
+
+etG e−μt dt, (30) which we approximate by a Toeplitz-weighted sum of transfer operators, 
+
+Rμ,ℓ =
+
+> ℓ
+
+X
+
+> j=0
+
+aj Aj
+
+> ∆t
+
+, aj ≈ ∆t e −μj ∆t, (31) corresponding to a discretization of the Laplace transform. Equivalently, using the transfer-operator resolvent, we have 
+
+(eμI − A∆t)−1 =
+
+> ∞
+
+X
+
+> j=0
+
+e−(j+1) μAj
+
+> ∆t
+
+, (32) which naturally yields Toeplitz coefficients. These filters concentrate spectral information near the shift parameter μ, allowing us to localize different regions of the spectrum. In addition, exponential and trigonometric filters (e.g. e∆tG , cosh(∆ tG ), sinh(∆ tG )) can be used to emphasize specific spectral structures depending on the nature of the dynamics. 
+
+Spectral representation learning. For each filter Fq (G), indexed by a parameter q such as a resolvent shift μ, we do not first estimate Fq (G) as an operator on the ambient space. Instead, we use the Toeplitz filter to learn a low-dimensional latent spectral representation. Given the Toeplitz coefficients associated with Fq , we form the Toeplitz-weighted lagged data operator. In the finite-dimensional representation this gives a filtered matrix Wq , while in the sample representation it gives the corresponding Toeplitz-filtered Gram operator. The latent spectral space is then obtained from the leading solutions of the generalized eigenproblem 
+
+Wq W ⊤ 
+
+> q
+
+vq,k = σ2
+
+> q,k
+
+Cγ vq,k , k = 1 , . . . , r q , (33) or equivalently from its dual version. We denote the resulting latent space by 
+
+Uq = span {vq, 1, . . . , v q,r q }. (34) Only after this latent space has been learned do we represent the filtered dynamics on it. The empirical compressed filter is 
+
+bF (r) 
+
+> q
+
+= V ⊤ 
+
+> q
+
+Wq Vq , (35) where Vq = [ vq, 1, . . . , v q,r q ]. Its spectral decomposition 
+
+bF (r) 
+
+> q
+
+wq,k = bνq,k wq,k (36) yields the filtered spectral coordinates. The corresponding generator atom is obtained by inverting the scalar filter, bλq,k = F −1 
+
+> q
+
+(bνq,k ). (37) 16 For the resolvent filter Fq (λ) = ( μ − λ)−1, this gives 
+
+bλq,k = μ − bν−1 
+
+> q,k
+
+. (38) Thus, Step 1 learns generator atoms by first learning a latent spectral representation induced by the Toeplitz-filtered trajectory, and then diagonalizing the compressed filtered operator in that learned latent space. 
+
+Latent generator atoms. The outcome of this step is a collection of spectral atoms 
+
+A0 =
+
+n bλq,k , bψq,k , q  : q ∈ Q , k ≤ rq
+
+o
+
+, (39) which define a latent spectral representation of the generator. Each atom corresponds to a localized spectral component obtained through a specific filter q.These atoms provide a structured, low-dimensional parametrization of the generator spectrum and its associated modes. They serve as the input for the second step, where dictionary learning is performed on the manifold generated by these initial spectral representations. 
+
+Related work on operator estimation. Estimating evolution operators from data is challenging, as dynamical systems are typically observed through discrete trajectories, and neither the generator G
+
+nor its domain is known. A common approach consists in learning the action of the time-δt operator 
+
+A = exp( δtG) on a predefined Reproducing Kernel Hilbert Space (RKHS) H, yielding an estimator of the projected operator ˜A = PHA|H . This is typically achieved via empirical risk minimization with low-rank constraints [ 29 , 34 ], and is closely related to kernel-based variants of dynamic mode decomposition [9]. An alternative approach consists in learning finite-dimensional function spaces, for instance parame-terized by neural networks, in which the operator is well approximated [ 43 , 32 ]. These methods aim at minimizing projection errors of the form ∥P ⊥H A|H ∥, thereby adapting the representation space to the underlying dynamics. More recently, spectral approaches based on analytic functional calculus have been proposed, where one does not directly approximate the generator or the transfer operator, but rather bounded transforms such as resolvents or Laplace-type operators. In particular, Toeplitz-based spectral methods [ 37 ]leverage structured combinations of time-lagged observations to approximate analytic functions of the generator, enabling stable recovery of spectral quantities through finite-dimensional projections. While such approaches provide consistent estimators under suitable assumptions, they typically operate in high-dimensional function spaces and exhibit nonparametric statistical rates, where n
+
+denotes the number of samples [ 33 ]. This can limit their reliability in low-data regimes. Moreover, the resulting spectral decompositions lie on non-linear manifolds, making subsequent comparison and learning tasks non-trivial. 
+
+Learning transfer operators in RKHS. Let D = ( xi, y i)ni=1 be sampled from a stationary Markov process, with yi ∼ P (· | xi). Let ϕ : X → H be the canonical feature map and define 
+
+ΦX := [ ϕ(x1), . . . , ϕ (xn)] , ΦY := [ ϕ(y1), . . . , ϕ (yn)] .
+
+The empirical covariance and cross-covariance operators are 
+
+bCx = 1
+
+n ΦX Φ∗ 
+
+> X
+
+, bCxy = 1
+
+n ΦX Φ∗ 
+
+> Y
+
+.
+
+For λ > 0 and rank r, we estimate the transfer operator A by the regularized reduced-rank estimator 
+
+bAr,λ ∈ arg min 
+
+> rank( A)≤r
+
+(
+
+1
+
+n
+
+> n
+
+X
+
+> i=1
+
+∥A∗ϕ(xi) − ϕ(yi)∥2 
+
+> H
+
++ λ∥A∥2HS 
+
+)
+
+. (40) Equivalently, we first form the ridge-stabilized regression operator 
+
+bAλ := ( bCx + λ Id) −1 bCxy , (41) and then retain its leading r spectral components. The regularization parameter λ controls stability, while r controls the approximation rank. 17 Dual representation. In practice, the estimator is computed through Gram matrices 
+
+KXX := Φ ∗ 
+
+> X
+
+ΦX , KY Y := Φ ∗ 
+
+> Y
+
+ΦY , KXY := Φ ∗ 
+
+> X
+
+ΦY .
+
+Define 
+
+Mλ := ( KXX + nλI )−1/2KXY (KY Y + nλI )−1/2. (42) If 
+
+Mλ = X
+
+> j≥1
+
+bσj buj bv⊤ 
+
+> j
+
+,
+
+its rank-r truncation is 
+
+Mλ,r := 
+
+> r
+
+X
+
+> j=1
+
+bσj buj bv⊤ 
+
+> j
+
+.
+
+The corresponding RKHS operator is 
+
+bAr,λ = Φ X (KXX + nλI )−1/2Mλ,r (KY Y + nλI )−1/2Φ∗ 
+
+> Y
+
+. (43) All computations are thus performed via kernel evaluations and an n × n SVD. 
+
+Error decomposition. Let A⋆r,λ denote the population counterpart. Then 
+
+E( bAr,λ ) := ∥AZ π − Zπ bAr,λ ∥H→L 2   
+
+> π(X)
+
+(44) admits the decomposition 
+
+E( bAr,λ ) ≲ ∥AZ π − Zπ A⋆r,λ ∥H→L 2  
+
+> π(X)
+
+| {z }
+
+> approximation error
+
++ ∥Zπ (A⋆r,λ − bAr,λ )∥H→L 2  
+
+> π(X)
+
+| {z }
+
+> statistical error
+
+. (45) 
+
+Finite-rank approximation. Let 
+
+AZ π = X
+
+> j≥1
+
+σj uj ⊗ vj (46) be the singular value decomposition of the embedded transfer operator. Then 
+
+inf  
+
+> rank( B)≤r
+
+∥AZ π − B∥H→L 2   
+
+> π(X)
+
+= σr+1 (AZ π ), (47) and the optimal approximation is obtained by truncation. Under the regularity condition 
+
+Cxy C∗ 
+
+> xy
+
+⪯ a2C1+ αx , α ∈ (0 , 2] , (48) and the spectral decay condition 
+
+λj (Cx) ≤ bj −1/β , β ∈ (0 , 1] , (49) the approximation error satisfies 
+
+∥AZ π − Zπ A⋆r,λ ∥H→L 2   
+
+> π(X)
+
+≲ λα/ 2 + σr+1 (AZ π ). (50) 
+
+Statistical error. With probability at least 1 − δ,
+
+∥Zπ (A⋆r,λ − bAr,λ )∥H→L 2   
+
+> π(X)
+
+≲ λ−β/ 2n−1/2 log( δ−1). (51) Balancing bias and variance yields 
+
+λ ≍ n−1/(α+β), (52) and therefore 
+
+E( bAr,λ ) ≲ σr+1 (AZ π ) + n− α 
+
+> 2( α+β)
+
+log( δ−1). (53) Thus, the total error decomposes into a finite-rank approximation term controlled by the spectral decay of the embedded transfer operator, and a statistical estimation term governed by (α, β, n ).18 Random Fourier Features approximation. When the kernel k is shift-invariant, i.e. k(x, y ) = 
+
+κ(x − y) for some positive definite function κ, Bochner’s theorem guarantees the existence of a spectral measure Λ such that 
+
+k(x, y ) = Eω∼Λ
+
+eiω ⊤(x−y) = Eω∼Λ,b ∼Unif([0 ,2π]) 
+
+zω (x)zω (y), (54) where zω (x) := √2 cos( ω⊤x + b) is a random feature map [ 51 ]. Given p i.i.d. draws (ωk, b k)pk=1 
+
+from Λ × Unif([0 , 2π]) , the random Fourier feature (RFF) map is 
+
+ϕ(x) := 1
+
+√p
+
+zω1 (x), . . . , z ωp (x)⊤ ∈ Rp, (55) so that ϕ(x)⊤ϕ(y) ≈ k(x, y ). The RFF approximation replaces the potentially infinite-dimensional RKHS H by the finite-dimensional feature space Rp, with approximation error controlled by McDi-armid’s inequality: with probability at least 1 − δ over the draw of features, 
+
+sup 
+
+> x,y ∈X
+
+|k(x, y ) − ϕ(x)⊤ϕ(y)| ≤ 
+
+s
+
+2 log(2 /δ )
+
+p . (56) 
+
+RFF in the DOODL framework. In our setting, the RFF map provides a natural finite-dimensional feature space satisfying the boundedness assumption κ := sup x ∥ϕ(x)∥2 < ∞. Indeed, since 
+
+|zω (x)| ≤ √2 for all x, ω, b , we have 
+
+∥ϕ(x)∥2 = 1
+
+√p
+
+> p
+
+X
+
+> k=1
+
+zωk (x)2
+
+!1/2
+
+≤ √2, ∀x ∈ X , (57) so κ = √2 uniformly in p. This makes the RFF map particularly well-suited for our statistical guarantees: the feature bound κ is dimension-free and does not degrade as p grows. The RFF estimator of the transfer operator is obtained by substituting ϕ for the kernel feature map in the RRR estimator (40) , yielding a finite-dimensional linear regression problem of size 
+
+p × p. This construction is consistent with the broader framework of random features for operator-valued and vector-valued regression [ 28 , 49 , 8 , 39 ], which establishes that RFF-based estimators recover the statistical rates of their kernel counterparts when the number of features p is chosen appropriately relative to the sample size. Concretely, with p growing polynomially in n, the additional approximation error introduced by replacing the kernel Gram matrices with their RFF counterparts does not affect the leading statistical rate of the estimator [4, 51]. Finally, in the DOODL framework, the same RFF map ϕ is shared across all d training systems and the test system, ensuring a common finite-dimensional observable space Rp as required by Assumption (A1). 
+
+Remark 1 (Bounded activations as an alternative) . When ϕ is the last layer of a neural network with bounded activation (e.g. arctan , sigmoid, or tanh ), the same bound κ < ∞ holds by construction. In this case all the statistical guarantees of Appendix F apply without modification, with κ determined by the activation range rather than the RFF construction. 
+
+A.2 Geometry of operators via spectral optimal transport 
+
+We consider operators only through their finite-rank components. Let H be a separable Hilbert space and fix r ∈ N∗. Denote by Sr (H) the set of non-defective operators of rank at most r. In the setting of this work, each operator is replaced by an element G ∈ S r (H) capturing its dominant spectral modes. These operators are assumed to lie in a common r-dimensional subspace, either by construction or through the estimation procedure described above. 
+
+Spectral decomposition as measures over eigen-components. Let G ∈ S r (H) admit the spectral decomposition 
+
+G =
+
+> ℓ
+
+X
+
+> i=1
+
+λiPi, (58) 19 where (λi)i∈[ℓ] are distinct eigenvalues, Pi are the associated spectral projectors, and mi := rank( Pi)
+
+their multiplicities, with mtot := Pℓi=1 mi ≤ r.We encode the spectral information of G as a discrete probability measure on C × E r (H), where 
+
+Er (H) := {P ∈ S r (H) : P 2 = P } denotes the set of oblique projections, by 
+
+μ(G) = 
+
+> ℓ
+
+X
+
+> i=1
+
+mi
+
+mtot 
+
+δ(λi,P i). (59) 
+
+Spectral Optimal Transport between Operators. Let dE be a divergence on Er (H). For η ∈ (0 , 1) 
+
+and q ∈ N∗, define the ground cost 
+
+Cqη
+
+ (λ, P ), (λ′, P ′) = η |λ − λ′|q + (1 − η) dq 
+
+> E
+
+(P, P ′). (60) Given G, G ′ ∈ S r (H) with spectral measures 
+
+μ(G) = 
+
+> ℓ
+
+X
+
+> i=1
+
+wi δ(λi,P i), μ(G′) = 
+
+> ℓ′
+
+X
+
+> j=1
+
+w′ 
+
+> j
+
+δ(λ′   
+
+> j,P ′
+> j)
+
+, (61) their spectral optimal transport (SGOT) divergence is defined as 
+
+dS (G, G ′) = min 
+
+> π∈Π( w,w ′)
+> ℓ
+
+X
+
+> i=1
+> ℓ′
+
+X
+
+> j=1
+
+πij Cqη
+
+ (λi, P i), (λ′ 
+
+> j
+
+, P ′ 
+
+> j
+
+), (62) where 
+
+Π( w, w ′) = 
+
+π ∈ Rℓ×ℓ′ 
+
+> +
+
+:
+
+> ℓ′
+
+X
+
+> j=1
+
+πij = wi,
+
+> ℓ
+
+X
+
+> i=1
+
+πij = w′
+
+> j
+
+ . (63) The divergence dS compares operators through their spectral components by jointly aligning eigen-values and spectral projectors. It is invariant under permutations of the spectral decomposition and depends only on the associated invariant subspaces. When dE is a metric and q = 1 , dS coincides with a Wasserstein distance. In the present work, G and G′ are obtained as finite-rank estimators (or truncations) of underlying operators. Consequently, μ(G) and μ(G′) are supported on finitely many atoms, and the computation of dS reduces to a finite-dimensional optimal transport problem. Note that dS is in general a divergence, and reduces to a Wasserstein metric when dE is a metric and 
+
+q = 1 . In this regime, dS defines a well-posed objective for learning operators from data: given a collection of estimated operators, it can be used to fit a shared low-dimensional representation (or dictionary) by minimizing the discrepancy between their spectral measures, thereby aligning their dominant eigenvalues and invariant subspaces in a common latent space. 
+
+Metric between spectral projectors. Suppose two rank-one spectral projector in Cn: P = u ⊗ v
+
+and ˜P = ˜ u ⊗ ˜v. Let the spectral angle θs between P and ˜P be defined as: 
+
+cos( θs) = |⟨ P, ˜P⟩| ∥P∥∥ ˜P∥ = |⟨ u, ˜u⟩⟨ ˜v, v⟩| ∥u∥∥ ˜u∥∥ v∥∥ ˜v∥ . (64) From spectral angle one can define metrics between rank-one operator detailed in Table 1. 
+
+Wasserstein barycenters of operators. Given a collection of finite-rank operators (G(k))Nk=1 ⊂Sr (H) with associated spectral measures (μ(G(k))) Nk=1 , a natural notion of average operator is provided by the Wasserstein barycenter of these measures under the SGOT geometry. For weights 
+
+(αk)Nk=1 with αk ≥ 0 and PNk=1 αk = 1 , the barycenter is defined as 
+
+¯μ ∈ arg min  
+
+> ν∈P (C×E r(H))
+> N
+
+X
+
+> k=1
+
+αk WCqη (ν, μ (G(k))) , (65) 20 Table 1: Metrics between rank-one spectral projectors. cos( θs) = δ.
+
+Metric Angle formulation Matrix formulation 
+
+Geodesic (dgeo ) θ2 
+
+> s
+
+arccos 2(δ)
+
+Chordal (dchord ) sin 2 θs 1 − δ2
+
+Procrustes (dproc ) 2(1 − cos θs) 2(1 − δ)
+
+Log-Martin (dMartin ) − log(cos 2 θs) − log( δ2)
+
+where WCqη denotes the optimal transport cost induced by the ground metric Cqη . When q = 1 and dE
+
+is a metric, this corresponds to a Wasserstein barycenter in the space of spectral measures. In the finite-rank setting, ¯μ is supported on a finite number of atoms and can be written as 
+
+¯μ =
+
+> ¯ℓ
+
+X
+
+> j=1
+
+¯wj δ(¯λj , ¯Pj ), (66) which defines a barycentric operator 
+
+¯G =
+
+> ¯ℓ
+
+X
+
+> j=1
+
+¯λj ¯Pj ∈ S r (H). (67) This construction defines an operator-valued average that is consistent with the SGOT geometry: the barycenter ¯G minimizes the total transport cost to the input operators, and therefore provides a representative element whose spectral measure is optimally aligned, in the sense of optimal transport, with those of the operators (G(k))Nk=1 . In particular, the support of ¯μ captures spectral components that best match, under the joint eigenvalue–eigenspace cost, the dominant modes of the input operators. In our framework, such barycenters are used as representative elements (or dictionary atoms) for collections of estimated operators. 
+
+A.3 Dictionary learning on structured spaces Dictionary learning as a reconstruction problem. Let (xi)i∈[N ] be data points in a space X .Dictionary learning seeks a set of atoms D = ( Dℓ)ℓ∈[K] ⊂ X and codes (αi)i∈[N ], with αi ∈ ∆K ,such that each data point is approximated through a decoding function B: 
+
+xi ≈ B(αi; D). (68) The dictionary and codes are learned by minimizing a reconstruction objective 
+
+min 
+
+> D, (αi)
+> N
+
+X
+
+> i=1
+
+L xi, B(αi; D) + R(αi), (69) where L is a data fitting loss and R a regularization term. A key component of the formulation in (69) is the decoding function B, which specifies how atoms are combined. In Euclidean settings, B is typically linear, B(α; D) = P 
+
+> ℓ
+
+αℓDℓ. More generally, when X is non-linear, B can be defined through barycentric combinations associated with a given geometry. Dictionary learning was originally introduced in signal processing and computer vision with linear decoders and sparse regularization [ 50 , 45 ], and has since been extended to a wide range of machine learning tasks [ 58 ]. Beyond Euclidean settings, several works have generalized this paradigm to structured spaces by adapting the decoding function B to the underlying geometry, including kernel-based methods [ 60 , 61 ], Riemannian approaches on manifolds [ 25 , 22 ], and formulations based on Wasserstein barycenters for probability measures [ 54 ]. These extensions highlight that dictionary learning fundamentally depends on the choice of geometry and associated notion of barycentric combination. 21 Limitations for operator-valued data. Several extensions of dictionary learning have been pro-posed for dynamical systems. In Koopman-based approaches, one may learn a dictionary of observ-ables used to construct finite-dimensional approximations of a single operator, for instance within EDMD frameworks [ 42 ]. These methods learn the feature space on which an operator is represented, but do not learn a dictionary whose atoms are themselves dynamical operators, nor do they enable shared representations across systems. Another line of work considers dictionary learning for linear dynamical systems (LDS), where both data points and atoms are parametric state-space models [ 26 ]. Such approaches rely on Euclidean operations on finite-dimensional parameterizations and are therefore tied to specific model classes. These constructions do not extend to the setting considered in this work, where data points are dynamical systems represented by their associated operators. In this case, the relevant structure is spectral and operator-theoretic: eigenvalues and invariant subspaces encode the fundamental dynamical modes. Linear combinations in parameter space do not preserve this structure, and therefore do not yield meaningful interpolations between operators. 
+
+Operator dictionary learning via spectral optimal transport. In our setting, the data are finite-rank operators (G(k))Nk=1 ⊂ S r (H), each encoding the dominant spectral component of a dynamical system. We define dictionary learning directly in the SGOT geometry. Let μ(G(k)) denote the spectral measure associated with G(k). Given K ∈ N∗, we seek dictionary atoms (Dℓ)Kℓ=1 ⊂ S r (H), with associated spectral measures μ(Dℓ). For a code α ∈ ∆K , the reconstruction of an operator is defined through a barycentric combination in the SGOT geometry: 
+
+Bα(D1, . . . , D K ) ∈ arg min  
+
+> G∈S r(H)
+> K
+
+X
+
+> ℓ=1
+
+αℓ dS (G, D ℓ), (70) that is, Bα is a Wasserstein barycenter with respect to the SGOT divergence. Equivalently, at the level of spectral measures, 
+
+μ(Bα(D1, . . . , D K )) ∈ arg min  
+
+> ν∈P (C×E r(H))
+> K
+
+X
+
+> ℓ=1
+
+αℓ dS
+
+ ν, μ (Dℓ). (71) The operator dictionary learning problem is then given by 
+
+min  
+
+> (Dℓ)Kℓ=1 ⊂S r(H)
+
+min 
+
+> (α(k))Nk=1 ⊂∆K
+> N
+
+X
+
+> k=1
+
+dS
+
+
+
+G(k), B α(k) (D1, . . . , D K )
+
+
+
+. (72) Thus, reconstruction is not performed by Euclidean superposition of operators, but by barycentric interpolation in the spectral optimal transport geometry. The learned atoms correspond to represen-tative spectral structures, and the coefficients α(k) provide low-dimensional coordinates describing each system relative to these prototypes. 
+
+## B A Riemannian manifold of spectral decomposition 
+
+We provide a novel characterization of the manifold of spectral decompositions assuming low-rank settings and complex algebra. We also derive the tools required to perform Riemannian gradient-based optimization on this space. 
+
+B.1 Main results 
+
+Main results rely on preliminary results on manifolds of bi-orthogonal matrices which can be found in Section B.2. 
+
+The smooth manifold of spectral decompositions. Let H be a complex p-dimensional Hilbert space and Sr (H) being the set of non defective operators with rank at most r and simple spectrum. Any G ∈ S r (H) admits a spectral decomposition with matrix representation: 
+
+G = R Diag( Λ)L∗ s.t. L∗R = Ir , (73) 22 where Λ ∈ Cr are the eigenvalues, (L, R) ∈ (Cp×r )2 are the left/right eigenvectors satisfying the bi-orthogonal condition. As depicted in Equation (77), the set of low-rank bi-orthogonal matrices B = {(L, R) ∈
+
+(Cp×r )2 | L∗R = Ir } forms a smooth manifold, hence by product of smooth manifold, the set of all possible spectral decomposition: 
+
+N = Cr × B = {(Λ, L, R) | L∗R = Ir } , (74) forms a smooth manifold. However, operators’ spectral decomposition are not unique: under the simple spectrum assump-tion, eigenvectors are defined up to independent rescaling. This induces a natural equivalence relation on spectral decompositions, corresponding to component-wise actions of (C∗)r on eigen-vectors, i.e. (L, R) ∼ (L′, R′) if and only if there exists z ∈ (C∗)r such that (L′, R′) = (L Diag(¯ z), R Diag( z−1)) . As depicted in lemma 2, this equivalence relationship defines smooth quotient manifold of bi-orthogonal phase/scale invariant matrices, denoted B/(C∗)r . We therefore view spectral decompositions as elements of a quotient space 
+
+M = Cr × B /(C∗)r . (75) By product of quotient manifold, M is a smooth manifold, and Sr (H) can be identified with M.
+
+A Riemannian metric on the manifold of spectral decomposition. Since the quotient manifold 
+
+B/(C∗)r can be endow with a Riemannian as described in Proposition 6 and Proposition 3, by product with an Euclidean space, the manifold of spectral decomposition M, can be endowed with the Riemannian metric: 
+
+g(Λ,L,R)(( λ, ξ, ζ), (λ′, ξ′, ζ′)) ≜ λ∗λ′ + Tr( ξ∗ξ′(L∗L)−1) + Tr( ζ∗ζ′(R∗R)−1) , (76) where (Λ, L, R) ∈ M and (λ, ξ, ζ), (λ′, ξ′, ζ′) ∈ T(Λ,L,R)M are tangent vectors. Since the part of the metric related to the eigenvalues is the natural inner product, the necessary tools to perform Riemannian gradient descent (retraction and Riemannian gradient and transport) are just composition of the indentity on the eigenvalue space with tools on B/(C∗)r defined in Section B.2. 
+
+B.2 Manifolds of bi-orthogonal low-rank matrices and subspaces B.2.1 Smooth manifold structure of bi-orthogonal low-rank matrices and subspaces Lemma 1 (Smooth manifold of bi-orthogonal low rank matrices.) . Considering real differentiability, the manifold of low-rank bi-orthogonal complex matrices 
+
+B = (L, R) ∈ (Cp×r )2 | L∗R = Ir , (77) 
+
+with r < p , the manifold is a smooth manifold of dimension 2rp − r2 with tangent spaces: 
+
+T(L,R)B = (ξ, ζ) ∈ (Cp×r )2 | ξ∗R + L∗ζ = 0r , ∀(L, R) ∈ B . (78) 
+
+Proof. Let consider the application: F : ( L, R) ∈ (Cp×r )2 7 → L∗R − Ir ∈ Cr×r . (79) As a quadratic function, it is a real-smooth map between two Hilbert spaces. In particular, B =
+
+F−1(0r ) and since its differential (with Wirtinger notation): DF (L, R)[ ξ, ζ] ≜ ξ∗R + L∗ζ (80) is surjective for any (L, R) ∈ F−1(0r ), by the preimage theorem, B = F−1(0r ) is a smooth manifold with dim( B) = 2 nr − r2, and such that for any (L, R) ∈ F−1(0r ), its tangent space is defined as: 
+
+T(L,R)M = (ξ, ζ) ∈ (Cn×r )2 | ξ∗R + L∗ζ = 0r . (81) 23 Retraction on B. As B is submanifold of the Euclidean space (Cp×r )2, a retraction updates 
+
+(L, R) ∈ B in the direction of a tangent vector (ξ, ζ) ∈ T (L,R)B by projecting the vector (L + ξ, R +
+
+ζ) back on the manifold B.
+
+Proposition 1 (Retraction on B). The application R ≜ RL ◦ RR : T B 7 → B , such that for any 
+
+(L, R) ∈ B and (ξ, ζ) ∈ T (L,R)B:RR
+
+> (L,R)
+
+(ξ, ζ) ≜ (ξ, R + ζ) ,
+
+RL
+
+> (L,R)
+
+(ξ, ˜R) ≜
+
+
+
+L + ξ − ˜R( ˜R∗ ˜R)−1( ˜R∗(L + ξ) − Ir ), ˜R
+
+
+
+,
+
+forms a retraction on B.Proof. Let (L, R) ∈ B , since L∗R = Ir , L and R are full-rank, hence by the Weyl inequality there exists a open neighborhood of (0, 0), denoted U, in which L + ξ and R + ζ remain full rank. Denoting (˜L, ˜R) = R(ξ, ζ), one can verify that ˜L∗ ˜R = Ir . Hence R is well defined on U and takes value in B. In addition R(0, 0) = ( L, R). Since any (˜L, ˜R) ∈ U are full rank, ˜R∗ ˜R is invertible, hence by addition, matrix product and inversion, the application R is smooth and verifies: DR (L,R)(0, 0)[ dξ, dζ] ≜ (dξ − R(R∗R)−1(R∗dξ + dζ∗L), dζ) . (82) However, since for any (dξ, dζ) ∈ T (L,R)M, R∗dξ + dζ∗L = 0, it follows DR (L,R)(0, 0) = Id on U. Hence by definition 4.1.1 in [1], R is a retraction on B.
+
+Remark 2. Let (L, R) ∈ B and (ξ, ζ) ∈ T (L,R)B. To remain in the open subset where the retraction is well-defined, one can estimate λ ∈ R∗ 
+
+> +
+
+such that R + λζ is full rank, i.e. λ < σ min (R)/∥ζ∥, the norm being the operator norm or the HS norm. 
+
+Since bi-orthogonal low-rank matrices from a smooth manifold, we can investigates properties of the manifold of phase/scale invariant bi-orthogonal matrices: 
+
+Lemma 2 (Smooth manifold of phase/scale invariant bi-orthogonal matrices.) . The manifold 
+
+B/(C∗)r with (L, R) ∼ (L′, R′) if and only if there exists z ∈ (C∗)r such that (L′, R′) = (L Diag(¯ z), R Diag( z−1)) , is a smooth quotient manifold and the quotient map π : B 7 → B /(C∗)r
+
+is a submersion. Proof. As (( C∗)r , ×) is an Abelian Lie group for the element-wise product, the action (z, (L, R)) ≜
+
+(L Diag(¯ z), R Diag( z−1)) , for any (z, (L, R)) ∈ (C∗)r × B is well defined and smooth. For any 
+
+(L, R) ∈ B , the stabilizer set G(L,R) = {z ∈ (C∗)r | (L, R) = z · (L, R)} = {Ir } is reduced to the neutral, hence the action is free. We prove the action’s properness with the sequential characterization. Let (Ln, Rn) → (L, R) and (Ln Diag(¯ zn), Rn Diag( z−1 
+
+> n
+
+)) → (L′, R′), let’s prove that zn → z.By convergence, since for n ∈ N, L (resp. R) is full rank, there exist constants cL, CL > 0 (resp. cR, CR) such that for any n ∈ N, cL ≤ ∥ Ln∥ ≤ CL (resp. cR ≤ ∥ Rn∥ ≤ CR). Similarly, there exist mL, ML > 0 (resp. mR, MR) such that for any n ∈ N, mL ≤ ∥ Ln Diag(¯ zn)∥ ≤ ML (resp. mR ≤ ∥ Rn Diag( z−1 
+
+> n
+
+)∥ ≤ MR). Hence, for any n ∈ N:mL
+
+CL
+
+≤ ∥Ln Diag(¯ zn)∥∥Ln∥ ≤ ∥ zn∥ and mR
+
+CR
+
+≤ ∥Rn Diag( z−1 
+
+> n
+
+)∥∥Rn∥ ≤ ∥ z−1 
+
+> n
+
+∥ ,
+
+leading to the bounds: mL/CL ≤ ∥ zn∥ ≤ rCR/mR. As a sequence of in a compact set of (C∗)r ,
+
+(zn)n∈N admits a convergent subsequence. Hence, by the Bolzano-Weierstrass, the action is proper by compactness of the pre-image of a compact. Finally, as the action is smooth, free and proper, the quotient manifold is smooth and the quotient map π : B 7 → B /(C∗) is a submersion. 
+
+Remark 3. The manifold B/(C∗)r also corresponds to the smooth manifold of set of r orthogonal one-dimensional subspace of Cp.
+
+24 B.2.2 Riemannian metrics on the B and B/(C∗)r
+
+A natural Riemannian metric. Since (Cp×r )2 endowed with the inner product 
+
+⟨(A, U), (B, V)⟩ ≜ Tr( A∗B) + Tr( U∗V) forms an Hilbert space, B, as a submanifold, inherits a Riemannian metric g such that for any (ξ, ζ), (ξ′, ζ′) ∈ T (L,R)B,
+
+g(L,R)(( ξ, ζ), (ξ′, ζ′)) ≜ ⟨(ξ, ζ), (ξ′, ζ′)⟩ . (83) In particular, for ¯f : ( Cp×r )2 7 → C, and f its restriction to B we have the relationship: 
+
+grad (L,R) f = P(L,R)(grad (L,R) ¯f ) , (84) where P(L,R) : ( Cp×r )2 7 → T (L,R)B is the orthogonal projector on the subspace T(L,R)B at (L, R) ∈B.
+
+Proposition 2 (Orthogonal projection on tangent spaces) . For any (L, R) ∈ B endowed with its natural Riemannian metric, the orthogonal projector on the tangent space T(L,R)B verifies: P(L,R) : ( ξ′, ζ′) ∈ (Cp×r )2 7 → (ξ′ − Rμ∗, ζ′ − Lμ) ∈ T (L,R)B , (85) 
+
+with: 
+
+μ = PLZP ∗ 
+
+> R
+
+s.t. Zij = [P∗
+
+> L
+
+(ξ′∗ R + L∗ζ′)PR]ij 
+
+λR,j + λL,i 
+
+and 
+
+ R∗R = PR Diag( λR)P∗
+
+> R
+
+L∗L = PL Diag( λL)P∗
+
+> L
+
+.
+
+(86) 
+
+Proof. Given (L, R) ∈ B , since T(L,R)B is a vector subspace of the Hilbert space (Cp×r )2, by the projection theorem on a closed convex set, the orthogonal projector exists, it is a linear application and it verifies: P(L,R) : ( ξ′, ζ′) ∈ (Cp×r )2 7 → arg min 
+
+> (ξ,ζ)∈T (L,R)B
+
+(ξ, ζ) − (ξ′, ζ′) 2 . (87) Given (ξ′, ζ′) ∈ (Cp×r )2 and considering the real differentiability case, the minimization problem is strictly convex and strictly feasible, hemce the KKT conditions are necessary and sufficient conditions to characterize the optimum. The Lagrandian can be expressed as: 
+
+L(ξ, ζ, λ, ˜λ) = (ξ, ζ) − (ξ′, ζ′) 2 + Tr( λ⊺ Re( ξ∗R + L∗ζ)) + Tr( ˜λ⊺ Im( ξ∗R + L∗ζ)) (88) As a quadratic function, the lagrangian is differentiable and, taking the Wirtinger notation, at the optimum it holds: 
+
+∇ξL = ξ − ξ′ + R(λ − i˜λ)⊺ = 0
+
+∇ζ L = ζ − ζ′ + L(λ + i˜λ) = 0
+
+∇λL = Re( ξ∗R + L∗ζ) = 0
+
+∇˜λL = Im( ξ∗R + L∗ζ) = 0
+
+(89) Denoting μ = λ + i˜λ, the optimal solution exists, is unique and verifies: 
+
+ ξ = ξ′ − Rμ∗
+
+ζ = ζ′ − Lμ s.t. μR∗R + L∗Lμ = ξ′∗ R + L∗ζ′ (90) Note that μ is solution of a Sylvester system and since L and R are full rank, the matrices R∗R and 
+
+L∗L are invertible and self adjoint, hence they admit a spectral decomposition with all eigenvalues real and strictly positive. Hence, μ verifies: 
+
+μ = PLZP ∗ 
+
+> R
+
+s.t. Zij = [P∗
+
+> L
+
+(ξ′∗ R + L∗ζ′)PR]ij 
+
+λR,j + λL,i 
+
+and 
+
+ R∗R = PR Diag( λR)P∗
+
+> R
+
+L∗L = PL Diag( λL)P∗
+
+> L
+
+.
+
+(91) 25 A stable Riemannian metric. We propose a Riemannian metric that is numerically more stable by rescaling search directions and avoiding directions towards singularities. This metric has the benefit to also be well-defined on the quotient manifold B/(C∗)r as depicted below. 
+
+Proposition 3 (Stable Riemannian metric) . For any (ξ, ζ), (ξ′, ζ′) ∈ T (L,R)B, the application: 
+
+g(L,R)(( ξ, ζ), (ξ′, ζ′)) ≜ Tr( ξ∗ξ′(L∗L)−1) + Tr( ζ∗ζ′(R∗R)−1) , (92) 
+
+defines a Riemannian metric on B.Proof. Let (L, R) ∈ B , since L∗R = Ir , L and R are full rank, leading to L∗L and R∗R
+
+being hermitian and positive definite. Thus, by sum of trace norms, g(L,R) is hermitian, positive definite (separated) and verifies the triangle inequality. Finally, for any smooth vector fields on B,
+
+X, Y ∈ F(B), the application: 
+
+(L, R) ∈ B 7 → g(L,R)(( Xξ
+
+> (L,R)
+
+, Xζ
+
+> (L,R)
+
+), (Yξ
+
+> (L,R)
+
+, Yζ
+
+> (L,R)
+
+)) ,
+
+is smooth as trace of matrix products of smooth matrices. Hence g is a Riemannian metric. 
+
+Proposition 4 (Orthogonal projection on tangent spaces) . Let (L, R) ∈ B and consider the Hilbert space (( Cp×r )2, g (L,R)), the orthogonal projector on the tangent space T(L,R)B verifies: P(L,R) : ( ξ′, ζ′) ∈ (Cp×r )2 7 →
+
+ ξ′ − R(R∗R)−1(ξ′∗ R + L∗ζ′)∗
+
+ζ′ − L(L∗L)−1(ξ′∗ R + L∗ζ′)
+
+
+
+∈ T (L,R)B , (93) 
+
+Proof. Given (L, R) ∈ B, since (T(L,R)B, g (L,R)) is a vector subspace of the Hilbert space 
+
+(( Cp×r )2, g (L,R)), by the projection theorem on a closed convex set, the orthogonal projector exists, it is a linear application and it verifies: P(L,R) : ( ξ′, ζ′) ∈ (Cp×r )2 7 → arg min 
+
+> (ξ,ζ)∈T (L,R)B
+
+g2(L,R)(( ξ − ξ′, ζ − ζ′), (ξ − ξ′, ζ − ζ′)) . (94) Given (ξ′, ζ′) ∈ (Cp×r )2 and considering the real differentiability case, the minimization problem is strictly convex and strictly feasible, hence the KKT conditions are necessary and sufficient conditions to characterize the optimum. The Lagrangian can be expressed as: 
+
+L(ξ, ζ, λ, ˜λ) = g2(L,R)(( ξ−ξ′, ζ−ζ′), (ξ−ξ′, ζ−ζ′))+Tr( λ⊺ Re( ξ∗R+L∗ζ))+Tr( ˜λ⊺ Im( ξ∗R+L∗ζ)) 
+
+(95) As a quadratic function, the Lagrangian is differentiable and, taking the Wirtinger notation, at the optimum it holds: 
+
+∇ξL = ( ξ − ξ′)( L∗L)−1 + R(λ − i˜λ)⊺ = 0
+
+∇ζ L = ( ζ − ζ′)( R∗R)−1 + L(λ + i˜λ) = 0
+
+∇λL = Re( ξ∗R + L∗ζ) = 0
+
+∇˜λL = Im( ξ∗R + L∗ζ) = 0
+
+(96) Denoting μ = λ + i˜λ, the optimal solution exists, is unique and verifies: 
+
+ ξ = ξ′ − Rμ∗(L∗L)
+
+ζ = ζ′ − Lμ(R∗R) s.t. ξ∗R + L∗ζ = 0 (97) 
+
+Proposition 5 (Riemannian gradient) . Consider ¯f : ( Cn×r )2 7 → R a smooth function and let f
+
+denotes its restriction to B, for any (L, R) ∈ B :
+
+grad f (L, R) ≜ P(L,R)(∇L ¯f (L∗L), ∇R ¯f (R∗R)) , (98) 
+
+where ∇ ¯f = ( ∇L ¯f , ∇R ¯f ) is the gradient in the natural Euclidean space and P(L,R) the orthogonal projector on the tangent space at (L, R) ∈ B .Proof. Consider (L, R) ∈ B and let ∇ ¯f = ( ∇L ¯f , ∇R ¯f ) be the gradient of ¯f in the natural Euclidean space (( Cn×r )2, ⟨., . ⟩). Then its gradients in (( Cn×r )2, g (L,R)), denoted as ∇ ¯fg , verifies: 
+
+⟨∇ ¯f , ξ⟩ = g(L,R)(∇ ¯fg , ξ) , ∀ξ ∈ T (L,R)B .
+
+Hence, (∇L ¯fg , ∇R ¯fg ) = ( ∇L ¯f (L∗L), ∇R ¯f (R∗R)) , and, by projection on T(L,R)B, the Rieman-nian gradient of f at (L, R), denoted grad f (L, R), verifies eq. (98). 26 With the sable metric in mind we can now define a Riemannian structure on the manifold of phase/scale invariant low-rank matrices. 
+
+Proposition 6. The manifold (B/(C∗)r , g ) is a Riemannian quotient manifold of (B, g ) where g is the stable Riemannian metric. Proof. Let (L, R) ∈ B , (ξ, ζ) and (ξ′, ζ′) ∈ T (L,R)B, by the group action of (C∗)r , for any 
+
+z ∈ (C∗)r it follows: 
+
+gz·(L,R)(dz(ξ, ζ), dz(ξ′, ζ′)) = g(¯ zL ,z−1R)((¯ zξ, z−1ζ), (¯ zξ′, z−1ζ′)) = Tr(Diag( |z|2)ξ∗ξ′(L∗L)−1 Diag( |z|−2)) + Tr(Diag( |z|−2)ζ∗ζ′(R∗R)−1 Diag( |z|2)) = g(L,R)(( ξ, ζ), (ξ′, ζ′)) ,
+
+where |z| is the element with norm vector. Thus, g is invariant to the group action. Thus, (B/(C∗)r , g )
+
+is a Riemannian quotient manifold of B.
+
+Remark 4. For any smooth function ¯f : B → R also defining a function on the quotient manifold 
+
+f : B/(C∗)r → R, the unique gradient represent at [x] in horizontal space at TxB, denoted with abuse of notation grad f ([ x]) , verifies: grad f ([ x]) = grad ¯f (x) .
+
+## C Dynamical Operator Dictionary Learning 
+
+C.1 Wasserstein reconstruction model 
+
+Since the data fitting loss function corresponds to a divergence, a natural choice of reconstruction map is the Fréchet mean barycenter with BOT (α; G) ≜ arg min 
+
+> G∈N
+
+P 
+
+> j∈[d]
+
+αj dS (G, Gj ) . (99) This reconstruction map is consistent with the geometry of spectral operators induced by the diver-gence dS [ 17 ]. A similar strategy was proposed in [ 54 ] for performing non-linear DL is the space of probability distributions endowed with the Wasserstein metric. It corresponds to a free-support optimal transport barycenter [ 14 ], but classical fixed point iteration cannot be applied because of the Riemannian structure of the manifold. Instead, the barycenter can be computed via Riemannian gradient-based optimization as detailed in Appendix B. While this approach faithfully captures the underlying geometry, it incurs a significant computational cost due to the inner optimization problem, which can become prohibitive in practice. 
+
+C.2 Optimization scheme 
+
+We adopt a stochastic inexact block-coordinate strategy similar to the one proposed in [ 45 ] for euclidean spaces. Given a batch of size b, we perform two successive steps: 1. Coefficient estimation: fix the dictionary and optimize {αi}i∈[b] via gradient descent (with softmax parametrization). Since the problem is not convex, we use an initialization of based on proximity to dictionary atoms, i.e. αi ∝ {− dS (Gi, Gj )}j∈[d] to start the optimization in a relevant region of the parameter space. In practice we use the Adam optimizer with a learning rate of 0.5 and perform 100 iterations. Algorithm 1 describes the pseudo code. 2. Dictionary update: fix the coordinates {αi}i∈[b] and update the dictionary with a Riemannian gradient step on N d from the objective on the batch. We leverage the envelope theorem to ignore implicit gradients through {αi}i∈[b]. Default gradient steps has a learning rate of 1e-2. Algorithm 2 describes the overall optimization procedure. Computation of the data fitting loss that is the SGOT divergence [ 17 ] requires the computation of optimal transport plans that we implemented in order to leverage the computational efficiency of GPUs. 27 Algorithm 1 Operator coefficient estimation 
+
+Require: G ≜ {Gi}i∈[N ] ∈ M N , G ≜ {Gi}i∈[d] ∈ M d ▷ Operators / Dictionary  
+
+> 1:
+
+α ← InitializationCoefficientLogit (G, G) ▷ αi ≜ {− dS (Gi, Gj )}j∈[d] 
+
+> 2:
+
+while not converged do  
+
+> 3:
+
+bG ← ComputeReconstructedSpectralDecomposition (α, G) ▷ Equation (5)  
+
+> 4:
+
+L ← ComputeDataFittingLoss (bG, G) ▷ Equation (1)  
+
+> 5:
+
+R, Λ, L ← UpdateCoefficientLogit (L, α) 
+
+> 6:
+
+return α
+
+Algorithm 2 Learn DOODL dictionary 
+
+Require: G ≜ {Gi}i∈[N ] ∈ M N , G ≜ {Gi}i∈[d] ∈ M d ▷ Operator / Dictionary  
+
+> 1:
+
+while not converged do  
+
+> 2:
+
+α ← EstimateOperatorCoefficient (G, G) ▷ Algorithm 1  
+
+> 3:
+
+bG ← ComputeReconstructedSpectralDecomposition (α, G) ▷ Equation (5)  
+
+> 4:
+
+L ← ComputeDataFittingLoss (bG, G) ▷ Equation (1)  
+
+> 5:
+
+ξ ← ComputeAmbientSpaceDictionaryGradient (L) ▷ bG is fixed  
+
+> 6:
+
+ξ ← ComputeRiemannianGradient (ξ, G) ▷ Proposition 5  
+
+> 7:
+
+G ← UpdateDictionary (ξ, G) ▷ Perform a retraction, see Proposition 1  
+
+> 8:
+
+return G
+
+## D Dictionary Learning on Langevin dynamics 
+
+D.1 Langevin dynamics 
+
+Langevin dynamics provides a fundamental mathematical framework for modeling stochastic dynamical systems evolving under the combined influence of deterministic forces and thermal or environmental noise. It underpins a wide range of scientific domains, including molecular dynamics, statistical physics, chemistry, materials discovery, and biological conformational analysis, where the key quantities of interest are inherently dynamical and spectral: metastable states, transition pathways, relaxation time scales, and invariant distributions [ 55 , 56 ]. In these settings, obtaining reliable estimates of the underlying evolution operators is notoriously difficult because trajec-tories are often short, high-dimensional, partially observed, and collected far from equilibrium [ 6, 64 ]. 
+
+D.2 Experimental settings 
+
+The whole experiment is ran on a single GPU (NVIDIA RTX A6000). 
+
+Trajectory simulation We consider a one-dimensional damped Langevin dynamics governed by dXt = ∇Uw(Xt) + √2σdBt with {Bt}t> 0 a Brownian motion, σ > 0 its temperature, and a two well potential Uw(x) ≜ w−4(x2 − w2)2 where w > 0 controls the distance between the two wells and their respective width, see fig. 1-left. We uniformly sampled 256/256 train/test potential parameters w ∈ [0 .5, 1.2] and generates trajectories of 40k samples at 100Hz according to their Langevin dynamics and with the Euler–Maruyama method. 
+
+Operator estimation. The operators are estimated via Reduced Rank Regression (RRR) [ 34 ] with a tikhonov regularization of 1e-6. Operators rank is fixed to 3 and the observable space approximates the RBF kernel via 400 Random Fourier Features [4] on sliding windows of 50 samples. 
+
+Dictionary learning. On the training set, we learn DOODL dictionaries eq. (4) with 2 to 5 atoms, using the SGOT divergence with η = 0 .25 and the log-Martin metric for the spectral projector term. The training of each dictionary last for 3 epochs with batch sizes of 32. Dictionary is learned following the procedure described in Appendix section C.2 with the default settings. 28 D.3 Additional results. 
+
+We provide additional results for the estimation of operators from short trajectories in Figure 7 and Figure 8 by including DOODL dictionaries with 3 and 4 atoms. We observe the DOODL performs better than other estimators for trajectories up to 10k samples with lower variances for all potential widths. As well by increasing the number of atoms operator estimation with DOODL improves in accuracy. 10 1 10 2 10 3 10 4           
+
+> traj. length
+> 10 0
+> 10 1
+> 10 2
+> d (G, Gref )
+> 10 110 210 310 4
+> traj. length
+> 10 1
+> 10 0
+> 10 1
+> | 0 0,  ref  |
+> RRR DOODL, avg. DOODL, d=2 DOODL, d=3 DOODL, d=4 DOODL, d=5 Linear DL, d=5 Linear DL, d=10
+
+Figure 7: Comparison of operator estimator on truncated trajectories, including individual RRR, linear DL and DOODL. Error to ground truth in SGOT divergence between operators (left) and absolute error between first eigenvalues (right). 0.6 0.7 0.8 0.9 1.0 1.1 
+
+Width 
+
+> 1
+> 2
+> 3
+> 4
+> 5
+> 6
+> avg.  d (G, Gref )
+> DL L=2
+> DL L=3
+> DL L=4
+> DL L=5
+> RRR
+
+Figure 8: Comparison of operator estimation per potential width with SGOT error on trajectories of length 1.2k. Including individual RRR and DOODL. 
+
+## E Plasma Experiments 
+
+This section details the plasma pipeline used in the Tokam2D experiments. Starting from high-dimensional plasma trajectories, we construct finite-rank generator representations and then test whether their operator geometry retains the physical parameters of the dynamicals systems. The pipeline is 
+
+xt 7 −→ ψP(xt) 7 −→ zt 7 −→ bG 7 −→ bα.
+
+Here xt is a four-channel plasma snapshot, ψP(xt) is the frozen POSEIDON descriptor, zt is the learned temporal coordinate, bG ∈ S r (H) is the finite-rank generator representation, and bα ∈ ∆K is the DOODL barycentric coordinate. The parameters (g, κ ) are never used during POSEIDON feature extraction, temporal representation learning, generator-resolvent estimation, or dictionary learning (All the pipeline is Unsupervised). They are used only afterward as diagnostics. Thus, recovering (g, κ ) from the learned operator coordinates indicates that the unsupervised operator geometry captures physical structure in the Tokam2D regime family. Note that the whole experiment is ran on a single GPU (NVIDIA RTX A6000). 29 E.1 Plasma details. 
+
+The plasma benchmark is based on a reduced two-field model for edge turbulence with density 
+
+n(x, y, t ) and electrostatic potential ϕ(x, y, t ) [18 , 19 ]. The vorticity is W = ∆ ⊥ϕ, with ∆⊥ = ∂xx +
+
+∂yy . The potential also defines the advecting velocity through its spatial derivatives (−∂y ϕ, ∂ xϕ),which are used as input channels in the observation map. The nonlinear advection is written with the Poisson bracket 
+
+[ϕ, f ] = ∂xϕ ∂ y f − ∂y ϕ ∂ xf. 
+
+We use the gradient-driven configuration, where a prescribed background density gradient replaces a localized source. This gives the scalar control parameter κ = 1 /L n. The dynamics are 
+
+ ∂tn + κ∂ y ϕ + [ ϕ, n ] − Dn∆⊥n = −σnn + σnϕ ϕ, ∂tW + g∂ y n + [ ϕ, W ] − Dϕ∆⊥W = −σϕn n + σϕϕ, W = ∆ ⊥ϕ. 
+
+The parameter κ controls the density-gradient drive in the density equation, while g controls the interchange coupling in the vorticity equation through g∂ y n. Thus, κ acts directly on the transported density field, whereas g acts through the density–vorticity coupling and modifies the potential-driven flow. In the linear interchange analysis, the drive depends multiplicatively on g and the background gradient, which explains why the strongest changes are observed when both parameters are large [ 18 ]. All diffusion and loss coefficients are fixed. We generate the data with Tokam2D [ 21 ], a reduced 2D fluid solver in the plane transverse to the magnetic field. We uniformly sample M = 400 dynamics with (g, κ ) ∈ [0 , 0.5] × [1 , 3.5] . Each system is simulated on a 128 × 128 grid for T = 4093 time steps with ∆t = 0 .05 , and we use an 
+
+80 /20 train/test split over simulations. Each regime m is represented by X(m) = ( x(m)1 , . . . , x (m) 
+
+> T
+
+),with 
+
+x(m) 
+
+> t
+
+=  n(m) 
+
+> t
+
+, −∂y ϕ(m) 
+
+> t
+
+, ∂ xϕ(m) 
+
+> t
+
+, ϕ (m)
+
+> t
+
+ ∈ R4×128 ×128 .(g; ∙ ) = (0 :0; 1:0) (g; ∙ ) = (0 :0; 3:5) (g; ∙ ) = (0 :5; 1:0) (g; ∙ ) = (0 :5; 3:5) 
+
+> −2
+> −1
+> 0
+> 1
+> 2
+
+Figure 9: electrostatic potential ϕ(x, y, t ) fluctuations at the four corners of the (g, κ ) grid. In contrast to density snapshots, which mainly show the transported scalar field, the potential highlights the organization of the advecting flow. Increasing g makes the potential structures more deformed and vortex-like, consistently with its role in the vorticity equation. Figure 9 complements the density snapshots by showing the potential-driven flow organization. The panels are standardized independently, so they compare morphology rather than amplitude. Increasing 
+
+κ changes the spatial scale, whereas increasing g makes the structures more distorted and vortex-like, especially in the high-κ regime. This suggests that part of the information on g is carried by the potential/vorticity dynamics rather than by density fluctuations alone. 
+
+E.2 POSEIDON as a PDE foundation model encoder 
+
+The first stage maps each plasma state to a finite-dimensional PDE-aware descriptor. We use POSEIDON-B [ 24 ] as a frozen feature extractor. POSEIDON is a PDE foundation model pretrained to approximate solution operators: given a state u(ti) and a lead time τ , its native task is 
+
+Sθ (τ, u(ti)) ≃ u(ti + τ ).
+
+Its scOT backbone uses patch embeddings, multiscale shifted-window attention, and lead-time conditioning. The POSEIDON paper also reports strong transfer to out-of-distribution PDEs and physical processes not seen during pretraining. This is the setting we rely on here: POSEIDON is not 30 used to forecast Tokam2D trajectories. The recovery head is discarded, all POSEIDON parameters are frozen, and only the internal encoder representation is retained. The choice of channels is guided by the variables and differential operators appearing in the equations. Define 
+
+∇⊥ϕ := ( −∂y ϕ, ∂ xϕ), VE := ∇⊥ϕ, ∇ · VE = 0 .
+
+Then 
+
+[ϕ, f ] = ∂xϕ ∂ y f − ∂y ϕ ∂ xf = VE · ∇ f, 
+
+and the Tokam2D system can be written as 
+
+ ∂tn + VE · ∇ n + κ∂ y ϕ − Dn∆⊥n = −σnn + σnϕ ϕ, ∂tW + VE · ∇ W + g∂ y n − Dϕ∆⊥W = −σϕn n + σϕϕ, W = ∆ ⊥ϕ. 
+
+Thus Tokam2D has the same basic transport form as the incompressible equations used in POSEIDON pretraining: a divergence-free vector field advects scalar or vorticity-like quantities, with diffusion and coupling terms. In two-dimensional incompressible Navier–Stokes, writing u = ( u, v ), one has 
+
+∂tu + ( u · ∇ )u + ∇p − ν∆u = 0 , ∇ · u = 0 ,
+
+or equivalently in vorticity form 
+
+∂tω + u · ∇ ω − ν∆ω = 0 , u = ∇⊥ψ, ω = ∆ ψ. 
+
+The corresponding structures are 
+
+VE = ∇⊥ϕ ↔ u = ∇⊥ψ, W = ∆ ⊥ϕ ↔ ω = ∆ ψ. 
+
+Moreover, POSEIDON is also pretrained on compressible Euler variables, which include a density ρ,a velocity field (u, v ), and a pressure-like scalar p. We therefore feed POSEIDON the four-channel Tokam2D state 
+
+x(m) 
+
+> t
+
+=  n(m) 
+
+> t
+
+, V (m)
+
+> E,x,t
+
+, V (m)
+
+> E,y,t
+
+, ϕ (m)
+
+> t
+
+ =  n(m) 
+
+> t
+
+, −∂y ϕ(m) 
+
+> t
+
+, ∂ xϕ(m) 
+
+> t
+
+, ϕ (m)
+
+> t
+
+ ∈ R4×128 ×128 ,
+
+with the channel correspondence 
+
+nt ↔ ρ, (VE,x,t , V E,y,t ) ↔ (u, v ), ϕt ↔ p. 
+
+This gives POSEIDON fields with the same mathematical roles as in its pretraining interface: a density-like scalar, a vector transport field, and a scalar potential or pressure-like channel. Before applying the frozen encoder, each channel is standardized independently for each snapshot. The normalized four-channel field is passed through the frozen POSEIDON patch embedding and scOT encoder. If 
+
+H(m) 
+
+> t
+
+= Enc P(ex(m) 
+
+> t
+
+) ∈ RNtok ×768 
+
+denotes the last hidden token matrix, we define the frozen POSEIDON descriptor by token averaging, 
+
+ψP(x(m) 
+
+> t
+
+) = 1
+
+Ntok 
+
+> Ntok
+
+X
+
+> ℓ=1
+
+H(m) 
+
+> t,ℓ
+
+∈ R768 .
+
+For each regime, this gives the descriptor trajectory 
+
+Ψ(m)P =  ψP(x(m)1 ), . . . , ψ P(x(m) 
+
+> T
+
+) ∈ RT ×768 .
+
+These descriptors are precomputed once for every simulation. The operators used by DOODL are not estimated directly from Ψ(m)P , but from the learned temporal coordinates described next. 
+
+E.3 Observable space learning for single dynamical system 
+
+The frozen POSEIDON descriptors encode spatial morphology, but they are not optimized for spectral operator estimation. We therefore learn temporal coordinates using the contrastive loss from Neural Conditional Probability (NCP) [ 36 ]. We use the same loss as NCP, but not for conditional probability estimation: here, it is used only to extract a latent space adapted to the plasma dynamics. 31 For each regime m, we sample temporal windows {(ti, t i + 1) }ni=1 and apply two shared MLP heads 
+
+uθ : R768 → Rdz , vθ : R768 → Rdz , dz = 64 .
+
+The current and future coordinates are 
+
+Z(m) 
+
+> −
+
+= uθ (ψP(x(m) 
+
+> t1
+
+)) , . . . , u θ (ψP(x(m) 
+
+> tn
+
+))  ∈ Rdz ×n,
+
+Z(m)+ = vθ (ψP(x(m)
+
+> t1+1
+
+)) , . . . , v θ (ψP(x(m)
+
+> tn+1
+
+))  ∈ Rdz ×n.
+
+We define the score matrix 
+
+S(m) =  Z(m)
+
+> −
+
+⊤Z(m)+ , S(m) 
+
+> ij
+
+=
+
+D
+
+uθ (ψP(x(m) 
+
+> ti
+
+)) , v θ (ψP(x(m) 
+
+> tj+1
+
+)) 
+
+E
+
+.
+
+The NCP contrastive loss for regime m is 
+
+ℓm(θ) = 1
+
+n(n − 1) 
+
+X
+
+> i̸=j
+
+ S(m)
+
+> ij
+
+2 − 2
+
+n
+
+> n
+
+X
+
+> i=1
+
+S(m) 
+
+> ii
+
++ γ
+
+h
+
+r(Z(m) 
+
+> −
+
+) + r(Z(m)+ )
+
+i
+
+. (100) The diagonal term aligns true one-step pairs, while the off-diagonal term penalizes mismatched temporal pairs. The regularizer prevents collapse and keeps the coordinates well conditioned. For Z ∈ Rdz ×n, define 
+
+¯z = 1
+
+n Z1 , bΣZ = 1
+
+n (Z − ¯z1 ⊤)( Z − ¯z1 ⊤)⊤.
+
+We use 
+
+r(Z) = 1
+
+dz
+
+∥ bΣZ − I∥2 
+
+> F
+
++ 2 ∥¯z∥22. (101) This centers and approximately whitens the learned coordinates over each temporal window. 
+
+E.4 Observable space learning on multiple dynamical systems with GradNorm multitask strategy. Multitask balancing across plasma regimes. Each Tokam2D regime m corresponds to a parameter pair (g(m), κ (m)) and is treated as one task. Let Mtr be the set of training regimes and ℓm(θ) the temporal representation loss of regime m. A uniform objective, |M tr |−1 P 
+
+> m∈M tr
+
+ℓm(θ), can be poorly balanced because regimes have different temporal complexity. The parameter κ controls the density-gradient drive, while g acts through the interchange coupling between density and vorticity; regimes where both effects are large can exhibit stronger fluctuations and richer temporal spectra. We therefore use a GradNorm-weighted multitask objective [ 11 ]. For a mini-batch of regimes 
+
+B ⊂ M tr ,
+
+LMTL (θ, ω ) = X
+
+> m∈B
+
+ωmℓm(θ), ωm = |M tr | exp( βm)
+
+P 
+
+> j∈M tr
+
+exp( βj ) , (102) so that the average task weight over training regimes is one. The logits βm are learned with GradNorm, while θ denotes the shared temporal-head parameters. Let ℓm(0) be the initial loss of regime m. At iteration t, define the relative training rate 
+
+rm(t) = ℓm(t)/ℓ m(0) 
+
+|B| −1 P 
+
+> j∈B
+
+ℓj (t)/ℓ j (0) .
+
+Thus, rm(t) > 1 means that regime m is learning more slowly than the mini-batch average. Let Wref 
+
+be the last shared layer of the temporal heads. GradNorm measures 
+
+Gm(t) = ∇Wref 
+
+ ωmℓm(t) 
+
+> 2
+
+, eGm(t) = G(t)rm(t)αGN ,
+
+where 
+
+G(t) = |B| −1 X
+
+> j∈B
+
+Gj (t), αGN = 0 .12 .
+
+32 The task weights are updated by minimizing 
+
+LGN = X
+
+> m∈B
+
+Gm(t) − eGm(t) , (103) and the shared representation parameters are updated with LMTL .This balancing does not force all regimes to be equally easy. It prevents regimes with larger loss scale or stronger turbulent activity from dominating the shared representation. In practice, higher weights on high-drive or strongly coupled regimes are consistent with their richer temporal spectra and help learn coordinates that remain usefu. 0 50 100 150 200 250       
+
+> Epoch
+> −800
+> −600
+> −400
+> −200
+> 0
+> temp
+> Training dynamics
+> Train 0.0 0.1 0.2 0.3 0.4 0.5
+> g
+> 1.0
+> 1.5
+> 2.0
+> 2.5
+> 3.0
+> 3.5
+> κ
+> Distribution of ( g,κ) colored by GradNorm weight
+> 0.6
+> 0.8
+> 1.0
+> 1.2
+> 1.4
+> 1.6
+> GradNorm weight  wm
+
+Figure 10: Temporal representation learning diagnostics. Left: training objective in (100) . Right: final GradNorm weights over the (g, κ ) map. Larger weights indicate regimes that require more optimization effort in the shared temporal representation. 0 50 100 150 200 250      
+
+> Epoch
+> 20
+> 40
+> 60
+> 80
+> GradNorm objective
+> GradNorm auxiliary objective
+> 050 100 150 200 250
+> Epoch
+> 4
+> 6
+> 8
+> 10
+> 12
+> 14
+> Mean gradient norm ̄  G
+> Mean task gradient norm
+
+Figure 11: GradNorm optimization diagnostics. Left: auxiliary GradNorm objective. Right: gradient norm of the main multitask objective. The curves show that the task weights stabilize during training. The final GradNorm weights in Figure E.4 indicate where the shared temporal representation has more difficulty fitting all regimes simultaneously. The largest weights are concentrated at high 
+
+κ, matching the density snapshots where larger κ produces stronger, more organized fluctuations. Increasing g alone has a weaker effect on the weights, consistent with its more indirect role through the density–vorticity coupling. Its influence becomes more visible at high κ, where the potential snapshots show more distorted flow structures. Overall, the weighting diagnostic suggests that the hardest regimes are those with stronger turbulent activity and richer temporal content. 
+
+Reduced-rank validation of the temporal representation. We use reduced-rank regression (RRR) only as a validation diagnostic for the temporal representation; it is not the spectral estimator used by DOODL. The goal is to check whether the learned coordinates admit a predictable finite-rank one-step evolution. 33 For each regime m, we form one-step pairs in the learned coordinate space, 
+
+z−,(m) 
+
+> i
+
+= uθ
+
+
+
+ψP(x(m) 
+
+> ti
+
+)
+
+
+
+, z+,(m) 
+
+> i
+
+= uθ
+
+
+
+ψP(x(m)
+
+> ti+1
+
+)
+
+
+
+.
+
+For a candidate rank r, we fit a ridge-regularized reduced-rank predictor 
+
+bAm,r ∈ arg min 
+
+> rank( A)≤r
+
+1
+
+|I (m)tr |
+
+X
+
+> i∈I (m)tr
+
+Az−,(m) 
+
+> i
+
+− z+,(m)
+
+> i
+> 22
+
++ λ∥A∥2 
+
+> F
+
+. (104) We first select the diagnostic rank by evaluating the held-out one-step error 
+
+Err RRR (r) = 1
+
+|M val |
+
+X
+
+> m∈M val
+
+1
+
+|I (m)val |
+
+X
+
+> i∈I (m)val
+
+bAm,r z−,(m) 
+
+> i
+
+− z+,(m)
+
+> i
+> 22
+
+.
+
+Figure 12 shows that the error decreases at small ranks and then saturates. We therefore use rank 
+
+reval = 40 for checkpoint selection. 0 10 20 30 40 50 60 
+
+> Rank
+> 5
+> 10
+> 15
+> 20
+> 25
+> RRR reconstruction error
+
+Rank selection 
+
+> Mean error
+
+Figure 12: Diagnostic rank selection for reduced-rank validation. The held-out one-step error decreases at small ranks and then saturates, indicating that a moderate-rank predictor captures most of the predictable temporal structure in the learned coordinates. Given reval = 40 , we monitor the one-step coefficient of determination 
+
+R2RRR = 1 −
+
+P
+
+> m
+
+P 
+
+> i∈I (m)
+
+bAm,r eval z−,(m) 
+
+> i
+
+− z+,(m)
+
+> i
+> 22
+
+P
+
+> m
+
+P 
+
+> i∈I (m)
+
+z+,(m) 
+
+> i
+
+− ¯z+,(m) 22
+
+, ¯z+,(m) = 1
+
+|I (m)|
+
+X
+
+> i∈I (m)
+
+z+,(m) 
+
+> i
+
+.
+
+This score measures how much one-step variation is explained by a finite-rank linear predictor, relative to a constant predictor. We compute it on both training and validation regimes and select the checkpoint maximizing validation R2RRR .34 0 50 100 150 200 250     
+
+> Epoch
+> 0.0
+> 0.2
+> 0.4
+> 0.6
+> 0.8
+> R 2RRR
+> Reduced-rank operator validation
+> Validation R2RRR
+> Train R2RRR
+
+Figure 13: Checkpoint selection with reduced-rank validation. Train and validation R2RRR measure finite-rank one-step predictability in the learned coordinates. The selected checkpoint maximizes validation R2RRR , while the train/validation comparison checks that the representation improves without relying on physical labels. 
+
+E.5 Generator-resolvent estimation 
+
+For each regime m, the temporal representation step produces the latent trajectory 
+
+z(m)1: T =  z(m)1 , . . . , z(m)
+
+> T
+
+, z(m) 
+
+> t
+
+= uθ
+
+
+
+ψP(x(m) 
+
+> t
+
+)
+
+
+
+∈ Rdz .
+
+From this trajectory, we estimate a finite-rank spectral generator representation 
+
+bGm = ( bΛm, bLm, bRm)
+
+using a generator-resolvent (GR) estimator [ 35 ]. The GR estimator is well suited to plasma trajectories because it aggregates time-lagged information over multiple lags. This helps capture dynamics occurring at different time scales, including oscillatory drift/interchange activity and slower transport structures, while producing a stable spectral representation of the generator. The estimated eigenvalues bλi = bσi + i bωi encode growth or decay through bσi and oscillatory content through bωi, while the spectral factors (bLm, bRm) encode the associated modes. The resulting bGm is the operator representation passed to DOODL. Details of the generator-resolvent construction are given in Section A.1. 
+
+Choice of shift, lag, and rank. For the plasma experiments, each learned latent trajectory z(m)1: T =(z(m)1 , . . . , z(m) 
+
+> T
+
+) is mapped to a finite-rank spectral generator representation 
+
+bGm = ( bΛm, bLm, bRm),
+
+where bΛm contains the recovered generator eigenvalues and bLm, bRm are the associated left and right spectral factors. We use a generator-resolvent (GR) filter with 
+
+a = 8 , K = 600 , rGR = 40 ,
+
+Here a is the GR shift, K is the maximum lag used by the time-lagged filter, and rGR is the number of retained spectral components. The eigenvalues bνi of the GR-filtered operator are mapped back to generator eigenvalues by 
+
+bλi = a  1 − bν−1
+
+> i
+
+ .
+
+All spectra shown below are therefore spectra of the recovered generator, not spectra of the resolvent. The shift a controls the resolution–stability tradeoff of the recovered generator spectrum. Small shifts reveal finer spectral variation but are more sensitive to numerical noise, whereas large shifts smooth the estimate but compress the recovered eigenvalues. The value a = 8 gives a stable compromise for the downstream SGOT geometry. The maximum lag controls the temporal support of the GR 35 estimate: with ∆t = 0 .05 , K = 600 corresponds to a time window of length 30 . This provides enough temporal context to capture slow transport and oscillatory content while remaining stable across regimes. Finally, rGR = 40 retains a rich spectral description, including oscillatory and subspace information useful for DOODL, without making the representation dominated by weak numerical modes. −6 −4 −2 0                
+
+> Real part
+> −7.5
+> −5.0
+> −2.5
+> 0.0
+> 2.5
+> 5.0
+> 7.5
+> Imaginary part
+> a= 0.1
+> −3 −2 −1 0
+> Real part
+> −1.5
+> −1.0
+> −0.5
+> 0.0
+> 0.5
+> 1.0
+> 1.5
+> a= 1
+> −2.0 −1.5 −1.0 −0.5 0.0
+> Real part
+> −1.0
+> −0.5
+> 0.0
+> 0.5
+> 1.0
+> a= 5
+> −1.0 −0.5 0.0
+> Real part
+> −1.0
+> −0.5
+> 0.0
+> 0.5
+> 1.0
+> a= 10
+> 1.0 1.2 1.4
+> Real part
+> −0.5
+> 0.0
+> 0.5
+> a= 20
+> Generator-resolvent spectrum for different shifts
+
+Figure 14: Recovered generator spectra for different GR shifts a, with fixed maximum lag. The plotted points are generator eigenvalues obtained after inversion of the GR filter. Small shifts reveal finer spectral variation, while larger shifts produce smoother but more compressed spectra. We use 
+
+a = 8 in the plasma pipeline. Figure 14 shows that the recovered generator spectra remain mostly in the stable half-plane and retain nonzero imaginary components. This is consistent with the operator structure expected for statistically stable plasma regimes: negative real parts encode decay or relaxation, while imaginary parts encode oscillatory drift/interchange content. Since the latent dynamics are real-valued, complex eigenvalues appear in conjugate pairs up to numerical error. −1.5 −1.0 −0.5 0.0                   
+
+> Real part
+> −1.0
+> −0.5
+> 0.0
+> 0.5
+> 1.0
+> Imaginary part
+> L= 100
+> −1.5 −1.0 −0.5 0.0
+> Real part
+> L= 200
+> −1.5 −1.0 −0.5 0.0
+> Real part
+> L= 400
+> −1.5 −1.0 −0.5 0.0
+> Real part
+> L= 600
+> −1.5 −1.0 −0.5 0.0
+> Real part
+> L= 800
+> Generator-resolvent spectrum for different max lags ( a= 8)
+
+Figure 15: Recovered generator spectra for different maximum lags K, with fixed GR shift a = 8 .The plotted points are generator eigenvalues obtained after inversion of the GR filter. The dominant spectral organization is stable across the tested lags, supporting the use of K = 600 .Figure 15 shows that the main spectral structure is stable across the tested lag values. We therefore use K = 600 , which provides enough temporal context for slow modes without visibly destabilizing the recovered spectrum. 
+
+Generator-resolvent eigenfunction prediction score. We use an eigenfunction prediction score as a dynamic consistency diagnostic. Let bλi be the recovered generator eigenvalues and bψi(t) the corresponding right eigenfunction evaluations along the trajectory. A consistent generator estimate should satisfy 
+
+bψi(t + 1) ≃ e∆t bλi bψi(t).
+
+We report 
+
+R2GR = 1 −
+
+PT −1
+
+t=1 
+
+PrGR 
+
+i=1 bψi(t + 1) − e∆t bλi bψi(t) 2
+
+PT −1
+
+t=1 
+
+PrGR 
+
+i=1 bψi(t + 1) − ¯ψi
+
+2 , ¯ψi = 1
+
+T − 1
+
+T −1X
+
+t=1 
+
+bψi(t + 1) .
+
+This score measures whether the recovered spectral coordinates evolve according to the estimated generator eigenvalues. . In the selected configuration, we obtain R2GR = 0 .97 ,36 E.6 Spectral coordinates and physical parameters 
+
+We finally inspect whether the recovered generator spectra retain the physical parameters of the Tokam2D dynamical systems from unsupervised learning. For each regime m ∈ [M ], the generator-resolvent estimator returns generator eigenvalues bλ(m) 
+
+> i
+
+=
+
+bσ(m) 
+
+> i
+
++ i bω(m) 
+
+> i
+
+, i = 1 , . . . , r GR . We encode the recovered spectrum by 
+
+s(m) =  bσ(m)1 , . . . , bσ(m) 
+
+> rGR
+
+, |bω(m)1 |, . . . , |bω(m) 
+
+> rGR
+
+|⊤ ∈ R2rGR .
+
+The real parts encode decay or growth rates, while the absolute imaginary parts encode frequency scales. We use absolute values because non-real eigenvalues appear in complex conjugate pairs. Stacking all regimes gives a matrix S ∈ RM ×2rGR , whose columns are standardized across regimes. The parameter vectors g, κ ∈ RM are standardized as well. 
+
+Marginal spectral associations. For y ∈ { g, κ}, we compute the marginal association between the j-th spectral coordinate and y as 
+
+ρy,j = ⟨S:,j , y⟩∥S:,j ∥2∥y∥2
+
+, j = 1 , . . . , 2rGR .
+
+Thus, ρy,j is the empirical correlation between a recovered generator coordinate and the physical parameter. 1 11 21 31 41 51  
+
+> Mode index
+> −1.00
+> −0.75
+> −0.50
+> −0.25
+> 0.00
+> 0.25
+> 0.50
+> 0.75
+> 1.00
+> Correlation with  κ
+> Raw spectral correlations with κ
+> ℜ(λi)
+> |ℑ(λi)|
+
+Figure 16: Marginal correlations between recovered generator coordinates and the density-gradient parameter κ. Large coefficients identify decay-rate or frequency coordinates that vary systematically with the imposed density-gradient drive. Figure 16 shows a strong spectral signature of κ. This is consistent with the model: κ directly controls the density-gradient drive, and therefore changes the dominant activity level, spatial scale, and temporal organization of the plasma dynamics. 
+
+Residual association with g after regressing out κ. The interchange parameter g has a weaker marginal spectral signature than κ. This is consistent with the Tokam2D equations: κ enters as the density-gradient drive, whereas g acts through the coupling between density perturbations and vorticity. Its effect can therefore be partially masked by the dominant variation induced by κ.To isolate the part of the recovered spectrum associated with g beyond this dominant κ-direction, we remove the linear effect of κ from both g and each spectral coordinate. Let S ∈ RM ×2rGR be the standardized matrix of spectral coordinates, where the j-th column S:,j contains one coordinate across the M regimes. We also denote by κ, g ∈ RM the standardized parameter vectors. For each spectral coordinate j, we fit the linear regression 
+
+S:,j = β0,j 1 + β1,j κ + r(κ) 
+
+> j
+
+,
+
+37 1 11 21 31 41 51        
+
+> Mode index
+> −1.00
+> −0.75
+> −0.50
+> −0.25
+> 0.00
+> 0.25
+> 0.50
+> 0.75
+> 1.00
+> Correlation with  g
+> Raw spectral correlations with g
+> ℜ(λi)
+> |ℑ(λi)| 111 21 31 41 51
+> Mode index
+> −1.00
+> −0.75
+> −0.50
+> −0.25
+> 0.00
+> 0.25
+> 0.50
+> 0.75
+> 1.00
+> Partial corr. with  g
+> Partial spectral correlations with g
+> ℜ(λi)
+> |ℑ(λi)|
+
+Figure 17: Spectral correlations with the interchange parameter g. Left: marginal correlations be-tween g and the recovered generator coordinates. Right: partial correlations obtained after regressing out the linear effect of κ from both g and each spectral coordinate. The residual signal shows that the recovered generator spectrum retains information about g beyond the dominant κ-driven variation. where r(κ) 
+
+> j
+
+is the residual part of the j-th generator coordinate after removing its linear dependence on κ. We similarly regress g on (1, κ),
+
+g = γ01 + γ1κ + r(κ) 
+
+> g
+
+.
+
+We then define 
+
+ρg|κ,j =
+
+D
+
+r(κ) 
+
+> j
+
+, r(κ)
+
+> g
+
+E
+
+r(κ) 
+
+> j2
+
+r(κ) 
+
+> g2
+
+, j = 1 , . . . , 2rGR .
+
+This is the empirical partial correlation between the j-th recovered generator coordinate and g, after removing the linear contribution of κ.Figure 17 shows that the marginal spectral correlations with g are weaker than those for κ, but that a clear residual signal remains after regressing out κ. This indicates that the recovered generator spectrum does not only encode the dominant density-gradient drive. It also retains information about the interchange parameter through more distributed spectral coordinates, consistent with the role of g
+
+in the density–vorticity coupling. 
+
+Representative spectral coordinates. We visualize representative coordinates by selecting those with the largest values of |ρκ,j | and |ρg|κ,j |. The first group corresponds to generator eigenvalues with the most important correlation with κ, while the second group captures the strongest residual correlation with g.Figure 18 makes the previous correlations explicit. Coordinates associated with κ organize regimes along the main density-gradient direction. Coordinates associated with g are less dominant, but remain structured once the leading κ effect is removed. Overall, the recovered generator coordinates are therefore not arbitrary numerical features: they retain interpretable information about the physical control parameters of the Tokam2D dynamical systems. 
+
+SGOT geometry before dictionary projection. We also inspect the operator geometry before fitting the DOODL dictionary. From the generator-resolvent representations { bGm}Mm=1 , we compute the pairwise SGOT distance matrix using the log-Martin projector distance and spectral weight 
+
+η = 0 .9, then embed this distance matrix with t-SNE. Figure 19 shows that the SGOT geometry of the recovered generators is already structured by the scanned parameters. The organization is strongest for κ, consistent with its direct role as the density-gradient drive, while g appears more weakly and in a less monotone way. This supports the role of DOODL as a compression of an already informative operator geometry, rather than a supervised mechanism for creating parameter information. 38 1.0 1.5 2.0 2.5 3.0 3.5                        
+
+> κ
+> −0.5
+> −0.4
+> −0.3
+> −0.2
+> −0.1
+> 0.0
+> ℜ(λ47 )
+> κ—corr = -0.97 (mode 47)
+> 1.0 1.5 2.0 2.5 3.0 3.5
+> κ
+> 0.0
+> 0.2
+> 0.4
+> 0.6
+> 0.8
+> 1.0
+> |ℑ(λ59 )|
+> κ—corr = 0.60 (mode 59)
+> −0.2 −0.1 0.0 0.1 0.2
+> Residualized g
+> −0.15
+> −0.10
+> −0.05
+> 0.00
+> 0.05
+> 0.10
+> 0.15
+> Residualized  ℜ(λ29 )
+> g—partial corr = -0.84 (mode 29)
+> −0.2 −0.1 0.0 0.1 0.2
+> Residualized g
+> −0.4
+> −0.2
+> 0.0
+> 0.2
+> Residualized | ℑ(λ58 )|
+> g—partial corr = -0.45 (mode 58)
+> Best spectral modes and physical parameters
+
+Figure 18: Representative recovered generator coordinates. Top: coordinates most associated with κ.Bottom: coordinates most associated with g after removing the effect of κ. The plots show that κ
+
+is encoded in dominant spectral directions, while g appears through weaker but structured residual variation. 
+
+Figure 19: t-SNE embedding of the pairwise SGOT distance matrix between recovered generator operators, colored by the physical parameters g and κ. The embedding shows a clear organization along κ and a weaker but visible organization along g, indicating that physical information is already present in the operator geometry before dictionary learning. 
+
+E.7 Dictionary learning and parameter recovery 
+
+We apply DOODL to the full-trajectory generator representations bGm = ( bΛm, bLm, bRm), m =1, . . . , M . The dictionary contains d = 12 atoms and is trained with the SGOT distance dS , using the log-Martin projector distance and spectral weight η = 0 .9.The training of each dictionary last for 6 epochs with batch sizes of 64. Dictionary is learned following the procedure described in section C.2 with the default settings. Each regime is represented by barycentric coordinates bαm ∈ ∆d−1
+
+obtained by projecting bGm onto the learned operator dictionary, i.e. by fitting the SGOT barycenter 
+
+Bbαm (D1, . . . , D d) to bGm.To test whether the unsupervised coordinates retain physical information, we fit two independent degree-2 polynomial ridge regressors on the training regimes, one from bαm to g(m) and one from 
+
+bαm to κ(m).. As shown in Figure 5, regression from full-trajectory DOODL coordinates reaches 
+
+R2
+
+g = 0 .811 and R2
+
+κ = 0 .967 on held-out regimes. The stronger recovery of κ is consistent with its dominant role as density-gradient drive, while the recovery of g shows that the dictionary also preserves information about the more indirect interchange dynamics. 39 E.8 Early operator and parameter recovery 
+
+We also evaluate short trajectories. For a trajectory length τ < T , let bαm,τ denote the DOODL coordinates estimated from the short trajectory of regime m. These coordinates define the dictionary-constrained operator bGDOODL m,τ = Bbαm,τ (D1, . . . , D d). We compare this estimate with a direct generator-resolvent estimate from the same short trajectory, using the SGOT distance to the full-trajectory operator bGm,T . As shown in Figure 6, the dictionary-constrained estimate is closer to 
+
+bGm,T in the short-data regime. This supports the interpretation of DOODL as an operator-level prior: early estimation is reduced to fitting coordinates in a learned spectral dictionary, rather than estimating an unconstrained generator from few observations. For early parameter recovery, we train a separate diagnostic regressor. Full-trajectory recovery uses only the full-trajectory coordinates bαm. Early recovery uses data augmentation: the training set includes dictionary coordinates obtained from both full and short trajectories. For this early regressor, we use the pre-softmax dictionary logits bℓm,τ ∈ Rd rather than the simplex-normalized coordinates, We again fit two independent degree-2 polynomial ridge regressors, one for g and one for κ. This augmentation is used only for the diagnostic parameter regressor; it does not change the learned operator dictionary. Figure 6 shows that parameter recovery improves as longer trajectories become available. The recovery of κ rises quickly, consistent with its dominant spectral signature, while g improves more gradually, consistent with its more distributed residual signature in the generator spectrum. At the longest trajectory length, the early-recovery protocol reaches R2 
+
+> g
+
+= 0 .81 and R2 
+
+> κ
+
+= 0 .97 .Figure 6 show that short trajectories already contain useful operator-level information, and that the learned DOODL dictionary makes this information recoverable in both SGOT geometry and physical parameter space. 
+
+E.9 Hyperparameters 
+
+Table 2: Main hyperparameters used in the Tokam2D plasma pipeline. Parameter Value Number of regimes 400 
+
+Train/test split 80 /20 over regimes Grid size 128 × 128 
+
+Time step ∆t = 0 .05 
+
+POSEIDON descriptor dimension 768 
+
+Temporal latent dimension d = 64 
+
+Temporal heads uθ , v θ two MLPs [512,256,64] Task definition one regime = one task Task balancing GradNorm GradNorm exponent α = 0 .12 
+
+Maximum epochs 250 
+
+Validation metric R2RRR 
+
+RRR validation rank reval = 40 
+
+Selected validation score R2RRR = 0 .86 
+
+Resolvent shift a = 8 
+
+Maximum lag K = 600 
+
+Generator resolvant rank r = 40 
+
+GR validation score R2GR = 0 .97 
+
+Regression diagnostic degree-2 polynomial ridge Full-trajectory regression scores R2 
+
+> g
+
+= 0 .81 , R 2 
+
+> κ
+
+= 0 .97 
+
+40 F Statistical Guarantees 
+
+F.1 Setup and notation 
+
+Throughout we assume (Xt)t≥1 is stationary with marginal π, so that Var π (ℓt(G)) is time-independent for every fixed G. Let zt := ϕ(Xt) ∈ H denote the encoded state under the feature map 
+
+ϕ : X → H . Let ¯G = ( ¯Gj )j∈[d] ∈ N d be a dictionary of d atoms, B(α; ¯G) ∈ N the decoder (either BOT or B p), and 
+
+Gα := Op [B(α; ¯G)] ∈ S r (H), G( ¯G) := Gα : α ∈ ∆d−1 ⊂ S r (H). (105) The sample loss at operator G ∈ S r (H) is ℓt(G) := ∥zt+1 − G∗zt∥2
+
+> H
+
+. For a fixed dictionary ¯G, the population and empirical risks are 
+
+R( α | ¯G) := Eπ [ℓt(Gα)] , bR( α | ¯G) := 1
+
+n
+
+> n
+
+X
+
+> t=1
+
+ℓt(Gα), (106) with minimizers α∗( ¯G) ∈ arg min α R( α | ¯G) and ˆα( ¯G) ∈ arg min α bR( α | ¯G). We identify the following quantities: • κ := sup x∈X ∥ϕ(x)∥H, the uniform bound on the feature map; • M := sup j∈[d] ∥Op [ ¯Gj ]∥op , the operator norm of the dictionary atoms; sup α ∥Gα∥op ≤ M
+
+since SGOT barycenters do not increase operator norm; • m ≤ d − 1, the intrinsic dimension of G( ¯G) under ∥ · ∥ op , with diameter ≤ 2M ;• σ2¯G := sup G∈G ( ¯G) Var π (ℓt(G)) , the uniform variance of the sample loss; • ¯σ2 
+
+> G
+
+:= sup G∈G ( ¯G) Eπ [ℓt(G)2], the uniform second moment of the sample loss. 
+
+F.2 Technical results Regularity and entropy of the decoder Lemma 3 (Proposition 5 of [ 17 ]) . For all G, G ′ ∈ S r (H), ∥G − G′∥op ≤ CS dS (G, G ′), where 
+
+CS = 2 √2 Cξψ .
+
+Lemma 4 (Lipschitz continuity of the OT barycenter decoder) . Let ¯G = ( ¯Gj )j∈[d] ∈ N d be a fixed dictionary with atoms of bounded operator norm M < ∞. Then α 7 → Gα = Op [BOT (α; ¯G)] is Ldec -Lipschitz from (∆ d−1, ∥ · ∥ 1) to (Sr (H), ∥ · ∥ op ), with Ldec := CS max j,k ∈[d] dS (Op [ ¯Gj ], Op [ ¯Gk]) .Proof. By stability of SGOT barycenters with respect to weights [17], 
+
+dS (Gα, G α′ ) ≤ max  
+
+> j,k ∈[d]
+
+dS
+
+ Op [ ¯Gj ], Op [ ¯Gk] · ∥ α − α′∥1. (107) Then α 7 → Gα = Op [BOT (α; ¯G)] is Lipschitz from (∆ d−1, ∥ · ∥ 1) to (Sr (H), d S ) with Lipschitz constant bounded from above by max j,k ∈[d] dS (Op [ ¯Gj ], Op [ ¯Gk]) .Applying Lemma 3, ∥Gα − Gα′ ∥op ≤ CS dS (Gα, G α′ ) ≤ CS Ldec ∥α − α′∥1.
+
+Lemma 5 (Metric entropy of the OT barycenter decoder image) . Let G( ¯G) = {Gα : α ∈ ∆d−1} for a fixed dictionary ¯G, and let m ≤ d − 1 be the intrinsic dimension of G( ¯G) under ∥ · ∥ op . Then for every ε > 0,
+
+log N  G( ¯G), ∥ · ∥ op , ε  ≲ m log 
+
+ Ldec 
+
+ε
+
+
+
+. (108) 
+
+Proof. Since G( ¯G) has intrinsic dimension m under ∥ · ∥ op , a standard volumetric argument gives 
+
+log N (G( ¯G), ∥ · ∥ op , ε ) ≲ m log( DG /ε ), where DG ≤ Ldec is the diameter of G( ¯G) under ∥ · ∥ op ,since G( ¯G) is the image of ∆d−1 under an Ldec -Lipschitz map from (∆ d−1, ∥ · ∥ 1) of diameter 1.41 Lemma 6 (Lipschitz continuity of the projection-based decoder) . Let ¯G = ( ¯Gj )j∈[d] ∈ N d be a fixed dictionary with atoms ¯Gj = ( ¯Λj , ¯Lj , ¯Rj ). Assume that the dictionary atoms have bounded operator norm M < ∞ and that the right eigenvector aggregation is uniformly non-degenerate: 
+
+σmin 
+
+ X
+
+> j∈[d]
+
+αj ¯Rj
+
+ ≥ c > 0, ∀ α ∈ ∆d−1. (109) 
+
+Then α 7 → Gα = Op [Bp(α; ¯G)] is Lipschitz from (∆ d−1, ∥ · ∥ 1) to (Sr (H), ∥ · ∥ op ) with constant 
+
+Ldec ≲ M 2(1 + M 2)2/c 4, (110) 
+
+and in particular is Ldec CS -Lipschitz from (∆ d−1, ∥ · ∥ 1) to (Sr (H), d S ).Proof. Fix α, α′ ∈ ∆d−1 and write R := P 
+
+> j
+
+αj ¯Rj , R′ := P 
+
+> j
+
+α′ 
+
+> j
+
+¯Rj , L := P 
+
+> j
+
+αj ¯Lj , L′ := 
+
+P 
+
+> j
+
+α′ 
+
+> j
+
+¯Lj , Λ := P 
+
+> j
+
+αj ¯Λj , Λ′ := P 
+
+> j
+
+α′ 
+
+> j
+
+¯Λj . By linearity and ∥ · ∥ 1-contractivity of convex combinations, 
+
+∥R − R′∥op , ∥L − L′∥op , |Λ − Λ′| ≤ M ∥α − α′∥1. (111) 
+
+Projection step. The projection P N maps (Λ, L, R) to (Λ, ˜L, R) where 
+
+˜L = L + R(R∗R)−1(Ir − L∗R)∗. (112) To see this, note that any ˜L satisfying ˜L∗R = Ir can be written as ˜L = L + R(R∗R)−1V∗ for some matrix V, and minimizing ∥˜L − L∥op over V gives V = Ir − L∗R, yielding (112) . We bound 
+
+∥˜L − ˜L′∥op by writing 
+
+˜L − ˜L′ = ( L − L′) + R(R∗R)−1(Ir − L∗R)∗ − R′(R′∗ R′)−1(Ir − L′∗ R′)∗. (113) The first term satisfies ∥L − L′∥op ≤ M ∥α − α′∥1 by (111). For the second term, decompose as 
+
+R(R∗R)−1(Ir − L∗R)∗ − R′(R′∗ R′)−1(Ir − L′∗ R′)∗
+
+= R(R∗R)−1 − R′(R′∗ R′)−1(Ir − L∗R)∗ + R′(R′∗ R′)−1(L′∗ R′)∗ − (L∗R)∗. (114) 
+
+First bracket. Using R(R∗R)−1 − R′(R′∗ R′)−1 = (R − R′)( R∗R)−1 + R′[( R∗R)−1 −
+
+(R′∗ R′)−1], the resolvent identity, ∥(R∗R)−1∥op ≤ c−2, and ∥R′∗ R′ − R∗R∥op ≤ 2M ∥R −
+
+R′∥op ,
+
+∥R(R∗R)−1 − R′(R′∗ R′)−1∥op ≤ M (1 + 2 M 2/c 2)
+
+c2 ∥α − α′∥1. (115) The factor ∥(Ir − L∗R)∗∥op ≤ 1 + ∥L∥op ∥R∥op ≤ 1 + M 2.
+
+Second bracket. ∥L′∗ R′ − L∗R∥op ≤ ∥ L′ − L∥op ∥R′∥op + ∥L∥op ∥R′ − R∥op ≤ 2M 2∥α − α′∥1,and ∥R′(R′∗ R′)−1∥op ≤ M/c 2.Combining both brackets, 
+
+∥˜L − ˜L′∥op ≲ M (1 + M 2)2
+
+c4 ∥α − α′∥1. (116) 
+
+Operator norm step. Writing 
+
+Gα − Gα′ = ( R − R′)Diag( Λ)˜L∗ + R′Diag( Λ − Λ′)˜L∗ + R′Diag( Λ′)( ˜L − ˜L′)∗, (117) and using ∥R∥op , ∥R′∥op ≤ M , |Λ|, |Λ′| ≤ M , ∥˜L∥op ≤ M + M (1 + M 2)/c 2, together with (111) and (116), 
+
+∥Gα − Gα′ ∥op ≲ M 2(1 + M 2)2
+
+c4 ∥α − α′∥1. (118) This establishes Lipschitz continuity with constant Ldec ≲ M 2(1 + M 2)2/c 4.42 Lemma 7 (Metric entropy of the projection-based decoder image, Bp). Let Assumption (WC) be satisfied. Then for every ε > 0,
+
+log N  G( ¯G), ∥ · ∥ op , ε  ≲ m log 
+
+ Mc2 ε
+
+
+
+, (119) 
+
+where m ≤ d − 1 is the intrinsic dimension of G( ¯G) under ∥ · ∥ op .Proof. Under Assumption (WC) , the map α 7 → Gα = Op [Bp(α; ¯G)] is Ldec -Lipschitz from 
+
+(∆ d−1, ∥·∥ 1) to (Sr (H), ∥·∥ op ) with Ldec ≲ M (1+ M/c 2) by Lemma 6. Note also that the diameter satisfies DG ≤ 2M . The result now follows from an identical argument to that of Lemma 5. 
+
+Oracle dictionary and dictionary bias. We consider d training dynamical systems, each observed through a trajectory of length ntrain , from which the transfer operators { ˆGj }j∈[d] are estimated. The empirically learned dictionary ˆG minimizes objective (4) over these estimated operators. The oracle dictionary ¯G∗ is the minimizer of the same objective evaluated at the true operators {Gj }j∈[d], i.e. what dictionary learning would produce from infinitely long training trajectories: 
+
+¯G∗ ∈ arg min  
+
+> ¯G∈N d
+
+1
+
+d
+
+> d
+
+X
+
+> j=1
+
+min 
+
+> α∈∆d−1
+
+dS
+
+ B(α; ¯G), Gj
+
+ . (120) The dictionary bias 
+
+bias( ˆG) := inf 
+
+> α∈∆d−1
+
+R( α | ˆG) − inf 
+
+> α∈∆d−1
+
+R( α | ¯G∗) ≥ 0 (121) measures the effect of operator estimation error on the learned dictionary. It vanishes when ntrain →∞. For two dictionaries ¯G, ¯G′ ∈ N d, we extend the operator norm componentwise by 
+
+∥ ˆG − ¯G∗∥op := max  
+
+> j∈[d]
+
+∥Op [ ˆGj ] − Op [ ¯G∗ 
+
+> j
+
+]∥op . (122) 
+
+Proposition 7 (Control of the dictionary bias) . Under the Ldec -Lipschitz assumption on the decoder in ¯G under ∥ · ∥ op (Lemmas 4 and 6), 
+
+bias( ˆG) ≤ 2(1 + M )κ2Ldec ∥ ˆG − ¯G∗∥op . (123) 
+
+Proof. For any α ∈ ∆d−1 and two dictionaries ¯G, ¯G′ ∈ N d, let Gα = Op [B(α; ¯G)] and G′ 
+
+> α
+
+=
+
+Op [B(α; ¯G′)] . Writing et(G) := z t+1 − G∗zt,
+
+|ℓt(G) − ℓt( ¯G)| = ⟨et(G) + et( ¯G), (G − ¯G)∗zt⟩H ≤  ∥et(G)∥H + ∥et( ¯G)∥H
+
+∥G − ¯G∥op ∥zt∥H.
+
+(124) Since ∥zt∥H ≤ κ and ∥G∥op , ∥ ¯G∥op ≤ M , we have ∥et(G)∥H ≤ (1 + M )κ. The Ldec -Lipschitz assumption on the decoder in ∥ · ∥ op ,
+
+|R( α | ¯G) − R( α | ¯G′)| ≤ Eπ |ℓt(Gα) − ℓt(G′
+
+> α
+
+)| ≤ 2(1 + M )κ2Ldec ∥ ¯G − ¯G′∥op . (125) The result follows from the value function inequality | inf α f (α) − inf α g(α)| ≤ sup α |f (α) −
+
+g(α)|.
+
+Remark 5 (Rate of the dictionary bias) . By Lipschitz continuity of the dictionary learning objective (4) 
+
+in the training operators, ∥ ˆG − ¯G∗∥op ≲ max j∈[d] ∥Op [ ˆGj ] − Op [Gj ]∥op . Each operator estimation error ∥Op [ ˆGj ] − Op [Gj ]∥op is controlled by the spectral estimation rates of Appendix A.1, see (53) ,with trajectory length ntrain . A union bound over j ∈ [d] gives with probability at least 1 − δ,
+
+bias( ˆG) ≲ (1 + M )κ2Ldec (ntrain )− α 
+
+> 2( α+β)
+
+log( d/δ ), (126) 
+
+where α ∈ (0 , 2] and β ∈ (0 , 1] are the regularity and spectral decay parameters of Appendix A.1. The bias decays with the training trajectory length ntrain , confirming that longer training trajectories yield a learned dictionary closer to the oracle. 
+
+43 F.3 Main results Coordinate fitting guarantee. Theorem 2 (Coordinate fitting, i.i.d.) . Let ¯G ∈ N d be a fixed dictionary. Suppose (Xt)t∈[n] has marginal π and is i.i.d. Then for any δ ∈ (0 , 1) , with probability at least 1 − δ,
+
+R( ˆ α | ¯G) − inf 
+
+> α∈∆d−1
+
+R( α | ¯G) ≤ bias( ˆG) + c′
+
+s
+
+σ2¯G · m log( M L dec (1 + M )κ2√n) + log(1 /δ )
+
+n ,
+
+(127) 
+
+where c′ > 0 is a numerical constant. Proof of Theorem 2. We proceed in five steps. 
+
+Step 1: Reduction to uniform deviation. Decompose the excess risk as 
+
+R( ˆ α | ˆG) − inf 
+
+> α∈∆d−1
+
+R( α | ¯G∗) = R( ˆ α | ˆG) − inf  
+
+> α
+
+R( α | ˆG)
+
+| {z }
+
+> coordinate fitting excess risk
+
++ inf  
+
+> α
+
+R( α | ˆG) − inf  
+
+> α
+
+R( α | ¯G∗)
+
+| {z }
+
+> bias( ˆG)
+
+.
+
+(128) We now bound the coordinate fitting excess risk. By optimality of ˆα for bR and of α∗( ˆG) for R( · | ˆG),
+
+R( ˆ α | ˆG) − inf  
+
+> α
+
+R( α | ˆG) ≤ 2 sup 
+
+> G∈G ( ˆG)
+
+¯ℓ(G) − Eπ [ℓt(G)] , (129) where ¯ℓ(G) := 1
+
+> n
+
+Pnt=1 ℓt(G).
+
+Step 2: Covering net. For ε > 0 to be chosen, let Gε be an ε-net of G( ¯G) under ∥ · ∥ op . By Lemmas 4 and 6 and the volumetric argument of Lemma 5, log |G ε| ≲ m log( M L dec /ε ). For any 
+
+G ∈ G ( ¯G), pick ¯G ∈ G ε with ∥G − ¯G∥op ≤ ε.
+
+Step 3: Lipschitz continuity of the loss. Writing et(G) := z t+1 − G∗zt,
+
+|ℓt(G) − ℓt( ¯G)| = ⟨et(G) + et( ¯G), (G − ¯G)∗zt⟩H ≤  ∥et(G)∥H + ∥et( ¯G)∥H
+
+∥G − ¯G∥op ∥zt∥H.
+
+(130) Since ∥zt∥H ≤ κ and ∥G∥op , ∥ ¯G∥op ≤ M , we have ∥et(G)∥H ≤ (1 + M )κ, and thus 
+
+|ℓt(G) − ℓt( ¯G)| ≤ 2(1 + M )κ2 ∥G − ¯G∥op ≤ 2(1 + M )κ2 ε. (131) 
+
+Step 4: Bernstein’s inequality. For fixed ¯G ∈ G ε, 0 ≤ ℓt( ¯G) ≤ (1 + M )2κ2 and Var π (ℓt( ¯G)) ≤
+
+σ2¯G . By Bernstein’s inequality applied to the i.i.d. sequence (ℓt( ¯G)) nt=1 , for any s > 0,
+
+P
+
+ ¯ℓ( ¯G) − Eπ [ℓt( ¯G)] ≥ s
+
+2
+
+
+
+≤ 2 exp − n s 2/42σ2¯G + 23 (1 + M )2κ2 s
+
+!
+
+. (132) 
+
+Step 5: Union bound and optimization. Set ε := s/ (4(1 + M )κ2) so that 2(1 + M )κ2ε = s/ 2.By the triangle inequality, |¯ℓ(G) − Eπ [ℓt(G)] | ≤ | ¯ℓ( ¯G) − Eπ [ℓt( ¯G)] | + s/ 2. The net size at this ε
+
+satisfies log |G ε| ≲ m log( M L dec (1 + M )κ2/s ). Taking a union bound over Gε and solving for s
+
+such that the right-hand side equals δ yields 
+
+sup 
+
+> G∈G ( ¯G)
+
+¯ℓ(G) − Eπ [ℓt(G)] ≲
+
+s
+
+σ2¯G · m log( M L dec (1 + M )κ2√n) + log(1 /δ )
+
+n . (133) The result follows from Step 1. 44 Extension to β-mixing trajectories. For a stationary process (Xt)t≥1 with marginal π, the β-mixing coefficients are 
+
+β(τ ) := sup 
+
+> t≥1
+
+sup  
+
+> B∈σ(Xs, s ≤t)⊗σ(Xs, s ≥t+τ)
+
+P(B) − (P ⊗ P)( B) , τ ∈ N. (134) Fix block length τ ∈ N, let neff := ⌊n/ (2 τ )⌋, and define the effective variance 
+
+¯σ2eff := σ2¯G + 4 ¯ σ2 
+
+> G
+> τ−1
+
+X
+
+> s=1
+
+β(s), (135) which accounts for within-block temporal dependence via the Davydov–Rio covariance inequal-ity [52]. 
+
+Theorem 1 (Oracle inequality) . Let (WC) be satisfied. Suppose the test trajectory (Xt)t∈[n+1] is stationary, β-mixing, and independent of the training data. Then for any δ ∈ (0 , 1) , with probability at least 1 − δ − 2( neff − 1) β(τ ),
+
+R( ˆ α | ˆG)−inf  
+
+> α
+
+R( α | ¯G) ≤ bias( ˆG)+ c′
+
+s
+
+¯σ2eff · m log  M L dec (1 + M )κ2√neff 
+
+ + log(1 /δ )
+
+neff 
+
+(8) 
+
+where c′ > 0 is a numerical constant and bias( ˆG) := inf α R( α | ˆG) − inf α R( α | ¯G∗) ≥ 0.Proof. Steps 1–3: Reduction, covering, and Lipschitz control. By optimality of ˆα,
+
+R( ˆ α | ˆG) − inf  
+
+> α
+
+R( α | ˆG) ≤ 2 sup 
+
+> G∈G ( ˆG)
+
+¯ℓ(G) − Eπ [ℓt(G)] . (136) For ε > 0 to be chosen, let Gε be an ε-net of G( ˆG) under ∥ · ∥ op , with log |G ε| ≲ m log( M L dec /ε ).For any G ∈ G ( ˆG), pick ¯G ∈ G ε with ∥G − ¯G∥op ≤ ε. By Step 3 of Theorem 2, |ℓt(G) − ℓt( ¯G)| ≤ 
+
+2(1 + M )κ2 ε.
+
+Step 4: Control of Var( Yj ). Following the blocking construction of [ 34 , Lemma 1], split (ℓt( ¯G)) nt=1 
+
+into odd block sums Yj := P(2 j−1) τi=2( j−1) τ +1 ℓti ( ¯G), j = 1 , . . . , n eff . Expanding the variance of Yj ,
+
+Var( Yj ) = 
+
+> τ
+
+X
+
+> i=1
+
+Var( ℓti ( ¯G)) + 2 X
+
+> 1≤i<k ≤τ
+
+Cov  ℓti ( ¯G), ℓ tk ( ¯G) . (137) The diagonal terms satisfy Pτi=1 Var( ℓti ( ¯G)) ≤ τ σ 2¯G by stationarity. For the off-diagonal terms at lag s = k − i, the Davydov–Rio inequality [ 52 ] gives |Cov( ℓti ( ¯G), ℓ tk ( ¯G)) | ≤ 2β(s)¯ σ2 
+
+> G
+
+. Since lag 
+
+s ∈ { 1, . . . , τ − 1} appears at most τ times, 
+
+Var( Yj ) ≤ τ σ 2¯G + 4 τ ¯σ2 
+
+> G
+> τ−1
+
+X
+
+> s=1
+
+β(s) = τ ¯σ2eff . (138) 
+
+Step 5: Bernstein for β-mixing. 
+
+The odd blocks are β(τ )-approximately independent: replacing them by exactly independent copies incurs total variation error 2( neff −1) β(τ ), following [ 34 , Lemma 1]. Each Yj satisfies |Yj −E[Yj ]| ≤ 
+
+τ (1 + M )2κ2 almost surely and Var( Yj ) ≤ τ ¯σ2eff by (138) . Applying Bernstein’s inequality to the approximately independent odd blocks, for any s > 0,
+
+P
+
+ 1
+
+neff 
+
+> neff
+
+X
+
+> j=1
+
+Yj − Eπ [ℓt( ¯G)] ≥ s
+
+2
+
+ ≤ 2 exp 
+
+
+
+− neff s2/42¯ σ2eff + 23 (1 + M )2κ2 s
+
+
+
++ 2( neff − 1) β(τ ).
+
+(139) 
+
+Step 6: Union bound and optimization. 
+
+Set ε = s/ (4(1+ M )κ2) so that 2(1+ M )κ2ε = s/ 2. By the triangle inequality, |¯ℓ(G)−Eπ [ℓt(G)] | ≤ |¯ℓ( ¯G) − Eπ [ℓt( ¯G)] | + s/ 2. The net size at this ε satisfies log |G ε| ≲ m log( M L dec (1 + M )κ2/s ).Taking a union bound over Gε and solving for s such that the right-hand side equals δ yields the result, with the mixing tail 2( neff − 1) β(τ ) carried additively in the probability statement. 45 Remark 6 (Exponentially fast mixing) . When β(τ ) ≤ Ce −cτ for constants C, c > 0, the sum 
+
+Pτ −1 
+
+> s=1
+
+β(s) ≤ C/c is bounded uniformly in τ , so ¯σ2eff ≲ σ2¯G + ¯ σ2 
+
+> G
+
+. Choosing τ = ⌈c−1 log( n/δ )⌉
+
+ensures 2( neff − 1) β(τ ) ≤ δ, giving neff = Ω( n/ log( n/δ )) and recovering nearly the i.i.d. rate of Theorem 2. 
+
+Remark 7 (Finite-dimensional embeddings) . When ϕ takes values in Rp, κ = sup x ∥ϕ(x)∥2 < ∞
+
+holds automatically with bounded activations such as arctan , and ∥ · ∥ H = ∥ · ∥ 2 throughout. Both theorems apply without modification. 
+
+46

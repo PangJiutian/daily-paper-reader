@@ -1,0 +1,1293 @@
+Title: Physics-Informed Generative Solver: Bridging Data-Driven Priors and Conservation Laws for Stable Spatiotemporal Field Reconstruction
+
+URL Source: https://arxiv.org/pdf/2605.22338v1
+
+Published Time: Fri, 22 May 2026 01:32:44 GMT
+
+Number of Pages: 31
+
+Markdown Content:
+# Physics-Informed Generative Solver: Bridging Data-Driven Priors and Conservation Laws for Stable Spatiotemporal Field Reconstruction 
+
+## Ziyuan Zhu #1,2 , Keyu Hu #1,2 , Zhifei Chen #*1,2 , Yuhao Shi 1,2 , Ming Bao *1,2 ,Jing Zhao 1,2,3 , Gang Wang 4, Haitan Xu 1,5,6 , Jiadong Li 7, Qijun Zhao 8,Xiaodong Li 9, Minghui Lu *1,2,10,11 , and Yanfeng Chen 2,11 1School of Advanced Manufacturing Engineering, Nanjing University, Suzhou, 215163, China. 
+
+> 2
+
+National Laboratory of Solid State Microstructures, Nanjing University, Nanjing, 210093, China. 
+
+> 3
+
+Suzhou Acoustics Industry Technology Research Institute Co., Ltd., Suzhou, 215513, China. 
+
+> 4
+
+School of Mechanical and Electric Engineering, Soochow University, Suzhou, 215131, China. 
+
+> 5
+
+Shishan Laboratory, Nanjing University, Suzhou, 215163, China. 
+
+> 6
+
+Jiangsu Key Laboratory of Quantum Information Science and Technology, Nanjing University, Suzhou 215163, China. 
+
+> 7
+
+Key Laboratory of Nanodevices and Applications, Suzhou Institute of Nano-tech and Nano-bionics, Chinese Academy of Sciences, Suzhou, 215125, China. 
+
+> 8
+
+National Key Laboratory of Helicopter Aeromechanics, Nanjing University of Aeronautics and Astronautics, Nanjing, 210016, China. 
+
+> 9
+
+Key Laboratory of Noise and Vibration Research, Institute of Acoustics, Chinese Academy of Sciences, Beijing, 100190, China. 
+
+> 10
+
+Jiangsu Key Laboratory of Artificial Functional Materials, Nanjing, 210093, China. 
+
+> 11
+
+Collaborative Innovation Center of Advanced Microstructures, Nanjing University, Nanjing, 210093, China.  
+
+> #
+
+These authors contributed equally to this work.  
+
+> *
+
+Corresponding authors: chenzhifei@nju.edu.cn; baomingnju@nju.edu.cn; luminghui@nju.edu.cn. 
+
+Abstract 
+
+Spatiotemporal field reconstruction from sparse measurements is an ill-posed fundamental inverse problem across the physical sciences, wherein purely data-driven methods often violate governing dynamics. We introduce a physics-informed generative reconstruction framework that decouples martingale-stabilized prior learn-ing from inference-time conservation-law projection. During training, Martingale-Regularized Score Matching (MRSM) couples denoising score matching with a Score Fokker–Planck Equation constraint to enforce a reverse martingale property, yielding a dynamically stable generative prior. During inference, Physics-Informed Implicit Score Sampling (PI-ISS) projects samples toward the physical manifold by back-propagating conservation-law residuals, without embedding physical penalties into training. This separation enables flexible reconstruction from extremely sparse, incom-plete, and multimodal observations while preserving physical consistency. In acoustic systems, the framework co-generates coupled pressure and particle velocity fields from sparse measurements, transforming sparse physical arrays into dense virtual arrays and suppressing spatial aliasing in undersampled localization. Beyond acoustics, the same stable prior generalizes to highly chaotic Kolmogorov flows and large-scale 
+
+1
+
+> arXiv:2605.22338v1 [cs.LG] 21 May 2026 ERA5 meteorological fields under extreme data sparsity. By synergizing dynamical stability with physics-constrained probabilistic inference, this work establishes a rigorous and generalizable paradigm for solving high-dimensional inverse problems, bridging the gap between generative artificial intelligence and first-principles science.
+
+# 1 Introduction 
+
+Many physical investigations are faced with a simple observational constraint: the state of a system is continuous, but measurements are sparse. For example, acoustic waves evolve over space and time, turbulent flows contain rapidly interacting vortical structures, and meteorological variables form large-scale coupled patterns across the atmosphere. In all these systems, the physical field of interest is high-dimensional and dynamically constrained, whereas the available sensors usually sample only a small fraction of the underlying state. Reconstructing a complete spatiotemporal field from such limited observations remains therefore a central inverse challenge across the physical sciences [1 –3]. Partial differential equations (PDEs) constitute the mathematical foundation for de-scribing these physical laws. Conventional numerical methods have long driven scientific computing, but they typically require well-specified governing equations, boundary condi-tions, initial states, and material parameters. These requirements are difficult to satisfy when only sparse, noisy, or incomplete measurements are available. The AI-for-Science paradigm, a transformative solution to circumvent these bottlenecks, catalyzes landmark breakthroughs across quantum chemistry [4 –6], molecular dynamics [7 –10], biology [11 –15], materials science [16 –20], and the reconstruction of high-dimensional quantum states from sparse measurements [21 –24]. Within macroscopic physical field reconstruction, physics-informed neural networks (PINNs) embed governing equations into training ob-jectives [25, 26], whereas operator-learning frameworks learn mappings that approximate global solution operators [27–29]. Despite these advances, real-world spatiotemporal inverse problems remain fundamen-tally limited by observational sparsity [1, 30]. We herein operationally define sparsity as a regime where the available observational degrees of freedom are profoundly insufficient to uniquely determine the target physical manifold via the Shannon-Nyquist sampling theorem or traditional well-posed equation solvers. This regime includes severe spatial downsampling, extensive random masking, and the complete absence of coupled cross-modal variables. Under such conditions, the inverse problem is intrinsically non-unique: multiple physically plausible fields may be consistent with the same sparse measurements. Deterministic neural architectures, which map a given input to a single output, are there-fore prone to stability degradation and unrecoverable error accumulation in highly sparse and noisy regimes [31, 32]. In doing so, they often suppress rather than represent the uncertainty inherent to the inverse problem. As a promising alternative, generative paradigms, such as score-based diffusion models [33 – 37] and flow matching models [38 –40], offer a powerful pathway to capture complex data distributions and resolve the intrinsic uncertainty of inverse problems [41 – 44]. However, directly applying these models to physical systems introduces a different failure mode. A generated field may appear statistically plausible while violating conservation laws, wave propagation constraints, or momentum balance. Purely data-driven priors rely on empirical correlations and do not guarantee conservative probability flows during generation. As 2sparsity becomes severe, small score-estimation errors can be amplified along the reverse sampling trajectory, driving the generated samples away from the physical manifold. The key challenge is therefore not only to generate plausible fields, but to generate fields that remain dynamically stable and physically admissible under extreme data sparsity. Here we introduce Martingale-Regularized Score Matching (MRSM), a generative framework for reconstructing spatiotemporal physical fields from sparse observations. MRSM reformulates ill-posed physical inversion as a regularized joint optimization problem. During pre-training, it couples denoising score matching (DSM) [34] with Score Fokker– Planck Equation (Score FPE) regularization [45, 46]. This regularization encourages the diffusion trajectories to satisfy a reverse martingale property, thereby stabilizing the learned generative prior before any task-specific physical constraints are imposed. To enable efficient inference, we further derive an Implicit Score Sampler (ISS) tailored for variance-exploding (VE) stochastic differential equations (SDEs). For systems with explicit physical coupling, ISS is extended to a Physics-Informed ISS (PI-ISS). Rather than imposing PDE residuals during training, PI-ISS injects conservation residuals into the reverse sampling iterations as gradient constraints. This design separates prior learning from physical enforcement: the data-driven prior is learned once, while conservation laws are enforced only at inference. As a result, the method avoids the multi-objective optimization pathologies of conventional physics-informed training and supports zero-shot generalization across irregular and unstructured sparse observation patterns. This work primarily contributes a physically constrained generative reconstruction framework that remains effective when observations are extremely sparse, incomplete, and multimodal. In acoustic systems, we validate PI-ISS using in-house acoustic vector sensors (AVS) in both standing-wave tube and free-field environments. By enforcing mass and momentum conservation, PI-ISS achieves self-consistent co-generation of acoustic pressure and particle velocity fields from sparse measurements. This converts sparse physical arrays into dense virtual arrays and suppresses the sidelobe interference that traditionally limits undersampled array signal processing. Beyond acoustics, the same MRSM prior maintains energetic and mechanical fidelity in highly chaotic Kolmogorov flows and large-scale ERA5 meteorological fields [47]. Together, these results suggest a shift from hardware-dense sensing toward physics-informed generative reconstruction, where sparse measurements are computationally lifted into continuous, dynamically consistent physical fields. By linking stochastic generative priors with first-principles physical constraints, this study establishes a general paradigm for multimodal inverse problems in high-dimensional physical systems. 
+
+# 2 Results 
+
+In this section, we first introduce the conceptual mechanisms of the MRSM framework and the PI-ISS strategy for solving ill-posed spatiotemporal inverse problems. Subsequently, the efficacy and generalizability of the proposed framework are evaluated across a hierarchy of dynamical systems: from idealized acoustic simulations to real-world cross-modal inferences. We then demonstrate the framework’s capability to break the spatial Nyquist limit in free-field source localization. Finally, this paradigm culminates in generalizations to highly chaotic Kolmogorov flows and meteorological systems. 3MRSM Pre-training stage  
+
+> Generated multimodal spatiotemporal fields
+> Denoising score matching Score FPE regularization
+> Gaussian Noise
+> Time series
+> XT
+> ……
+> Joint score function for spatiotemporal data 3D U-net Skip connection Spatial and temporal attention Spatial convolution
+
+a 
+
+> Pretrain
+> Incorporate multimodal constraints Implicit Score Sampler
+> Spatiotemporal data
+> Add noise via VE SDE
+
+Conditional generation stage b                                  
+
+> Measurements from sparse sensors
+> Parallel sequence generation Xk
+> (1)
+> Xk
+> (2)
+> Xk
+> (3)
+> Time-Conditioned Score Network
+> Noisy score fields
+> x1
+> x2
+> t
+> sθ
+> …
+> Observation Consistency Physical Consistency Time Series Consistency
+> Pressure Particle velocity Self-Constraint (Wave Eq.) Self-Constraint (Wave Eq.) Coupled Constraints (Euler & Continuity Equations)
+> 22,(0), ( ) ( ) 022
+> ( ) (( ), ) log (( ) | (0)) []tttttttpt
+> qq
+> léù- Ñ êúû+ëXXXsXXXsEE
+> 2
+> d[ ( )] ddd
+> tt
+
+s       
+
+> =XW
+> ()()()11
+
+( ) ( , )b b bk k k k k k k
+
+> q
+
+s s ss- -= + -X X s X
+
+μ μ μ( ) ( )          
+
+> ()(1) ()()20002
+
+( , )b bk k  
+
+> bbbb
+
+ba
+
+> -
+
+Ñ + Ñ -X X
+
+X X y HX ý ýCμ μ 2( ) ( )0 021
+
+( ) ( )   
+
+> Jbbphys jjj
+
+w
+
+> =
+
+= åX R XUFigure 1: Schematic of the proposed generative framework. a , MRSM pre-training stage. The model employs a spatiotemporal attention-enhanced neural architecture to fit the joint score function of multimodal data. The training objective synergizes DSM with Score FPE regularization to enforce dynamical stability. b, Conditional generation stage. Iterative denoising is executed via the proposed ISS. The inference process is governed by three gradient guidance mechanisms: (1) Time Series Consistency for continuous evolution across sequential patches, (2) Observation Consistency to strictly honor sparse sensor measurements, and (3) Physical Consistency, which forces the co-generated multimodal fields to satisfy governing laws. 
+
+## 2.1 The MRSM and PI-ISS methods 
+
+The proposed generative framework comprises two stages: the pre-training phase enforcing martingale dynamics regularization, and the conditional generation phase driven by physics-informed guidance. The overarching conceptual architecture is illustrated in Figure 1. In the pre-training stage, the framework learns the joint score function of the multimodal physical fields. In conventional DSM, a critical limitation is its inaccurate score estimation in low-data-density regions, leading to non-conservative generation trajectories. To circumvent this, MRSM introduces a Score FPE regularization term to the training objective. This dual-constraint mechanism goes beyond merely fitting the empirical data distribution; it constrains the evolved score field to satisfy the underlying probability flow of the forward diffusion process. This ensures that the score function itself acts as a conserved 4Correction  
+
+> Gradient guidance Physical correction
+> Physical constraint
+> Noise-free state estimation
+> Score network Noisy state Tweedie's formula
+> Finite Difference Method (FDM)
+> Physical residual
+> Residual map
+
+
+
+b
+
+> Noise-free state estimation
+
+Computational architecture of the single-step physical correction 
+
+> Iterate
+> Residual calculation
+> Backpropagate
+> μ
+
+( ; ) , 1, ,j j J= = ¼X ψ 0Pμ 0( )kphys phys = Ñ Xg XUISS 1 1k k phys phys 
+
+l- -¬ -X X g
+
+a Manifold projection of the physics-guided process 
+
+> Chaotic initial noise state Support of the data prior
+> Physic constraint
+> Physics-constrained Manifold Target manifold Generated noise-free physical field
+> PI-ISS sample path
+> 0
+
+supp( )
+
+m 
+
+> phys 0
+
+supp( )
+
+m= ÇS M
+
+> N
+
+X
+
+> k
+
+X
+
+> k¢
+
+X
+
+> k¢¢
+
+X 
+
+> 0
+
+ÎX S
+
+> k
+
+X
+
+> ISS
+
+DX 
+
+> 1k-
+
+Xphys phys 
+
+l- ÑX U 
+
+> phys
+
+( ( ; ) 0) =X ψ M PFigure 2: Physics-informed manifold projection and gradient guidance. a , Left panel: manifold projection of the physics-guided process. The PI-ISS sampling trajectory originates from a chaotic noise state and is iteratively guided toward the target manifold, defined as the intersection of the data prior support and the physics-constrained manifold. Right panel: a detailed illustration of the discrete vector update, combining the unconditional ISS step with the physical gradient correction. b, Computational architecture of the single-step physical correction. Illustration of the physical correction loop (PI-ISS) during a single reverse inference step. Anoise-free physical state is first estimated from the current noisy state. Physical residuals are evaluated via discrete operators, yielding the total physical potential energy. The gradient of this energy with respect to the current state, is then applied as a direct correction to the ISS update trajectory, scaled by the guidance strength. 
+
+5quantity, which mathematically enforces the reverse martingale property. Consequently, this formulation establishes a dynamically stable generative prior for ill-posed physical inverse problems (Figure 1a). In the conditional generation stage, we derive an ISS to overcome the computational bottlenecks of high-dimensional spatiotemporal sampling. This sampler, mathematically established in the Supplementary Note S1, accelerates generation while rigorously pre-serving strict integration accuracy. We upgrade this sampler into a PI-ISS to ensure the generated multimodal fields strictly obey physical laws. At each iterative step, PI-ISS conceptually estimates the underlying noise-free state from the current noisy trajectory, and then injects a physics-guided correction term directly into the state update rule (Figure 2b) by computing the gradient of the physical conservation residuals with respect to this estimated state. Ultimately, this cross-gradient coupling mechanism ensures asymptotic physical consistency, strictly projecting the data-driven sampling sequence onto the defined physical manifold (Figure 2a). The detailed algorithmic implementations and theoretical proofs for these mechanisms are provided in the Methods and Supplementary Note S2. 
+
+## 2.2 Physics-consistent reconstruction of acoustic fields 
+
+To evaluate the performance of the MRSM framework in solving multimodal physical inverse problems, we first benchmarked the model on a free-field acoustic propagation task. This scenario, governed by the linearized Euler equations and the law of mass conservation, features intricate cross-modal coupling between acoustic pressure and par-ticle velocity, and tests the physical representation capacity of generative models. To establish the generative prior, we constructed a comprehensive spatiotemporal dataset via finite-difference simulations to capture diverse wavefield dynamics excited by acoustic point sources within a non-reflecting domain (see Supplementary Note S10 for dataset details). For inference, we challenged the trained frameworks with a highly ill-posed task: reconstructing the full-field dynamics of an independent test sample from 6 × spatially downsampled observations corrupted by Gaussian noise to simulate sensor uncertainties. Furthermore, to demonstrate inference efficiency, we constrained all score-based solvers (standard SDE, ISS, and PI-ISS) to a rapid 100-step generation regime, representing an order-of-magnitude reduction from the 1000-step baseline typical of standard reverse diffusion. Meanwhile, we evaluated end-to-end operator learning models, namely the Fourier Neural Operator (FNO) and Laplace Neural Operator (LNO), trained under the same 6 × downsampling conditions. Under this scenario, Figure 3a illustrates the recovered sound intensity fields. While all methods successfully capture the macroscopic wavefield topology, the standard SDE solver, the ISS, and the operator networks exhibit perceptible directional deviations and subtle local distortions. In contrast, PI-ISS more faithfully recovers the intricate spatiotemporal patterns of the ground truth. The advantage of PI-ISS becomes more evident when we examine the intrinsic adher-ence of the reconstructed fields to physical laws rather than mere visual similarity. While conventional statistical models can easily achieve pixel-level resemblance, they fail to guarantee mechanical consistency, frequently masking unphysical generative hallucinations. Analysis of the wave equation residuals (Figure 3b) directly exposes this vulnerability: standard SDE trajectories severely violate governing physical dynamics, a direct con-sequence of the large truncation errors induced by the accelerated 100-step generation 60 200 400                           
+
+> Frequency (Hz)
+> 012
+> Amplitude
+> ×10 −2P
+> 0200 400
+> Frequency (Hz)
+> 0123
+> ×10 −5Vx
+> 0200 400
+> Frequency (Hz)
+> 0.0 0.5 1.0 1.5
+> ×10 −5Vy
+> Frequency domain Ref PI-ISS
+> 2× 3× 4× 5× 6×
+> Downsampling factor
+> 00.1 0.2 0.3 0.4
+> nRMSE Error evaluation at varying sparsity LNO FNO SDE ISS PI-ISS
+> 35810 15 20
+> Observable portion (%)
+> 0.99 1
+> Correlation Pearson correlation coefficient SDE ISS
+> PI-ISS
+> 35810 15 20
+> Observable portion (%)
+> 00.05 0.1 0.15
+> nRMSE Errors (nRMSE) SDE ISS
+> PI-ISS
+
+b
+
+d
+
+c
+
+e
+
+f        
+
+> Ref.
+> PI-ISS
+> ISS SDE FNO LNO
+> 07Magnitude ( ×10 −4W /m2)
+> Step = 1 20 40 60 80 100 t
+> Sound intensity field for 6 ×downsampling
+
+a       
+
+> SDE ISS PI-ISS
+> 515 25
+> Residual Magnitude Wave equation residual field
+> 1
+> c2
+> ∂2p
+> ∂t2− ∇ 2p
+
+Figure 3: Performance evaluation of free-field reconstruction. a , Reconstructed sound intensity fields under 6 × spatial downsampling. From top to bottom: Ground truth (Ref.), PI-ISS, ISS, standard SDE solver, FNO, and LNO. The baseline operator networks were trained under 6 × spatial downsampling. b, Physical consistency evaluated via wave equation residuals. 
+
+c, Evolution of the mean nRMSE for acoustic pressure and particle velocity components as a function of the observable data proportion. d, Frequency-domain analysis comparing the average spectrum of the PI-ISS reconstructed signals (blue solid line) against the reference (red dashed line). e, Average Pearson correlation coefficients between the reconstructed fields and the ground truth across varying observable proportions. f, Reconstruction performance (nRMSE) across baseline methods at varying spatial downsampling factors. For c, e, and f, data are presented as mean values ± standard deviation (s.d.) over 5 independent test samples. 
+
+7regime. Although ISS is specifically formulated to overcome this rapid sampling degrada-tion and considerably mitigates these residual levels compared to the standard SDE, it still operates without explicit physical constraints. In contrast, the physics-informed gradient guidance in PI-ISS mathematically bounds the generative trajectory within the physically permissible manifold, profoundly suppressing fundamental conservation violations and ensuring strict mechanical validity. Quantitative evaluations confirm this advantage across varying data sparsity levels. While visual differences in the intensity fields may appear nuanced, the objective metrics clearly delineate the performance hierarchy. Notably, the standard SDE method suffers severe accuracy degradation under the 100-step constraint, whereas the proposed ISS maintains high fidelity, validating its design for efficient, accelerated sampling without requiring the standard 1000-step computational cost. Building upon this baseline, PI-ISS establishes a commanding lead. It consistently achieves the lowest normalized root-mean-square error (nRMSE) and the highest Pearson correlation for both acoustic pressure and particle velocity components (Figures 3c, e). Crucially, even in the extreme low-observation regime, PI-ISS maintains robust reconstruction fidelity. Beyond spatial metrics, capturing the true dynamical behavior of the acoustic field requires overcoming the spectral bias of generative models, a tendency that often smooths out fine-scale dynamics or introduces unphysical high-frequency noise. Frequency-domain analysis (Figure 3d) rigorously verifies that PI-ISS overcomes this limitation. It accurately preserves the time-varying spectral properties of the acoustic signals and captures exact resonance peaks and spectral roll-off characteristics, without introducing spurious high-frequency energy blowups. This corroborates that the model has deeply internalized the acoustic wave propagation mechanisms rather than merely fitting spatial contours. Finally, PI-ISS sustains superior accuracy when benchmarked against the FNO and LNO baselines across all spatial downsampling factors (Figure 3f). These results establish that integrating data-driven generative priors with explicit physical constraints can effectively overcome the severe ill-posedness of physical inverse problems. 
+
+## 2.3 Sim-to-real cross-modal inference in acoustic environments 
+
+To validate the efficacy of the proposed framework in a real-world physical environment, we constructed a standing wave tube platform to perform scalar and cross-modal acoustic field reconstructions. A fundamental challenge in physical deep learning is the acquisition of dense, high-fidelity ground-truth data for training. To preclude this, the MRSM framework was pre-trained exclusively on a numerical simulation dataset governed by the 1D linearized Euler equations (see Supplementary Note S11 for simulation parameters). The subsequent inference tasks were directly executed on real-world measurements acquired via an in-house developed synchronous scalar and vector acoustic data acquisition system (detailed in Extended Data Figure 1 and Supplementary Note S5), testing the model’s capacity to overcome the sim-to-real domain gap. We first conducted a sparse reconstruction experiment for the scalar acoustic pressure field, using a masked validation strategy (Figure 4a). The physical measurement domain was discretized into a virtual reconstruction grid comprising 64 uniformly distributed nodes with a spatial resolution of 20 mm. During inference, a non-uniform masking scheme was applied: data from 10 of the 16 sensors were retained as sparse conditional inputs, 8Observation SDE PI-ISS 
+
+-1 0 1Pressure Reconstruction pressure field for 395 Hz b
+
+3  3 
+
+ 
+
+
+
+
+
+
+
+3
+
+> 
+
+×   
+
+  
+
+   -ISS 
+
+3  3 
+
+ 
+
+
+
+
+
+
+
+> 
+
+×   
+
+3  
+
+  -ISS 
+
+3  3 
+
+ 
+
+
+
+
+
+> 
+
+×   
+
+3  
+
+   -ISS 
+
+c
+
+a
+
+− 
+
+
+
+
+
+>  #$
+
+"!  "! "! 
+
+   
+
+"# "
+
+  
+
+
+
+
+
+>  #$
+
+"! 
+
+   
+
+"# "
+
+"! 
+
+   
+
+"# "
+
+"! %!"#!$#! & 
+
+!$#!$#   -ISS 
+
+d
+
+> Observed Data Speaker
+> Spatiotemporal acoustic sampling within the standing wave tube
+> Rigid wall
+
+Figure 4: Experimental results of the scalar acoustic pressure field. a , Spatiotemporal acoustic sampling within the standing wave tube. A loudspeaker at the left end generates the incident waves, and a rigid wall at the right end provides total reflection to establish the standing wave field. The setup utilizes 10 observation points as sparse inputs while withholding the remaining 6 for independent validation. b, Comparison of spatiotemporal acoustic pressure fields. The left panel displays the sparse 10-channel observation input, while the two right panels detail the 64-node high-resolution fields reconstructed by the standard SDE and PI-ISS solvers. c,Comparison of the nRMSE at various sensor locations across different operating frequencies. d,Waveform comparison at validation points, contrasting the signals reconstructed by different methods at the 6 masked sensor locations against the measured ground truth. 
+
+9while measurements from the remaining 6 sensors (indices 3, 5, 8, 10, 13, and 15) were strictly withheld to serve as independent validation targets. As depicted in Figure 4b for an operating frequency of 395 Hz, the absence of ex-plicit physical constraints causes the standard SDE solver to generate unphysical spatial oscillations within the unobserved intervals. Conversely, the PI-ISS method recovers a spatially continuous and smooth standing wave profile across the entire 64-node domain. Quantitative analysis (Figure 4c) confirms PI-ISS consistently achieves a lower nRMSE than the standard SDE at all sensor locations, an advantage across multiple frequencies (175 Hz, 345 Hz, and 395 Hz). Detailed waveform comparisons at the masked locations (Figure 4d) further reveal that the PI-ISS reconstructions align precisely with the empirical ground truth while the standard SDE exhibits significant phase and magnitude deviations. This successful sparse reconstruction confirms the framework’s robust adaptability to the inherent distributional shifts between idealized simulated training data and noisy physical measurements. Following the scalar validation, we challenged the framework with a highly ill-posed cross-modal inference task to evaluate its capability in resolving multiphysics coupled inverse problems. To acquire the requisite multimodal data, we designed and fabricated a PU (pressure-velocity) joint sensor chip in-house, specifically engineered for this validation, to synchronously measure both physical quantities (Extended Data Figure 1). Using experimental data acquired at 385 Hz, the model was conditioned exclusively on acoustic pressure observations from 12 active sensor locations, while the corresponding particle velocity channel was completely masked (Figures 5a, b). The objective was to blindly infer the full-field (64 nodes) spatiotemporal distribution of both acoustic pressure and particle velocity (Figure 5c). Figure 5d presents a time-domain evaluation of the particle velocity waveforms re-constructed by PI-ISS against the measured ground truth at the 12 sensor locations. PI-ISS bridges this modality gap by coupling the data-driven joint score prior with the governing laws of mass and momentum conservation, even in the complete absence of velocity observations. Specifically, the DSM captures the intrinsic statistical correlations between pressure and velocity, while the physics-informed gradient guidance mechanism mathematically translates the pressure-gradient information into physical corrections for the unobserved particle velocity. The resulting reconstructions closely match the empirical data in both magnitude and phase, corroborating that this framework can effectively solve complex cross-modal physical inverse problems by anchoring data-driven generative priors to fundamental physical laws. 
+
+## 2.4 Generative virtual arrays suppress spatial aliasing 
+
+In addition to recovering continuous physical fields, we demonstrate how the PI-ISS framework fundamentally redefines the hardware constraints of array signal processing by circumventing the spatial Nyquist limit. Conventional acoustic sensing systems are trapped in an inescapable physical trade-off: constraints on hardware costs and acquisition channels dictate a harsh compromise between array aperture, which governs spatial resolution, and spatial sampling density, that prevents aliasing. Consequently, expanding the physical aperture to resolve adjacent sources forces the inter-sensor spacing to exceed half the target signal wavelength. This severe spatial undersampling induces spatial aliasing and 10 ?
+
+Unknown velocity 
+
+> -3
+> 0
+> 3
+> Velocity  (m/s)
+
+×   Sensor 2 Sensor 4 Sensor 5 Sensor 6
+
+> -3
+> 0
+> 3
+> Velocity  (m/s)
+
+×   Sensor 7 Sensor 8 Sensor 9 Sensor 11  
+
+> 0100 200
+
+Time steps 
+
+> -3
+> 0
+> 3
+> Velocity  (m/s)
+
+×   Sensor 12   
+
+> 0100 200
+
+Time steps 
+
+Sensor 13   
+
+> 0100 200
+
+Time steps 
+
+Sensor 14   
+
+> 0100 200
+
+Time steps 
+
+Sensor 15 Particle velocity waveform reconstruction for 385 Hz 
+
+Ref. PI-ISS 
+
+Pressure observation  
+
+> -1 1
+
+Pa 
+
+Pressure  
+
+> -1 1
+
+Pa 
+
+Velocity  
+
+> -2 2
+
+m/s (×   )
+
+a
+
+> Reconstruct
+
+b c
+
+d 
+
+> Speaker Rigid wall
+> Acquired multimodal data
+> Multimodal spatiotemporal acoustic data acquisition within the standing wave tube
+
+Figure 5: Experimental results of cross-modal inference. a , Multimodal spatiotemporal acoustic data acquisition within the standing wave tube. Multimodal data are acquired using a PU joint sensor array; however, only the acoustic pressure (orange solid dots) is observed as the conditional input, while the acquired particle velocity channel (gray hollow circles) is strictly masked for cross-modal validation. b, Schematic of the inference scheme, highlighting that the model is conditioned exclusively on pressure observations while the velocity channel is fully masked. c, Reconstructed full-field physical dynamics, showcasing the high-resolution (64 nodes) spatiotemporal evolution of acoustic pressure and particle velocity synchronously generated by PI-ISS. d, Comparison of the particle velocity waveform reconstructions. The plots contrast the unobserved velocity waveforms inferred by PI-ISS (red dashed lines) against the measured ground truth (black solid lines) at the 12 active sensor locations under a 385 Hz excitation. 
+
+11 0 100 200 300 400 0 8 16 24 31 
+
+vz
+
+Time Index 
+
+0 100 200 300 400 0 8 16 24 31 
+
+vy
+
+0 100 200 300 400 0 8 16 24 31 
+
+vx
+
+0 100 200 300 400 0 5 10 15 20 25 30 
+
+vz
+
+Time Index 
+
+0 100 200 300 400 0 5 10 15 20 25 30 
+
+vy
+
+0 100 200 300 400 0 5 10 15 20 25 30 
+
+vx
+
+0 100 200 300 400 0 8 16 24 31 P
+
+Reconstruction fields 
+
+0 100 200 300 400 0 5 10 15 20 25 30 P
+
+Sparse observations 
+
+-1 0 1
+
+X (m) 
+
+0.5 
+
+1.0 
+
+1.5 
+
+> Z (m)
+
+Source 1 Source 2
+
+> -12
+> -9
+> -6
+> -3
+> 0
+> Spectrum  (dB)
+
+-1 0 1
+
+X (m) 
+
+0.5 
+
+1.0 
+
+1.5 
+
+> Z (m)
+
+Source 1 Source 2
+
+> -12
+> -9
+> -6
+> -3
+> 0
+> Spectrum  (dB)
+
+a b 
+
+> Sidelobe Interference Sidelobe cancellation
+
+c 
+
+> Virtual array reconstruction as up-sampling
+> DOA estimation DOA estimation
+> Localization performance comparison
+> Reconstruct
+
+Figure 6: Generative super-resolution for acoustic source localization. In this experiment, two target sound sources emitted continuous sinusoidal signals at 2900 Hz and 3000 Hz. a, Sparse observations from the 7-element physical AVS array, operating in a severely undersampled regime. 
+
+b, Reconstructed spatiotemporal dynamics across the 32-node virtual array, recovering the high-frequency wavefield continuous profile. c, DOA estimation via the full-vector MUSIC algorithm. The left panel shows the spatial spectrum derived from the original sparse physical array, where undersampling induces severe spatial aliasing and sidelobe interference (white box). The right panel shows the spatial spectrum based on the generative virtual array. By utilizing virtual array reconstruction as a spatial upsampling strategy, sidelobe elimination is successfully achieved. The plus (+) and cross ( ×) symbols indicate the true locations of the sound sources. 
+
+12 fundamentally confounds direction-of-arrival (DOA) estimation. Here, we demonstrate a paradigm shift from hardware-bound physical arrays to software-defined generative arrays. We show that the MRSM framework, coupled with PI-ISS sampling, acts as a physics-consistent spatial interpolator. It iteratively synthesizes dense virtual arrays from highly sparse physical measurements, effectively neutralizing the spatial undersampling bottleneck. The free-field localization experiment was conducted in a semi-anechoic chamber to approximate reflection-free conditions (see Extended Data Figure 2 for setup details). The measurement system comprised a uniform linear array of 7 in-house developed AVS units, each synchronously acquiring acoustic pressure and three-dimensional particle velocity. The physical inter-sensor spacing was fixed at 0.16 m. We introduced two independent sound sources emitting continuous sinusoidal signals at 2900 Hz and 3000 Hz. At these operating frequencies, the acoustic half-wavelength is approximately 0.058 m, significantly smaller than the physical sensor spacing, placing the measurement system in a severe state of spatial undersampling. We first constructed a full-vector free-field dataset via FDTD simulations to complete the MRSM pre-training phase. During inference, the sparse time-series observations, acquired by the 7-element physical array (Figure 6a) , were injected as conditional information into the reverse diffusion process. Guided by physical consistency, PI-ISS successfully reconstructed a continuous spatiotemporal physical field comprising 32 virtual nodes from the discrete observations (Figure 6b). This generative upsampling reduced the equivalent virtual inter-sensor spacing to 0.032 m, satisfying the spatial Nyquist sampling criterion across the entire field, and replenishing the critical waveform and phase information in the unobserved spatial regions. To quantify the impact of this generative spatial upsampling, we executed the full-vector MUSIC spatial spectrum estimation algorithm on both the original physical array and the reconstructed virtual array. As depicted in Figure 6c (left), the spatial spectrum from the 7-element physical array exhibited spatial aliasing. It generated prominent grating lobes in the central interference zone with a peak spurious level of -8.25 dB, which severely confounded true target identification. In contrast, the 32-element virtual array generated by PI-ISS effectively increased the spatial sampling rate and neutralized these unphysical artifacts. Quantitative evaluation within this identical spatial zone demonstrates that the virtual array drives the local peak interference level down to -12.14 dB, a substantial absolute spatial interference suppression of 3.89 dB, successfully eliminating the sidelobe aliasing in the resulting localization spectrum (Figure 6c, right). Although the peak amplitude of the virtual array spectrum exhibited a slight attenuation due to minor reconstruction residuals, the structural fidelity of the localization was decisively preserved. These experimental results conclusively demonstrate that integrating generative priors with physical constraints can successfully decouple array performance from spatial sampling density. By virtually reconstructing the unobserved wavefield continuity, the PI-ISS circumvents the spatial Nyquist limit without requiring additional physical sensors, which fundamentally revolutionizes the design paradigm of sensing systems. It proves that generative models, anchored by physical laws, can computationally substitute expensive hardware channels. Ultimately, this generative virtual array strategy holds out the prospect for deploying ultra-sparse, low-cost sensing architectures without sacrificing high-fidelity spatial awareness. 13 2.5 Generalization to Kolmogorov flows 
+
+The preceding sections have established the exceptional efficacy of the PI-ISS framework in acoustic environments, where explicit governing equations could provide rigid gradient constraints to guide the generative trajectory. Real-world physical systems, however, often present a more severe challenge: governing equations may be partially unknown; crucial system parameters, such as the Reynolds number in turbulent flows, might be completely inaccessible during sparse observation. A truly universal generative framework must rely entirely on the intrinsic robustness of its learned prior to navigate ill-posed inversions and remain stable when explicit physical guidance is unavailable. To validate this universality, we transition from explicitly constrained acoustics to the highly nonlinear and chaotic regime of Kolmogorov flows. This dynamic system is characterized by complex, multi-scale vortical structures that thoroughly test the capacity of purely data-driven generative priors. In the crucial part of the system, we deliberately deactivate the physics-informed gradient constraints, and deploy the foundational ISS driven solely by the FPE-regularized MRSM prior. We also challenge the framework with an out-of-distribution inference task at a higher, unseen Reynolds number (Re = 1500) and a distinct forcing wavenumber ( k = 4). This extreme configuration isolates and evaluates the pure representational capacity of the pre-trained prior. It demonstrates whether the MRSM framework merely relies on explicit equation penalization, or if it fundamentally internalizes the underlying physical manifold to achieve broad applicability across diverse dynamical systems. Comparisons under a 6 × spatial downsampling constraint (Figure 7a) reveal stark performance discrepancies. The end-to-end LNO fails to capture valid structures, and FNO exhibits severe distortions, whereas the standard SDE recovers macroscopic features but remains corrupted by high-frequency noise and artifacts. In contrast, the vorticity field reconstructed by ISS accurately reflects the complex vortex evolution, demonstrating robust feature extraction and high-fidelity completion from sparse data. The physical consistency of these reconstructions is further validated in the frequency domain. Energy spectrum analysis (Figure 7b) demonstrates that without FPE regulariza-tion, the purely data-driven model displays unphysical high-frequency energy fluctuations. This indicates that standard score networks generate non-conservative gradient fields in low-density regions. By enforcing the Score FPE during pre-training, the model mathematically guarantees the reverse martingale property, effectively eliminating these non-conservative components. Consequently, the energy spectrum of the FPE-regularized ISS reconstruction aligns exceptionally well with the reference ground truth, successfully restoring the true energy cascade across both the inertial subrange and the dissipation range. Quantitative evaluation across the physical temporal evolution (Figure 7c) highlights the computational superiority of the ISS sampling mechanism. After tracking the nRMSE across the 100 consecutive physical time steps of the generated spatiotemporal sample, we find that the proposed ISS, requiring only reverse diffusion iterations, sustains a prediction error substantially lower than the standard SDE solver at equivalent or even 200-step configurations. Its accuracy over the entire temporal sequence closely rivals the computationally expensive 1000-step SDE baseline. This confirms that ISS reduces the inference cost by an order of magnitude without sacrificing the fidelity of long-term dynamic predictions. Finally, evaluating the models across progressively harsher downsampling 14 2× 3× 4× 5× 6×                    
+
+> Downsampling factor
+> 00.1 0.2 0.3 0.4 0.5
+> nRMSE Error evaluation at varying sparsity LNO FNO SDE ISS
+> 20 40 60 80
+> Time Step
+> 0
+> 0.1
+> 0.2
+> 0.3
+> nRMSE
+> Prediction error for 6x downsampling
+> SDE ( N= 100)
+> SDE ( N= 200)
+> SDE ( N= 1000)
+> ISS ( N= 100)
+> 0.04
+> 0.06
+> Ref. ISS SDE FNO LNO
+> −10 010 Vorticity
+> Step = 20 40 60 80 100 t
+> Vorticity field for 6 ×downsampling k= 4 Re=1500
+
+10 1
+
+λ
+
+10 2
+
+10 4
+
+10 6
+
+> (λ)
+
+3× 
+
+10 1
+
+λ
+
+4× 
+
+10 1
+
+λ
+
+5× 
+
+10 1
+
+λ
+
+6× 
+
+Energy spectrum at varying sparsity 
+
+10 1
+
+λ
+
+10 2
+
+10 4
+
+10 6
+
+> (λ)
+
+3× 
+
+10 1
+
+λ
+
+4× 
+
+10 1
+
+λ
+
+5× 
+
+10 1
+
+λ
+
+6× 
+
+SDE ISS Ref. 
+
+a b
+
+d
+
+c
+
+> DSM MRSM
+
+Figure 7: Performance evaluation of Kolmogorov flow reconstruction at high Reynolds numbers. a , Reconstructed vorticity fields. The panel displays the results of the SDE, ISS, FNO, and LNO methods on a test sample with k = 4 and Re = 1500, where the baseline operator networks were trained under 6 × spatial downsampling. b, Impact of FPE regularization on the kinetic energy spectrum. The top and bottom rows present the energy spectra without and with FPE regularization, respectively. c, Evolution of the nRMSE across 100 physical time steps. The spatiotemporal sequence generated by the proposed ISS (using N = 100 reverse diffusion iterations) is evaluated against standard SDE implementations ( N = 100 , 200 , 1000). d,Reconstruction performance across varying spatial downsampling factors. Data are presented as mean values ± standard deviation over 5 independent test samples with differing initial conditions. 
+
+15 factors (Figure 7d) further underscores the resilience of this approach. While the errors of FNO and LNO escalate rapidly with increased sparsity, ISS sustains a persistently low error regime, exhibiting exceptional anti-perturbation capabilities when confronted with extreme observational constraints. 
+
+## 2.6 Generalization to real-world meteorological systems 
+
+We subject the framework to a stringent empirical evaluation: macro-scale, real-world Earth systems upon the universal representation capacity demonstrated in simulated chaotic flows. Meteorological dynamics, a formidable inverse challenge in the physical sciences, is characterized by profound multiphysics coupling, immense spatiotemporal dimensions, and inherently sparse observational networks. To evaluate whether the unconstrained ISS can navigate such complexity, we applied it to the East Asian domain of the ERA5 climate dataset to reconstruct highly coupled meteorological fields, namely, 10-metre zonal wind velocity ( u), 10-metre meridional wind velocity ( v), 2-metre temperature ( T ), and surface pressure ( P ). Figure 8 displays representative snapshots of the spatiotemporal reconstructions sam-pled at 20-day intervals over the first 100 days of 2023. During inference, only 2% spatial grid points were selected randomly as conditioning inputs, representing an extreme 98% missing data scenario. All generative trajectories were uniformly constrained to a rapid 50-step regime. Figures 8a–d contrast the reconstructions of the standard SDE solver against those of the proposed ISS across the four physical channels. While both solvers are driven by the identical pre-trained MRSM prior, the standard SDE solver suffers from severe local truncation errors under this accelerated, large-step sampling constraint, exhibiting noticeable local distortions and unphysical noise. Conversely, the ISS, leveraging its higher integration accuracy in the discrete update rule, mitigates these numerical bottlenecks and recovers coherent regional meteorological patterns. The ISS reconstructions align rigorously with the reference ground truth in critical macroscopic zones, such as the tropical dynamics over the lower latitudes and the thermal gradient structures at mid-latitudes, highlighting its capacity to preserve structural fidelity even with large sampling step sizes. Figure 8e presents the probability density functions (PDFs) of the respective variables. The statistical distribution curves of the ISS-reconstructed fields (blue solid lines) are in precise agreement with the empirical ERA5 data (red crosses). This verifies that the ISS not only effectively suppresses point-wise reconstruction errors but also strictly reproduces the underlying physical and statistical distributions of the regional meteorological system. Quantitative tracking of the reconstruction metrics (Figures 8f, g) further delineates the performance hierarchy with the observable data proportion increaseing from 2% to 20%. The accuracy of ISS consistently surpasses that of the baseline SDE across the entire tested sparsity range. Crucially, under the most extreme sparsity (the 2% observable ratio), the error of the SDE surges drastically, whereas the ISS sustains a persistently low nRMSE and high Pearson correlation. This underscores the exceptional robustness and inference efficiency of the ISS sampler in tackling severely ill-posed inverse problems in high-dimensional, nonlinear, and multiphysics-coupled physical systems. 16 2 5 10 15 20 
+
+Observable portion (%) 
+
+> 0.5
+> 0.6
+> 0.7
+> 0.8
+> 0.9
+> 1.0
+> Correlation
+
+Pearson correlation coef ficient 
+
+u (SDE) 
+
+u (ISS) 
+
+v (SDE) 
+
+v (ISS) 
+
+T (SDE) 
+
+T (ISS) 
+
+P (SDE) 
+
+P (ISS)     
+
+> 2510 15 20
+
+Observable portion (%) 
+
+> 0
+> 0.2
+> 0.4
+> 0.6
+> 0.8
+> nRMSE
+
+Prediction error 
+
+u (SDE) 
+
+u (ISS) 
+
+v (SDE) 
+
+v (ISS) 
+
+T (SDE) 
+
+T (ISS) 
+
+P (SDE) 
+
+P (ISS)   
+
+> − 
+
+u 
+
+> 
+> 
+> 
+
+× −   
+
+> − 
+
+v 
+
+> 
+> 
+> 
+
+× −     
+
+>  
+
+T 
+
+> 
+> 
+> 
+> 
+
+× −     
+
+>    
+
+P 
+
+> 
+> 
+> 
+> 
+
+× −
+
+$ # !"! 
+
+  
+
+SDE Day 20 Day 40 Day 60 Day 80 Day 100 
+
+ISS 
+
+Ref.  
+
+> -10 10
+
+u (  
+
+SDE Day 20 Day 40 Day 60 Day 80 Day 100 
+
+ISS 
+
+Ref.  
+
+> -10 10
+
+v (  
+
+SDE Day 20 Day 40 Day 60 Day 80 Day 100 
+
+ISS 
+
+Ref.  
+
+> 245 335
+
+T ( 
+
+SDE Day 20 Day 40 Day 60 Day 80 Day 100 
+
+ISS 
+
+Ref.  
+
+> 0.6 1.3
+
+P (   
+
+Reconstructed spatiotemporal fields for 98% Sparsity   
+
+> ab
+> cd
+> e
+
+f gFigure 8: Performance evaluation of ERA5 meteorological field reconstruction. a–d ,Representative snapshots of the spatiotemporal reconstructions sampled at 20-day intervals over the first 100 days of 2023 under the 98% data masking condition. The reverse diffusion process was constrained to 50 sampling steps across all results. a, 10-metre zonal wind velocity u. b, 10-metre meridional wind velocity v. c, 2-metre temperature T . d, Surface pressure P . e, Statistical distributions displaying the PDFs of the four physical variables across all spatiotemporal points. 
+
+f, g, Quantitative evaluation as a function of the observation data proportion (ranging from 2% to 20%). Solid and dashed lines correspond to the ISS and standard SDE methods, respectively. Error bars represent the mean ± standard deviation across 5 independent random seeds. f,nRMSE. g, Pearson correlation coefficient. 17 3 Discussion 
+
+We reconstruct consistent dynamics by constraining generative priors with physical man-ifolds. MRSM embeds FPE regularization to guarantee stability, while PI-ISS projects stochastic trajectories onto deterministic manifolds using conservation residuals. This architecture effectively decouples prior learning from posterior physical correction, ensuring mechanical validity in accelerated sampling. Efficacy is validated across acoustic and chaotic systems. PI-ISS enables cross-modal inference and alleviates hardware constraints imposed by the spatial Nyquist criterion through virtual array synthesis. The stable prior, in ERA5 and Kolmogorov flows, preserves energy cascades and suppresses high-frequency artifacts. Consequently, the framework exhibits superior robustness compared to pure operator learning methods. This superiority suggests a paradigm shift. Operator networks like FNO, mapping inputs to outputs directly, induce physical hallucinations under sparsity and therefore need complete retraining for new sensor geometries. Conversely, PI-ISS treats reconstruction as probabilistic sampling bounded by physics. Decoupling the data-driven prior from inference-time enforcement, without retraining, endows the model with zero-shot generalization capabilities, across highly variable and irregular sparse observation patterns. Furthermore, the decoupled structure of PI-ISS theoretically provides a foundation for future extensions into joint state-parameter inference. By leveraging generative priors to bridge observational gaps, this paradigm could potentially calibrate latent physical parameters within known PDE templates, a promising future investigation. Despite these capabilities, fundamental challenges remain. First, iterative SDE-based sampling inherently trails the single forward-pass latency of operator networks. Although ISS significantly reduces the number of integration steps, meeting stringent real-time engineering requirements may still require future coupling with rapid-sampling distillation techniques. Second, the explicit gradient guidance in PI-ISS currently necessitates complete PDE formulations. Since residual convergence only confirms adherence to prescribed equations rather than underlying reality, zero residuals can inadvertently fit incomplete physics, introducing uncertainty in highly nonlinear regimes. This guidance also becomes intractable in environments with unknown parameters or fluctuating boundaries, thereby forcing reliance on the unconstrained ISS prior. While reconstructing global climate dynamics from merely 2% of ERA5 observations within 50 steps demonstrates extreme resilience, reducing observation density below critical limits deprives the cross-gradient mechanism of spatial anchors, even causing mode collapse. Furthermore, extreme out-of-distribution noise from severe sensor failures can misdirect physical guidance. Therefore, a critical next step would be integrating learnable parameterizations to concurrently invert fields and unknown dynamics, alongside establishing theoretical sparsity bounds. 
+
+# 4 Methods 
+
+Our proposed generative framework is constructed hierarchically across three methodologi-cal layers. First, to establish a dynamically stable prior distribution, we introduce MRSM during the pre-training phase. Second, to overcome the computational bottleneck of standard reverse diffusion, we derive an ISS that serves as a highly efficient unconditional inference engine. Finally, for multiphysics-coupled systems, we extend this engine into 18 a PI-ISS by embedding explicit physical governing laws into the sampling trajectory as gradient constraints. 
+
+## 4.1 Martingale-regularized score matching (MRSM) 
+
+Score-based generative models define a diffusion process indexed by a continuous time variable t ∈ [0 , T ]. Let x(t) ∈ Rd represent the continuous state of high-dimensional data. Its stochastic dynamics evolving over time t are governed by an Itˆ o stochastic differential equation (SDE): dx = f (x, t )d t + g(t)d w (1) where w is the standard Wiener process, f (x, t ) is the drift coefficient, and g(t) is the diffusion coefficient. By initiating this process from a prior distribution x(T ) ∼ pT and evolving backward in time, samples from the target distribution x(0) ∼ p0 can be recovered. The corresponding reverse-time SDE [48] is expressed as: dx = f (x, t ) − g(t)2∇x log pt(x) dt + g(t)d ¯w (2) where ¯w is a standard Wiener process in the backward direction, and d t is an infinitesimal negative time step. Associated with Eq. (2) is a deterministic probability flow ordinary differential equation (PF-ODE) that shares the identical marginal probability density 
+
+pt(x): dx =
+
+
+
+f (x, t ) − 12 g(t)2∇x log pt(x)
+
+
+
+dt (3) This work adopts the VE SDE framework, wherein the drift coefficient is f (x, t ) = 0
+
+and the diffusion coefficient satisfies g(t) = pdσ2(t)/dt.In practice, a neural network sθ is trained to approximate the true score function 
+
+∇ log pt. To distinguish the spatiotemporal physical field from the generic state variable x
+
+utilized in standard generative models, we introduce the uppercase tensor X to represent the continuous physical field encompassing spatiotemporal correlations. The network 
+
+sθ (X, t ) is optimized via DSM [34]: 
+
+LDSM = Et, X(0) ,X(t)
+
+h
+
+λ(t) sθ (X(t), t ) − ∇ X(t) log p0t(X(t)|X(0)) 22
+
+i
+
+(4) where λ(t) > 0 is a weighting function. Although DSM provides a standard training objective, the learned score function often deviates from the fundamental Score FPE, leading to non-conservative gradient fields and spatial instabilities [45, 46]. To address this, we incorporate Score FPE regularization during the pre-training stage of the spatiotemporal physical fields. When the score field strictly satisfies the Score FPE, the absence of spurious non-conservative forces is mathematically guaranteed. Theoretically, this ensures the reverse diffusion trajectory adheres to the reverse martingale property, thereby establishing a dynamically stable generative prior for physical inverse problems. The MRSM training objective is defined as the sum of the standard DSM loss and the Score FPE regularization term: 
+
+J (θ) = LDSM + γLF P E (5) 19 The regularization term LF P E is defined as the squared norm of the residual operator 
+
+E[sθ ], which quantifies the deviation of sθ from the Score FPE. For the VE SDE framework (f = 0), this residual operator E[sθ ]( X, t ) simplifies to: 
+
+E[sθ ]( X, t ) := ∂sθ
+
+∂t − ∇ X
+
+ 12 g(t)2div X(sθ ) + 12 g(t)2∥sθ ∥22
+
+
+
+(6) By jointly minimizing J (θ), the pre-trained model is projected into a dynamical solution space which satisfies the martingale property. To ensure the computational tractability of the high-order derivatives in Eq. (6), the FDM is employed for the temporal derivative 
+
+∂sθ /∂t , and Hutchinson’s trace estimator is utilized to stochastically approximate the divergence term div X(sθ ). This approach effectively balances numerical efficiency with physical autonomy. 
+
+## 4.2 Implicit Score Sampler (ISS) 
+
+Having established a dynamically stable generative prior via MRSM during the pre-training phase, we focus on the subsequent challenge in the inference stage. Conventionally, score-based generative models map noise to data, by solving the VE SDE in reverse; however, such standard numerical solvers are fundamentally constrained by efficiency bottlenecks. Classical numerical solutions (e.g., the Euler-Maruyama method) rely on the assumption of infinitesimal time steps. When the discrete time step is directly enlarged to accelerate sampling, the local truncation errors of the drift and diffusion terms will be amplified, causing the generated sample trajectories to deviate from the true data manifold and eventually resulting in reconstruction distortions. To circumvent this reliance on vanishingly small step sizes and to resolve the trade-off between sampling efficiency and generation quality, we derive an efficient sampling algorithm, termed the ISS, tailored specifically for the VE SDE framework. The model corresponding to the VE SDE, under a discrete setting, is generally referred to as Score Matching with Langevin Dynamics (SMLD) [33]. To establish the algorithmic foundation, we temporarily revert to the generic state variable x ∈ Rd. Considering a set of discrete noise scales {σk}Nk=0 in SMLD (where the diffusion step index k decreases from 
+
+N down to 0, satisfying σN > σ N −1 > · · · > σ 0), the joint probability distribution of this reverse process can be factorized as follows: 
+
+pθ (x0: N ) = p(xN )
+
+> N
+
+Y
+
+> k=1
+
+pθ (xk−1|xk) (7) where x0: N represents the complete evolution sequence from pure noise to data, p(xN ) is the prior noise distribution, and pθ (xk−1|xk) is the reverse transition kernel. We define the reverse transition kernel at each step as a Gaussian distribution: 
+
+pθ (xk−1|xk) = N  xk−1; μθ (xk, σ k), η 2(σ2 
+
+> k
+
+− σ2
+
+> k−1
+
+)I (8) where μθ is the mean vector of the distribution, the variance is determined by a hyper-parameter η ∈ [0 , 1] alongside the difference between adjacent noise variances, and I is the identity matrix. To determine μθ , it is necessary to estimate the noise-free sample ˆx0
+
+20 from the noisy sample xk at the current diffusion step. Applying Tweedie’s formula [49] in conjunction with the score function sθ (xk, σ k), the empirical Bayes estimate of the noise-free sample is obtained: 
+
+ˆx0 = xk + σ2
+
+> k
+
+sθ (xk, σ k) (9) Upon acquiring the estimate ˆx0, the mean of the reverse transition is formulated as a linear combination of the current sample xk and the predicted noise-free sample ˆx0:
+
+μθ (xk, σ k) = xk + ( σk − σk−1)σksθ (xk, σ k) (10) This formulation corresponds to the deterministic component of the sampling process (i.e., the score-driven term), which leverages the score function to evolve the sample in the direction of increasing marginal probability density. Added to the mean is a stochastic noise injection term scaled by the noise difference, so as to introduce controllable stochasticity during sampling and thereby enhance generation quality or correct prediction errors. Combining the score-driven term with the stochastic correction term yields an iterative rule for reverse evolution: 
+
+xk−1 = xk + ( σk − σk−1)σksθ (xk, σ k)
+
+| {z }
+
+> Score-driven term
+
++ η
+
+q
+
+σ2 
+
+> k
+
+− σ2
+
+> k−1
+
+z
+
+| {z }
+
+> Stochastic correction term
+
+(11) where z ∼ N (0, I) is standard normal noise. When η = 0, the sampling process degenerates into a purely deterministic numerical solution of the PF-ODE; when η > 0, stochastic perturbation is introduced to augment diversity. The theoretical superiority of this sampler, namely, its linear exactness and first-order strong convergence bound under the variance-exploding regime, is mathematically established in Supplementary Note S1. Regarding the high-dimensional sequence generation task inherent in spatiotemporal physical field reconstruction, the signals acquired by sensors typically span a prolonged physical duration τ . Consequently, generating the sequence globally in a single pass poses severe challenges, including memory overflow and difficulties in capturing long-range dependencies. To resolve this, we reformulate the continuous dynamic physical field tensor 
+
+X into a controllable spatiotemporal patching problem, and design a parallel generation strategy based on overlapping time windows. For the continuous spatiotemporal sub-sequences acquired by sparse sensors, we initialize B continuous spatiotemporal noise tensor patches in the initial pure noise stage (diffusion step k = N ): 
+
+XN =
+
+h
+
+X(1)  
+
+> N
+
+, X(2)  
+
+> N
+
+, . . . , X(B)
+
+> N
+
+i
+
+(12) where the superscript ( b) ∈ { 1, 2, . . . , B } denotes the parallel spatial patch index. Along the physical time dimension τ , each patch tensor maintains an overlap of m physical snapshots with its preceding adjacent patch. Subsequently, the ISS discrete iterative inference is executed independently for each patch. To ensure the physical temporal continuity of adjacent patches within the overlapping regions and to constrain the generated results to align with the sparse observations y(b), conditional gradient guidance terms for observation consistency and temporal continuity are introduced during the discrete iteration (from 21 step k to k − 1): 
+
+X(b) 
+
+> k−1
+
+= X(b) 
+
+> k
+
++ ( σk − σk−1)σksθ (X(b) 
+
+> k
+
+, σ k) + η
+
+q
+
+σ2 
+
+> k
+
+− σ2
+
+> k−1
+
+Z(b)
+
+− clip 
+
+
+
+α∇X(b)
+
+> k
+
+∥y(b) − H ˆ X(b)0 ∥22 + β∇X(b)
+
+> k
+
+C( ˆX(b)0 , ˆX(b−1) 0 )
+
+ (13) where Z(b) ∼ N (0, I) is an independent standard Gaussian tensor corresponding to the b-th patch; H is the measurement mask matrix in the physical space; C(·, ·) is the continuity loss function quantifying the discrepancy of physical snapshots within the overlapping regions; α and β are hyperparameters modulating observation consistency and content similarity in the overlaps, respectively. Here, clip (·) denotes a gradient clipping operation, utilized to constrain extreme conditional gradient values to prevent numerical instability. By iterating this process as the diffusion step k decreases from N down to 0, the parallel local sub-sequences are seamlessly fused, outputting the final denoised physical field. 
+
+## 4.3 Physics-Informed Implicit Score Sampler (PI-ISS) 
+
+The proposed ISS, though successfully resolves the inference efficiency problem, practically functions as a data-driven sampling engine. In complex spatiotemporal systems, relying solely on unconstrained statistical generation does not promise adherence of the resulting fields to the underlying physical laws. The spatiotemporal dynamics of continuous media are primarily governed by PDEs. For a generalized multimodal physical field X comprising 
+
+J components, the governing system is expressed as: 
+
+Pj (X; ψ) = 0, j = 1 , . . . , J (14) where Pj is a spatiotemporal differential operator and ψ represents the physical param-eters of the medium. On a discrete computational grid, these continuous equations are transformed into residual forms. For the j-th physical conservation law, the discrete residual Rj at spatiotemporal coordinates ( r, τ ) is defined as: 
+
+Rj (X) := bPj (X; ψ) (15) where bPj denotes the discrete physical operator formulated via the FDM or alternative numerical schemes. Even though score-based generative models excel at fitting complex data distributions, purely data-driven generation cannot guarantee adherence to underlying physical laws. Theoretically, it is feasible to incorporate physical residuals, as a regularization term, into the MRSM pre-training loss, while it is an exorbitant computational burden to compute these residuals for every diffusion state during training. To achieve efficient and physically consistent reconstruction, we adopted the Physics-Informed ISS (PI-ISS) to defer the imposition of physical constraints to the inference stage. At each discrete diffusion step k, we first estimate the noise-free physical field sample 
+
+bX(b)0 from the current state X(b) 
+
+> k
+
+using Tweedie’s formula: bX(b)0 = X(b) 
+
+> k
+
++ σ2
+
+> k
+
+sθ (X(b) 
+
+> k
+
+, σ k). Subsequently, a total physical potential energy function, Uphys , is evaluated on this estimated noise-free field. Defined as the weighted sum of squared residuals across all 22 coupled physical equations, this function quantifies the extent of physical violation: 
+
+Uphys ( bX(b)0 ) = 
+
+> J
+
+X
+
+> j=1
+
+ωj Rj ( bX(b)0 ) 22
+
+(16) where ωj is the weighting coefficient for the j-th equation. To synergistically generate multimodal fields, the negative gradient of this potential energy is integrated into the ISS update rule. Combined with the previously defined constraints for observation consistency and temporal continuity, the comprehensive iterative update rule for PI-ISS is formulated as: 
+
+X(b) 
+
+> k−1
+
+= X(b) 
+
+> k
+
++ ( σk − σk−1)σksθ (X(b) 
+
+> k
+
+, σ k) + η
+
+q
+
+σ2 
+
+> k
+
+− σ2
+
+> k−1
+
+Z(b) − g(b) 
+
+> total
+
+(17) Here, the total guidance term g(b) 
+
+> total
+
+aggregates both the physical and observational constraints: 
+
+g(b) 
+
+> total
+
+= clip 
+
+
+
+α∇X(b)
+
+> k
+
+y(b) − H bX(b)0
+
+> 22
+
++ β∇X(b)
+
+> k
+
+C( bX(b)0 , bX(b−1) 0 ) + λphys ∇X(b)
+
+> k
+
+Uphys ( bX(b)0 )
+
+
+
+(18) where λphys is a hyperparameter governing the strength of the physical guidance. Under this update rule, the sampler not only gravitates towards regions of high probability density but is simultaneously projected towards the null space of the physical operator P.We designate this ISS, enriched with physical constraints, as PI-ISS. We prove the asymptotic physical consistency of the PI-ISS framework (detailed in Supplementary Note S2), which verifies that the physics-informed guidance mechanism drives the generated distribution toward the solution manifold defined by the physical conservation laws. Specifically, as the physical guidance strength approaches infinity (λphys → ∞ ), the generated sample sequence converges weakly to the exact intersection of the data prior support and the physical manifold. This theoretical validity demonstrates that PI-ISS fundamentally constructs a physics-constrained Gibbs distribution. Through a cross-gradient coupling mechanism, PI-ISS constrains the multimodal variables to evolve jointly within a physically admissible solution space. For the acoustic scenarios emphasized in this paper, this ensures that acoustic pressure and particle velocity, coupled via the momentum equation, will not undergo unphysical independent evolution. In practical applications of the PI-ISS algorithm, a finite physical guidance strength 
+
+λphys numerically corresponds to a soft projection. Although Theorem 2 establishes asymptotic consistency under limiting conditions, the actual reconstruction error remains constrained by the discretization step size of the sampling algorithm and the specific choice of λphys .
+
+## 4.4 Implementation of PI-ISS in acoustic scenarios 
+
+This section elucidates PI-ISS framework’s specific implementation in reconstructing spatiotemporal acoustic field. We designed physical constraint mechanisms, tailored to diverse sensor configurations, for both unimodal and multimodal scenarios. 
+
+Unimodal constraints. In acoustic pressure field reconstruction solely relying on microphone arrays, the target tensor X exclusively comprises the acoustic pressure 23 component p on a discrete spatial grid. The generated spatiotemporal samples are constrained to satisfy the second-order wave equation in linear acoustics. For an isotropic and homogeneous medium, this physical constraint operator P1 is defined as: 
+
+P1(p; c) = ∇2p − 1
+
+c2
+
+∂2p∂τ 2 = 0 (19) where ∇2 denotes the Laplace operator. In the discrete computational domain, the second-order central FDM is employed to construct the discrete residual R1. For a spatiotemporal grid point ( r, τ ), the discrete physical loss term Uscalar is expressed as: 
+
+Uscalar ( bX(b)0 ) = δ2 
+
+> r
+
+ˆp(b)0 − 1
+
+c2 δ2 
+
+> τ
+
+ˆp(b)0
+
+> 22
+
+(20) where δ2 
+
+> r
+
+and δ2 
+
+> τ
+
+represent the spatial and temporal discrete Laplacian difference operators, respectively. This loss term constrains the spatiotemporal evolution of the generated acoustic pressure field to satisfy wave consistency. 
+
+Multimodal synergistic constraints. In reconstruction tasks utilizing AVS, the target tensor X constitutes a multimodal composite field comprising the acoustic pressure 
+
+p and the particle velocity vector v = [ vx, v y , v z ]T . To achieve the physically entangled generation of these modalities, we introduce multi-level physical consistency constraints, encompassing coupled equations describing inter-modal correlations and self-constraint equations governing individual modalities. The Euler equations constrain the acoustic pressure gradient and the time derivative of the particle velocity: 
+
+Rmom (X) := ρ0
+
+∂v
+
+∂τ + ∇p = 0 (21) Simultaneously, the continuity equation constrains the temporal evolution of acoustic pressure and the divergence of particle velocity: 
+
+Rcont (X) := ∂p ∂τ + ρ0c2∇ · v = 0 (22) Both acoustic pressure and particle velocity individually satisfy the wave equation in a homogeneous medium. Unimodal self-constraint terms arefurther introduced, to ensure each physical component maintains correct spatiotemporal wave characteristics: 
+
+Rwave,p (X) := ∇2p − 1
+
+c2
+
+∂2p∂τ 2 = 0 
+
+Rwave, v(X) := ∇2v − 1
+
+c2
+
+∂2v
+
+∂τ 2 = 0
+
+(23) For multimodal scenarios, the total physical energy function Uvector is formulated as the weighted sum of squares of all aforementioned coupled residuals and self-constraint residuals: 
+
+Uvector ( bX(b)0 ) = ωmom ∥Rmom ∥22 + ωcont ∥Rcont ∥22 + ωp∥Rwave,p ∥22 + ωv∥Rwave, v∥22 (24) Note that Eq. (24) serves as the concrete realization of the generalized PI-ISS constraint defined in Eq. (16), specifically tailored for the entangled generation of acoustic pressure and particle velocity fields. 24 The weighting coefficients {ωj } dictates the efficacy of the physical guidance. Given the dimensional disparity between acoustic pressure (unit: Pa) and particle velocity (unit: m/s), their corresponding residual values are imbalanced by orders of magnitude. Thus, a normalization process is conducted: 
+
+Magnitude alignment based on characteristic impedance. In an air medium, acoustic pressure and particle velocity are correlated via the characteristic impedance 
+
+Z0 = ρ0c. The residual magnitude of the Euler equation is predominantly governed by the pressure gradient ∇p, whereas the continuity equation contains a ρ0c2 term, whose value is typically substantially higher than the former. By establishing the weight relationship 
+
+ωmom ≈ Z20 · ωcont , we ensure that the cross-modal coupling possesses equal optimization weight during the generation process. 
+
+Consistency normalization of residuals. The wave equation self-constraint term includes a spatial second-order derivative ∇2, whose magnitude is inversely proportional to the square of the grid step size ∆ r. To prevent the self-constraint terms from either over-whelming or being overshadowed by the coupling terms, a dynamic magnitude alignment strategy is adopted, defined as ωj ∝ E ∥Rj ∥22
+
+−1.Detailed elaborations on the multimodal cross-gradient coupling mechanism for acous-tics are provided in Supplementary Note S3. 
+
+# 5 Code Availability 
+
+The code for MRSM is open source, released under the MIT License. The code repository is accessible online, at: https://github.com/BrianZhu1999/MRSM. 
+
+# 6 Data Availability 
+
+The training and testing datasets, and the pre-trained model weights for the MRSM framework, are openly available in the Zenodo repository at: https://doi.org/10.5281/zenodo.19398315. 
+
+# 7 Acknowledgements 
+
+This work was supported in part by the Projects of Jiangsu Province Science and Technology Plan Special Fund in 2023, Basic Research Program Natural Science Foundation, under Grant BK20232048; and in part by the National Key Research and Development Program of China under Grant 2022YFB2602003 and Grant 2023YFA1406904. 
+
+# 8 Author Contributions 
+
+M.B., Z.C. and M.L. supervised the project. M.B., Z.Z. and K.H. conceived the idea. Z.Z., M.B. and M.L. ensured the physical rigor of the framework. Z.Z., K.H. and M.B. formalized the mathematical rigor of the theories. Z.Z. and Z.C. performed the numerical simulations. Z.C., J.Z. and J.L. developed the AVS. Z.Z., Y.S. and Z.C. designed and carried out 25 the experiments. G.W. provided guidance on computational mechanics modeling. H.X. provided guidance on physics-informed modeling. Q.Z. provided guidance on the analysis of Kolmogorov flows. X.L. and Y.C. provided scientific oversight and critical feedback. All authors discussed the results and contributed to manuscript preparation. 
+
+# References 
+
+[1] Arridge, S., Maass, P., ¨Oktem, O. & Sch¨ onlieb, C.-B. Solving inverse problems using data-driven models. Acta Numerica 28 , 1–174 (2019). [2] Donoho, D. L. Compressed sensing. IEEE Transactions on Information Theory 52 ,1289–1306 (2006). [3] Cand` es, E. J., Romberg, J. & Tao, T. Robust uncertainty principles: Exact signal reconstruction from highly incomplete frequency information. IEEE Transactions on Information Theory 52 , 489–509 (2006). [4] Pfau, D., Axelrod, S., Sutterud, H., Von Glehn, I. & Spencer, J. S. Accurate computation of quantum excited states with neural networks. Science 385 , eadn0137 (2024). [5] Gong, X. et al. General framework for E(3)-equivariant neural network representation of density functional theory Hamiltonian. Nature Communications 14 , 2848 (2023). [6] Li, H. et al. Deep-learning electronic-structure calculation of magnetic superstructures. 
+
+Nature Computational Science 3, 321–327 (2023). [7] Chmiela, S. et al. Accurate global machine learning force fields for molecules with hundreds of atoms. Science Advances 9, eadf0873 (2023). [8] Musaelian, A. et al. Learning local equivariant representations for large-scale atomistic dynamics. Nature Communications 14 , 579 (2023). [9] Zou, Z. et al. A deep learning model for predicting selected organic molecular spectra. 
+
+Nature Computational Science 3, 957–964 (2023). [10] Choi, S. Prediction of transition state structures of gas-phase chemical reactions via machine learning. Nature Communications 14 , 1168 (2023). [11] Cui, H. et al. Enzyme specificity prediction using cross-attention graph neural networks. Nature 647 , 639–647 (2025). [12] Abramson, J. et al. Accurate structure prediction of biomolecular interactions with AlphaFold 3. Nature 630 , 493–500 (2024). [13] Watson, J. L. et al. De novo design of protein structure and function with RFdiffusion. 
+
+Nature 620 , 1089–1100 (2023). [14] Madani, A. et al. Large language models generate functional protein sequences across diverse families. Nature Biotechnology 41 , 1099–1106 (2023). 26 [15] Moor, M. et al. Foundation models for generalist medical artificial intelligence. Nature 
+
+616 , 259–265 (2023). [16] Zeni, C. et al. A generative model for inorganic materials design. Nature 639 , 624–632 (2025). [17] Szymanski, N. J. et al. An autonomous laboratory for the accelerated synthesis of novel materials. Nature 624 , 86–91 (2023). [18] Merchant, A. et al. Scaling deep learning for materials discovery. Nature 624 , 80–85 (2023). [19] Bastek, J.-H. & Kochmann, D. M. Inverse-design of nonlinear mechanical metamate-rials via video denoising diffusion models. Nature Machine Intelligence 5, 1466–1475 (2023). 2305.19836 .[20] Deng, B. et al. CHGNet as a pretrained universal neural network potential for charge-informed atomistic modelling. Nature Machine Intelligence 5, 1031–1041 (2023). [21] Quek, Y., Fort, S. & Ng, H. K. Adaptive quantum state tomography with neural networks. npj Quantum Information 7, 105 (2021). [22] Xin, T. et al. Local-measurement-based quantum state tomography via neural networks. npj Quantum Information 5, 109 (2019). [23] Torlai, G. et al. Quantum process tomography with unsupervised learning and tensor networks. Nature Communications 14 , 2858 (2023). [24] Zhang, M. et al. Quantum state tomography of molecules by ultrafast diffraction. 
+
+Nature Communications 12 , 5441 (2021). [25] Raissi, M., Perdikaris, P. & Karniadakis, G. E. Physics Informed Deep Learning (Part I): Data-driven Solutions of Nonlinear Partial Differential Equations (2017). 
+
+1711.10561 .[26] Raissi, M., Perdikaris, P. & Karniadakis, G. E. Physics Informed Deep Learning (Part II): Data-driven Discovery of Nonlinear Partial Differential Equations (2017). 
+
+1711.10566 .[27] Lu, L., Jin, P. & Karniadakis, G. E. DeepONet: Learning nonlinear operators for identifying differential equations based on the universal approximation theorem of operators. Nature Machine Intelligence 3, 218–229 (2021). 1910.03193 .[28] Li, Z. et al. Fourier Neural Operator for Parametric Partial Differential Equations (2021). 2010.08895 .[29] Cao, Q., Goswami, S. & Karniadakis, G. E. LNO: Laplace Neural Operator for Solving Differential Equations (2023). 2303.10528 .[30] Ongie, G. et al. Deep Learning Techniques for Inverse Problems in Imaging. IEEE Journal on Selected Areas in Information Theory 1, 39–56 (2020). 27 [31] Wang, S., Wang, H. & Perdikaris, P. On the eigenvector bias of Fourier feature networks: From regression to solving multi-scale PDEs with physics-informed neural networks. Computer Methods in Applied Mechanics and Engineering 384 , 113938 (2021). [32] Wang, S., Teng, Y. & Perdikaris, P. Understanding and mitigating gradient pathologies in physics-informed neural networks (2020). 2001.04536 .[33] Song, Y. & Ermon, S. Generative Modeling by Estimating Gradients of the Data Distribution (2020). 1907.05600 .[34] Song, Y. et al. Score-Based Generative Modeling through Stochastic Differential Equations (2021). 2011.13456 .[35] Ho, J., Jain, A. & Abbeel, P. Denoising Diffusion Probabilistic Models (2020). 
+
+2006.11239 .[36] Kingma, D. P., Salimans, T., Poole, B. & Ho, J. Variational Diffusion Models (2023). 
+
+2107.00630 .[37] Song, J., Meng, C. & Ermon, S. Denoising Diffusion Implicit Models (2022). 2010. 02502 .[38] Liu, X., Gong, C. & Liu, Q. Flow Straight and Fast: Learning to Generate and Transfer Data with Rectified Flow (2022). 2209.03003 .[39] Lipman, Y., Chen, R. T. Q., Ben-Hamu, H., Nickel, M. & Le, M. Flow Matching for Generative Modeling (2023). 2210.02747 .[40] Albergo, M. S., Boffi, N. M. & Vanden-Eijnden, E. Stochastic Interpolants: AUnifying Framework for Flows and Diffusions (2023). 2303.08797 .[41] Kawar, B., Vaksman, G. & Elad, M. SNIPS: Solving Noisy Inverse Problems Stochastically (2021). 2105.14951 .[42] Kawar, B., Elad, M., Ermon, S. & Song, J. Denoising Diffusion Restoration Models (2022). 2201.11793 .[43] Chung, H., Kim, J., Mccann, M. T., Klasky, M. L. & Ye, J. C. Diffusion Poste-rior Sampling for General Noisy Inverse Problems. In The Eleventh International Conference on Learning Representations (2022). [44] Li, Z. et al. Learning spatiotemporal dynamics with a pretrained generative model. 
+
+Nature Machine Intelligence 6, 1566–1579 (2024). [45] Lai, C.-H. et al. FP-Diffusion: Improving Score-based Diffusion Models by Enforcing the Underlying Score Fokker-Planck Equation (2023). 2210.04296 .[46] Lai, C.-H. et al. On the Equivalence of Consistency-Type Models: Consistency Models, Consistent Diffusion Models, and Fokker-Planck Regularization (2023). 2306.00367 .28 [47] Hersbach, H. et al. The era5 global reanalysis. Quarterly Journal of the Royal Meteorological Society 146 , 1999–2049 (2020). [48] Anderson, B. D. O. Reverse-time diffusion equation models. Stochastic Processes and their Applications 12 , 313–326 (1982). [49] Efron, B. Tweedie’s Formula and Selection Bias. Journal of the American Statistical Association 106 , 1602–1614 (2011). 29 Standing wave tube Power amplifier Signal collector Signal conditioning circuit board PC 
+
+a b c
+
+> Pt Hot-wires
+> Interface
+> Interface
+> Multi-channel PU Sensor Inputs Multi-channel PU Sensor Inputs
+
+d PU-integrated sensor chip 
+
+> Speaker
+> Plug
+> End cap
+> Tube
+> Rubber pad
+> Speaker adapter
+> Base
+
+e fExtended Data Figure 1: Schematic of the data acquisition and processing system for the standing wave tube acoustic field. a , Design schematic of the PU joint acquisition sensor chip. The chip integrates measurement functionalities for both acoustic pressure and particle velocity, utilized for data acquisition in multimodal acoustic field reconstruction experiments. 
+
+b, Microscopic magnified view of the particle velocity sensing module. Shows microstructural details such as the platinum (Pt) hot-wires and the electrical interface. c, In-house developed multi-channel signal conditioning circuit board. Used for the pre-processing and amplification of analog signals output by the sensors. d, Experimental hardware connection setup. The PC emits a signal, which is amplified by a power amplifier to drive the loudspeaker, generating an acoustic field within the standing wave tube. The sensor array distributed along the tube wall acquires the acoustic field signals. After being processed by the signal conditioning circuit board, the signals are transmitted to the signal collector for aggregation and then fed back to the PC for analysis. e, Structural schematic of the standing wave tube. The main body of the standing wave tube is fabricated from acrylic glass, with a total length of 1500 mm, a diameter of 150 mm, and a wall thickness of 10 mm. A loudspeaker is mounted at one end of the tube, while the other end is sealed with an end cap. Sixteen sensor mounting holes are reserved axially along the tube wall; the first measurement point is located 150 mm from the sound source, and the spacing between all subsequent adjacent points is maintained at 80 mm. All connecting parts are equipped with sealing measures to prevent sound leakage. f, The 1/2-inch acoustic pressure sensor. Used for the scalar acoustic pressure field reconstruction experiment. 
+
+30 Data acquisition front-end 
+
+> Sound source stand
+> Linear AVS array
+> Array mounting bracket Semi-anechoic Chamber Floor absorbers
+> Loudspeaker source
+> Multi-axis traversing system
+> Three-axis Acoustic Vector Sensor
+
+Extended Data Figure 2: Hardware and scene setup for the full-vector acoustic field localization experiment. The experiment was conducted in a semi-anechoic chamber. The internal dimensions of the semi-anechoic chamber are 12.6 × 10.9 × 6.1 m 3, with a cut-off frequency of 80 Hz, a free-field radius of 4.5 m, and a background noise level below 1.3 dB. Acoustic absorbing foam was laid on the floor to attenuate ground reflections. A multi-axis translation stage and array fixtures ensured the spatial precision of the AVS linear array and the loudspeaker sources on both sides. The photograph shows a representative 8-element AVS arrangement on the same experimental platform; the localization experiment reported in this work used a 7-element AVS linear array with an inter-sensor spacing of 0.16 m. The top-right corner of the figure provides a close-up of the external appearance and internal structure of the in-house developed three-axis AVS used in the array. The multi-channel data acquired by the sensors were synchronously recorded through the data acquisition system front-end at the bottom. 
+
+31

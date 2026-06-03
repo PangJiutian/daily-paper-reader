@@ -1,0 +1,1254 @@
+Title: SURGE: Approximation and Training Free Particle Filter for Diffusion Surrogate
+
+URL Source: https://arxiv.org/pdf/2605.18745v2
+
+Published Time: Tue, 26 May 2026 02:08:42 GMT
+
+Number of Pages: 29
+
+Markdown Content:
+# SURGE : Approximation and Training Free Particle Filter for Diffusion Surrogate 
+
+Lifu Wei 1 Yinuo Ren 2 Naichen Shi 3 1 Yiping Lu 3
+
+# Abstract 
+
+Data assimilation (DA) tackles the sequential esti-mation of a dynamical system’s latent state from noisy, partial observations. In this paper, we study DA in a setting where the system dynamics are represented by a pretrained diffusion model used as a surrogate forecaster. We focus on how to integrate incoming observations into the diffu-sion surrogate’s predictions to support continu-ous state correction and progressively refining the estimated trajectory over time. After receiving noisy observations, the diffusion model is guided using the observation likelihood to steer the gener-ation process toward observation-consistent states. However, such guidance does not guarantee sam-pling from the true posterior. Motivated by parti-cle filtering methods, we represent the posterior distribution using an ensemble of particles. We perform Sequential Monte Carlo over diffusion trajectories, working with their path measure. We compute importance weights for generated par-ticles and resample to focus on trajectories con-sistent with the observations. This procedure cor-rects the generation dynamics, drives the particle approximation toward the desired posterior and leads to an approximation-free particle filtering method that rigorously fuses observational data with diffusion model simulations. 
+
+# 1. Introduction 
+
+Recovering the state of complex dynamical systems from noisy and incomplete observations is a fundamental prob-lem in science and engineering. Accurate state estimation 
+
+> 1
+
+Department of Mechanical Engineering, Northwestern Uni-versity, Evanston, IL, United States 2Institute for Computa-tional & Mathematical Engineering, Stanford University, Stan-ford, CA, United States 3Department of Industrial Engineering & Management Sciences, Northwestern University, Evanston, IL, United States. Correspondence to: Yiping Lu <yip-ing.lu@northwestern.edu >.
+
+Proceedings of the 43 rd International Conference on Machine Learning , Seoul, South Korea. PMLR 306, 2026. Copyright 2026 by the author(s). 
+
+Figure 1. Many modern systems come with complementary “dig-ital” and “physical” twins: a diffusion-based digital twin learns from historical trajectories to generate probabilistic forecasts over dynamics, while sparse and noisy measurements from the physical twin are assimilated to correct and fuse multiple predictions into a single posterior state estimate. 
+
+underpins reliable prediction in applications such as weather forecasting, oceanography, seismology, and fluid dynam-ics, where system evolution is governed by nonlinear, high-dimensional, and often stochastic partial differential equa-tions. Data assimilation (DA) addresses this challenge by combining model-based forecasts with observational data to produce physically consistent state estimates. In many modern settings, we increasingly have access to two complementary “twins” of the same system (Reich, 2025). On one hand, a data-driven digital twin can be learned from historical trajectories, for which diffusion models are a par-ticularly suitable choice because they can represent high-dimensional complex distributions and generate realistic stochastic evolutions (Ho et al., 2022; Gruver et al., 2023; Li et al., 2022; Nie et al., 2025). On the other hand, a physi-cal twin delivers measurements from the real system, often sparse, noisy, and incomplete, but grounded in reality. This motivates a DA perspective in which a diffusion-based digi-tal twin produces probabilistic forecasts, while observations from the physical twin are used to correct and aggregate 1
+
+> arXiv:2605.18745v2 [stat.ML] 25 May 2026 SURGE Filtering
+
+multiple predictive sources into a single posterior estimate of the system state. However, when the underlying dynamics are simulated by a diffusion model rather than an explicit mechanis-tic time-stepping solver, it is nontrivial to design a filter-ing/assimilation framework that incorporates physical ob-servations in a principled way. In particular, a key challenge is how to fuse the diffusion model’s prior forecast distri-bution with the physical twin’s observations to obtain an approximation-free (or controlled-bias), physically consis-tent posterior, while remaining computationally tractable in the high-dimensional, nonlinear regime. Mathematically, a discrete-time stochastic dynamical sys-tem can be described by: 
+
+xt+1 = Ψ( xt, ξ t), yt+1 = A(xt+1 ) + εt+1 , (1) wher xt ∈ RD is the state vector at time step k, Ψ is the state transition map and ξt denotes the stochastic force. The observations yt ∈ RM are related to the state through the measurement map A, with observation noise εt+1 . DA seeks to infer the posterior of the state trajectory x0: T given observations y1: T .This paper focuses on the case where a dynamic system is simulated using a generative digital twin. More specif-ically, the conditional transition density p(xt+1 | xt) of dynamical system with transition xt+1 = Ψ( xt, ξ t) is ap-proximated using a conditional diffusion model (Song et al., 2020; Lipman et al., 2022; Liu et al., 2022; Albergo & Vanden-Eijnden, 2022; Albergo et al., 2025). Sampling the next state is implemented by simulating an internal diffu-sion time process that maps a base distrbution to a sample in state space. When a new observation arrives, a common practice is to guide diffusion sampling by the observation likelihood, swterring samples toward observation-consistent states. However, unless the guidance is the exact Doob’s 
+
+h-transform (Denker et al., 2024; Tang & Xu, 2024; Nguyen et al., 2025; Ren et al., 2025b; Sabour et al., 2025; Bao & Sun, 2025; Domingo-Enrich et al., 2024; Havens et al., 2025; Liu et al., 2025; Zhu et al., 2026), guided sampling does not in general produce samples from the correct posterior. Exact Doob guidance typically requires solving an associ-ated backward Kolmogorov equation (Albergo & Vanden-Eijnden, 2024; Zhang et al., 2023), which is intractable in high-dimensional generative models. In most cases, the resulting guidance is necessarily approximate and often heuristic (Ren et al., 2025a; Chen et al., 2025b). A natural question is thus: 
+
+How can we fuse diffusion-based digital twin simulations with partial observations without introducing systematic bias from approximate guidance?  
+
+> Figure 2. Conceptual description of SURGE for Data Assimila-tion. We present SURGE, an approximation-free data assimilation framework. SURGE presents diffusion-based process as a path distribution and perform reweighting and resampling on multi stochastic trajectories during inference to achieve approximation-free output.
+
+To construct an approximation-free data assimilation frame-work, we draw inspirations from particle filtering, which approximates the filtering posterior by propagating and reweighting an ensemble of particles according to the system dynamics and the observation likelihood. In our approach, we evaluate the probability of each generated trajectory us-ing the Girsanov change of measure, which accounts for the discrepancy between the guided diffusion model dy-namics and the target dynamics. We perform Sequential Monte Carlo (SMC) updates at each step to reweight and resample particles. This sequential resampling mitigates particle degeneracy and ensures that the particle ensemble remains concentrated in regions of high posterior proba-bility. To reduce resampling variance, we incorporate the observation likelihood progressively along the trajectory, so that particle weights remain well-balanced at each small time step rather than becoming highly concentrated due to a single, large likelihood update. Building on this idea, we propose the SURGE filter ( Sequential Unbiased Resampling via Girsanov Estimation), a particle filtering-based frame-work that enables approximation-free data assimilation for diffusion-model-based simulators. Operating exclusively at the inference phase, SURGE is designed to enhance perfor-mance in high-dimensional, long-horizon physical processes characterized by sparse and noisy observations. 
+
+Contributions. Our contributions are as follows: • We introduce SURGE , an approximation-free data as-similation method that rigorously combines a diffusion surrogate-based digital twin with noisy, partial measure-ments from a physical twin via particle filtering, enabling sequential state correction over time. • We cast diffusion-based forecasting as inference over a path distribution and perform reweighting and resam-pling on diffusion trajectories, using a Girsanov change-of-measure to compute importance weights that correct bias introduced by likelihood guidance. We further stabi-2SURGE Filtering 
+
+lize filtering in high dimensions via progressive (time-distributed) likelihood incorporation, mitigating parti-cle degeneracy and rigorously fusing observations with diffusion-model simulations. • We apply SURGE solely at the inference level of prevailing diffusion-based data assimilation methods, evaluating it under conditions of long-time sequence prediction and high-dimensional chaotic dynamics. The findings confirm that SURGE adeptly governs sequential generation for diffusion surrogates, enhancing performance during the inference phase. 
+
+# 2. Preliminaries 
+
+In this section, we will briefly review the background of data assimilation and particle filtering. 
+
+2.1. Data Assimilation 
+
+Given the stochastic dynamical system (1) , the goal of data assimilation (Sanz-Alonso et al., 2023) is to approximate the posterior distribution 
+
+p(x0: T | y1: T ) ∝ p(x0) 
+
+> T−1
+
+Y
+
+> t=0
+
+p(xt+1 | xt)p(yt+1 | xt+1 ).
+
+This posterior can be sequentially approximated via a pre-diction step and an analysis step. 
+
+Prediction Step. In the prediction step, the current posterior is propagated forward through the dynamical model to ob-tain a prior distribution. Suppose the dynamical system (1) has the transition kernel p(xt+1 | xt), the prediction step gives the forward predict of latent state at time t + 1 as 
+
+p(xt+1 | y1: t) = 
+
+Z
+
+p(xt+1 | xt)p(d xt | y1: t). (2) 
+
+Analysis Step. In the analysis step, the prior is updated using incoming observations to produce the posterior at the current time. At time t + 1 , it updates the predictive prior with the new observation yt+1 through the likelihood: 
+
+p(xt+1 | y1: t+1 ) ∝ p(yt+1 | xt+1 )p(xt+1 | y1: t).
+
+By alternating between the prediction and analysis steps, the posterior evolves from p(xt | y1: t) to p(xt+1 | y1: t+1 ).
+
+2.2. Particle Filters 
+
+Within the above discrete-time stochastic dynamical sys-tem, particle filtering (Gordon et al., 1993; Kitagawa, 1996; Del Moral, 1996; Johansen, 2009) provides a sampling-based approach to approximate the posterior distribution of the system state given sequential observations. The key idea is to represent the filtering distribution by a collection of weighted particles that evolve according to the system dynamics and are corrected using incoming data. Assume that at time t, the posterior distribution p(xt | y1: t)
+
+is approximated by an ensemble of M particles 
+
+p(xt | y1: t) ≈ 1
+
+M
+
+> M
+
+X
+
+> m=1
+
+δx(m)
+
+> t
+
+(xt),
+
+where {x(m) 
+
+> t
+
+}Mm=1 ⊂ RD are M particle with equal weights. The particle filter proceeds recursively from time t to t + 1 
+
+through the following three steps. 
+
+Prediction Step. Each particle is propagated forward using the stochastic state transition map Ψ (1) . Specifi-cally, for each x(m) 
+
+> t
+
+, a predicted particle is generated by 
+
+ˆx(m) 
+
+> t+1
+
+= Ψ x(m) 
+
+> t
+
+, ξ (m)
+
+> t
+
+, where ξ(m) 
+
+> t
+
+is an independent realization of ξt. The collection of predicted particles 
+
+{ˆx(m)
+
+> t+1
+
+}Mm=1 defines an empirical approximation of the prior distribution p(xt+1 | y1: t) ≈ 1
+
+> M
+
+PMm=1 δˆx(m)
+
+> t+1
+
+(xt+1 ).
+
+Update Step. With the new observation yt+1 , the pre-dicted particle ˆx(m) 
+
+> t+1
+
+are reweighted according to the impor-tance weight given by w(m) 
+
+> t+1
+
+∝ p yt+1 | xt+1 = ˆ x(m)
+
+> t+1
+
+.
+
+This yields a weighted empirical approximation of the pos-terior p(xt+1 | y1: t+1 ) ≈ PMm=1 w(m) 
+
+> t+1
+
+δˆx(m)
+
+> t+1
+
+(xt+1 ).
+
+Resampling Step. To mitigate particle degeneracy, resam-pling is applied to replace the weighted ensemble with an equally weighted set of particles {x(m)
+
+> t+1
+
+}Mm=1 drawn from the above weighted distribution. The resulting empirical measure p(xt+1 | y1: t+1 ) ≈ 1
+
+> M
+
+PMm=1 δx(m)
+
+> t+1
+
+(xt+1 ) serves as the filtering distribution at time t + 1 , completing one assimilation cycle. Despite its conceptual generality, particle filtering is known to suffer from severe weight degeneracy in high-dimensional state spaces, where the number of particles required to avoid collapse grows exponentially with the system dimension, rendering the method numerically less efficient and scalable in practical data assimilation settings. 
+
+2.3. Related Works Diffusion Model for Data Assimilation In diffusion-based data assimilation, the reverse-time sampler requires the score of the diffused posterior, ∇xt log pt(xt | y1: t).However, pt(xt | y1: t) is the marginal obtained by diffusing the true posterior p(xt | y1: t) through the forward nois-ing kernel, i.e., pt(xt | y) = R pt(xt | x0)p(x0 | y)d x0.
+
+This marginalization makes the posterior score analytically intractable in general. Consequently, practical methods must approximate this term (Rozet & Louppe, 2023; Bao et al., 2023; Hodyss & Morzfeld, 2025). Another line of research leverages guidance for flow matching (Chen et al., 2025b; Transue et al., 2025; Bao & Sun, 2025) to construct filters for diffusion surrogates, so that generated samples are consistent with partial observations. However, these 3SURGE Filtering 
+
+guidance procedures remain approximate: they do not in general target the exact posterior, and they cannot provide approximation-free samples from the reward-tilted distribu-tion. To the best of the authors’ knowledge, this is the first work to provide an approximation-free filtering algorithm for diffusion-based surrogates of the posterior distribution. 
+
+Inference-Time Scaling with Diffusion Prior When a diffusion model is used as a learned prior, downstream in-ference can be formulated as approximate posterior sam-pling (Xu & Chi, 2024; Wu et al., 2024; Coeurdoux et al., 2024; Bruna & Han, 2024) or optimization under measure-ment or task constraints, where each denoising step refines the estimate while enforcing consistency (e.g., via gradient-based corrections or guidance). Many previous works (Wu et al., 2023; Cardoso et al., 2023; Singhal et al., 2025; Chen et al., 2025a; Ren et al., 2025a; Skreta et al., 2025; Uehara et al., 2025; He et al., 2025a;b; Ou et al., 2025; Chu et al., 2025; Hasan et al., 2026; Ma et al., 2025) explored the use of particle filters or related methods for better posterior approx-imation and constraint satisfaction, making diffusion priors a natural substrate for test-time compute scaling without retraining the prior. 
+
+Nonlinear Filtering for Diffusions Nonlinear filtering for diffusion processes concerns inference of a latent continuous-time state Xt evolving as an SDE from par-tial and noisy observations Yt. The optimal conditional law πt = L(Xt | F Yt ) is characterized by the Kushner– Stratonovich equation (Kushner, 1967; Stratonovich, 1965), with an equivalent unnormalized Zakai SPDE (Zakai, 1969). While these SPDE characterizations are complete, they are typically intractable beyond special cases, especially in high dimensions. Sequential Monte Carlo (SMC) / particle fil-tering methods (Sottinen & S ¨arkk ¨a, 2008; Fearnhead et al., 2008; Del Moral et al., 2006; Doucet et al., 2000; Wang et al., 2026; Zhu & Lu, 2026), including continuous-time variants, are therefore widely used, but often suffer from weight degeneracy and poor scaling as dimension grows. 
+
+# 3. SURGE : Sequential Unbiased Resampling via Girsanov Estimation 
+
+We aim to perform data assimilation by combining physical observations with simulations from a digital twin which, in our setting, is implemented as a conditional diffusion model approximating the system dynamics; prior works (Chen et al., 2025b; Transue et al., 2025) rely on guidance mechanisms, as they enable observational constraints to be injected into the sampling process without retraining or explicitly modifying the generative model, leading to stable and effective posterior correction. 
+
+3.1. Conditional Diffusion Surrogate for Transitions 
+
+Starting from samples drawn from p(xt | y1: t), we assume that the one-step transition p(xt+1 | xt) is modeled using a conditional diffusion sampler (Lipman et al., 2022; Tong et al., 2023). It can be expressed as an stochastic differential equation (SDE) on an internal time variable s ∈ [t, t + 1] :
+
+dxs = vθ (xs, s − t | xt)d s + Σ 1/2(s − t)d Ws, (3) which defines a path measure, denoted as P(xt:t+1 |y1: t), on the space of continuous trajectories C([ t, t + 1] , RD ), with marginals P(xt | y1: t) = p(xt | y1: t) and P(xt+1 | y1: t) = 
+
+p(xt+1 | y1: t).To encourage consistency between the generated next state and the observations, one often modifies the drift during sampling using a guidance term derived from the likeli-hood (Nichol et al., 2021; Ho & Salimans, 2022). Given an observation yt+1 , a guided sampler takes the form: 
+
+dxGs = vθ (xGs , s − t | xt)+ Σ( s − t)∇xG(xGs , s − t | yt+1 )ds + Σ 1/2(s − t)d Ws,
+
+(4) where G : Rd × [0 , 1] → R is a control potential, e.g. ,guidance from a prior model or simplified physics. Similarly, we denote the path measure of the SDE (4) as PG(xGt:t+1 |
+
+y1: t+1 ).When G equals log h for the correct Doob’s h-transform, the guided process corresponds to the exact conditioned dynamics. In practice, a common choice is to set 
+
+Σ( s−t)∇xG(xs, s | yt+1 ) = λ(s−t)∇xs log p(yt+1 | xs),
+
+where λ controls the strength of the guidance. However, solving for the exact h-function is often intractable and thus the guided evolution (4) with an approximate control is intrinsically biased (Chidambaram et al., 2024). In our method, SURGE , we leverage ideas from particle fil-tering to correct the bias introduced by such approximate guidance. As introduced in Section 2.2, particle filters en-force consistency with the posterior by reweighting and resampling generated particles ˆx(m) 
+
+> t+1
+
+according to their like-lihood p yt+1 | xt+1 = ˆ x(m)
+
+> t+1
+
+ under the observation yt+1 .In contrast, our method, SURGE , resamples the full trajec-tories xt:t+1 on the path-measure level, instead of at the endpoint t + 1 .
+
+3.2. Resampling on the Path Space 
+
+To this end, we first need to characterize the distribution defined by the guided generation process and quantify its deviation from the desired posterior. By Girsanov’s theorem, the Radon-Nikodym derivative (likelihood ratio) between the uncontrolled (or reference) state transition measure P
+
+4SURGE Filtering 
+
+Algorithm 1 SURGE -Filter: Sequential approximation-free Resampling via Girsanov Estimation 
+
+Require: Initial particles {x(i)0 }Ni=1 , time step ∆s, guidance G, variance schedule Σ( t), reward r(·), number of steps T ,resampling threshold c.
+
+1: for t = 0 to T − 1 do 
+
+2: for k = 0 to K − 1 do 
+
+3: Propagate particle : x(i) 
+
+> t+sk+1
+
+= x(i) 
+
+> t+sk
+
++  v(x(i) 
+
+> t+sk
+
+| xt) + Σ( sk)∇xG(x(i) 
+
+> t+sk
+
+, s k | yt+1 )∆s + Σ 1/2(sk)√∆sξ it ;
+
+4: Compute weight : w(i) 
+
+> t+sk+1
+
+= exp 
+
+
+
+(t + sk+1 )R(x(i) 
+
+> t+sk+1
+
+) − (t + sk)R(X(i) 
+
+> t+sk
+
+) − Σ1/2(sk)∇xG(x(i) 
+
+> t+sk
+
+, s k |
+
+yt+1 ) · √∆sξ it − 12 Σ( sk)∥∇ xG(x(i) 
+
+> t+sk
+
+, s k | yt+1 )∥2∆s
+
+
+
+w(i) 
+
+> t+sk
+
+;
+
+5: Normalize weights : ˜w(i) 
+
+> t+sk+1
+
+= w(i) 
+
+> t+sk+1
+
+/ PNj=1 w(j) 
+
+> t+sk+1
+
+;
+
+6: if bNeff = 1  P Ki=1 ( ˜ w(i) 
+
+> t+sk+1
+
+)2 < c then 
+
+7: Resample x(i) 
+
+> t+sk+1
+> Ni=1
+
+∼ Categorical 
+
+x(i)
+
+> t+sk+1
+> Ni=1
+
+,  ˜w(i)
+
+> t+sk+1
+> Ni=1
+
+
+
+and set w(i) 
+
+> t+sk+1
+
+← 1/N 
+
+8: end if 
+
+9: end for 
+
+10: end for 
+
+and the controlled (or guided) measure PG is 
+
+dP(xt:t+1 |y1: t)dPG(xt:t+1 |y1: t+1 ) ∝ exp 
+
+
+
+−
+
+Z 10
+
+Σ1/2(s)∇xG(xt+s, s |yt+1 ) · dWs
+
+− 12
+
+Z 10
+
+Σ1/2(s)∇xG(xt+s, s |yt+1 ) 22ds
+
+
+
+.
+
+As introduced earlier, the analysis step aims to sample from the true posterior distribution of states given observations 
+
+y1: T , which is obtained by “tilting” the prior trajectory mea-sure with the observation likelihood: 
+
+dP(xt:t+1 |y1: t+1 )dP(xt:t+1 |y1: t) ∝ p(yt+1 | xt+1 ).
+
+For most imperfect control potentials G, the path mea-sure PG(· | y1: t+1 ) generated by controlled simulation does not equal the observation-driven posterior distribution 
+
+P(· | y1: t+1 ). The discrepancy between them can be charac-terized using the chain rule for Radon-Nikodym derivatives. For a trajectory xGt:t+1 drawn from the guided simulation dis-tribution PG(· | y1: t+1 ), the importance weight that corrects it toward the target posterior P(· | y1: t+1 ) is 
+
+dP(xt:t+1 | y1: t+1 )dPG(xt:t+1 | y1: t+1 ) = dP(xt:t+1 | y1: t+1 )dP(xt:t+1 | y1: t)dP(xt:t+1 | y1: t)dPG(xt:t+1 | y1: t)
+
+∝ exp log p(yt+1 | xGt+1 )
+
+−
+
+Z 10
+
+Σ1/2(s)∇xG(xGt+s, s | yt+1 ) · dWs
+
+− 12
+
+Z 10
+
+Σ1/2(s)∇xG(xGt+s, s | yt+1 ) 22ds
+
+!
+
+.
+
+(5) 
+
+Similar as the particle filter, we propose to use the weighted empirical measure PNi=1 ˜w(i)
+
+> t+1
+
+δXG, (i)
+
+> t+1
+
+as approximation-free approximation of the posterior distribution P(· | y1: t+1 ).The construction to weights w(i) 
+
+> t+1
+
+is based on the Radon– Nikodym derivative in (5) as 
+
+w(i) 
+
+> t+1
+
+∝ dP(x(i) 
+
+> t:t+1
+
+| y1: t+1 )dPG(x(i) 
+
+> t:t+1
+
+| y1: t+1 ) .
+
+These weights are then normalized to obtain ˜w(i) 
+
+> t+1
+
+= 
+
+> w(i)
+> t+1
+> PNj=1 w(j)
+> t+1
+
+. Resampling is subsequently performed by draw-ing N particles with replacement from the weighted em-pirical measure PNi=1 ˜w(i)
+
+> t+1
+
+δXG, (i)
+
+> t+1
+
+, yielding an equally weighted particle approximation of the posterior distribution 
+
+p(xt+1 | y1: t+1 ). This resampling step mitigates particle degeneracy and completes a standard SMC update. 
+
+3.3. Implementation of SURGE 
+
+The variance of the resampling step depends on the disper-sion of the importance weights. Highly uneven weights lead to large resampling variance and unstable particle behavior. This issue is amplified over long simulations, where accu-mulated likelihood terms can produce extreme weight scales. To improve stability, we gradually incorporate the likelihood at each time step, thereby controlling weight variability and stabilizing the resampling procedure. Specifically, during each data assimilation cycle, we dis-cretize the time interval [0 , 1] into K uniform subintervals 
+
+{sk}Kk=0 , where sk = k∆s and ∆s = 1 /K . In each win-dow [sk, s k+1 ], we simulate N trajectories {x(i),G s }Ni=1 fol-lowing the guided SDE (4) and apply a resampling step at every assimilation time step for better performance. Small 5SURGE Filtering 
+
+assimilation time step ensures stable importance weighting and resampling. Within a small time steps, the incremental change in the state x(i),G s and corresponding reward remains limited. To make associated Radon-Nikodym derivative varies more smoothly across different particles, we introduce a 
+
+s log p(x(i),G s |yt+1 ) reward to the intermediate generating process. This change leads to the importance weight for window [sk, s k+1 ] to 
+
+β(i) 
+
+> t
+
+= exp sk+1 log p(ysk+1 | x(i),G sk+1 ) − sk log p(xsk | x(i),G sk )
+
+| {z }
+
+> gradually incorporate likelihood
+
+−
+
+Z sk+1 
+
+> sk
+
+Σ( s)1/2∇xG(s(i),G s , s | yt+1 ) · dWs
+
+− 12
+
+Z sk+1 
+
+> sk
+
+Σ( s)1/2∇xG(s(i),G s , s | yt+1 ) 22ds
+
+!
+
+.
+
+(6) 
+
+When sk and sk+1 are sufficiently close, the in-cremental likelihood term sk+1 log p
+
+
+
+ysk+1 | x(i),G sk+1 
+
+
+
+−
+
+sk log p
+
+
+
+ysk | x(i),G sk
+
+
+
+remains small, implying limited vari-ability in the resulting resampling weights and consequently a reduced resampling variance. The full algorithm is shown in Algorithm 1 where we adopt the simple Euler-Maruyama scheme for the computation of the integrals in (6) . The approximation-freeness of the SURGE filtering is demon-strated in Appendix A. 
+
+# 4. Experiments and Results 
+
+In this section, we present several experiments to validate the effectiveness of our proposed method, SURGE . Specifi-cally, we test on the Lorenz system, a forced incompressible Navier-Stokes system, and a real-world large-scale weather forecasting system. 
+
+4.1. Lorenz System 
+
+To validate the effectiveness of SURGE in data assimilation task, we using the Lorenz 1963 system (Lorenz, 1963), a canonical mathematical model originally developed to describe atmospheric convection. Due to its highly nonlinear and chaotic nature, this system is widely established as a rigorous benchmark for evaluating data assimilation and generative modeling techniques (Song et al., 2020; Chen et al., 2025b). The system’s state vector, x = [ x, y, z ]⊤,evolves according to a set of stochastic ordinary differential equations (SDEs) defined as: 
+
+
+
+˙x = σ(y − x) + ξx,
+
+˙y = x(ρ − z) − y + ξy ,
+
+˙z = xy − βz + ξz ,
+
+Table 1. Comparison of data assimilation results on the Lorenz 1963 experiment. SURGE demonstrates consistent performance enhancement across both SDA and FlowDAS backbones, yielding lower RMSE and W1 than all baselines. METHOD RMSE ↓ W1 ↓
+
+BPF (N=20) 0.0625 0.0448 
+
+ENKF 0.0624 0.0448 
+
+SDA 0.0589 0.0426 
+
++ SURGE 0.0555 0.0396 
+
+FLOW DAS 0.0545 0.0388 
+
++ SURGE 0.0502 0.0363 
+
+We adopt the standard chaotic parameter regime with Prandtl number σ = 10 , Rayleigh number ρ = 28 , and geomet-ric factor β = 8 /3. The system is subjected to additive Gaussian process noise ξ = ( ξx, ξ y , ξ z )⊤, where each com-ponent follows N (0 , 0.05 2). To ensure a fair comparison with the baseline FlowDAS (Chen et al., 2025b), we repli-cate their simulation protocol: the continuous dynamics are integrated using the fourth-order Runge-Kutta (RK4) method, ensuring that any performance variance is attributed to SURGE resampling process rather than numerical discrep-ancies. The observation operator A that acts exclusively on the 
+
+x-coordinate component, while dropping (y, z ) coordinate as the sparse observation. The measurement process is governed by: yobs = A(x) + η = arctan( x) + η, where η
+
+denotes Gaussian noise with a standard deviation of 0.05 .
+
+Dataset and Experiments. Following the established exper-imental design, we generate 1,024 independent trajectories, each comprising 1,024 states. To capture authentic chaotic dynamics, initial states are sampled directly from the sys-tem’s statistically stationary regime. The dataset is parti-tioned into training ( 80% ), validation ( 10% ), and evaluation (10% ) subsets. 
+
+SURGE operates as a training-free, inference-time method, based on baseline setting and model in inference stage. Dur-ing the testing phase, both methods perform autoregressive generation conditioned on the immediate previous state. We quantitatively evaluate the models by independently estimat-ing 20 trajectories over a prediction horizon of 15 time steps applied in state of art baseline FlowDAS. 
+
+Results. As demonstrated in Table 1 and Figure 3, our proposed SURGE method consistently outperforms classical filtering baselines (BPF, EnKF), the score-based assimi-lation method (SDA), and the FlowDAS baseline across all evaluated metrics. The observation conditions in this task are particularly challenging due to an extreme partial bias, where only the noisy x-coordinate is observable. Fur-thermore, these observations are subject to high noise lev-6SURGE Filtering      
+
+> Figure 3. Performance comparison between baseline methods and SURGE on the Lorenz system. The SURGE trajectory aligns more closely with the ground-truth trajectory than the baseline trajectories.
+
+els, especially when the ground truth of x approaches zero. Such conditions frequently lead to misleading guidance in gradient-based methods. 
+
+4.2. Forced Incompressible Navier-Stokes System 
+
+To further investigate the capability of SURGE in high-dimensional complex data assimilation tasks, we employed a 2D forced incompressible Navier-Stokes (NS) system driven by random forcing. The physical process is described using the stream function formulation, with the vorticity field ω serving as the fundamental state variable x = ω.The evolution of the system follows the stochastic partial differential equation: 
+
+dω + v · ∇ ωdt = ν∆ωdt − αω dt + ϵdξ
+
+where the velocity field v = ∇⊥ψ = ( −∂y ψ, ∂ xψ) is cou-pled to the vorticity via the stream function ψ, which satis-fies the Poisson equation: −∆ψ = ω.The observation process is defined by an obervation operator 
+
+A that maps the simulated vorticity fields to a noisy, sparse representation: y = A(ω) + η. In this task, the operator A
+
+linearly downsamples the field or apply sparse observation of partial pixels, while η accounts for observational noise. 
+
+Dataset and Experiments. Following our experimental protocols, we employed JAX-CFD (Kochkov et al., 2021), a GPU-accelerated differentiable simulation framework, to generate high-fidelity datasets. The Navier-Stokes equations were solved via a pseudo-spectral method on a 256 2 grid with a simulation time step of ∆t = 10 −4. Initial condi-tions were defined by a random vorticity field, ω = ∇ × v.To ensure physical consistency and eliminate transient ef-fects, the first 50 sampled frames of each trajectory were discarded. We generated 200 trajectories, each providing 200 data frames sampled at intervals of 0.5 seconds. All snapshots were subsequently downsampled to a resolution of 128 2. The final dataset was partitioned into training (80%), validation (10%), and testing (10%) sets. Addition-ally, a separate out-of-distribution test set consisting of 10 trajectories (1,000 frames each) was generated to evaluate long-term autoregressive performance. We designed two experimental configurations based on the observation modality: super-resolution and sparse obser-vation. Super-resolution : We aimed to reconstruct high-resolution fields 128 2 from low-resolution inputs of 82.
+
+Sparse Observation : We reconstructed the complete 128 2
+
+fluid vorticity field using only 5% of the spatial points as sparse observations. Both experiments utilize 4 × temporal downsampling (a 2s interval per step) to evaluate the frame-work’s efficacy with sparse temporal constraints. SURGE 
+
+utilizes the same pre-trained parameters and architecture as FlowDAS, improve it by optimizing solely at the inference level. For autoregressive prediction, the model is condi-tioned on a history of L = 10 previous states. All models were trained on 80% of the dataset, and evaluations were conducted on 10 unseen trajectories. We evaluate recon-struction using pixel level RMSE for spatial accuracy and kinetic energy spectrum to compute relative error (KES-RE) for physical fidelity. These metrics evaluate model’s perfor-mance in both pixel-level precision and multi-scale physical characteristics of the flow. 
+
+Results. As the quantitative results in Figure 4 and Ta-ble 2 demonstrate, SURGE maintains a kinetic energy spec-trum closer to the ground truth during long-horizon com-plex flow predictions while simultaneously reducing pixel-level RMSE, outperforming all baselines (BPF, EnKF, SDA, FlowDAS) across both metrics. Qualitative evaluation in Figure 5 further shows that even in the final stages of a 100-step autoregressive rollout, SURGE more accurately cap-tures essential structural features, resulting in significantly higher fidelity compared to the baselines. These results in-dicate SURGE achieves higher pixel-level precision while maintaining the fundamental multi-scale physical character-istics of the flow. 
+
+4.3. Weather Forecasting 
+
+The accurate weather forecasting is a cornerstone of modern environmental analysis. The highly non-linear and chaotic nature of atmospheric systems make them exceptionally difficulty to simulate by traditional numerical based method. Using learning based surrogate model generally become the essential way in such tasks. While data assimilation provide a promising way to build digital twins for physical weather systems. To evaluate SURGE data assimilation method in this challenging field, we utilized the The Storm EVent ImagRy (SEVIR) (Veillette et al., 2020) and focus on the Vertically Integrated Liquid (VIL) product as a key value for weather forecasting. 
+
+Dataset and Experiments. To provide a rigorous valida-7SURGE Filtering        
+
+> Figure 4. Performance comparison between baseline methods and SURGE on a forced Navier-Stokes system. Relative kinetic energy spectrum error (left) and RMSE (right) over 100 inference frames. The top row compares all baselines (EnKF, BPF, SDA, FlowDAS) against SDA+ SURGE and FlowDAS+ SURGE , while the middle and bottom rows show the per-frame improvement of
+> SURGE over FlowDAS and SDA backbones respectively, with win rates reported in each subtitle. SURGE demonstrates consistent performance enhancement across both backbones in this high-dimensional chaotic flow task.
+
+tion of our method, we adopt the experimental framework established by FlowDAS (Chen et al., 2025b) a recent state-of-the-art approach in data assimilation. We utilize the SEVIR dataset, focusing on the Vertically Integrated Liq-uid (VIL). Following the FlowDAS setting, we emulate the harsh conditions of real-world sensing by randomly sam-pling only 10% of the grid cells. Model use information from L = 6 historical frames to predict the state at t + 10 
+
+min, effectively testing its capacity to handle both extreme data sparsity and complex physical evolution. We utilize 
+
+SURGE method in FlowDAS inference step. Following the aviation weather standards established by (Robinson et al., 2002), we evaluate our model across 2 thresholds of τ20 , τ 40 
+
+dBZ, capturing both general coverage and high-intensity extremes. The Critical Success Index (CSI) and RMSE are used as metrics to account for both hits and false alarms in the predictions. 
+
+Results. As shown in Table 3, SURGE enhances the Flow-DAS inference process, achieving lower RMSE and higher CSI scores at target thresholds than all baselines (BPF, EnKF, SDA, FlowDAS). Qualitative comparisons in Fig-ure 6 further demonstrate that SURGE recovers more coher-ent structures with sharper boundaries, as well as accurate localization and intensity. These results confirm that SURGE 
+
+effectively improves data assimilation across both SDA and FlowDAS backbones without additional training or data, highlighting its capability in complex real-world physical evolution tasks without explicit equations.    
+
+> Figure 5. Qualitative comparison of vorticity field reconstruction between baseline methods and SURGE . Positive red values indi-cate clockwise rotation, and negative blue values indicate counter-clockwise rotation. Yellow boxes highlight regions where SURGE
+> better recovers physical structures under large temporal gaps and sparse observations.
+
+# 5. Conclusion and Future Work 
+
+We introduce SURGE , a training-free, plug-and-play data assimilation framework that enhances any diffusion sur-rogate under sparse, noisy measurements. By leveraging particle filtering during inference, SURGE approximation-freely integrates observations to rectify predictions in high-dimensional, nonlinear dynamical systems. Experiments on Lorenz systems, Navier-Stokes flow, and weather forecast-ing demonstrate significant performance gains, particularly in challenging tasks like extreme super-resolution and long-term autoregressive prediction under sparse data and rapid dynamic shifts. SURGE serves as a universal online enhance-ment, effectively correcting diffusion-based sequence mod-els without retraining. However, its efficacy is intrinsically linked to the base model’s quality and remains sensitive to hyperparameters. Future work will focus on developing robust reward and guidance mechanisms to accommodate multi-scale inputs and diverse guidance types, further im-proving system stability in complex physical simulations. 
+
+# Impact Statement 
+
+This paper presents work whose goal is to advance the field of machine learning. There are many potential societal consequences of our work, none of which we feel must be specifically highlighted here. 8SURGE Filtering                                                                               
+
+> Table 2. Comparison of Navier-Stokes results on super-resolution
+> (82→128 2) and sparse recovery (5% →100% ). SURGE
+> demonstrates consistent performance enhancement across both SDA and FlowDAS backbones, outperforming all baselines. METHOD KES-RE ↓RMSE ↓
+> Super-resolution (8 2→128 2)
+> BPF (N=20) 0.490 1.143
+> ENKF 0.551 0.847
+> SDA 0.473 0.987
+> +SURGE 0.417 0.966
+> FLOW DAS 0.401 1.018
+> +SURGE 0.317 0.851
+> Sparse recovery (5% →100%)
+> BPF (N=20) 0.486 1.133
+> ENKF 0.676 0.800
+> SDA 0.231 0.590
+> +SURGE 0.207 0.564
+> FLOW DAS 0.543 0.872
+> +SURGE 0.278 0.673
+> Table 3. Comparison of data assimilation results on the Weather forecast dataset. SURGE demonstrates consistent performance enhancement across both SDA and FlowDAS backbones, yielding lower RMSE and higher CSI scores than all baselines. METHOD RMSE ↓CSI( τ20 )↑CSI( τ40 )↑
+> BPF (N=20) 0.0939 0.4146 0.2171
+> ENKF 0.1281 0.4970 0.3150
+> SDA 0.3511 0.2757 0.1569
+> +SURGE 0.0925 0.4089 0.2196
+> FLOW DAS 0.0657 0.5779 0.4044
+> +SURGE 0.0513 0.6197 0.4541
+> Figure 6. Qualitative and quantitative comparison of precipita-tion forecasting between baseline methods and SURGE . Flow-DAS tends to produce blurry predictions, failing to maintain high-intensity echo regions. In contrast, SURGE effectively preserves sharp boundaries and fine-grained patterns, achieving consistently higher CSI scores across all thresholds.
+
+# References 
+
+Albergo, M., Boffi, N. M., and Vanden-Eijnden, E. Stochas-tic interpolants: A unifying framework for flows and diffusions. Journal of Machine Learning Research , 26 (209):1–80, 2025. Albergo, M. S. and Vanden-Eijnden, E. Building normal-izing flows with stochastic interpolants. arXiv preprint arXiv:2209.15571 , 2022. Albergo, M. S. and Vanden-Eijnden, E. Nets: Anon-equilibrium transport sampler. arXiv preprint arXiv:2410.02711 , 2024. Bao, F. and Sun, H. The ensemble schr ¨odinger bridge filter for nonlinear data assimilation. arXiv preprint arXiv:2512.18928 , 2025. Bao, F., Zhang, Z., and Zhang, G. A score-based nonlinear filter for data assimilation. arXiv preprint arXiv:2306.09282 , 2023. Bruna, J. and Han, J. Posterior sampling with denoising ora-cles via tilted transport. arXiv preprint arXiv:2407.00745 ,2024. Cardoso, G., Idrissi, Y. J. E., Corff, S. L., and Moulines, E. Monte carlo guided diffusion for bayesian linear inverse problems. arXiv preprint arXiv:2308.07983 , 2023. Chen, H., Ren, Y., Min, M. R., Ying, L., and Izzo, Z. Solving inverse problems via diffusion-based priors: An approximation-free ensemble sampling approach. arXiv preprint arXiv:2506.03979 , 2025a. Chen, S., Jia, Y., Qu, Q., Sun, H., and Fessler, J. A. Flow-das: A stochastic interpolant-based framework for data assimilation. arXiv preprint arXiv:2501.16642 , 2025b. Chidambaram, M., Gatmiry, K., Chen, S., Lee, H., and Lu, J. What does guidance do? a fine-grained analysis in a simple setting. Advances in Neural Information Processing Systems , 37:84968–85005, 2024. Chu, W., Wu, Z., Chen, Y., Song, Y., and Yue, Y. Split gibbs discrete diffusion posterior sampling. arXiv preprint arXiv:2503.01161 , 2025. Coeurdoux, F., Dobigeon, N., and Chainais, P. Plug-and-play split gibbs sampler: embedding deep generative priors in bayesian inference. IEEE Transactions on Image Processing , 33:3496–3507, 2024. Del Moral, P. Nonlinear filtering using random particles. 
+
+Theory of Probability & Its Applications , 40(4):690–701, 1996. Del Moral, P., Doucet, A., and Jasra, A. Sequential monte carlo samplers. Journal of the Royal Statistical Society Series B , 68(3):411–436, 2006. Denker, A., Vargas, F., Padhy, S., Didi, K., Mathis, S., Bar-bano, R., Dutordoir, V., Mathieu, E., Komorowska, U. J., and Lio, P. Deft: Efficient fine-tuning of diffusion mod-els by learning the generalised h-transform. Advances in Neural Information Processing Systems , 37:19636– 19682, 2024. 9SURGE Filtering 
+
+Domingo-Enrich, C., Drozdzal, M., Karrer, B., and Chen, R. T. Adjoint matching: Fine-tuning flow and diffusion generative models with memoryless stochastic optimal control. arXiv preprint arXiv:2409.08861 , 2024. Doucet, A., Godsill, S., and Andrieu, C. On sequential monte carlo sampling methods for bayesian filtering. 
+
+Statistics and computing , 10(3):197–208, 2000. Evensen, G. The ensemble kalman filter: Theoretical for-mulation and practical implementation. Ocean dynamics ,53(4):343–367, 2003. Fearnhead, P., Papaspiliopoulos, O., and Roberts, G. O. Par-ticle filters for partially observed diffusions. Journal of the Royal Statistical Society Series B: Statistical Method-ology , 70(4):755–777, 2008. Gordon, N. J., Salmond, D. J., and Smith, A. F. Novel ap-proach to nonlinear/non-gaussian bayesian state estima-tion. In IEE proceedings F (radar and signal processing) ,volume 140, pp. 107–113. IET, 1993. Gruver, N., Stanton, S., Frey, N., Rudner, T. G., Hotzel, I., Lafrance-Vanasse, J., Rajpal, A., Cho, K., and Wil-son, A. G. Protein design with guided discrete diffusion. 
+
+Advances in neural information processing systems , 36: 12489–12517, 2023. Hasan, M., Ohanesian, V., Gazizov, A., Bengio, Y., Aspuru-Guzik, A., Bondesan, R., Skreta, M., and Neklyudov, K. Discrete feynman-kac correctors. arXiv preprint arXiv:2601.10403 , 2026. Havens, A., Miller, B. K., Yan, B., Domingo-Enrich, C., Sriram, A., Wood, B., Levine, D., Hu, B., Amos, B., Karrer, B., et al. Adjoint sampling: Highly scalable diffusion samplers via adjoint matching. arXiv preprint arXiv:2504.11713 , 2025. He, J., Hern ´andez-Lobato, J. M., Du, Y., and Vargas, F. Rne: a plug-and-play framework for diffusion density estimation and inference-time control. arXiv preprint arXiv:2506.05668 , 2025a. He, J., Jeha, P., Potaptchik, P., Zhang, L., Hern ´andez-Lobato, J. M., Du, Y., Syed, S., and Vargas, F. Crepe: Con-trolling diffusion with replica exchange. arXiv preprint arXiv:2509.23265 , 2025b. Ho, J. and Salimans, T. Classifier-free diffusion guidance. 
+
+arXiv preprint arXiv:2207.12598 , 2022. Ho, J., Salimans, T., Gritsenko, A., Chan, W., Norouzi, M., and Fleet, D. J. Video diffusion models. Advances in neural information processing systems , 35:8633–8646, 2022. Hodyss, D. and Morzfeld, M. Using diffusion models to do data assimilation. Monthly Weather Review , 2025. Johansen, A. A tutorial on particle filtering and smoothing: Fifteen years later. 2009. Kitagawa, G. Monte carlo filter and smoother for non-gaussian nonlinear state space models. Journal of compu-tational and graphical statistics , 5(1):1–25, 1996. Kochkov, D., Smith, J. A., Alieva, A., Wang, Q., Brenner, M. P., and Hoyer, S. Machine learning–accelerated com-putational fluid dynamics. Proceedings of the National Academy of Sciences , 118(21):e2101784118, 2021. Kushner, H. J. Dynamical equations for optimal nonlinear filtering. Journal of Differential Equations , 3(2):179–190, 1967. Li, X., Thickstun, J., Gulrajani, I., Liang, P. S., and Hashimoto, T. B. Diffusion-lm improves controllable text generation. Advances in neural information process-ing systems , 35:4328–4343, 2022. Lipman, Y., Chen, R. T., Ben-Hamu, H., Nickel, M., and Le, M. Flow matching for generative modeling. arXiv preprint arXiv:2210.02747 , 2022. Liu, G.-H., Choi, J., Chen, Y., Miller, B. K., and Chen, R. T. Adjoint schr \” odinger bridge sampler. arXiv preprint arXiv:2506.22565 , 2025. Liu, X., Gong, C., and Liu, Q. Flow straight and fast: Learning to generate and transfer data with rectified flow. 
+
+arXiv preprint arXiv:2209.03003 , 2022. Lorenz, E. N. Deterministic nonperiodic flow. Journal of Atmospheric Sciences , 20(2):130 – 141, 1963. doi: 10.1175/1520-0469(1963)020 ⟨0130:DNF ⟩2.0.CO;2. URL https://journals.ametsoc.org/view/ journals/atsc/20/2/1520-0469_1963_ 020_0130_dnf_2_0_co_2.xml .Ma, N., Tong, S., Jia, H., Hu, H., Su, Y.-C., Zhang, M., Yang, X., Li, Y., Jaakkola, T., Jia, X., et al. Inference-time scaling for diffusion models beyond scaling denoising steps. arXiv preprint arXiv:2501.09732 , 2025. Nguyen, T., Do, K., Kieu, D., and Nguyen, T. h-edit: Ef-fective and flexible diffusion-based editing via doob’s h-transform. In Proceedings of the Computer Vision and Pattern Recognition Conference , pp. 28490–28501, 2025. Nichol, A., Dhariwal, P., Ramesh, A., Shyam, P., Mishkin, P., McGrew, B., Sutskever, I., and Chen, M. Glide: Towards photorealistic image generation and editing with text-guided diffusion models. arXiv preprint arXiv:2112.10741 , 2021. 10 SURGE Filtering 
+
+Nie, S., Zhu, F., You, Z., Zhang, X., Ou, J., Hu, J., Zhou, J., Lin, Y., Wen, J.-R., and Li, C. Large language diffusion models. arXiv preprint arXiv:2502.09992 , 2025. Ou, Z., Pani, C., and Li, Y. Inference-time scaling of discrete diffusion models via importance weighting and optimal proposal design. arXiv e-prints , pp. arXiv–2505, 2025. Reich, S. Digital twins: Synergy between data assimilation and optimal control. Collections , 58(03), 2025. Ren, Y., Gao, W., Ying, L., Rotskoff, G. M., and Han, J. Driftlite: Lightweight drift control for inference-time scal-ing of diffusion models. arXiv preprint arXiv:2509.21655 ,2025a. Ren, Y., Rotskoff, G. M., and Ying, L. A unified approach to analysis and design of denoising markov models. arXiv preprint arXiv:2504.01938 , 2025b. Robinson, M., Evans, J., and Crowe, B. En route weather depiction benefits of the nexrad vertically integrated liq-uid water product utilized by the corridor integrated weather system. In 10th conference on aviation, range and aerospace meteorology, american meteorological so-ciety, portland, or , 2002. Rozet, F. and Louppe, G. Score-based data assimilation. 
+
+Advances in Neural Information Processing Systems , 36: 40521–40541, 2023. Sabour, A., Albergo, M. S., Domingo-Enrich, C., Boffi, N. M., Fidler, S., Kreis, K., and Vanden-Eijnden, E. Test-time scaling of diffusions with flow maps. arXiv preprint arXiv:2511.22688 , 2025. Sanz-Alonso, D., Stuart, A., and Taeb, A. Inverse problems and data assimilation , volume 107. Cambridge Univer-sity Press, 2023. Singhal, R., Horvitz, Z., Teehan, R., Ren, M., Yu, Z., McK-eown, K., and Ranganath, R. A general framework for inference-time scaling and steering of diffusion models. 
+
+arXiv preprint arXiv:2501.06848 , 2025. Skreta, M., Akhound-Sadegh, T., Ohanesian, V., Bondesan, R., Aspuru-Guzik, A., Doucet, A., Brekelmans, R., Tong, A., and Neklyudov, K. Feynman-kac correctors in diffu-sion: Annealing, guidance, and product of experts. arXiv preprint arXiv:2503.02819 , 2025. Song, Y., Sohl-Dickstein, J., Kingma, D. P., Kumar, A., Er-mon, S., and Poole, B. Score-based generative modeling through stochastic differential equations. arXiv preprint arXiv:2011.13456 , 2020. Sottinen, T. and S ¨arkk ¨a, S. Application of girsanov theorem to particle filtering of discretely observed continuous-time non-linear systems. 2008. Stratonovich, R. L. Conditional markov processes. In 
+
+Non-linear transformations of stochastic processes , pp. 427–453. Elsevier, 1965. Tang, W. and Xu, R. A stochastic analysis approach to conditional diffusion guidance. Columbia University Preprint , 2024. Tong, A., Fatras, K., Malkin, N., Huguet, G., Zhang, Y., Rector-Brooks, J., Wolf, G., and Bengio, Y. Improving and generalizing flow-based generative models with mini-batch optimal transport. arXiv preprint arXiv:2302.00482 ,2023. Transue, T., Chen, B., Takao, S., and Wang, B. Flow matching-based generative modeling for efficient and scalable data assimilation. arXiv e-prints , pp. arXiv–2508, 2025. Uehara, M., Zhao, Y., Wang, C., Li, X., Regev, A., Levine, S., and Biancalani, T. Inference-time alignment in diffu-sion models with reward-guided generation: Tutorial and review. arXiv preprint arXiv:2501.09685 , 2025. Veillette, M., Samsi, S., and Mattioli, C. Sevir: A storm event imagery dataset for deep learning applications in radar and satellite meteorology. Advances in Neural In-formation Processing Systems , 33:22009–22019, 2020. Wang, C., Wang, W., Ren, Y., Blanchet, J., and Lu, Y. Simple approximation and derivative free inference-time scaling for diffusion models via sequential monte carlo on path measures. In Forty-third International Con-ference on Machine Learning , 2026. URL https: //openreview.net/forum?id=TWTZ2kmojU .Wu, L., Trippe, B., Naesseth, C., Blei, D., and Cunning-ham, J. P. Practical and asymptotically exact conditional sampling in diffusion models. Advances in Neural Infor-mation Processing Systems , 36:31372–31403, 2023. Wu, Z., Sun, Y., Chen, Y., Zhang, B., Yue, Y., and Bouman, K. L. Principled probabilistic imaging using diffusion models as plug-and-play priors. Advances in Neural In-formation Processing Systems , 37:118389–118427, 2024. Xu, X. and Chi, Y. Provably robust score-based diffusion posterior sampling for plug-and-play image reconstruc-tion. Advances in Neural Information Processing Systems ,37:36148–36184, 2024. Zakai, M. On the optimal filtering of diffusion processes. 
+
+Zeitschrift f ¨ur Wahrscheinlichkeitstheorie und verwandte Gebiete , 11(3):230–243, 1969. Zhang, Q., Taghvaei, A., and Chen, Y. An optimal control approach to particle filtering. Automatica , 151:110894, 2023. 11 SURGE Filtering 
+
+Zhu, Q., Ye, Z., Liu, H., Wang, Z., and Chen, M. Training-free adaptation of diffusion models via doob’s 
+
+h-transform. arXiv preprint arXiv:2602.16198 , 2026. Zhu, Y. and Lu, Y. On the power of (approximate) re-ward models for inference-time scaling. arXiv preprint arXiv:2602.01381 , 2026. 12 SURGE Filtering 
+
+# A. Theoretical Analysis: approximation-freeness of the SURGE Filter 
+
+This appendix formalizes the correctness claim behind SURGE : although the guided sampler (4) generally does not sample from the filtering posterior, it can be used as a proposal on path space, and the Girsanov-corrected importance weights in (5) exactly map the proposal back to the desired posterior. In particular, SURGE introduces no systematic bias from using an approximate guidance potential G; G only affects proposal efficiency and weight variance. 
+
+A.1. Posterior as a tilted path measure 
+
+Fix an assimilation step t → t + 1 . Recall the uncontrolled diffusion surrogate transition (3) , whose induced path measure on C([ t, t + 1] , RD ) we denote by P(d xt:t+1 | y1: t). The guided sampler (4) induces a second path measure, denoted 
+
+PG(d xt:t+1 | y1: t+1 ).Let the (physical) observation likelihood be 
+
+ℓt+1 (x) := p(yt+1 | x).
+
+The filtering posterior path measure is obtained by tilting the prior path measure by the terminal likelihood: 
+
+P(d xt:t+1 | y1: t+1 ) = 1
+
+Zt+1 
+
+ℓt+1 (xt+1 ) P(d xt:t+1 | y1: t), Zt+1 := EP(·| y1: t)[ℓt+1 (Xt+1 )] . (7) The filtering distribution p(xt+1 | y1: t+1 ) is the marginal of (7) at time t + 1 .
+
+A.2. Girsanov change-of-measure and the SURGE weight 
+
+Define the (whitened) control associated with the guidance potential G by 
+
+us(x) := Σ 1/2(s) ∇xG(x, s | yt+1 ), s ∈ [0 , 1] .
+
+Assume the standard Novikov condition (sufficient for Girsanov) holds under the guided measure: 
+
+EPG(·| y1: t+1 )
+
+
+
+exp 
+
+ 12
+
+Z 10
+
+∥us(XGt+s)∥22 ds
+
+ 
+
+< ∞. (8) Then P(· | y1: t) is absolutely continuous with respect to PG(· | y1: t+1 ), and Girsanov’s theorem yields the Radon–Nikodym derivative 
+
+dP(· | y1: t)dPG(· | y1: t+1 ) (xt:t+1 ) = exp −
+
+Z 10
+
+us(xt+s) · dWs − 12
+
+Z 10
+
+∥us(xt+s)∥22 ds
+
+!
+
+, (9) where W is the Brownian motion under the guided measure PG(· | y1: t+1 ).Combining (7) and (9), the unnormalized importance weight for a guided trajectory XGt:t+1 ∼ PG(· | y1: t+1 ) is 
+
+wt+1 (XGt:t+1 ) := ℓt+1 (XGt+1 ) dP(· | y1: t)dPG(· | y1: t+1 ) (XGt:t+1 ), (10) which is exactly the continuous-time counterpart of (5) (up to the normalizing constant Zt+1 ). 
+
+Proposition A.1 (approximation-freeness for the unnormalized posterior functional) . Let Φ : C([ t, t + 1] , RD ) → R be bounded and measurable. Under (8) ,
+
+EPG(·| y1: t+1 )
+
+h
+
+wt+1 (XGt:t+1 ) Φ( XGt:t+1 )
+
+i
+
+= EP(·| y1: t)
+
+h
+
+ℓt+1 (Xt+1 ) Φ( Xt:t+1 )
+
+i
+
+= Zt+1 EP(·| y1: t+1 )
+
+h
+
+Φ( Xt:t+1 )
+
+i
+
+. (11) 
+
+In particular, taking Φ( xt:t+1 ) = ϕ(xt+1 ) gives 
+
+EPG
+
+h
+
+wt+1 ϕ(XGt+1 )
+
+i
+
+= Zt+1 Eϕ(Xt+1 ) | y1: t+1 
+
+.
+
+Proof. The first equality is the defining property of the Radon–Nikodym derivative in (9), and the second equality follows immediately from the tilted-measure definition (7). 13 SURGE Filtering 
+
+Corollary A.2 (Asymptotic exactness of self-normalized SURGE estimates) . Let XG, (1)  
+
+> t:t+1
+
+, . . . , X G, (N )
+
+> t:t+1
+> i.i.d.
+
+∼ PG(· | y1: t+1 )
+
+and define the self-normalized estimator 
+
+ˆπNt+1 (ϕ) := 
+
+> N
+
+X
+
+> i=1
+
+˜w(i) 
+
+> t+1
+
+ϕ
+
+
+
+XG, (i)
+
+> t+1
+
+
+
+, ˜w(i) 
+
+> t+1
+
+:= w(i)
+
+> t+1
+
+PNj=1 w(j)
+
+> t+1
+
+.
+
+Then ˆπNt+1 (ϕ) → E[ϕ(Xt+1 ) | y1: t+1 ] in probability as N → ∞ .Proof. This is the standard self-normalized importance sampling law of large numbers, applied with the target measure (7) and weight (10); see Proposition A.1. 
+
+A.3. Gradual likelihood incorporation as an exact telescoping factorization 
+
+Algorithm 1 updates weights along the internal diffusion time s ∈ [0 , 1] on a grid 0 = s0 < s 1 < · · · < s K = 1 , with 
+
+∆s = sk+1 − sk.Define the log-likelihood reward 
+
+R(x) := log ℓt+1 (x) = log p(yt+1 | x).
+
+The gradual update used in SURGE is an exact factorization of the terminal likelihood ℓt+1 (xt+1 ):
+
+Lemma A.3 (Telescoping likelihood decomposition) . For any trajectory xt:t+1 and any grid 0 = s0 < · · · < s K = 1 ,
+
+ℓt+1 (xt+1 ) = 
+
+> K−1
+
+Y
+
+> k=0
+
+exp 
+
+
+
+sk+1 R(xt+sk+1 ) − skR(xt+sk )
+
+
+
+. (12) 
+
+Proof. Summing the exponents gives 
+
+> K−1
+
+X
+
+> k=0
+
+ sk+1 R(xt+sk+1 ) − skR(xt+sk ) = sK R(xt+sK ) − s0R(xt+s0 ) = R(xt+1 ),
+
+since all intermediate terms cancel and s0 = 0 , sK = 1 .Thus, distributing the likelihood contribution across internal steps does not change the final target: the product of incremental likelihood factors remains exactly ℓt+1 (Xt+1 ).
+
+A.4. Discrete-time incremental weights (Euler–Maruyama) 
+
+Let ∆Wk := Wsk+1 − Wsk so that ∆Wk = √∆s ξ k with ξk ∼ N (0 , I ). Approximating the integrals in (9) by Euler– Maruyama, and using Lemma A.3, yields the per-step incremental weight 
+
+β(i) 
+
+> t,k
+
+= exp 
+
+
+
+sk+1 R(XG, (i) 
+
+> t+sk+1
+
+) − skR(XG, (i) 
+
+> t+sk
+
+) − usk (XG, (i) 
+
+> t+sk
+
+) · √∆s ξ (i) 
+
+> k
+
+− 12 ∥usk (XG, (i) 
+
+> t+sk
+
+)∥22 ∆s
+
+
+
+, (13) and the recursion w(i) 
+
+> t+sk+1
+
+= w(i) 
+
+> t+sk
+
+β(i)
+
+> t,k
+
+, where usk = Σ 1/2(sk)∇xG(·, s k | yt+1 ). This is the discrete analogue of (10) and matches Algorithm 1. 
+
+A.5. Resampling preserves expectations 
+
+Resampling is used to control weight degeneracy; it does not change the represented distribution in expectation. 
+
+Lemma A.4 (Conditional approximation-freeness of multinomial resampling) . Let {(X(i), ˜w(i))}Ni=1 be weighted particles with P 
+
+> i
+
+˜w(i) = 1 . Let { ˜X(i)}Ni=1 be obtained by multinomial resampling from P 
+
+> i
+
+˜w(i)δX(i) and assigning equal weights 
+
+1/N . Then for any integrable test function ϕ,
+
+E
+
+"
+
+1
+
+N
+
+> N
+
+X
+
+> i=1
+
+ϕ( ˜X(i)) {(X(j), ˜w(j))}Nj=1 
+
+#
+
+=
+
+> N
+
+X
+
+> j=1
+
+˜w(j) ϕ(X(j)).
+
+14 SURGE Filtering 
+
+Proof. Conditioned on the current weighted particles, the resampling indices are i.i.d. with P(A(i) = j) = ˜w(j) and 
+
+˜X(i) = X(A(i)), hence E[ϕ( ˜X(i)) | · ] = P 
+
+> j
+
+˜w(j)ϕ(X(j)). Averaging over i gives the claim. 
+
+Remark A.5 . Lemma A.4 also holds for standard low-variance schemes (residual, stratified, systematic), which are approximation-free in the same conditional sense. 
+
+A.6. Takeaway 
+
+Proposition A.1 and Corollary A.2 show that SURGE is an importance sampler on diffusion-time path space whose target is exactly the filtering posterior (7) . Lemma A.3 shows that gradual likelihood incorporation is an exact factorization of the same terminal likelihood (hence it does not alter the target), and Lemma A.4 shows resampling preserves expectations conditional on the current weighted particles. Therefore, approximate guidance affects only efficiency and variance, not the target posterior in the large-particle limit. 
+
+# B. Additional Experimental Details 
+
+B.1. Datasets and Problem Settings Lorenz System. We evaluate the framework on the Lorenz 1963 system, a chaotic low-dimensional dynamical system widely used in data assimilation benchmarks. The state vector x = ( a, b, c )⊤ ∈ R3 evolves according to the following stochastic ordinary differential equations (ODEs): 
+
+
+
+da
+
+dt = μ(b − a) + ξ1,
+
+db
+
+dt = a(ρ − c) − b + ξ2,
+
+dc
+
+dt = ab − τ c + ξ3,
+
+where the system parameters are set to standard values: μ = 10 , ρ = 28 , and τ = 8 /3. The process noise ξ = ( ξ1, ξ 2, ξ 3)⊤
+
+consists of Gaussian components, each with a standard deviation of σ = 0 .25 .Due to the chaotic nature of the system, we employ the fourth-order Runge-Kutta (RK4) method for numerical simulation. The deterministic state updates from time 
+
+tn to tn+1 = tn + h are computed using standard RK4 intermediate steps ( k1 through k4) , followed by the addition of the stochastic force.Dataset: We generated 1,024 independent trajectories, each consisting of 1,024 time steps. The data was split into training (80%), validation (10%), and evaluation (10%) sets. Initial states were sampled from the system’s statistically stationary regime. The observation operator A(·) transforms the first state component a using an arctangent function. The observation yk at time step k is given by: 
+
+yk = A(xk) + ηk = arctan( ak) + ηk,
+
+where ηk represents observation noise. In our experimental setting, ηk is drawn from a zero-mean Gaussian distribution 
+
+N (0 , γ 2) with a standard deviation of γ = 0 .05 .
+
+Model Architecture and Training. To ensure a fair comparison, we adopted identical experimental settings for both methods. Specifically, all drift model configurations and guidance parameters in SURGE are kept consistent with those used in FlowDAS. For this low-dimensional task, the drift velocity field bs(Xs, X 0) is approximated using a fully connected neural network (MLP). The architecture details are as follows:Hidden Layers: 5 layers with a hidden dimension of 256 each.Input/Output: Input and output dimensions are both 3 (corresponding to the state space).Conditioning: The initial state condition X0 and the interpolation time s are injected via embeddings of dimension 4.Training: The model is optimized using the Adam optimizer with a base learning rate of 0.005. A linear learning rate scheduler is applied, and the training is conducted for 5000 epochs. During the inference stage, we utilize the following hyperparameters:Monte Carlo Sampling ( J): 21Sampling Step Size ( ζ): 0.0002. This step size is set smaller than in other experiments to accurately capture the sensitive dynamics of the chaotic Lorenz system 
+
+Navier-stokes Flow System. We assess the proposed method on the high-dimensional 2D incompressible Navier-Stokes (NS) equations defined on a torus T2 = [0 , 2π]2. The system dynamics for the vorticity field ω(x, t ) are governed by the 15 SURGE Filtering 
+
+stochastic partial differential equation : 
+
+dω + ( v · ∇ ω)dt = ν∆ωdt − αωdt + ϵdξ, (14) where v is the velocity field related to vorticity by ω = ∇ × v. The system parameters are set to viscosity ν = 10 −3,damping coefficient α = 0 .1, and noise magnitude ϵ = 1 . The stochastic forcing term dξ acts on specific Fourier modes. 
+
+Data Generation and Observation. The ground truth trajectories are generated using a pseudo-spectral method with a spatial resolution of 256 2 and a time step of ∆t = 10 −4. For training and evaluation, the simulation snapshots are downsampled to a resolution of 128 2 and recorded at intervals of ∆t = 0 .5. The observation model assumes the measurements y are corrupted by Gaussian noise: 
+
+y = A(ω) + η, η ∼ N (0 , γ 2I), (15) where the noise standard deviation is set to γ = 0 .05 .
+
+Model Architecture and Training. To ensure a fair comparison, we adopted identical experimental settings for both methods. Specifically, all drift model configurations and guidance parameters in SURGE are kept consistent with those used in FlowDAS. We adopt a U-Net architecture to approximate the drift velocity bs(Xs, X 0), following the configuration in FlowDAS. The network conditions on the past L = 10 states via channel concatenation. The architecture features an initial channel dimension of 128 with channel multipliers of (1, 2, 2, 2) at subsequent stages . It incorporates group normalization (8 groups) and self-attention mechanisms (4 heads, 64 dimensions per head) to capture multi-scale features . The model is trained using the AdamW optimizer with a cosine annealing learning rate schedule, starting from a base learning rate of 
+
+2 × 10 −4 . The training process runs for 1,000 epochs with a batch size of 32. 
+
+Weather Forecasting. We evaluate the method on the Storm EVent Imagery and Radar (SEVIR) dataset, a large-scale meteorological dataset containing diverse storm events. We focus specifically on the Vertically Integrated Liquid (VIL) product, which serves as a 2D proxy for precipitation intensity. Each data sample consists of a 128 × 128 grid representing a 384 km × 384 km area, with a temporal resolution of 10 minutes. The forecasting task involves conditioning on L = 6 
+
+past frames (from t − 50 min to t min) to predict the future state at t + 10 min. The observations are sparse and noisy. We emulate sparse radar coverage by randomly sampling 10% of the grid cells as available measurements. We assume the observations are corrupted by Gaussian noise with a standard deviation of γ = 0 .05 .
+
+Model Architecture and Training. Although the original study suggests using a Fourier Neural Operator for this task, the official FlowDAS implementation currently only provides the U-Net architecture. To ensure alignment with the available codebase, we employ the U-Net as the backbone for the drift velocity model bs(Xs, X 0). The network is configured with an initial channel dimension of 128 and channel multipliers of (1, 2, 2, 2) across stages. It incorporates ResNet blocks with group normalization (8 groups) and self-attention mechanisms (4 heads, 64 dimensions per head). The network inputs include the concatenation of the previous L = 6 states and the current interpolation state Xs, with the time step s injected via learned sinusoidal embeddings. We observed that retraining the model from scratch using the provided open-source code did not yield acceptable convergence or performance levels. Therefore, to ensure a valid assessment of the framework’s capabilities, we directly employed the official pre-trained model weights provided by the FlowDAS authors for this task. During the inference stage, we perform the stochastic generation with J = 25 Monte Carlo sampling steps and a sampling step size of ζ = 0 .1.
+
+B.2. Implementation Details Diffusion Model Architecture. We employ a U-Net style architecture for the drift model, a design fully adopted from the FlowDAS framework. It is important to note that the input and output configurations vary across the different tasks (i.e., Lorenz, Navier-Stokes, and Weather Forecasting). Specific details regarding these task-dependent settings are provided in the Datasets and Problem Settings section. 
+
+Guidance Term. For the guidance term G, we employ the gradient-guidance mechanism introduced in FlowDAS. This method augments the learned drift term bs(Xs, X 0) with an observation-dependent correction term during the inference process: 
+
+bs(Xs, y, X 0) = bs(Xs, X 0) + ∇ log p(y|Xs, X 0)
+
+λsβs
+
+. (16) As the likelihood term ∇ log p(y|Xs, X 0) is analytically intractable, it is approximated via Monte Carlo marginalization 16 SURGE Filtering 
+
+using J posterior samples: 
+
+∇ log p(y|Xs, X 0) ≈
+
+> J
+
+X
+
+> j=1
+
+wj ∇ log p(y| ˆX(j)1 ), (17) where wj denotes the softmax-normalized likelihood weights derived from the observation error ∥y − A ( ˆX(j)1 )∥22. To ensure a strictly fair comparison and isolate the contributions of our proposed improvements, we adopt this guidance strategy and its associated hyperparameters identically to the FlowDAS setting. 
+
+Reward Term. We employ a reward mechanism to modulate particle weights, steering the generation towards high-probability states. The specific form of the reward function r(x) depends on the task. For standard observation consistency (likelihood mode), we define the reward based on the measurement residual: 
+
+r(x) = − 12
+
+X (λ(y − A (x))) 2 , (18) where y is the observation and A(·) is the observation operator. 
+
+Hyperparameters. 
+
+• Number of particles: N = 3 for Lorenz system, N = 4 for Navier-stokes flow and N = 4 for Weather forecasting. • Resampling threshold (effective sample size): c = 0 .75 N for Lorenz system, c = 0 .5N for Navier-stokes flow and 
+
+c = 0 .5N for weather forecasting. • Diffusion coefficient: Σ( s) = σ2I with σ = 0 .1
+
+• Learning rate: 2 × 10 −5 for Lorenz, 2 × 10 −5 for Navier-stokes flow and 2 × 10 −5 for Weather forecasting. • Euler-Maruyama (Diffusion) steps: 600 for Lorenz, 20 for Navier-stokes and 500 for weather forecasting. 
+
+B.3. Evaluation Metrics 
+
+• Root Mean Square Error (RMSE). 
+
+RMSE =
+
+vuut 1
+
+T D 
+
+> T
+
+X
+
+> t=1
+
+∥ˆxt − xtrue  
+
+> t
+
+∥2,
+
+where ˆxt is the posterior mean estimate. • Relative Error of Kinetic Energy Spectrum (KES-RE). 
+
+KES-RE = ∥ ˆE(k) − Etrue (k)∥2
+
+∥Etrue (k)∥2
+
+,
+
+Here, E(k) represents the kinetic energy spectrum, calculated by summing the energy of Fourier modes within concentric shells of wavenumber k:
+
+E(k) = X
+
+> k≤∥ k∥<k +1
+
+12 ∥ˆv(k)∥2,
+
+• Critical Success Index (CSI). 
+
+CSI (τ ) = Hits Hits + Misses + False Alarms ,
+
+where hits, misses, and false alarms are calculated based on a binary map generated by an intensity threshold τ . The threshold τ signifies the severity of the weather event: a lower τ (e.g., τ20 ) assesses the prediction of general rainfall, while a higher τ (e.g., τ40 ) specifically evaluates the model’s ability to capture extreme events, such as heavy storms. 17 SURGE Filtering                                                                                 
+
+> Table 4. Full results on the Lorenz 1963 experiment. SURGE consistently improves both SDA and FlowDAS backbones. METHOD RMSE ↓W1↓
+> BPF (N=20) 0.0625 0.0448
+> DM 0.0766 0.0549
+> ENKF 0.0624 0.0448
+> SDA 0.0589 0.0426
+> +SURGE 0.0555 0.0396
+> FLOW DAS 0.0545 0.0388
+> FLOW DAS AVG 0.0923 0.0698
+> +SURGE 0.0502 0.0363
+> Table 5. Full results on Navier-Stokes super-resolution (SR, 82→128 2) and sparse observation (SO, 5% →100% ). textttSURGE consistently improves both SDA and FlowDAS backbones. SR ( 82→128 2)SO ( 5% →100% )METHOD KES-RE ↓RMSE ↓KES-RE ↓RMSE ↓
+> BPF (N=20) 0.490 1.143 0.486 1.133
+> DM 0.657 1.310 0.663 1.320
+> ENKF 0.551 0.847 0.676 0.800
+> SDA 0.473 0.987 0.231 0.590
+> +SURGE 0.417 0.966 0.207 0.564
+> FLOW DAS 0.401 1.018 0.543 0.872
+> FLOW DAS AVG 0.329 0.898 0.315 0.723
+> +SURGE 0.317 0.851 0.278 0.673
+
+B.4. Additional Results Baselines. We compare SURGE against several representative data assimilation methods spanning classical filtering and modern generative approaches. For a fair comparison, BPF, EnKF, and SDA all share the same learned dynamics model as the forecast drift. 
+
+Bootstrap Particle Filter (BPF) is a classical sequential Monte Carlo method that propagates weighted particles through the dynamics and reweights them by the observation likelihood(Gordon et al., 1993); we use N = 20 .
+
+Diffusion Model (DM) refers to a plain diffusion sampler that generates trajectories from the learned prior without observation guidance, included to isolate the contribution of guidance. 
+
+Ensemble Kalman Filter (EnKF) maintains a finite ensemble and applies a Kalman-style update under a Gaussian approximation of the forecast distribution(Evensen, 2003). 
+
+Score-based Data Assimilation (SDA) learns a score model of the trajectory prior and conditions on observations via score-based posterior sampling(Rozet & Louppe, 2023). 
+
+FlowDAS is the current state-of-the-art flow-matching framework for data assimilation, which builds a guided proposal from observations(Chen et al., 2025b); FlowDAS AVG denotes the average of multiple independent FlowDAS runs. As the strongest existing baseline, FlowDAS is also the primary backbone we plug SURGE into. 
+
+Lorenz. Additional visualization results of the state trajectories for the Lorenz experiment are presented in Figure 7 and Figure 8. It can be clearly figure out that by optimizing inference step with SURGE , FlowDAS baseline achieves better results. Full quantitative results are reported in Table 4. 
+
+Navier-stokes. Additional results of the trajectories wise performacne for the Navier-stokes experiment are presented in Figure 11 and Figure 12. SURGE Outperform in more steps accurate kinetic energy spectrum with ground truth and smaller root mean square error in these results. Full quantitative results are reported in Table 5. 18 SURGE Filtering                                      
+
+> Table 6. Full results on the Weather forecasting task. SURGE consistently improves both SDA and FlowDAS backbones. METHOD RMSE ↓CSI( τ20 )↑CSI( τ40 )↑
+> BPF (N=20) 0.0939 0.4146 0.2171
+> DM 0.1259 0.3181 0.1486
+> ENKF 0.1281 0.4970 0.3150
+> SDA 0.3511 0.2757 0.1569
+> +SURGE 0.0925 0.4089 0.2196
+> FLOW DAS 0.0657 0.5779 0.4044
+> FLOW DAS AVG 0.0534 0.6163 0.4477
+> +SURGE 0.0513 0.6197 0.4541
+
+Weather forecasting. Additional qualitative and quantitative results comparison for the weather forecasting experiment are presented in Figure 14, Figure 15, Figure 16 and Figure 17. SURGE outperforms the BASE model by generating more accurate VIL intensity patterns relative to the ground truth and achieving consistently higher Critical Success Index (CSI) scores across various thresholds and time steps in these results. Full quantitative results are reported in Table 6. Regarding the specific pixel intensity thresholds (Th) employed in the CSI analysis over the [0 , 255] range: The threshold parameter 
+
+τ = 0 .3 used in our method corresponds approximately to a normalized value of 0.2 in the [0 , 1] interval, which maps to Th=74 (representing moderate intensity). The broadest evaluation threshold, Th=16, captures the lower bound of detectable precipitation. Higher thresholds evaluate performance on increasingly severe weather: Th=133 indicates high intensity, Th=160 and Th=181 represent very high intensities, and Th=219 corresponds to extreme intensity events, matching the VIL Intensity color scale shown in the figures. 
+
+B.5. Analysis Dependency in Diffusion surrogate. While SURGE demonstrates superior performance in most regimes, we observe a specific failure mode in the Lorenz system under partial observation (observing only the x-coordinate). As illustrated in Figure 9, when the trajectory initializes near the null-isocline ( x ≈ 0), the learned drift model (diffusion surrogate) exhibits instability, leading to oscillatory behaviors (Figure 9, Left). In this scenario, applying SURGE can result in high-variance estimates. Although SURGE correctly attempts to steer the particles towards the observation (green dashed line), the aggressive re-weighting mechanism discards alternative paths. Given the poor quality of the proposal distribution in this specific region, this selection bias leads to trajectory overshooting and deviation from the true state (Figure 9, Right). This can be further explained by Figure 10. This case highlights a fundamental limitation: SURGE performance is intrinsically coupled with the stability of the underlying drift model. Unlike image generation tasks where semantic guidance allows for diverse outputs that remain perceptually valid, physical forecasting requires precise state recovery. In simple regimes where the diffusion surrogate is highly confident (i.e., generated samples are nearly identical), SURGE 
+
+becomes redundant as the proposal distribution already collapses to a deterministic path.In complex regimes where the surrogate exhibits necessary stochasticity, SURGE acts as a de-biasing mechanism. However, under limited particle counts, if the proposal distribution (drift) is fundamentally misaligned or unstable (as seen in the x ≈ 0 case), the re-sampling process may exacerbate errors rather than correct them. Carefully balancing the output stochasticity (temperature) of the diffusion surrogate with the strength of the SURGE guidance is a non-trivial optimization problem. This is particularly challenging in physical tasks where evaluation is based on deterministic accuracy rather than perceptual diversity. Future work will focus on developing adaptive mechanisms to robustly handle such edge cases without manual parameter tuning. 
+
+Ensemble Smoothing Dilemma. SURGE inherently generates a particle ensemble to approximate the posterior. While this strategy proves highly effective for the Lorenz and Weather forecasting tasks, it introduces a smoothing effect in the Navier-Stokes experiment, where averaging the particle cloud dampens high-frequency flow details. Nevertheless, preserving reasonable details within an ensemble output remains a challenge, as the particle filter is fundamentally designed to output a distribution. Despite the visual smoothing, quantitative analysis demonstrates that the SURGE ensemble output significantly surpasses both the FlowDAS baseline and individual particle trajectories in error metrics. This superiority validates the core effectiveness of our particle filter framework. It is important to note that this trade-off between spectral detail and RMSE is unique to the high-frequency nature of Navier-Stokes flow and is not observed in the other experimental 19 SURGE Filtering                                                      
+
+> Table 7. Effective sample size (ESS/ K) of SURGE across tasks and backbones, evaluated at N= 4 and N= 100 particles. ESS decreases as Ngrows, consistent with weight collapse, but SURGE maintains substantially non-degenerate weights even at N= 100 .
+> N= 4 N= 100 ONE STEP
+> TASK SDA+SURGE FLOW DAS+SURGE SDA+SURGE FLOW DAS+SURGE LORENZ 82 .9% 81 .5% 75 .2% 71 .3%
+> NS-SR 59 .2% 50 .8% 47 .2% 18 .6%
+> NS-SO 59 .9% 51 .4% 40 .2% 19 .5%
+> WEATHER 51 .7% 85 .9% 30 .1% 45 .3%
+> Table 8. Ablation on the role of observation guidance ( N= 50 ). Replacing FlowDAS with a plain diffusion model (DM) that receives no observation guidance leads to a notable drop in ESS, supporting the view that guidance is the primary driver of effective sample size. BACKBONE TASK MEAN ESS/ K↑
+> DM NAVIER -S TOKES 7.7%
+> FLOW DAS NAVIER -S TOKES 20 .9%
+> DM WEATHER 19 .7%
+> FLOW DAS WEATHER 51 .7%
+
+benchmarks. We are working with this problem and trying to develop an interpretable ensemble method for better final output, as demonstrated in Figure 13. 
+
+ESS analysis. A common concern with particle-filter methods is weight degeneracy: a single particle dominates the ensemble and the effective sample size (ESS) collapses to one. Table 7 shows the particle system stays well-distributed. ESS drops as N grows to 100 , as expected for particle filters, but stays well above 1% on every task. The guided proposal avoids full weight collapse. ESS depends on the quality of the proposal, and in SURGE the proposal is shaped by observation guidance. Stochasticity in the diffusion sampler spreads particles, but guidance pulls them back toward high-likelihood regions, so the post-guidance weights stay closer to uniform. The ESS we report reflects this alignment with the posterior, not low observation noise. On harder tasks, SURGE becomes more selective and drops low-weight particles through resampling. To check this, we run an ablation on Navier-Stokes and Weather ( N = 50 , on a subset), replacing FlowDAS with a plain diffusion model that receives no observation guidance (Table 8). ESS drops sharply (NS: 20 .9% → 7.7% ; Weather: 
+
+51 .7% → 19 .7% ). 
+
+Ablation Study. To further investigate the efficacy of the proposed SURGE framework, we conducted ablation study. We firstly focus on the Lorenz system experiment to demonstrate the results with maximum clarity. This choice is motivated by the highly distinct nature of chaotic Lorenz trajectories, which offers the most discriminative visualization for analyzing the specific contributions of each component. We decompose the weight computation in the SURGE particle filter into two essential components to ensure accurate posterior estimation. The first is the Reward Term, defined as (t + ∆ t)R(Xit+∆ t) −
+
+tR (Xit ), which quantifies the incremental gain in data fidelity by evaluating the alignment between the predicted state and observations via pixel-level likelihoods. The second is the Guidance Term, expressed as −V (t)∇xG(Xit |xt) · √∆tξ it − 
+
+> 12
+
+V (t)2∥∇ xG(Xit |xt)∥2∆t, which functions as a Girsanov correction factor that mathematically compensates for the bias introduced by the external guidance drift, ensuring that the particle weights correctly reflect the approximation-free target posterior distribution. The impact of individual components is visualized in the ablation study. Figure 18 and Figure 19 display the predicted trajectories upon removing the guidance and reward terms, respectively. Notably, removing all SURGE 
+
+features reverts the performance to the FlowDAS baseline, as shown in Figure 20. Collectively, these results demonstrate the importance of both terms for accurate trajectory estimation. The quantitative result over evaluation data is in Table 9, shows both terms are essential for SURGE accurate prediction. 
+
+B.6. Computational Resources 
+
+All experiments were conducted on a single NVIDIA RTX PRO 6000 with 96GB memory. Training the diffusion model required approximately 1.5 hours for Lorenz system and 2 hours for Navier-stokes flow. We utilize pretrained model form 20 SURGE Filtering     
+
+> Figure 7. More trajectory wise comparison between baselines and SURGE on Lorenz system. The blue SURGE ’s trajectory align closer to green real trajectory compare with baselines’ result.
+
+FlowDAS in weather forecasting task. Inference with the SURGE filter took approximately 30 seconds per time step for Lorenz system, 0.5 seconds per time step for Navier-stokes and 100 seconds per time step based one the same setting with FlowDAS. 21 SURGE Filtering 
+
+Figure 8. More trajectory wise comparison between baselines and SURGE on Lorenz system. The blue SURGE ’s trajectory align closer to green real trajectory compare with baselines’ result. 
+
+Figure 9. Failure case analysis of the Lorenz system under partial observation. When the trajectory is initialized near the null-isocline (x ≈ 0), the drift model exhibits significant oscillatory instability (Left). In this scenario, although the SURGE guidance attempts to correct the bias, the poor quality of the underlying proposal distribution leads to excessive concentration of particle weights and trajectory overshooting (Right), highlighting the algorithm’s dependence on the stability of the surrogate model. 
+
+22 SURGE Filtering 
+
+Figure 10. Illustration of SURGE behavior under unstable and erroneous predictions from the diffusion surrogate, and the resulting particle degeneracy. 
+
+Figure 11. More trajectory wise comparison between baselines and SURGE on Navier-stokes flow in terms of Energy Spectrum Relative Error and RMSE, demonstrating that SURGE consistently outperforms all baselines. 
+
+Table 9. Quantitative result in ablation study of Lorenz system prediction task. METHOD RMSE ↓ W1 ↓
+
+FLOW DAS W/O DA 0.0666 0.0479 
+
+FLOW DAS 0.0545 0.0388 
+
+SURGE 0.0502 0.0363 
+
+SURGE W/O REWARD 0.0647 0.0486 
+
+SURGE W/O GUIDANCE 0.0608 0.0428 
+
+23 SURGE Filtering 
+
+Figure 12. More trajectory wise comparison between baselines and SURGE on Navier-stokes flow in terms of Energy Spectrum Relative Error and RMSE, demonstrating that SURGE consistently outperforms all baselines. 
+
+Figure 13. Impact of Ensemble Averaging. Individual particles (left) exhibit high stochastic variance, whereas the ensemble mean (right) effectively outperform in RMSE. This shows that SURGE relies on all particles for robust estimation. 
+
+24 SURGE Filtering 
+
+Figure 14. More trajectory wise comparison between baselines and SURGE on weather forecasting in terms of VIL intensity visualization and Critical Success Index (CSI), demonstrating that SURGE consistently outperforms baselines. 
+
+25 SURGE Filtering 
+
+Figure 15. More trajectory wise comparison between baselines and SURGE on weather forecasting in terms of VIL intensity visualization and Critical Success Index (CSI), demonstrating that SURGE consistently outperforms baselines. 
+
+26 SURGE Filtering 
+
+Figure 16. More trajectory wise comparison between baselines and SURGE on weather forecasting in terms of VIL intensity visualization and Critical Success Index (CSI), demonstrating that SURGE consistently outperforms baselines. 
+
+27 SURGE Filtering 
+
+Figure 17. More trajectory wise comparison between baselines and SURGE on weather forecasting in terms of VIL intensity visualization and Critical Success Index (CSI), demonstrating that SURGE consistently outperforms baselines. 
+
+Figure 18. Ablation of the guidance term. Without guidance (right), the trajectory fails to correct drift and degrades to the baseline, highlighting the term’s necessity for accurate tracking (left). 
+
+28 SURGE Filtering 
+
+Figure 19. Ablation of the reward term. Without reward (right), the trajectory fails to correct drift and degrades to the baseline, highlighting the term’s necessity for accurate tracking (left). 
+
+Figure 20. Ablation of SURGE weight computing and resampling. The trajectory is same as FlowDAS predicted. 
+
+29

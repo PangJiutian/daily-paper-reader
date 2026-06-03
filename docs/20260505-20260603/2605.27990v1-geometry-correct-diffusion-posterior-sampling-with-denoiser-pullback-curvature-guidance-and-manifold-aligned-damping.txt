@@ -1,0 +1,2519 @@
+Title: Geometry-Correct Diffusion Posterior Sampling with Denoiser-Pullback Curvature Guidance and Manifold-Aligned Damping
+
+URL Source: https://arxiv.org/pdf/2605.27990v1
+
+Published Time: Thu, 28 May 2026 00:48:28 GMT
+
+Number of Pages: 33
+
+Markdown Content:
+# Geometry-Correct Diffusion Posterior Sampling with Denoiser-Pullback Curvature Guidance and Manifold-Aligned Damping 
+
+Seunghyeok Shin * 1 Minwoo Kim * 1 Dabin Kim 1 Hongki Lim 1
+
+## Abstract 
+
+Diffusion posterior sampling conditions diffusion priors on measurements, but data-consistency up-dates are typically scaled by hand-tuned guidance weights and can destabilize sampling under stiff, operator-dependent curvature. We replace scalar guidance with a per-noise-level damped Gauss– Newton correction computed in diffusion-state coordinates. The correction pulls likelihood gra-dients back through the denoiser, uses a one-sided curvature model that avoids forward denoiser Ja-cobians, and applies diffusion-calibrated rank-one damping aligned with the denoiser residual. Each correction is solved with matrix-free GMRES us-ing automatic differentiation, and sampling pro-ceeds with a variance-preserving Langevin tran-sition with a closed-form drift/noise split. On FFHQ and ImageNet across inverse problems, it achieves competitive PSNR/SSIM/LPIPS while running markedly faster than most of the com-pared baselines; on accelerated MRI reconstruc-tion, it achieves the best PSNR/SSIM among the compared baselines. Code is available at 
+
+github.com/Seunghyeok0715/CLAMP .
+
+## 1. Introduction 
+
+Inverse problems aim to infer an unknown signal from in-direct and noisy measurements. We consider the standard additive Gaussian model 
+
+y = A(x0) + n, n ∼ N (0, β 2
+
+> y
+
+I), (1) where A is a (possibly nonlinear) forward operator and x0
+
+is the unknown clean image. Because the mapping x0 7 → y
+
+is typically ill-posed, many x0 can explain the same obser-vation (Bertero & Boccacci, 1998; Calvetti & Somersalo, 
+
+> *
+
+Equal contribution 1Department of Electrical and Computer Engineering, Inha University, Incheon, 22212, South Korea. Cor-respondence to: Hongki Lim <hklim@inha.ac.kr >.
+
+Proceedings of the 43 rd International Conference on Machine Learning , Seoul, South Korea. PMLR 306, 2026. Copyright 2026 by the author(s). 
+
+2007). In such settings, posterior sampling can be more informative than returning a single reconstruction: it gener-ates multiple plausible explanations of the data and supports principled uncertainty quantification (Stuart, 2010; Dashti & Stuart, 2015). Pretrained diffusion models are strong natural-image pri-ors and are widely used in training-free inverse problem solvers (Feng et al., 2023). They generate samples by progressively denoising noisy states (Sohl-Dickstein et al., 2015; Ho et al., 2020; Song & Ermon, 2019; Song et al., 2021b), and EDM provides a practical noise-conditioned denoiser interface and schedule (Karras et al., 2022). Be-cause runtime is dominated by denoiser calls, acceleration (e.g., distillation) is relevant under fixed compute budgets (Salimans & Ho, 2022). A widely used conditional strategy is to run a diffusion sampler while injecting likelihood-driven data-consistency updates, as in diffusion posterior sampling (DPS) (Chung et al., 2023a). Under (1) , the physical Gaussian negative log-likelihood is Φmeas (x) = 12β2
+
+> y
+
+∥A(x) − y∥22. Interleav-ing “prior” diffusion steps with likelihood corrections is conceptually straightforward, but the likelihood correction is often fragile: it must be strong enough to reduce measure-ment error yet small enough to avoid pushing iterates into low-density regions of the diffusion prior. Two coupled issues make this correction hard to calibrate across operators and noise levels. First, the local geome-try of the likelihood can be strongly anisotropic: a single scalar step size must be small enough to remain stable in stiff directions, which can slow progress in flatter directions (especially for nonlinear A or latent parameterizations). Sec-ond, measurement consistency is defined on a clean variable (the input of A), while the sampler state is a noisy diffu-sion variable. In practice, one evaluates the measurement residual on the denoised prediction produced at each noise level, so the effective mismatch depends on the composition of the forward model with the denoiser. As a result, clean-space likelihood information must be mapped back to the diffusion-state update; ignoring this mapping can mis-scale directions when the denoiser is anisotropic. Existing work mitigates these failure modes in complemen-1
+
+> arXiv:2605.27990v1 [cs.LG] 27 May 2026
+
+Geometry-Correct Diffusion Posterior Sampling with Denoiser-Pullback Curvature Guidance and Manifold-Aligned Damping Measurement  LatentCLAMP (Ours) Resample  Reference                     
+
+> PSNR: 29.503
+> LPIPS: 0.233
+> TIME:275.59s
+> PSNR: 34.791
+> LPIPS: 0.128
+> TIME: 115.37s
+> (b) High dynamic range (Latent)
+> Measurement LatentCLAMP (Ours) PSLD LatentDAPS Reference
+> (e) Accelerated MRI
+> Reference
+> CLAMP
+> (a) Phase retrieval (Pixel)
+> PSNR: 31.785
+> LPIPS: 0.177
+> TIME: 96.89s
+> PSNR: 33.558
+> LPIPS: 0.163
+> TIME: 28.36s
+> Measurement CLAMP(Ours) DAPS Reference Measurement CLAMP(Ours) DAPS SITCOM Reference
+> PSNR: 26.561
+> LPIPS: 0.346
+> TIME: 67.12s
+> PSNR: 27.874
+> LPIPS: 0.249
+> TIME: 59.84s
+> PSNR: 27.991
+> LPIPS: 0.201
+> TIME: 24.36s
+> (c) Super resolution (Pixel)
+> (d) Box inpainting (Latent)
+
+Figure 1. Qualitative results on diverse inverse problems. (a–d) Qualitative comparisons on FFHQ and ImageNet at 256 × 256 ,covering both pixel- and latent-space variants of CLAMP and baseline methods across a range of general inverse problems. For each task, we report the best competing results for a representative visual comparison. (e) Visualization of CLAMP on accelerated MRI reconstruction. Overall, CLAMP produces high-fidelity, visually plausible reconstructions and remains effective across pixel/latent settings, linear/nonlinear operators, and both natural and medical imaging domains. 
+
+tary ways, including trajectory modifications (e.g., DAPS (Zhang et al., 2025)), per-step optimization (e.g., SITCOM (Alkhouri et al., 2025)), stabilization via preconditioning (Garber & Tirer, 2024) or projections (Chung et al., 2022), diffusion-bridge constructions (Chung et al., 2023b), and likelihood-update redesigns (Yismaw et al., 2025; Graikos et al., 2025; Hamidi et al., 2025). Despite this progress, many practical samplers still rely on scalar guidance sched-ules, and they do not explicitly combine coordinate-correct likelihood geometry with direction-wise curvature scaling and diffusion-calibrated step control in a single per-noise-level correction. This paper introduces CLAMP (Curvature-aware Langevin with Aligned Manifold Pullback), a diffusion posterior sam-pler that directly targets the two issues above. To handle anisotropic likelihood geometry, CLAMP replaces scalar guidance with a curvature-scaled correction based on a damped Gauss–Newton (Fisher) quadratic model of the mea-surement residual at each noise level. To ensure coordinate correctness, the correction is computed in diffusion-state coordinates by pulling likelihood sensitivity back through the denoiser, rather than applying clean-space derivatives di-rectly. For robustness and efficiency, we use a one-sided cur-vature approximation that avoids forward denoiser-Jacobian products inside curvature terms while retaining the pullback that maps measurement sensitivity into diffusion-state up-dates. Step sizes are stabilized via a trust-region/Levenberg– Marquardt viewpoint (Nocedal & Wright, 2006; Conn et al., 2000): we regularize the correction in a prior-aligned ge-ometry and calibrate its strength to the diffusion noise level, avoiding per-task step-size schedules. The resulting update is computed with a fixed, lightweight matrix-free solve us-ing Jacobian actions, yielding a favorable accuracy–runtime trade-off. After the correction, CLAMP advances the dif-fusion schedule with a variance-preserving Langevin-style step with a closed-form drift/noise split, avoiding an addi-tional per-step stochasticity parameter. The same construc-tion applies in latent space by composing the forward model with a decoder, replacing A by A ◦ D.Our contributions are: • Curvature-scaled, coordinate-correct likelihood corrections. We formulate per-noise-level data-consistency updates in diffusion-state coordinates us-ing denoiser pullback geometry and a damped Gauss– Newton curvature model, addressing both anisotropic stiffness and coordinate mismatch. • Diffusion-calibrated, prior-aligned anisotropic step control. We introduce a rank-one damping metric aligned with the denoiser residual direction and a schedule-calibrated regularization rule that stabilizes likelihood corrections across noise levels without an explicit guidance schedule. • Variance-preserving Langevin propagation. Af-ter each correction, we propagate to the next noise level with a Langevin-style transition whose drift and injected-noise coefficients are set in closed form by variance matching and fluctuation–dissipation cou-pling, preserving the prescribed diffusion noise sched-ule. • Fast matrix-free implementation in pixel and latent spaces. We solve each correction with a fixed-budget 2Geometry-Correct Diffusion Posterior Sampling with Denoiser-Pullback Curvature Guidance and Manifold-Aligned Damping 
+
+Krylov method using only Jacobian actions and eval-uate CLAMP on natural-image and medical-imaging inverse problems, demonstrating improved reconstruc-tion quality and sampling efficiency over representative baselines. Section 2 reviews diffusion denoisers, damped Gauss– Newton, and matrix-free Krylov solvers. Section 3 derives 
+
+> CLAMP
+
+, and Section 4 reports quantitative results and abla-tions on FFHQ/ImageNet inverse problems and MRI recon-struction; Section 5 concludes. 
+
+## 2. Background 
+
+This section summarizes the technical prerequisites for 
+
+> CLAMP
+
+: (i) diffusion denoisers and noise schedules, (ii) Gauss–Newton (GN) curvature with damping via local quadratic surrogates, and (iii) matrix-free Krylov solvers based on Jacobian actions. 
+
+2.1. Diffusion denoisers and noise schedules 
+
+Diffusion models generate samples by iteratively denoising a sequence of noisy states (Ho et al., 2020; Song et al., 2021b). We work with a decreasing noise schedule {σt}0
+
+> t=T
+
+and an EDM-style denoiser interface (Karras et al., 2022): 
+
+ˆx0|t = Fθ (xt; σt), ϵθ (xt, σ t) := xt − ˆx0|t
+
+σt
+
+. (2) Here xt is the diffusion-state iterate at noise level σt, and 
+
+ˆx0|t is the associated clean prediction used for measurement evaluation in conditional sampling. 
+
+2.2. Gauss–Newton quadratic surrogate and damping 
+
+Consider the Gaussian-form residual objective with residual scale σn > 0Φ( x) = 12σ2
+
+> n
+
+∥r(x)∥22, r(x) := A(x) − y, J := ∇xr(x).
+
+(3) For an increment ∆, linearize the residual r(x + ∆) ≈
+
+r(x) + J∆ and substitute into Φ:
+
+Φ( x + ∆) ≈ 12σ2
+
+> n
+
+∥r + J∆∥22
+
+=Φ( x) + 1
+
+σ2
+
+> n
+
+⟨J⊤r, ∆⟩ + 12σ2
+
+> n
+
+∆⊤(J⊤J)∆ , (4) where ⊤ denotes the Euclidean adjoint. Minimizing the quadratic model (4) yields the GN normal equations (No-cedal & Wright, 2006) 
+
+(J⊤J) ∆ = −J⊤r. (5) Damping (trust-region / Levenberg–Marquardt) stabilizes GN updates when the local model is imperfect or ill-conditioned by adding a positive semidefinite metric (No-cedal & Wright, 2006; Conn et al., 2000; Hanke, 1997): 
+
+(J⊤J + λH) ∆ = −J⊤r, H ⪰ 0. (6) The curvature J⊤J acts as a matrix-valued step size, sup-pressing updates along sensitive directions; the metric H
+
+provides (possibly anisotropic) step control. 
+
+2.3. Matrix-free Jacobian actions and Krylov solvers 
+
+Large-scale inverse problems rarely permit explicit forma-tion of J or J⊤J. Instead, second-order updates are com-puted by solving linear systems M∆ = b using only matrix– vector products M(v). These products are implemented via Jacobian actions: a Jacobian–vector product (JVP) com-putes Jv and a vector–Jacobian product (VJP) computes 
+
+J⊤u (Pearlmutter, 1994; Baydin et al., 2018). For linear 
+
+A, Jv = Av and J⊤u = A⊤u exactly; for differentiable nonlinear A, JVP/VJP can be obtained via autodiff. When M is symmetric positive-(semi)definite, conjugate gradients (and truncated trust-region variants) are standard (Steihaug, 1983; Conn et al., 2000). When M is not sym-metric, one instead uses a nonsymmetric Krylov solver such as GMRES (Saad & Schultz, 1986; Dembo et al., 1982; Knoll & Keyes, 2004), which remains fully matrix-free and only requires repeated evaluations of M(v).
+
+## 3. Method 
+
+3.1. Setup, notation, and per-step structure 
+
+We consider inverse problems with additive Gaussian mea-surement noise as in (1) , whose physical standard deviation is denoted by βy, and target posterior sampling 
+
+p(x0 | y) ∝ exp 
+
+
+
+− 12β2
+
+> y
+
+∥A(x0) − y∥22
+
+
+
+p(x0). (7) In the finite-step correction below, σn denotes the data-consistency scale used by CLAMP rather than the physical noise level itself. Setting σn = βy recovers the physi-cal Gaussian scaling; smaller values strengthen the local measurement-consistency correction and can compensate for finite-step, denoiser, and linearization effects. We ac-cess the prior through a pretrained diffusion model with a decreasing noise schedule {σt}0 
+
+> t=T
+
+, σt−1 < σ t, and an EDM/Tweedie denoiser interface 
+
+ˆx0|t = Fθ (xt; σt), ϵθ (xt, σ t) := xt − ˆx0|t
+
+σt
+
+. (8) Here xt ∈ Rd denotes the diffusion-state iterate at noise level σt.
+
+Per-step structure. At each noise level σt, CLAMP per-forms: (i) a likelihood correction ∆t computed in diffusion-state coordinates by solving a damped linear system, and (ii) 3Geometry-Correct Diffusion Posterior Sampling with Denoiser-Pullback Curvature Guidance and Manifold-Aligned Damping Composed Residual 
+
+> Automatic
+> Scaling
+
+Damped Gauss -Newton Correction 
+
+> Likelihood Curvature Model
+> Likelihood Pullback
+> Diffusion State
+> Variance -Preserving Langevin Step
+> Differentiating
+> Operator & denoiser
+> Forward
+> operator
+
+-
+
+> Prior Anisotropic Damping
+> Matrix -Free GMRES Solve
+> GMRES Iterations
+> (Only Jacobian Actions)
+> Residual Direction
+
+Figure 2. CLAMP update at one noise level. (1) Prior query & residual: from xt, compute ˆx0|t and the composed residual by comparing 
+
+A(ˆ x0|t) to y. (2) Curvature-aware correction: pull back measurement sensitivity through the denoiser to form a one-sided Gauss–Newton model with prior-aligned, automatically scaled damping, then solve the linear system with matrix-free GMRES. (3) Schedule transition: 
+
+apply the correction in a variance-preserving Langevin step to obtain xt−1.
+
+a prior propagation step that advances xt 7 → xt−1 while pre-serving the schedule variance. Algorithm 1 in Appendix A provides the full procedure; below we derive each compo-nent. 
+
+3.2. Overview of the CLAMP correction 
+
+We first summarize one CLAMP update before deriving its components. At noise level σt, CLAMP queries the denoiser and evaluates the measurement residual on the denoised prediction, 
+
+ˆx0|t = Fθ (xt; σt), rt = A(ˆ x0|t) − y.
+
+Let JA be the Jacobian of A at ˆx0|t and JF the Jacobian of Fθ (·; σt) at xt. The likelihood signal is pulled back to diffusion-state coordinates as 
+
+ct = 1
+
+σ2
+
+> n
+
+J⊤ 
+
+> F
+
+J⊤ 
+
+> A
+
+rt.
+
+Instead of taking a scalar-guided step along −ct, CLAMP 
+
+computes a matrix-scaled correction ∆t by solving 
+
+Mt(∆ t) = −ct, Mt(v) = Bt(v) + αtHt(v),
+
+where 
+
+Bt(v) = 1
+
+σ2
+
+> n
+
+J⊤ 
+
+> F
+
+J⊤ 
+
+> A
+
+(JAv), Ht(v) = λid v+ut(u⊤ 
+
+> t
+
+v),
+
+dt = xt − ˆx0|t, ut = dt
+
+∥dt∥2
+
+.
+
+Here Bt is the one-sided denoiser-pullback curvature opera-tor, and Ht is a rank-one damping metric aligned with the denoiser residual direction. The system is solved matrix-free with a fixed GMRES budget. After the likelihood correction, CLAMP advances the diffu-sion chain using a variance-preserving Langevin transition, 
+
+xt−1 = xt + ∆ t + ( σret ,t − σt)ϵθ (xt, σ t) + σinj ,t ξ,
+
+where ξ ∼ N (0, I).Thus, the core of CLAMP is a local, repeatedly re-linearized correction: J⊤ 
+
+> F
+
+J⊤ 
+
+> A
+
+rt provides the coordinate-correct likeli-hood pullback, Bt supplies curvature scaling, Ht stabilizes the step, and the Langevin transition propagates the cor-rected sample to the next noise level. 
+
+3.3. Why scalar likelihood guidance is brittle 
+
+Many diffusion posterior samplers scale a likelihood gradi-ent in xt-space by a scalar guidance weight. When the local geometry is stiff (ill-conditioned), stable scalar steps are constrained by the largest-curvature direction, which can leave insufficient progress along lower-curvature (“flatter”) directions. 4Geometry-Correct Diffusion Posterior Sampling with Denoiser-Pullback Curvature Guidance and Manifold-Aligned Damping 
+
+Proposition 3.1 (Scalar-step barrier under stiff local geome-try) . Fix t and suppose a local objective in the increment 
+
+∆ admits a quadratic model J (∆) ≈ J (0) + ⟨gt, ∆⟩ + 
+
+> 12
+
+∆⊤Qt∆ with Qt ≻ 0. A sufficient condition for global stability of the scalar-guided update ∆sc = −ηgt on this quadratic model is 
+
+η ≤ 2
+
+λmax (Qt) . (9) 
+
+Let ∆⋆ = −Q−1 
+
+> t
+
+gt denote the quadratic minimizer. In the eigenbasis Qtvi = λivi, for any i with ⟨vi, gt⟩̸ = 0 ,
+
+|⟨ vi, ∆sc ⟩| |⟨ vi, ∆⋆⟩| = ηλ i ≤ 2λi
+
+λmax (Qt) . (10) 
+
+In particular, along the flattest direction vmin (asso-ciated with λmin (Qt)), the stability constraint implies 
+
+ηλ min (Qt) ≤ 2/κ (Qt). Thus when κ(Qt) ≫ 1, any globally stable scalar step yields only O(λi/λ max ) relative progress in low-curvature directions, and at most O(1 /κ )
+
+relative progress along the flattest direction. 
+
+Proposition 3.1 motivates using a matrix-scaled correction that allocates step sizes direction-wise via curvature. 
+
+3.4. Stepwise surrogate objective in diffusion-state coordinates 
+
+At each noise level σt, CLAMP computes a likelihood cor-rection ∆t in diffusion-state coordinates by solving for the mode of a local surrogate that combines (i) the stepwise likelihood and (ii) a Gaussian surrogate over increments around xt. Concretely, we define a local Gaussian surrogate on the increment ∆:
+
+pt(xt + ∆ | xt) ∝ exp 
+
+
+
+− αt
+
+2 ∥∆∥2
+
+> Ht
+
+
+
+, (11) where Ht ⪰ 0 is a (possibly anisotropic) damping metric and αt > 0 sets its strength (both specified in Sec. 3.7). Combining this with the stepwise likelihood Φt (defined in Sec. 3.5) yields the stepwise surrogate conditional density 
+
+˜pt(x | y, xt) ∝ exp   − Φt(x) pt(x | xt), (12) whose negative log (up to an additive constant) is 
+
+Et(x) = Φ t(x) + αt
+
+2 ∥x − xt∥2 
+
+> Ht
+
+. (13) We compute ∆t by minimizing a quadratic surrogate of 
+
+Et(xt + ∆) derived below. The quadratic term plays the role of a trust-region/Levenberg–Marquardt stabilizer (Nocedal & Wright, 2006; Conn et al., 2000) for step control; it is not intended to match the exact diffusion transition density. 
+
+3.5. Denoiser-pulled-back likelihood geometry 
+
+The measurement residual is defined on a clean variable (the input of A), whereas the algorithm updates the noisy diffu-sion state xt. We therefore evaluate measurement residuals on the denoised prediction and define the composed residual and stepwise likelihood as functions of the diffusion-state argument x:
+
+rt(x) := A Fθ (x; σt) − y, Φt(x) := 12σ2
+
+> n
+
+∥rt(x)∥22.
+
+(14) Let zt := Fθ (xt; σt) and rt := rt(xt) = A(zt)−y. Define Jacobians at the current evaluation point: 
+
+JA := ∇zA(z) z=zt , JF := ∇xFθ (x; σt) x=xt (15) 
+
+Jt := ∇xrt(x) x=xt = JAJF . (16) 
+
+Proposition 3.2 (Coordinate-correct guidance requires de-noiser pullback) . Let ˜Φ( z) := 12σ2
+
+> n
+
+∥A(z) − y∥22 and 
+
+Φt(x) = ˜Φ( Fθ (x; σt)) . Then the first-order expansion at 
+
+xt is 
+
+Φt(xt +∆) = Φ t(xt)+ 
+
+D
+
+J⊤ 
+
+> F
+
+∇z ˜Φ( z) z=zt
+
+, ∆
+
+E
+
++o(∥∆∥2),
+
+(17) 
+
+so coordinate-correct steepest descent in xt-space is pro-portional to −J⊤ 
+
+> F
+
+∇z ˜Φ( zt). Moreover, under a Gauss– Newton/Fisher approximation (dropping second-order resid-ual terms), the diffusion-state curvature is 1
+
+> σ2
+> n
+
+J⊤ 
+
+> F
+
+J⊤
+
+> A
+
+JAJF .
+
+Proposition 3.2 motivates differentiating through the de-noiser (via J⊤ 
+
+> F
+
+): likelihood derivatives in clean coordinates do not, in general, provide correctly scaled directions for updating xt when JF is anisotropic. 
+
+3.6. Penalized Gauss–Newton correction and explicit approximations 
+
+Building on Sec. 3.5, we compute the likelihood correction 
+
+∆t by minimizing a quadratic surrogate of Et(xt + ∆) in (13) , using the composed residual rt(x) and Jacobian Jt =
+
+JAJF from (16). 
+
+(A1) Local linearization and penalized Gauss–Newton (standard). Using the first-order residual model 
+
+rt(xt + ∆) ≈ rt + Jt∆, (18) substituting into (13) yields the quadratic approximation 
+
+Et(xt + ∆) ≈ 12σ2
+
+> n
+
+∥rt + Jt∆∥22 + αt
+
+2 ∆⊤Ht∆. (19) Its stationary point solves the ideal penalized Gauss–Newton system 
+
+ 1
+
+σ2
+
+> n
+
+J⊤ 
+
+> t
+
+Jt + αtHt
+
+
+
+∆ = − 1
+
+σ2
+
+> n
+
+J⊤ 
+
+> t
+
+rt. (20) 5Geometry-Correct Diffusion Posterior Sampling with Denoiser-Pullback Curvature Guidance and Manifold-Aligned Damping 
+
+With Jt = JAJF , the curvature term is J⊤ 
+
+> t
+
+Jt =
+
+J⊤ 
+
+> F
+
+J⊤ 
+
+> A
+
+JAJF , which requires forward denoiser-Jacobian products of the form JF v inside curvature matvecs. 
+
+(A2) One-sided curvature approximation ( CLAMP de-sign choice). To avoid forward denoiser-Jacobian prod-ucts inside the curvature, CLAMP adopts a one-sided Gauss– Newton/Fisher model that approximates the forward de-noiser perturbation as JF v ≈ v only when forming the curvature operator, while retaining the pullback J⊤ 
+
+> F
+
+in the adjoint pass so that update directions remain coordinate-correct under anisotropic JF (Prop. 3.2). This approx-imation is motivated by the local translation heuristic 
+
+Fθ (xt + ∆; σt) ≈ Fθ (xt; σt) + ∆ for small ∆.A useful sanity check is that the diffusion-state gradient of the stepwise likelihood is exact under this construction: 
+
+∇xΦt(xt) = 1
+
+σ2
+
+> n
+
+J⊤ 
+
+> F
+
+J⊤ 
+
+> A
+
+rt,
+
+whereas only the curvature is approximated. In particu-lar, if we define the exact GN/Fisher curvature operator 
+
+Bexact  
+
+> t
+
+(v) := σ−2 
+
+> n
+
+J⊤ 
+
+> F
+
+J⊤ 
+
+> A
+
+JAJF v, then the one-sided opera-tor Bt defined below satisfies 
+
+ Bexact  
+
+> t
+
+− Bt
+
+(v) = 1
+
+σ2
+
+> n
+
+J⊤ 
+
+> F
+
+J⊤ 
+
+> A
+
+JA(JF − I)v,
+
+so the curvature discrepancy is controlled by the deviation of the forward action from identity (i.e., ∥JF − I∥), while eliminating JF v products in curvature matvecs. 
+
+Asymmetric Jacobian actions. Concretely, we use the asymmetric Jacobian actions 
+
+˜Jt(v) := JAv, ˜J⊤ 
+
+> t
+
+(u) := J⊤ 
+
+> F
+
+J⊤
+
+> A
+
+u, (21) which induce the matrix-free operators 
+
+Bt(v) := 1
+
+σ2
+
+> n
+
+˜J⊤
+
+> t
+
+ ˜Jt(v) = 1
+
+σ2
+
+> n
+
+J⊤ 
+
+> F
+
+J⊤
+
+> A
+
+ JAv, (22) 
+
+ct := 1
+
+σ2
+
+> n
+
+˜J⊤ 
+
+> t
+
+rt = 1
+
+σ2
+
+> n
+
+J⊤ 
+
+> F
+
+J⊤
+
+> A
+
+rt. (23) Compared to the exact GN/Fisher curvature 
+
+σ−2 
+
+> n
+
+J⊤ 
+
+> F
+
+J⊤ 
+
+> A
+
+JAJF , Bt drops the rightmost JF factor. Since ˜Jt(·) and ˜J⊤ 
+
+> t
+
+(·) are not adjoints of a single linear map, Bt (and thus Mt below) need not be self-adjoint, motivating a nonsymmetric Krylov solver (GMRES). 
+
+Linear system to solve. The correction ∆t is defined as the solution of the damped system 
+
+Mt(∆ t) = −ct, Mt(v) := Bt(v) + αtHt(v), (24) which we solve with GMRES (Sec. 3.8) using only matrix– vector products. 
+
+3.7. Prior-aligned anisotropic damping and diffusion-calibrated regularization Rank-one anisotropic metric. Define the denoiser resid-ual and its unit direction 
+
+dt := xt − ˆx0|t, ut := dt
+
+∥dt∥2
+
+. (25) We set 
+
+Ht := λid I + utu⊤ 
+
+> t
+
+, Htv = λid v + ut(u⊤ 
+
+> t
+
+v), (26) where λid ≥ 0 provides baseline isotropic damping and prevents degeneracy. This metric penalizes motion along the denoiser residual direction ut more strongly than orthog-onal directions, yielding explicit step control aligned with a diffusion-prior-indicated direction. 
+
+Diffusion-calibrated regularization strength. Define the (unscaled) backprojected residual in diffusion coordinates 
+
+at := σ2 
+
+> n
+
+ct = J⊤ 
+
+> F
+
+J⊤
+
+> A
+
+rt. (27) We set 
+
+αt := ∥dt∥2
+
+∥at∥2
+
+· 1
+
+σ2prior 
+
+(28) where σprior = max( σt−1, σ +min ). The ratio ∥dt∥2/∥at∥2
+
+provides an automatic scale match between the prior-indicated magnitude (the denoiser residual dt = xt − ˆx0|t)and the likelihood signal seen in diffusion coordinates (the backprojection at): when the likelihood pullback is strong, 
+
+αt decreases to avoid over-damping; when it is weak, αt
+
+increases to keep corrections conservative. The factor σ−2prior 
+
+ties the damping to the remaining diffusion noise level, yielding comparable step control across t. Finally, defin-ing at = σ2
+
+> n
+
+ct removes explicit σ−2 
+
+> n
+
+dependence from αt,so increasing σn naturally weakens likelihood corrections through Bt and ct without retuning. 
+
+3.8. Matrix-free GMRES and Jacobian-action interface 
+
+We never form JA, JF , Bt, or Ht explicitly. Instead, we as-sume access to matrix-free Jacobian actions: a JVP through 
+
+A to compute JAv (for linear A, this equals Av exactly), a VJP through A (or an explicit adjoint when available) to compute J⊤ 
+
+> A
+
+u, and a VJP through the denoiser to compute 
+
+J⊤ 
+
+> F
+
+u. With these primitives, we evaluate 
+
+Bt(v) = σ−2 
+
+> n
+
+J⊤
+
+> F
+
+
+
+J⊤
+
+> A
+
+ JAv
+
+, (29) 
+
+ct = σ−2 
+
+> n
+
+J⊤
+
+> F
+
+ J⊤ 
+
+> A
+
+rt
+
+, Ht(v) = λid v + ut(u⊤ 
+
+> t
+
+v). (30) For differentiable nonlinear A, these Jacobian actions can be obtained via automatic differentiation (Baydin et al., 2018); if automatic differentiation is unavailable, one may approxi-mate JAv using standard numerical directional-derivative schemes (e.g., finite differences) (Knoll & Keyes, 2004). 6Geometry-Correct Diffusion Posterior Sampling with Denoiser-Pullback Curvature Guidance and Manifold-Aligned Damping 
+
+We solve (24) using GMRES (Saad & Schultz, 1986), which applies to nonsymmetric operators and is fully matrix-free (see Algorithm 2 in Appendix A for details). We run GM-RES for a fixed iteration budget K (Dembo et al., 1982; Knoll & Keyes, 2004). A fixed Krylov budget is appropriate because our operator is derived from a local linearization and a one-sided curvature approximation: over-solving can amplify model mismatch, whereas moderate K yields stable updates. 
+
+Per-step computational cost. Each GMRES iteration re-quires one application of Mt(·), i.e., one JVP through A,one VJP through A, one VJP through Fθ , and one rank-one metric application. 
+
+3.9. Variance-preserving Langevin propagation 
+
+After computing ∆t, we propagate from σt to σt−1. Adeterministic EDM-style probability-flow update would be 
+
+xODE  
+
+> t−1
+
+= xt + ∆ t + ( σt−1 − σt) ϵθ (xt, σ t). (31) In posterior sampling, the additional drift ∆t can make purely deterministic propagation sensitive to discretization and model mismatch. We instead use a stochastic transi-tion that preserves the schedule variance while maintaining stochastic exploration: 
+
+xt−1 = xt + ∆ t + ( σret ,t − σt) ϵθ (xt, σ t) + σinj ,t ξ, (32) where ξ ∼ N (0, I). We enforce variance matching with the schedule: 
+
+σ2 
+
+> t−1
+
+= σ2ret ,t + σ2inj ,t . (33) Using ϵθ = ( xt − ˆx0|t)/σ t, the drift can be rewritten as 
+
+(σret ,t − σt) ϵθ = λt
+
+ Fθ (xt; σt) − xt
+
+, (34) 
+
+λt := 1 − σret ,t 
+
+σt
+
+, (35) so (32) is a single annealed-Langevin (unadjusted Langevin algorithm; ULA) step (Durmus & Moulines, 2017): move a fraction λt toward the denoiser output and inject Gaussian noise. Many stochastic diffusion samplers introduce an explicit stochasticity parameter to set the injected-noise term (with the complementary coefficient fixed by the schedule con-straint), e.g., η in DDIM (Song et al., 2021a) and (η, η b) in DDRM (Kawar et al., 2022). CLAMP instead determines 
+
+(σret ,t , σ inj ,t ) from the schedule by imposing a fluctuation– dissipation coupling at the geometric reference σ2ref := 
+
+σtσret ,t , yielding a closed form. 
+
+Proposition 3.3 (Drift/noise split under variance preserva-tion) . Assume (i) variance matching (33) and (ii) a Langevin fluctuation–dissipation coupling at σ2ref := σtσret ,t , i.e. 
+
+σ2inj ,t = 2 λtσ2ref with λt from (34) . Then (σret ,t , σ inj ,t ) is uniquely determined: 
+
+σret ,t = σt −
+
+q
+
+σ2 
+
+> t
+
+− σ2
+
+> t−1
+
+, σ inj ,t =
+
+q
+
+σ2 
+
+> t−1
+
+− σ2ret ,t .
+
+(36) 
+
+3.10. Latent CLAMP 
+
+To use a latent diffusion prior, we run CLAMP on latent states zt with a differentiable decoder D : Rdz → Rd that maps latents to pixels. Since measurements are defined in pixel space, it is natural to write the forward model through the composition 
+
+˜A := A ◦ D, y = ˜A(z0) + n, n ∼ N (0, β 2
+
+> y
+
+I). (37) At noise level σt, the latent denoiser produces ˆz0|t =
+
+Fθ (zt; σt) and the residual is evaluated as rt = ˜A(ˆ z0|t) − y.The latent-space algorithm is otherwise identical to the pixel-space derivation: replace A by ˜A and xt by zt every-where, retaining the denoiser pullback, anisotropic damp-ing, matrix-free GMRES likelihood solve, and variance-preserving Langevin propagation. Operationally, this sub-stitution only changes the required Jacobian actions: each 
+
+JVP A/VJP A call becomes a JVP ˜A/VJP ˜A call (and thus traverses D), while the denoiser pullback still uses VJP F .Algorithm 3 in Appendix A summarizes the resulting proce-dure, with final output x0 = D(z0).
+
+## 4. Experiments 
+
+4.1. Experimental setup 
+
+We largely follow the experimental setup of DAPS (Zhang et al., 2025) and evaluate on eight task settings, comprising five linear and three nonlinear inverse problems. Imple-mentation details and hyperparameter configurations for all baselines and our method, as well as other experimental details are provided in Appendix C. 
+
+4.2. Main Results 
+
+Tables 1 and 3 compare our method to baselines on FFHQ and ImageNet across eight inverse-problem tasks in both pixel and latent settings. Overall, CLAMP achieves com-petitive or leading quantitative metrics on most tasks, and Figure 1 shows reconstructions with fewer artifacts across representative tasks. Nonlinear tasks are challenging because a nonlinear forward model A(·) makes the data term nonconvex and can induce rapidly varying local curvature along the sampling trajectory, so likelihood-based corrections become highly sensitive to step size and direction. This is especially evident for nonlinear deblurring: small mis-calibration of the correction can lead to instability or pronounced artifacts. In contrast, 7Geometry-Correct Diffusion Posterior Sampling with Denoiser-Pullback Curvature Guidance and Manifold-Aligned Damping    
+
+> Table 1. Quantitative comparison on FFHQ and ImageNet across inverse-problem tasks in pixel setting. We report average PSNR/SSIM (higher is better), LPIPS (lower is better), and run-time (lower is better) over 100 validation images. Best and second-best scores are highlighted in bold and underlined, respectively.
+
+Task Method FFHQ ImageNet PSNR ↑ SSIM ↑ LPIPS ↓ Run-time (s) PSNR ↑ SSIM ↑ LPIPS ↓ Run-time (s) 
+
+Super resolution 4 ×
+
+Ours 29.515 0.841 0.219 6.743 26.981 0.742 0.290 23.587 DAPS 28.619 0.764 0.262 28.257 25.512 0.636 0.374 65.580 SITCOM 29.153 0.826 0.231 15.755 26.519 0.716 0.309 60.778 DMPlug 28.637 0.797 0.253 118.255 25.091 0.660 0.347 238.433 DCDP 27.611 0.785 0.225 4.719 24.358 0.640 0.369 9.190 
+
+Box inpainting Ours 25.495 0.882 0.125 6.175 21.547 0.825 0.188 23.427 DAPS 24.285 0.746 0.222 22.352 21.234 0.720 0.270 57.108 SITCOM 25.275 0.831 0.179 17.697 20.698 0.726 0.241 66.709 DMPlug 23.526 0.790 0.281 103.76 19.455 0.667 0.384 253.946 DCDP 21.721 0.766 0.219 8.147 17.741 0.662 0.301 17.214 
+
+Random inpainting Ours 32.955 0.918 0.140 6.171 30.215 0.866 0.159 23.419 DAPS 30.078 0.791 0.214 21.576 27.350 0.721 0.251 56.932 SITCOM 31.431 0.871 0.173 25.382 29.008 0.821 0.183 95.962 DMPlug 30.825 0.865 0.231 122.143 27.023 0.739 0.317 248.146 DCDP 27.240 0.788 0.229 8.130 23.284 0.606 0.355 17.518 
+
+Gaussian deblurring Ours 29.010 0.827 0.234 6.343 26.388 0.710 0.333 23.924 DAPS 28.762 0.767 0.254 37.730 25.932 0.655 0.355 74.984 SITCOM 29.359 0.826 0.236 25.491 26.741 0.719 0.315 95.161 DMPlug 27.95 0.770 0.278 181.695 24.082 0.613 0.389 313.680 DCDP 27.553 0.761 0.245 4.934 23.499 0.542 0.449 9.573 
+
+Motion deblurring Ours 31.641 0.880 0.183 6.322 29.141 0.812 0.243 23.805 DAPS 30.954 0.823 0.202 38.606 28.623 0.764 0.246 78.000 SITCOM 31.501 0.866 0.167 26.184 29.321 0.811 0.213 95.529 DMPlug 29.272 0.818 0.260 152.699 25.211 0.660 0.365 284.413 DCDP 25.468 0.566 0.365 5.007 17.771 0.248 0.574 9.488 
+
+Phase retrieval Ours 30.233 0.854 0.192 28.660 19.680 0.459 0.478 104.628 DAPS 30.103 0.796 0.208 98.054 22.354 0.519 0.402 241.113 SITCOM 28.782 0.791 0.239 24.584 18.481 0.383 0.524 94.187 
+
+DCDP 24.036 0.677 0.310 102.386 15.953 0.283 0.595 195.193 Nonlinear deblurring Ours 29.961 0.856 0.166 33.946 28.036 0.788 0.212 82.427 
+
+DAPS 28.868 0.780 0.223 755.725 27.537 0.734 0.266 884.119 SITCOM 29.519 0.812 0.207 27.167 28.097 0.774 0.221 97.029 DMPlug 28.298 0.811 0.249 291.221 25.086 0.679 0.317 668.641 DCDP 27.879 0.795 0.204 269.786 25.726 0.664 0.280 367.695 High dynamic range Ours 29.488 0.891 0.133 26.610 28.804 0.886 0.136 104.38 
+
+DAPS 27.149 0.834 0.196 76.724 26.568 0.819 0.198 216.701 SITCOM 27.205 0.777 0.226 33.887 26.449 0.774 0.222 129.681 DMPlug 25.507 0.777 0.264 221.418 23.244 0.715 0.308 564.501 our method remains stable in both pixel and latent settings. We attribute this behavior to combining (i) curvature-aware scaling of the likelihood correction with (ii) prior-aligned regularization that constrains updates in sensitive directions, which together stabilizes the conditioning step. Beyond reconstruction quality, Table 1, 3 and Figure 3 also highlight the computational efficiency of our approach:  
+
+> CLAMP
+
+provides a favorable quality–runtime trade-off, of-ten matching or improving metrics while reducing runtime relative to strong competing methods. For instance, SIT-COM is a strong and fast baseline, yet on pixel-space FFHQ motion deblurring we achieve up to a 4.14 × speedup while attaining higher PSNR. In latent space, we are approxi-mately 2.4× faster than Latent DAPS and about 9× faster than ReSample, while also delivering strong metrics overall. We provide additional experiments in Appendix D, includ-8Geometry-Correct Diffusion Posterior Sampling with Denoiser-Pullback Curvature Guidance and Manifold-Aligned Damping       
+
+> Table 2. Quantitative comparison for MRI reconstruction under Poisson-disc undersampling at acceleration factors ×4and ×8.We report average PSNR/SSIM over 100 test slices. Best scores are in bold and second-best are underlined.
+
+Method ×4 ×8
+
+PSNR ↑ SSIM ↑ PSNR ↑ SSIM ↑
+
+DPS 25.46 0.531 25.40 0.527 DAPS 30.20 0.687 28.19 0.582 DDS 32.07 0.763 30.03 0.669 Score-Med 32.21 0.776 30.29 0.694 Ours 34.05 0.834 32.27 0.766 
+
+ing higher-resolution evaluations, latent-space experiments, sample results across a wider range of datasets and tasks, hy-perparameter analyses, sample diversity under severe degra-dations, experiments with various measurement-noise set-tings, normalized residual checks, and diagnostic studies. 
+
+4.3. Accelerated MRI reconstruction results 
+
+To assess applicability beyond natural images, we eval-uate on multi-coil accelerated MRI reconstruction us-ing SKM-TEA dataset (Desai et al., 2021). Table 2 re-ports PSNR/SSIM for ×4 and ×8 acceleration. Our method achieves the best PSNR/SSIM among the compared diffusion-based baselines. Appendix E provides experimen-tal details, including the baselines and qualitative results. 
+
+4.4. Ablation studies 
+
+We ablate four components under matched compute (same diffusion steps and linear-solver budgets): noise-level transi-tion, prior-aligned damping, curvature operator, and Krylov solver. Table 7 shows that (i) replacing the variance-preserving transition with an ODE-style update and (ii) re-moving damping both degrade quality, especially for nonlin-ear operators. In the curvature model, dropping the pullback 
+
+J⊤ 
+
+> F
+
+speeds up inference but reduces accuracy, whereas us-ing the full curvature (including forward JF ) substantially increases runtime with little or no gain over the one-sided approximation, supporting our choice as the best accuracy– efficiency trade-off. Finally, since the resulting system is generally nonsymmetric, GMRES is more stable than CG in practice; additional results are in Appendix D. 
+
+## 5. Conclusion  
+
+> CLAMP
+
+provides a training-free posterior sampler for in-verse problems that works with pixel and latent diffusion priors and supports both linear and nonlinear forward mod-els. Its core update replaces heuristic scalar guidance with a denoiser-pullback Gauss–Newton correction and a prior-aligned anisotropic damping metric, producing noise-level– dependent matrix-scaled steps. Although each correction uses additional Jacobian actions (JVP/VJP) beyond a single backprojected gradient, it is computed with a fixed-budget matrix-free solve and yields favorable end-to-end runtime in practice. CLAMP is not intended to be tuning-free; rather, it reduces non-compute tuning by replacing per-task guidance-weight schedules with simple scalar settings for data con-sistency and damping, while diffusion steps and Krylov iterations specify the runtime–quality trade-off and may be adjusted by task. Empirically, it achieves competitive or im-proved reconstruction quality over the compared baselines while often reducing inference time on FFHQ/ImageNet inverse problems and MRI reconstruction. Limitations and future directions are discussed in Appendix F. 
+
+## Impact Statement 
+
+CLAMP makes diffusion posterior sampling for inverse problems more reliable and faster by replacing hand-tuned scalar guidance with a noise-level–specific, geometry-aware correction. It computes coordinate-correct likelihood up-dates by pulling measurement sensitivity back through the denoiser, then stabilizes them with manifold-aligned anisotropic damping—yielding direction-wise step control without per-task schedules. A matrix-free GMRES imple-mentation and a variance-preserving Langevin transition deliver a strong quality–runtime trade-off across diverse linear/nonlinear operators, including medical imaging (ac-celerated MRI). 
+
+## Acknowledgement 
+
+This work was supported in part by the National Research Foundation of Korea (NRF) grant funded by the Korea gov-ernment (MSIT) (RS-2025-24683103, RS-2026-25476632), in part by Korea Basic Science Institute (National research Facilities and Equipment Center) grant funded by the Min-istry of Science and ICT (No. RS-2024-00401899), and in part by Institute of Information & communications Tech-nology Planning & Evaluation (IITP) under the Leading Generative AI Human Resources Development (IITP-2026-RS-2024-00360227) grant funded by the Korea government (MSIT). 9Geometry-Correct Diffusion Posterior Sampling with Denoiser-Pullback Curvature Guidance and Manifold-Aligned Damping 
+
+## References 
+
+Alkhouri, I., Liang, S., Huang, C.-H., Dai, J., Qu, Q., Rav-ishankar, S., and Wang, R. SITCOM: Step-wise triple-consistent diffusion sampling for inverse problems. In 
+
+International Conference on Machine Learning , 2025. 2, 20, 21 Baydin, A. G., Pearlmutter, B. A., Radul, A. A., and Siskind, J. M. Automatic differentiation in machine learning: a survey. Journal of Machine Learning Research , 18(153): 1–43, 2018. 3, 6 Bertero, M. and Boccacci, P. Introduction to Inverse Prob-lems in Imaging . Institute of Physics Publishing, Bristol, UK, 1998. 1 Calvetti, D. and Somersalo, E. An introduction to Bayesian scientific computing: ten lectures on subjective comput-ing . Springer Science & Business Media, 2007. 1 Chung, H., Sim, B., Ryu, D., and Ye, J. C. Improving diffusion models for inverse problems using manifold constraints. In Advances in Neural Information Process-ing Systems , 2022. 2 Chung, H., Kim, J., McCann, M. T., Klasky, M. L., and Ye, J. C. Diffusion posterior sampling for general noisy in-verse problems. In International Conference on Learning Representations , 2023a. 1, 20, 24, 29 Chung, H., Kim, J., and Ye, J. C. Direct diffusion bridge using data consistency for inverse problems. In Advances in Neural Information Processing Systems , 2023b. 2 Chung, H., Lee, S., and Ye, J.-C. Decomposed diffusion sampler for accelerating large-scale inverse problems. In 
+
+International Conference on Learning Representations ,2024. 29 Conn, A. R., Gould, N. I., and Toint, P. L. Trust region methods . SIAM, 2000. 2, 3, 5 Dashti, M. and Stuart, A. M. The bayesian approach to inverse problems. In Handbook of uncertainty quantifica-tion , pp. 1–118. Springer, 2015. 1 Dembo, R. S., Eisenstat, S. C., and Steihaug, T. Inexact newton methods. SIAM Journal on Numerical Analysis ,19(2):400–408, 1982. 3, 7 Deng, J., Dong, W., Socher, R., Li, L.-J., Li, K., and Li, F.-F. ImageNet: A large-scale hierarchical image database. In 
+
+Computer Vision and Pattern Recognition (CVPR) , 2009. 20 Desai, A. D., Schmidt, A. M., Rubin, E. B., Sandino, C. M., Black, M. S., Mazzoli, V., Stevens, K. J., Boutin, R., R ´e, C., Gold, G. E., Hargreaves, B. A., and Chaudhari, A. S. SKM-TEA: A dataset for accelerated MRI reconstruction with dense image labels for quantitative clinical evalu-ation. In NeurIPS Track on Datasets and Benchmarks ,2021. 9, 29 Dhariwal, P. and Nichol, A. Diffusion models beat GANs on image synthesis. In Advances in Neural Information Processing Systems , 2021. 20, 23 Durmus, A. and Moulines, ´ E. Nonasymptotic convergence analysis for the unadjusted langevin algorithm. THE ANNALS of APPLIED PROBABILITY , pp. 1551–1587, 2017. 7 Feng, B. T., Smith, J., Rubinstein, M., Chang, H., Bouman, K. L., and Freeman, W. T. Score-based diffusion models as principled priors for inverse imaging. In International Conference on Computer Vision (ICCV) , 2023. 1 Fletcher, R. Conjugate gradient methods for indefinite sys-tems. Numerical Analysis , pp. 73–89, 1976. 22 Garber, T. and Tirer, T. Image restoration by denoising diffusion models with iteratively preconditioned guidance. In Computer Vision and Pattern Recognition (CVPR) ,2024. 2 Graikos, A., Jojic, N., and Samaras, D. Fast constrained sampling in pre-trained diffusion models. In Advances in Neural Information Processing Systems , 2025. 2 Hamidi, S. M., Yang, E., and Liang, B. Coupled data and measurement space dynamics for enhanced diffusion pos-terior sampling. In Advances in Neural Information Pro-cessing Systems , 2025. 2 Hanke, M. A regularizing Levenberg–Marquardt scheme, with applications to inverse groundwater filtration prob-lems. Inverse Problems , 13(1):79–95, 1997. 3 Ho, J., Jain, A. N., and Abbeel, P. Denoising diffusion probabilistic models. In Advances in Neural Information Processing Systems , 2020. 1, 3 Karras, T., Laine, S., and Aila, T. A style-based genera-tor architecture for generative adversarial networks. In 
+
+Computer Vision and Pattern Recognition (CVPR) , 2019. 20 Karras, T., Aittala, M., Aila, T., and Laine, S. Elucidating the design space of diffusion-based generative models. In Advances in Neural Information Processing Systems ,2022. 1, 3, 20 Kawar, B., Elad, M., Ermon, S., and Song, J. Denoising diffusion restoration models. In Advances in Neural In-formation Processing Systems , 2022. 7 10 Geometry-Correct Diffusion Posterior Sampling with Denoiser-Pullback Curvature Guidance and Manifold-Aligned Damping 
+
+Knoll, D. A. and Keyes, D. E. Jacobian-free Newton–Krylov methods: a survey of approaches and applications. Jour-nal of Computational Physics , 193(2):357–397, 2004. 3, 6, 7 Li, X., Kwon, S. M., Alkhouri, I. R., Ravishankar, S., and Qu, Q. Decoupled data consistency with diffusion purifi-cation for image restoration. arXiv , 2024. 20, 21 Liu, L., Jiang, H., He, P., Chen, W., Liu, X., Gao, J., and Han, J. On the variance of the adaptive learning rate and beyond. In International Conference on Learning Representations , 2020. 29 Nocedal, J. and Wright, S. J. Numerical Optimization .Springer, 2 edition, 2006. 2, 3, 5 Pearlmutter, B. A. Fast exact multiplication by the Hessian. 
+
+Neural Computation , 6(1):147–160, 1994. 3 Rombach, R., Blattmann, A., Lorenz, D., Esser, P., and Ommer, B. High-resolution image synthesis with latent diffusion models. In Computer Vision and Pattern Recog-nition (CVPR) , 2022. 20 Rout, L., Raoof, N., Daras, G., Caramanis, C., Dimakis, A. G., and Shakkottai, S. Solving linear inverse prob-lems provably via posterior sampling with latent diffusion models. In Advances in Neural Information Processing Systems , 2023. 20, 21 Saad, Y. and Schultz, M. H. Gmres: A generalized mini-mal residual algorithm for solving nonsymmetric linear systems. SIAM Journal on scientific and statistical com-puting , 7(3):856–869, 1986. 3, 7 Salimans, T. and Ho, J. Progressive distillation for fast sam-pling of diffusion models. In International Conference on Learning Representations , 2022. 1 Sohl-Dickstein, J., Weiss, E., Maheswaranathan, N., and Ganguli, S. Deep unsupervised learning using nonequi-librium thermodynamics. In International Conference on Machine Learning , 2015. 1 Song, B., Kwon, S. M., Zhang, Z., Hu, X., Qu, Q., and Shen, L. Solving inverse problems with latent diffusion models via hard data consistency. In International Conference on Learning Representations , 2024. 20, 21 Song, J., Meng, C., and Ermon, S. Denoising diffusion implicit models. In International Conference on Learning Representations , 2021a. 7 Song, Y. and Ermon, S. Generative modeling by estimating gradients of the data distribution. In Advances in Neural Information Processing Systems , 2019. 1 Song, Y., Sohl-Dickstein, J., Kingma, D. P., Kumar, A., Er-mon, S., and Poole, B. Score-based generative modeling through stochastic differential equations. In International Conference on Learning Representations , 2021b. 1, 3 Song, Y., Shen, L., Xing, L., and Ermon, S. Solving inverse problems in medical imaging with score-based genera-tive models. In International Conference on Learning Representations , 2022. 29 Steihaug, T. The conjugate gradient method and trust re-gions in large scale optimization. SIAM Journal on Nu-merical Analysis , 20(3):626–637, 1983. 3 Stuart, A. M. Inverse problems: A bayesian perspective. 
+
+Acta Numerica , 19:451–559, 2010. 1 Wang, H., Li, T., Zhuang, Z., Chen, T., Liang, H., and Sun, J. Early stopping for deep image prior. Transactions on Machine Learning Research , 2023. 21 Wang, H., Zhang, X., Li, T., Wan, Y., Chen, T., and Sun, J. DMPlug: A plug-in method for solving inverse problems with diffusion models. In Advances in Neural Information Processing Systems , 2024. 20, 21 Wang, Z., Bovik, A. C., Sheikh, H. R., and Simoncelli, E. P. Image quality assessment: From error visibility to structural similarity. IEEE Transactions on Image Processing , 13(4):600–612, 2004. 20 Yismaw, N., Kamilov, U. S., and Asif, M. S. Gaussian is all you need: A unified framework for solving inverse prob-lems via diffusion posterior sampling. IEEE Transactions on Computational Imaging , 11:1020–1030, 2025. 2 Zhang, B., Chu, W., Berner, J., Meng, C., Anandkumar, A., and Song, Y. Improving diffusion inverse problem solving with decoupled noise annealing. In Computer Vision and Pattern Recognition (CVPR) , 2025. 2, 7, 20, 21, 29 Zhang, R., Isola, P., Efros, A. A., Shechtman, E., and Wang, O. The unreasonable effectiveness of deep features as a perceptual metric. In Computer Vision and Pattern Recognition (CVPR) , 2018. 20 11 Geometry-Correct Diffusion Posterior Sampling with Denoiser-Pullback Curvature Guidance and Manifold-Aligned Damping 
+
+## A. Algorithms 
+
+Algorithm 1 CLAMP 
+
+Require: Measurement y; forward model A; data-consistency scale σn.Denoiser Fθ (·; σ); schedule {σt}0 
+
+> t=T
+
+.
+
+λid ≥ 0; GMRES iterations K.
+
+▷ All Jacobian actions are matrix-free: use JVP for JAv and VJP for J⊤ 
+
+> A
+
+u, J⊤ 
+
+> F
+
+u.
+
+1: σ+min ← min {σt : σt > 0}.
+
+2: Draw xT ∼ N (0, σ 2 
+
+> T
+
+I).
+
+3: for t = T, . . . , 1 do 
+
+4: ˆx0|t ← Fθ (xt; σt)
+
+5: rt ← A(ˆ x0|t) − y
+
+6: dt ← xt − ˆx0|t; ˆϵθ ← dt/σ t
+
+7: σprior ← max( σt−1, σ +min )
+
+8: ut ← dt/∥dt∥2
+
+9: at ← VJP F
+
+ VJP A(rt)
+
+10: ct ← at/σ 2
+
+> n
+
+11: αt ← (∥dt∥2/∥at∥2) · σ−2prior 
+
+12: Define Ht(v) ← λid v + ut(u⊤ 
+
+> t
+
+v)
+
+13: Define Bt(v) ← σ−2 
+
+> n
+
+VJP F
+
+ VJP A(JVP A(v)) 
+
+14: Define Mt(v) ← Bt(v) + αtHt(v)
+
+15: ∆t ← GMRES( Mt, −ct; K) (Alg. 2) 
+
+16: σret ,t ← σt −
+
+q
+
+σ2 
+
+> t
+
+− σ2
+
+> t−1
+
+17: σinj ,t ←
+
+q
+
+σ2 
+
+> t−1
+
+− σ2ret ,t 
+
+18: ξ ∼ N (0, I)
+
+19: xt−1 ← xt + ∆ t + ( σret ,t − σt)ˆ ϵθ + σinj ,t ξ
+
+20: end for 
+
+21: return x0
+
+12 Geometry-Correct Diffusion Posterior Sampling with Denoiser-Pullback Curvature Guidance and Manifold-Aligned Damping 
+
+Algorithm 2 GMRES for (Bt + αtHt)∆ = −ct
+
+Require: Matvec M(v) := Bt(v) + αtHt(v); RHS b := −ct; Krylov budget K; breakdown tolerance τ (e.g., 10 −12 ). 
+
+Ensure: Approximate solution ∆.
+
+1: ∆0 ← 0
+
+2: r0 ← b − M(∆ 0)
+
+3: β ← ∥ r0∥2
+
+4: if β < τ then 
+
+5: return 0
+
+6: end if 
+
+7: v1 ← r0/β 
+
+8: m ← K
+
+9: for j = 1 , 2, . . . , K do 
+
+10: w ← M(vj )
+
+11: for ℓ = 1 , 2, . . . , j do 
+
+12: hℓj ← v⊤ 
+
+> ℓ
+
+w
+
+13: w ← w − hℓj vℓ
+
+14: end for 
+
+15: hj+1 ,j ← ∥ w∥2
+
+16: if hj+1 ,j < τ then 
+
+17: m ← j
+
+18: break 
+
+19: end if 
+
+20: vj+1 ← w/h j+1 ,j 
+
+21: end for 
+
+22: Form the (upper) Hessenberg matrix ¯Hm ∈ R(m+1) ×m from {hℓj }1≤ℓ≤j+1 , 1≤j≤m.
+
+23: Set e1 ← [β, 0, . . . , 0] ⊤ ∈ Rm+1 
+
+24: Solve y = arg min y∈Rm ∥ ¯Hmy − e1∥2 (least squares; e.g., QR/SVD) 
+
+25: ∆ ← Pmj=1 yj vj
+
+26: return ∆
+
+13 Geometry-Correct Diffusion Posterior Sampling with Denoiser-Pullback Curvature Guidance and Manifold-Aligned Damping 
+
+Algorithm 3 Latent-CLAMP 
+
+Require: Measurement y; forward model A; data-consistency scale σn.Latent denoiser Fθ (·; σ); decoder D(·); schedule {σt}0 
+
+> t=T
+
+.
+
+λid ≥ 0; GMRES iterations K.
+
+▷ All Jacobian actions are matrix-free: use JVP/VJP for A◦D and VJP for F .
+
+1: σ+min ← min {σt : σt > 0}.
+
+2: Draw zT ∼ N (0, σ 2 
+
+> T
+
+I).
+
+3: for t = T, . . . , 1 do 
+
+4: ˆz0|t ← Fθ (zt; σt)
+
+5: rt ← A D(ˆ z0|t) − y
+
+6: dt ← zt − ˆz0|t; ˆϵθ ← dt/σ t
+
+7: σprior ← max( σt−1, σ +min )
+
+8: ut ← dt/∥dt∥2
+
+9: at ← VJP F
+
+
+
+VJP A◦D (rt)
+
+
+
+10: ct ← at/σ 2
+
+> n
+
+11: αt ← (∥dt∥2/∥at∥2) · σ−2prior 
+
+12: Define Ht(v) ← λid v + ut(u⊤ 
+
+> t
+
+v)
+
+13: Define Bt(v) ← σ−2 
+
+> n
+
+VJP F
+
+
+
+VJP A◦D (JVP A◦D (v)) 
+
+
+
+14: Define Mt(v) ← Bt(v) + αtHt(v)
+
+15: ∆t ← GMRES( Mt, −ct; K) (Alg. 2) 
+
+16: σret ,t ← σt −
+
+q
+
+σ2 
+
+> t
+
+− σ2
+
+> t−1
+
+17: σinj ,t ←
+
+q
+
+σ2 
+
+> t−1
+
+− σ2ret ,t 
+
+18: ξ ∼ N (0, I)
+
+19: zt−1 ← zt + ∆ t + ( σret ,t − σt)ˆ ϵθ + σinj ,t ξ
+
+20: end for 
+
+21: return x0 ← D(z0)
+
+## B. Theoretical details 
+
+This appendix collects proofs for the propositions stated in Sec. 3. We use the Euclidean inner product ⟨a, b⟩ := a⊤b
+
+and norm ∥a∥2 := √a⊤a. For a symmetric positive definite matrix Q, we denote the largest and smallest eigenvalues by 
+
+λmax (Q) and λmin (Q), and the condition number by κ(Q) := λmax (Q)/λ min (Q).
+
+B.1. Proof of Proposition 3.1 Proposition 3.1. Fix t and consider a local quadratic model in the increment ∆:
+
+J (∆) = J (0) + ⟨gt, ∆⟩ + 12 ∆⊤Qt∆, Qt ≻ 0. (38) Consider the scalar-guided update ∆sc = −ηgt with η ≥ 0. Then J (∆ sc ) ≤ J (0) for all gt if and only if η ≤ 2/λ max (Qt).Let ∆⋆ = −Q−1 
+
+> t
+
+gt be the minimizer of (38). In an eigenbasis Qtvi = λivi, for each index i with ⟨vi, gt⟩̸ = 0 ,
+
+|⟨ vi, ∆sc ⟩| |⟨ vi, ∆⋆⟩| = ηλ i ≤ 2λi
+
+λmax (Qt) , (39) and in particular for λi = λmin (Qt), |⟨ vmin ,∆sc ⟩| |⟨ vmin ,∆⋆⟩| ≤ 2 
+
+> κ(Qt)
+
+.
+
+Proof. We prove three claims: (i) the objective change formula under ∆sc ; (ii) the (necessary and sufficient) descent condition η ≤ 2/λ max ; (iii) the eigen-coordinate ratio (39). 14 Geometry-Correct Diffusion Posterior Sampling with Denoiser-Pullback Curvature Guidance and Manifold-Aligned Damping 
+
+1) Objective change under a scalar step. Substitute ∆sc = −ηgt into (38): 
+
+J (∆ sc ) − J (0) = ⟨gt, −ηgt⟩ + 12 (−ηgt)⊤Qt(−ηgt)= −η g⊤ 
+
+> t
+
+gt + η2
+
+2 g⊤ 
+
+> t
+
+Qtgt
+
+= −η ∥gt∥22 + η2
+
+2 g⊤ 
+
+> t
+
+Qtgt. (40) 
+
+2) Rayleigh quotient bound. Because Qt is symmetric positive definite, there exists an orthonormal eigenbasis {vi}di=1 
+
+and eigenvalues {λi}di=1 with λi > 0 and Qtvi = λivi. Expand gt as 
+
+gt =
+
+> d
+
+X
+
+> i=1
+
+aivi, ai := ⟨vi, gt⟩.
+
+Then, using orthonormality v⊤ 
+
+> i
+
+vj = δij ,
+
+∥gt∥22 = g⊤ 
+
+> t
+
+gt =
+
+> d
+
+X
+
+> i=1
+
+a2 
+
+> i
+
+,
+
+and 
+
+g⊤ 
+
+> t
+
+Qtgt = X
+
+> i
+
+aivi
+
+!⊤ X
+
+> j
+
+aj Qtvj
+
+ =
+
+> d
+
+X
+
+> j=1
+
+λj a2 
+
+> j
+
+.
+
+Since λj ≤ λmax (Qt) for all j, we obtain 
+
+g⊤ 
+
+> t
+
+Qtgt = X
+
+> j
+
+λj a2 
+
+> j
+
+≤ λmax (Qt) X
+
+> j
+
+a2 
+
+> j
+
+= λmax (Qt)∥gt∥22. (41) 
+
+3) Sufficient condition for descent. Combine (40) and (41): 
+
+J (∆ sc ) − J (0) ≤ − η ∥gt∥22 + η2
+
+2 λmax (Qt)∥gt∥22
+
+= −η ∥gt∥22
+
+
+
+1 − η
+
+2 λmax (Qt)
+
+
+
+. (42) If 0 < η ≤ 2/λ max (Qt), then 1 − η 
+
+> 2
+
+λmax (Qt) ≥ 0 and therefore J (∆ sc ) − J (0) ≤ 0. Hence J (∆ sc ) ≤ J (0).
+
+4) Necessity of η ≤ 2/λ max (Qt) for uniform descent over all gt. Assume η > 2/λ max (Qt). Let vmax be a unit eigenvector associated with λmax (Qt), and choose gt = vmax . Then ∥gt∥22 = 1 and g⊤ 
+
+> t
+
+Qtgt = λmax (Qt). From (40), 
+
+J (∆ sc ) − J (0) = −η + η2
+
+2 λmax (Qt) = η
+
+ η
+
+2 λmax (Qt) − 1
+
+
+
+> 0,
+
+since η 
+
+> 2
+
+λmax (Qt) > 1 by assumption. Thus the objective increases for this choice of gt, so η > 2/λ max cannot guarantee uniform descent. This shows the condition is also necessary for a guarantee that holds for all gt.
+
+5) Closed form of the quadratic minimizer ∆⋆. Differentiate (38) with respect to ∆. The derivative of ⟨gt, ∆⟩ = g⊤ 
+
+> t
+
+∆ is 
+
+gt. For symmetric Qt, the derivative of 12 ∆⊤Qt∆ is Qt∆. Therefore, 
+
+∇∆J (∆) = gt + Qt∆.
+
+Setting ∇∆J (∆ ⋆) = 0 gives Qt∆⋆ = −gt, hence 
+
+∆⋆ = −Q−1 
+
+> t
+
+gt.
+
+15 Geometry-Correct Diffusion Posterior Sampling with Denoiser-Pullback Curvature Guidance and Manifold-Aligned Damping 
+
+6) Eigen-coordinate ratio. Using the eigen-expansion gt = P 
+
+> i
+
+aivi,
+
+∆sc = −ηgt = X
+
+> i
+
+(−ηa i)vi.
+
+Also, because Q−1 
+
+> t
+
+vi = 1 
+
+> λi
+
+vi,
+
+∆⋆ = −Q−1 
+
+> t
+
+gt = − X
+
+> i
+
+ai Q−1 
+
+> t
+
+vi = − X
+
+> i
+
+ai
+
+λi
+
+vi.
+
+Therefore 
+
+⟨vi, ∆sc ⟩ = −ηa i, ⟨vi, ∆⋆⟩ = − ai
+
+λi
+
+.
+
+If ai = ⟨vi, gt⟩ = 0 , then both components are zero and the ratio is not informative. If ai̸ = 0 , then 
+
+|⟨ vi, ∆sc ⟩| |⟨ vi, ∆⋆⟩| = |ηa i||ai|/λ i
+
+= ηλ i.
+
+Under the stability condition η ≤ 2/λ max (Qt), this yields 
+
+ηλ i ≤ 2λi
+
+λmax (Qt) .
+
+For λi = λmin (Qt) the bound becomes ηλ min (Qt) ≤ 2/κ (Qt).
+
+B.2. Proof of Proposition 3.2 Proposition 3.2. Let 
+
+˜Φ( z) := 12σ2
+
+> n
+
+∥A(z) − y∥22, Φt(x) := ˜Φ( Fθ (x; σt)) .
+
+Let zt := Fθ (xt; σt), gz := ∇z ˜Φ( z)|z=zt , and JF := ∇xFθ (x; σt)|x=xt . Then, for any increment ∆,
+
+Φt(xt + ∆) = Φ t(xt) + ⟨J⊤ 
+
+> F
+
+gz , ∆⟩ + o(∥∆∥2).
+
+Consequently, among all increments with ∥∆∥2 ≤ ρ, the direction that maximizes first-order decrease of Φt is proportional to −J⊤ 
+
+> F
+
+gz . Under first-order residual linearization, the Gauss–Newton/Fisher curvature of Φt in diffusion-state coordinates is 1
+
+> σ2
+> n
+
+J⊤ 
+
+> F
+
+J⊤
+
+> A
+
+JAJF , where JA := ∇zA(z)|z=zt .
+
+Proof. We prove the first-order expansion, then the steepest descent direction, and finally the GN curvature form. 
+
+1) First-order expansion of Φt(xt + ∆) .
+
+Step 1: Expand the denoiser. Because Fθ (·; σt) is differentiable at xt, by the definition of the Jacobian there exists a remainder term rF (∆) such that 
+
+Fθ (xt + ∆; σt) = Fθ (xt; σt) + JF ∆ + rF (∆) , (43) where ∥rF (∆) ∥2 = o(∥∆∥2) as ∆ → 0. Define zt := Fθ (xt; σt), so (43) becomes 
+
+Fθ (xt + ∆; σt) = zt + JF ∆ + o(∥∆∥2).
+
+Step 2: Expand the clean-space likelihood. Because ˜Φ is differentiable at zt, there exists a remainder r˜Φ(u) such that 
+
+˜Φ( zt + u) = ˜Φ( zt) + ⟨gz , u⟩ + r˜Φ(u), (44) where gz := ∇z ˜Φ( z)|z=zt and r˜Φ(u) = o(∥u∥2) as u → 0.
+
+Step 3: Compose the expansions. By definition Φt(x) = ˜Φ( Fθ (x; σt)) . Let 
+
+u(∆) := Fθ (xt + ∆; σt) − zt.
+
+16 Geometry-Correct Diffusion Posterior Sampling with Denoiser-Pullback Curvature Guidance and Manifold-Aligned Damping 
+
+From Step 1, u(∆) = JF ∆ + o(∥∆∥2), hence ∥u(∆) ∥2 = O(∥∆∥2). Apply (44) with u = u(∆) :
+
+Φt(xt + ∆) = ˜Φ zt + u(∆) 
+
+= ˜Φ( zt) + ⟨gz , u(∆) ⟩ + o(∥u(∆) ∥2).
+
+Substitute u(∆) = JF ∆ + o(∥∆∥2):
+
+Φt(xt + ∆) = ˜Φ( zt) + ⟨gz , JF ∆⟩ + o(∥∆∥2),
+
+because ⟨gz , o (∥∆∥2)⟩ = o(∥∆∥2) and o(∥u(∆) ∥2) = o(∥∆∥2). Finally, use ⟨gz , JF ∆⟩ = ⟨J⊤ 
+
+> F
+
+gz , ∆⟩ and note ˜Φ( zt) = Φt(xt) to obtain 
+
+Φt(xt + ∆) = Φ t(xt) + ⟨J⊤ 
+
+> F
+
+gz , ∆⟩ + o(∥∆∥2).
+
+2) Steepest first-order decrease under ∥∆∥2 ≤ ρ. Let w := J⊤ 
+
+> F
+
+gz . For small ∆, the first-order change is governed by 
+
+⟨w, ∆⟩. To maximize first-order decrease we minimize ⟨w, ∆⟩ subject to ∥∆∥2 ≤ ρ.By Cauchy–Schwarz, 
+
+⟨w, ∆⟩ ≥ −∥ w∥2 ∥∆∥2 ≥ −∥ w∥2 ρ. 
+
+Equality is achieved by choosing ∆ colinear with −w and with maximal norm: 
+
+∆⋆ = −ρ w
+
+∥w∥2
+
+= −ρ J⊤ 
+
+> F
+
+gz
+
+∥J⊤ 
+
+> F
+
+gz ∥2
+
+, (w̸ = 0).
+
+Thus the steepest descent direction is proportional to −J⊤ 
+
+> F
+
+gz .
+
+3) Gauss–Newton/Fisher curvature in diffusion-state coordinates. Define the clean residual r(z) := A(z) − y, so 
+
+˜Φ( z) = 12σ2
+
+> n
+
+∥r(z)∥22. Let rt := r(zt) = A(zt) − y and JA := ∇zA(z)|z=zt .First-order linearization of A around zt gives 
+
+A(zt + u) ≈ A(zt) + JAu =⇒ r(zt + u) ≈ rt + JAu.
+
+From Step 1, the clean-space perturbation induced by ∆ is u ≈ JF ∆ (up to higher-order terms). Therefore 
+
+r(Fθ (xt + ∆; σt)) = r(zt + u) ≈ rt + JA(JF ∆) .
+
+Substitute into Φt(xt + ∆) = 12σ2
+
+> n
+
+∥ · ∥ 22:
+
+Φt(xt + ∆) ≈ 12σ2
+
+> n
+
+∥rt + JAJF ∆∥22
+
+= 12σ2
+
+> n
+
+
+
+∥rt∥22 + 2 ⟨rt, JAJF ∆⟩ + ∥JAJF ∆∥22
+
+
+
+.
+
+Rewrite the cross term: 
+
+⟨rt, JAJF ∆⟩ = ⟨J⊤ 
+
+> F
+
+J⊤ 
+
+> A
+
+rt, ∆⟩.
+
+Rewrite the quadratic term: 
+
+∥JAJF ∆∥22 = ( JAJF ∆) ⊤(JAJF ∆) = ∆ ⊤J⊤ 
+
+> F
+
+J⊤ 
+
+> A
+
+JAJF ∆.
+
+Hence the quadratic form in ∆ is 12 ∆⊤
+
+ 1
+
+> σ2
+> n
+
+J⊤ 
+
+> F
+
+J⊤ 
+
+> A
+
+JAJF
+
+
+
+∆, which is precisely the Gauss–Newton/Fisher curvature 1
+
+> σ2
+> n
+
+J⊤J
+
+for J = JAJF .17 Geometry-Correct Diffusion Posterior Sampling with Denoiser-Pullback Curvature Guidance and Manifold-Aligned Damping 
+
+B.3. Proof of Proposition 3.3 Proposition 3.3. Consider the stochastic prior propagation step 
+
+xt−1 = xt + ∆ t + ( σret ,t − σt) ϵθ (xt, σ t) + σinj ,t ϵ, ϵ ∼ N (0, I), (45) and impose schedule variance matching 
+
+σ2 
+
+> t−1
+
+= σ2ret ,t + σ2inj ,t . (46) Define 
+
+λt := 1 − σret ,t 
+
+σt
+
+, σ2ref := σtσret ,t ,
+
+and assume the fluctuation–dissipation coupling 
+
+σ2inj ,t = 2 λt σ2ref . (47) Then, under a decreasing nonnegative schedule 0 ≤ σt−1 ≤ σt with σt > 0, the pair (σret ,t , σ inj ,t ) is uniquely determined by 
+
+σret ,t = σt −
+
+q
+
+σ2 
+
+> t
+
+− σ2
+
+> t−1
+
+, σinj ,t =
+
+q
+
+σ2 
+
+> t−1
+
+− σ2ret ,t .
+
+Proof. The proof is algebraic: we eliminate σinj ,t using (46) and (47), then solve for σret ,t .
+
+1) Expand the coupling (47) . Substitute the definitions of λt and σ2ref into (47): 
+
+σ2inj ,t = 2 
+
+
+
+1 − σret ,t 
+
+σt
+
+
+
+(σtσret ,t )= 2  σtσret ,t − σ2ret ,t 
+
+
+
+= 2( σt − σret ,t ) σret ,t . (48) 
+
+2) Eliminate σinj ,t using variance matching. From (46), 
+
+σ2 
+
+> t−1
+
+= σ2ret ,t + σ2inj ,t .
+
+Substitute (48): 
+
+σ2 
+
+> t−1
+
+= σ2ret ,t + 2( σt − σret ,t ) σret ,t 
+
+= σ2ret ,t + 2 σtσret ,t − 2σ2ret ,t 
+
+= 2 σtσret ,t − σ2ret ,t . (49) Rearrange to obtain a quadratic equation in σret ,t :
+
+σ2ret ,t − 2σtσret ,t + σ2 
+
+> t−1
+
+= 0 . (50) 
+
+3) Solve the quadratic. Apply the quadratic formula to (50): 
+
+σret ,t =2σt ±
+
+q
+
+(2 σt)2 − 4σ2
+
+> t−1
+
+2 = σt ±
+
+q
+
+σ2 
+
+> t
+
+− σ2
+
+> t−1
+
+.
+
+Thus the two algebraic candidates are 
+
+σ(±)ret ,t = σt ±
+
+q
+
+σ2 
+
+> t
+
+− σ2
+
+> t−1
+
+. (51) The square root is real because σ2 
+
+> t
+
+− σ2 
+
+> t−1
+
+≥ 0 under σt−1 ≤ σt.18 Geometry-Correct Diffusion Posterior Sampling with Denoiser-Pullback Curvature Guidance and Manifold-Aligned Damping 
+
+4) Select the admissible root. Since σret ,t and σinj ,t are standard deviations, they must satisfy 
+
+σret ,t ≥ 0, σ2inj ,t = σ2 
+
+> t−1
+
+− σ2ret ,t ≥ 0 =⇒ σret ,t ≤ σt−1.
+
+We check the two roots in (51). 
+
+(a) The “plus” root is inadmissible when σt−1 < σ t. If σt−1 < σ t, then 
+
+q
+
+σ2 
+
+> t
+
+− σ2 
+
+> t−1
+
+> 0 and 
+
+σ(+) ret ,t = σt +
+
+q
+
+σ2 
+
+> t
+
+− σ2 
+
+> t−1
+
+> σ t > σ t−1,
+
+so it violates σret ,t ≤ σt−1 and cannot satisfy variance matching with a real σinj ,t .
+
+(b) The “minus” root is admissible. Define 
+
+σret ,t := σ(−)ret ,t = σt −
+
+q
+
+σ2 
+
+> t
+
+− σ2
+
+> t−1
+
+. (52) Nonnegativity. Because σ2 
+
+> t
+
+− σ2 
+
+> t−1
+
+≤ σ2 
+
+> t
+
+and σt ≥ 0, we have 
+
+q
+
+σ2 
+
+> t
+
+− σ2 
+
+> t−1
+
+≤ σt, hence σret ,t ≥ 0.Upper bound σret ,t ≤ σt−1. The inequality σret ,t ≤ σt−1 is equivalent to 
+
+σt −
+
+q
+
+σ2 
+
+> t
+
+− σ2 
+
+> t−1
+
+≤ σt−1 ⇐⇒ 
+
+q
+
+σ2 
+
+> t
+
+− σ2 
+
+> t−1
+
+≥ σt − σt−1.
+
+Both sides are nonnegative because σt ≥ σt−1 ≥ 0, so we can square without changing the inequality: 
+
+σ2 
+
+> t
+
+− σ2 
+
+> t−1
+
+≥ (σt − σt−1)2
+
+= σ2 
+
+> t
+
+− 2σtσt−1 + σ2
+
+> t−1
+
+.
+
+Cancel σ2 
+
+> t
+
+on both sides and rearrange: 
+
+−σ2 
+
+> t−1
+
+≥ − 2σtσt−1 + σ2 
+
+> t−1
+
+⇐⇒ 2σtσt−1 ≥ 2σ2 
+
+> t−1
+
+⇐⇒ σt−1(σt − σt−1) ≥ 0,
+
+which holds because σt−1 ≥ 0 and σt − σt−1 ≥ 0. Therefore σret ,t ≤ σt−1.Thus the minus root is admissible. Under a strict decrease σt−1 < σ t, it is the only admissible root, hence σret ,t is uniquely determined. 
+
+5) Recover σinj ,t . Once σret ,t is fixed, variance matching (46) gives 
+
+σ2inj ,t = σ2 
+
+> t−1
+
+− σ2ret ,t .
+
+The right-hand side is nonnegative because σret ,t ≤ σt−1, so define 
+
+σinj ,t := 
+
+q
+
+σ2 
+
+> t−1
+
+− σ2ret ,t ,
+
+taking the principal (nonnegative) square root. 19 Geometry-Correct Diffusion Posterior Sampling with Denoiser-Pullback Curvature Guidance and Manifold-Aligned Damping    
+
+> Table 3. Quantitative comparison on FFHQ and ImageNet across inverse-problem tasks in latent setting. We report average PSNR/SSIM (higher is better), LPIPS (lower is better), and run-time (lower is better) over 100 validation images. Best and second-best scores are highlighted in bold and underlined, respectively.
+
+Task Method FFHQ ImageNet PSNR ↑ SSIM ↑ LPIPS ↓ Run-time (s) PSNR ↑ SSIM ↑ LPIPS ↓ Run-time (s) 
+
+Super resolution 4 ×
+
+Ours 28.933 0.829 0.233 34.255 26.465 0.726 0.335 37.353 
+
+PSLD 24.627 0.628 0.377 69.290 16.656 0.291 0.541 102.757 ReSample 23.317 0.456 0.507 300.061 22.152 0.423 0.470 269.078 LatentDAPS 29.204 0.825 0.272 84.460 26.189 0.702 0.388 86.315 Box inpainting Ours 25.151 0.837 0.236 35.369 20.836 0.731 0.342 37.393 
+
+PSLD 21.847 0.612 0.370 69.045 18.762 0.424 0.549 99.832 ReSample 19.978 0.796 0.247 296.326 18.087 0.713 0.309 265.139 LatentDAPS 23.474 0.742 0.369 85.823 22.818 0.561 0.543 88.725 Random inpainting Ours 31.433 0.894 0.193 35.263 28.181 0.806 0.262 37.396 
+
+PSLD 24.280 0.635 0.346 68.915 20.690 0.436 0.550 98.449 ReSample 29.950 0.842 0.201 307.874 26.916 0.756 0.255 323.283 LatentDAPS 26.036 0.743 0.385 85.840 19.630 0.588 0.522 86.092 Gaussian deblurring Ours 28.269 0.801 0.272 35.011 25.443 0.662 0.411 38.110 
+
+PSLD 22.015 0.503 0.444 70.098 19.591 0.329 0.555 109.263 ReSample 26.357 0.662 0.329 355.885 23.530 0.497 0.439 338.281 LatentDAPS 25.717 0.732 0.384 87.407 22.695 0.567 0.549 86.016 Motion deblurring Ours 29.959 0.840 0.244 36.185 27.119 0.730 0.348 38.118 
+
+PSLD 24.416 0.603 0.346 70.041 20.761 0.376 0.518 98.400 ReSample 28.744 0.754 0.262 347.756 24.845 0.579 0.404 347.756 LatentDAPS 26.646 0.757 0.361 87.409 23.557 0.592 0.513 89.050 Phase retrieval Ours 28.194 0.802 0.271 133.941 20.133 0.483 0.458 119.078 
+
+ReSample 24.676 0.606 0.412 320.911 16.913 0.320 0.608 319.601 LatentDAPS 23.199 0.692 0.421 177.730 17.067 0.446 0.624 192.787 Nonlinear deblurring Ours 29.243 0.836 0.243 146.718 25.889 0.716 0.325 158.452 
+
+ReSample 28.748 0.797 0.236 843.212 26.047 0.697 0.301 686.128 LatentDAPS 25.152 0.726 0.387 194.014 22.516 0.568 0.530 198.074 High dynamic range Ours 26.245 0.816 0.279 134.060 28.885 0.887 0.130 117.544 
+
+ReSample 25.038 0.822 0.239 291.372 24.950 0.783 0.257 273.695 LatentDAPS 20.789 0.630 0.512 174.976 19.394 0.469 0.641 180.929 
+
+## C. Experimental Details. 
+
+C.1. Implementation details. 
+
+We use natural-image pre-trained diffusion priors in both pixel and latent spaces. Pixel-space priors are a FFHQ model (Chung et al., 2023a) and an ImageNet model (Dhariwal & Nichol, 2021). Latent-space priors use an unconditional LDM-VQ4 model (Rombach et al., 2022) for both FFHQ and ImageNet. For a fair comparison, we apply the same priors to all baselines. We follow (Karras et al., 2022) for the time-step discretization and noise schedule. 
+
+Datasets and metrics. We evaluate on FFHQ ( 256 × 256 ) (Karras et al., 2019) and ImageNet ( 256 × 256 ) (Deng et al., 2009), using 100 images from the validation set for each dataset. We report standard distortion and perceptual metrics, including PSNR, SSIM (Wang et al., 2004), and LPIPS (Zhang et al., 2018), along with qualitative reconstructions. 
+
+Baselines. We evaluate our method against representative state-of-the-art baselines capable of handling noisy measurement settings in both pixel and latent domains. For pixel-space, we compare our approach with DAPS (Zhang et al., 2025), SITCOM (Alkhouri et al., 2025), DMPlug (Wang et al., 2024), and DCDP (Li et al., 2024). For latent-space, we benchmark against LatentDAPS, ReSample (Song et al., 2024), and PSLD (Rout et al., 2023). All experiments were conducted on a single NVIDIA RTX 6000 Ada Generation GPU with batch size 1. Unless stated 20 Geometry-Correct Diffusion Posterior Sampling with Denoiser-Pullback Curvature Guidance and Manifold-Aligned Damping   
+
+> Table 4. Diffusion steps ( T) and GMRES iterations ( K) used for each task in pixel and latent spaces.
+
+Parameter Linear tasks Phase retrieval Nonlinear deblurring High dynamic range Pixel T 50 250 50 250 
+
+K 5 4 20 4Latent T 25 250 75 250 
+
+K 20 5 20 5otherwise, we set the data-consistency scale to σn = 0 .01 and the identity-damping parameter to λid = 2 .0 for all tasks. Following the DAPS setting, we assume that the true measurement noise level is unknown at test time; therefore, while measurements are generated with a larger physical noise level (e.g., βy = 0 .05 ), we use σn = 0 .01 as a data-consistency calibration scale rather than as an estimate of the physical measurement noise. We set the number of diffusion steps T and the number of GMRES iterations K as summarized in Table 4. 
+
+C.2. Baseline Details. DAPS (Zhang et al., 2025) We used the provided code in the official DAPS repository (code). For both DAPS and 
+
+LatentDAPS , we followed the DAPS paper setting and performed reconstruction via Langevin Dynamics. 
+
+SITCOM (Alkhouri et al., 2025) We used the default configuration provided in the official SITCOM repository (code). 
+
+DMPlug (Wang et al., 2024) We used the default configuration of DMPlug (code). Specifically, we employed DDIM with T = 3 reverse steps and η = 0 for all tasks, and optimized the latent seed using Adam with a learning rate of 0.01 .The maximum number of optimization iterations was set to 5000 for linear tasks and 10000 for nonlinear tasks. For early stopping, we adopted the same ES-WMV (Wang et al., 2023) criterion as DMPlug, using a window size of W = 10 and patience P = 100 for linear tasks, and W = 50 and P = 300 for nonlinear tasks. 
+
+DCDP (Li et al., 2024). We used the official implementation (code). Following the DCDP paper, linear tasks were evaluated in the noiseless setting. For noisy linear experiments, we followed the paper’s recommendation to reduce the learning rate by a factor of 10 and to increase the ending timestep tk. For inpainting, keeping the original learning rate performed better; under noise level βy = 0 .05 , tk = 100 gave the best performance and was used. For nonlinear tasks, we used the default configuration.   
+
+> Table 5. DCDP hyperparameters for noisy linear tasks. SR: super-resolution, BIP: box inpainting, RIP: random inpainting, GB: Gaussian blur, MB: motion blur.
+
+Param (DCDP) SR BIP RIP GB MB 
+
+tk 100 100 100 100 100 
+
+α 10 2 10 3 10 3 10 5 10 5
+
+ReSample (Song et al., 2024) We used the default configuration from the official ReSample repository (code). 
+
+PSLD (Rout et al., 2023) We used the official PSLD implementation (code). However, the provided configuration was unstable in our setup; therefore, we tuned (η, γ ) based on FFHQ and applied the task-specific settings below.   
+
+> Table 6. PSLD hyperparameters used in our experiments (FFHQ-based tuning). SR: super resolution 4 ×, BIP: box inpainting, RIP: random inpainting, GB: Gaussian blurring, MB: motion blurring.
+
+Param (PSLD) SR BIP RIP GB MB 
+
+η 1.0 0.1 0.1 0.1 0.1
+
+γ 0.1 10 −3 10 −2 10 −3 10 −2
+
+21 Geometry-Correct Diffusion Posterior Sampling with Denoiser-Pullback Curvature Guidance and Manifold-Aligned Damping      
+
+> Table 7. We evaluate four design choices—noise-level transition (variance-preserving Langevin vs. ODE-style update), prior-aligned damping, curvature operator (one-sided, without J⊤
+> F, and full curvature with JF), and linear solver (GMRES vs. BiCG/CG)—on super-resolution and nonlinear deblurring. Compute is matched across variants by fixing the number of diffusion steps and the number of Krylov/solver iterations.
+
+Variant Super resolution 4 × Nonlinear deblurring 
+
+PSNR SSIM LPIPS Time PSNR SSIM LPIPS Time Vanilla 22.982 0.390 0.496 1.696 22.644 0.532 0.364 18.294 w/ODE sampling 28.767 0.813 0.230 6.346 28.997 0.818 0.194 30.106 w/o damping 26.391 0.628 0.414 6.291 29.976 0.823 0.177 31.053 w/o J⊤ 
+
+> F
+
+28.501 0.758 0.334 1.669 24.848 0.643 0.339 18.127 w/ JF 29.798 0.841 0.227 31.985 30.420 0.843 0.170 132.596 GMRES →BiCG 29.806 0.841 0.228 11.107 26.796 0.740 0.284 74.102 Proposed 29.807 0.841 0.229 6.370 30.524 0.859 0.170 30.286 
+
+## D. Additional Experiments 
+
+Latent-space experiments. Table 3 summarizes latent-space inverse-problem results on FFHQ and ImageNet. Overall, our method consistently achieves strong reconstruction quality while being markedly faster than prior latent-space baselines, indicating that the proposed acceleration does not sacrifice fidelity. Notably, we remain robust on blur families and also handle the notoriously ill-posed phase retrieval task reliably in the latent setting. We additionally observe particularly large gains on high dynamic range reconstruction, where our method shows a clear margin over competing approaches across datasets. These results suggest that our latent-space solver generalizes well across diverse degradations, including highly ill-conditioned regimes, while maintaining practical runtimes. 
+
+Ablation Studies. To justify our design choices, we conduct a targeted study of four components: (i) how we transition to the next noise level, (ii) whether prior-aligned damping is applied, (iii) the effect of the one-sided curvature approximation, and (iv) the choice of linear solver. For the noise-level transition, we compare our default variance-preserving Langevin propagation against an EDM-style ODE update, where no additional stochastic noise is injected and the iterate is propagated solely using the model prediction. To evaluate the one-sided curvature approximation, we consider three curvature operators. Our default uses the one-sided form J⊤ 
+
+> F
+
+J⊤
+
+> A
+
+(JA ·). Removing the one-sided approximation yields J⊤
+
+> A
+
+(JA ·), while the full form corresponds to J⊤ 
+
+> F
+
+J⊤
+
+> A
+
+(JA(JF ·)) . We compare these three variants in a controlled setting. For solving the resulting linear systems, our default employs GMRES. As a variant, we compare against BiCG (Fletcher, 1976), a Krylov alternative for nonsymmetric systems—relevant here because the one-sided approximation makes the system matrix B nonsymmetric. We additionally include a plain CG solver as a further baseline. Finally, we compare against a “vanilla” configuration that uses CG with J⊤
+
+> A
+
+(JA ·), removes damping, and adopts the ODE update. For a fair comparison, we equalize compute across methods by matching both the number of solver steps and the number of diffusion steps. Across a representative linear task (super-resolution) and a nonlinear task (nonlinear deblurring), we observe consistent trends. First, replacing the proposed sampling transition with an ODE-style update degrades performance. Second, removing prior-aligned damping underperforms in both settings, indicating that the damping is important beyond the specific task type. Third, dropping the J⊤ 
+
+> F
+
+factor reduces runtime by approximately 3.8× on super-resolution, but incurs a clear performance trade-off, most notably on nonlinear deblurring. Conversely, using the exact curvature by including JF increases runtime by about 5.0× on super-resolution and 4.4× on nonlinear deblurring, while providing nearly identical or only marginally different performance. These results indicate that the one-sided approximation achieves a more favorable accuracy–efficiency trade-off, preserving performance at significantly lower computational cost. Regarding the linear solver choice, CG is fundamentally mismatched to our setting since it assumes a symmetric (typically SPD) system, whereas the one-sided curvature leads to a nonsymmetric matrix B. This motivates BiCG as a more appropriate Krylov alternative for nonsymmetric systems. However, BiCG (and related CG-style variants) can still exhibit numerical instability in practice when the effective system becomes poorly conditioned, especially on challenging nonlinear tasks such as nonlinear deblurring. In particular, increasing the number of iterations may amplify nonnormal effects and round-off errors, causing the iterates to become unstable and the reconstruction quality to deteriorate. These observations further 22 Geometry-Correct Diffusion Posterior Sampling with Denoiser-Pullback Curvature Guidance and Manifold-Aligned Damping (a) Motion deblur ring                     
+
+> (b) Nonlinear deblur ring
+> Figure 3. PSNR/SSIM/LPIPS versus wall-clock time for (a) motion deblurring and (b) nonlinear deblurring. Our method traces a Pareto curve as we vary the compute budget, where the budget for ours is measured by the product of the number of diffusion time steps ( T) and the number of GMRES iterations ( K); the evaluated (T, K )configurations are listed in Table 8.
+> Table 8. In Figure 3, we report the diffusion step count Tand the number of GMRES iterations per step Kused for CLAMP at four compute budgets (Steps =T×K∈ { 100 ,250 ,500 ,1k}) on motion deblurring and nonlinear deblurring.
+
+Task Step 100 250 500 1k Motion deblurring T 20 50 50 100 
+
+K 5 5 10 10 Nonlinear deblurring T 10 25 25 50 
+
+K 10 10 20 20 support GMRES as a robust default for our nonsymmetric curvature operator. 
+
+Evaluation on runtime and quality. In Figure 3, we evaluate the compute–quality trade-off on (a) motion deblur and (b) nonlinear deblur by plotting PSNR/SSIM/LPIPS against wall-clock time. Overall, CLAMP exhibits a favorable Pareto frontier, achieving improvements across all metrics (PSNR/SSIM/LPIPS) at comparable or lower runtime. 
+
+High-Resolution Experiments (512 ×512). To assess the scalability of our method to higher resolutions, we conduct additional experiments at 512 ×512 using the publicly available ImageNet class-conditional diffusion prior (Dhariwal & Nichol, 2021). Since this prior requires a class label, we obtain a label for each validation image by running a fixed pretrained ImageNet classifier once offline and treating the predicted label as a constant condition thereafter. Importantly, the classifier is not used during sampling (i.e., we do not employ classifier guidance); the sampling procedure only queries the class-conditional diffusion model with the precomputed label for each image. Under this protocol, we compare our method against DAPS and SITCOM on one representative linear task and one representative nonlinear task, using the same 512 ×512 diffusion prior and the same precomputed labels for all methods. Table 9 shows that our method remains competitive in reconstruction quality at higher resolution while providing substantial speedups over baselines: it is 4.57 ×
+
+faster than SITCOM on random inpainting and 2.65 × faster than DAPS on HDR, while maintaining higher PSNR/SSIM and lower LPIPS compared to competing methods. Reconstruction samples are provided in Figure 4, demonstrating that our method reconstructs images close to the originals while preserving fine details and naturalness even at higher resolutions. 23 Geometry-Correct Diffusion Posterior Sampling with Denoiser-Pullback Curvature Guidance and Manifold-Aligned Damping Measurement  Reconstruction  Referenc e               
+
+> Figure 4. Visualizations at 512 ×512 resolution on ImageNet. Top: random inpainting. Bottom: high dynamic range.
+> Table 9. 512 ×512 ImageNet results with a class-conditional diffusion prior (offline predicted labels; no classifier guidance). Random Inpainting (linear) and HDR (nonlinear): PSNR/SSIM/LPIPS and run-time. Best/second-best are bold /underlined (10 samples, batch size 1).
+
+Method Random Inpainting High dynamic range PSNR ↑ SSIM ↑ LPIPS ↓ Run-time (s) PSNR ↑ SSIM ↑ LPIPS ↓ Run-time (s) 
+
+Ours 35.646 0.920 0.212 40.897 28.845 0.858 0.192 176.777 
+
+DAPS 31.736 0.761 0.313 119.487 28.003 0.815 0.255 469.332 SITCOM 34.047 0.868 0.230 187.028 25.361 0.712 0.322 254.260 
+
+Hyperparameter analysis. We analyze the identity-damping parameter λid in the prior-aligned metric Ht = λid I + utu⊤
+
+> t
+
+used by the correction system (Bt + αtHt)∆ t = −ct. Here Bt denotes the one-sided GN/Fisher curvature operator and 
+
+αt is the diffusion-calibrated scaling that adjusts the overall damping strength across noise levels. The isotropic term λid I
+
+provides baseline regularization in all directions (and is the only regularization on u⊥ 
+
+> t
+
+, where the rank-one term vanishes), while utu⊤ 
+
+> t
+
+adds additional damping along the denoiser-residual direction. Table 10 shows that the effect of λid is task dependent. For random inpainting, which is intrinsically one-to-many, smaller λid 
+
+yields substantially better perceptual quality (lower LPIPS), consistent with allowing more freedom in u⊥ 
+
+> t
+
+while maintaining measurement consistency; larger λid progressively over-regularizes the correction and degrades all metrics. For nonlinear blur, moderate λid improves stability and achieves the best overall metrics in this sweep (we use λid = 2 ), whereas very large λid again over-regularizes the update and leads to under-correction and worse performance. 
+
+Severe degradation settings. In Figure 5, we visualize sample diversity under severe degradation on FFHQ 256 ×256 . We consider two highly ill-posed settings: 16 × super-resolution (top two rows) and 192 ×192 box inpainting (bottom two rows). For each measurement, we draw three independent runs (Sample1–3). Despite the measurement being heavily corrupted or largely missing, our method produces natural-looking, measurement-consistent reconstructions while exhibiting meaningful diversity across runs (e.g., facial attributes and expressions), suggesting effective sampling of a multi-modal solution space. 
+
+Various measurement noise levels. We further test robustness by varying only the measurement noise model/level while keeping the forward operator, compute budget, and data-consistency scale σn fixed. For Gaussian corruption, we add i.i.d. additive noise in the measurement domain with physical standard deviation βy ∈ { 0.01 , 0.05 , 0.1}, where βy = 0 .05 is used as our default setting. For Poisson corruption, we follow the Poisson simulation protocol of DPS (Chung et al., 2023a): measurements are interpreted as photon counts proportional to discretized intensity, noisy counts are sampled from a Poisson 24 Geometry-Correct Diffusion Posterior Sampling with Denoiser-Pullback Curvature Guidance and Manifold-Aligned Damping     
+
+> Table 10. Effect of the identity-damping parameter λid : we sweep λid and report PSNR/SSIM/LPIPS on random inpainting and nonlinear blur.
+
+λid 
+
+Random inpainting Nonlinear deblurring PSNR ↑ SSIM ↑ LPIPS ↓ PSNR ↑ SSIM ↑ LPIPS ↓
+
+0 33.081 0.897 0.144 30.012 0.825 0.175 0.1 33.165 0.899 0.144 30.048 0.828 0.173 2 33.249 0.901 0.202 30.524 0.859 0.170 10 31.873 0.863 0.285 29.654 0.842 0.218 100 27.482 0.754 0.415 26.765 0.776 0.294 Measurement  Reference  Sample1  Sample2  Sample3       
+
+> Figure 5. Sample diversity under severe degradation. Top two rows: 16 ×super-resolution. Bottom two rows: 192 ×192 box inpainting. Our method yields diverse, measurement-consistent reconstructions by effectively sampling from a multi-modal posterior.
+
+distribution, and the result is rescaled back to the normalized range. Here, the reported Poisson level λ ∈ { 3.0, 1.0, 0.5}
+
+acts as a scale factor (photon-rate / gain) that modulates the expected counts, producing signal-dependent shot noise. Across both noise families, our method remains stable without qualitative degradation and shows graceful performance decay as the noise increases, indicating that the proposed update is not overly sensitive to the measurement noise level and is reliable under a broad range of measurement conditions. 
+
+Normalized residual check. A core challenge in training-free diffusion posterior sampling is to ensure that the generated samples are not only visually plausible but also statistically consistent with the assumed measurement model. To this end, we evaluate a simple yet informative calibration diagnostic in measurement space. We define the noise-normalized residual statistic as 
+
+rs := 1
+
+m
+
+∥y − A(x)∥22
+
+β2
+
+> y
+
+(53) where m is the number of measurement entries. It measures the average squared misfit in units of the physical measurement-noise standard deviation βy (assuming i.i.d. Gaussian noise across measurements). If samples are well-calibrated with respect to the likelihood under the measurement noise level βy, then ∥y − A(x)∥22/β 2
+
+> y
+
+is on the order of a χ2 
+
+> m
+
+random variable, implying that rs should concentrate around 1. Deviations reveal systematic 25 Geometry-Correct Diffusion Posterior Sampling with Denoiser-Pullback Curvature Guidance and Manifold-Aligned Damping 
+
+Table 11. Effect of measurement noise. We evaluate robustness to different measurement noise levels on motion deblurring in pixel space and nonlinear deblurring in latent space. For Gaussian noise, we add i.i.d. noise to the measurement, y = A(x) + n with n ∼ N (0, β 2 
+
+> y
+
+I),sweeping βy ∈ { 0.01 , 0.05 , 0.1}. For Poisson noise, the Poisson level λ controls the effective photon budget (larger λ indicates higher expected counts and thus higher SNR).                                                                       
+
+> Gaussian (βy)Motion deblurring (pixel) Nonlinear deblurring (latent) Poisson (λ)Motion deblurring (pixel) Nonlinear deblurring (latent) PSNR ↑SSIM ↑LPIPS ↓PSNR ↑SSIM ↑LPIPS ↓PSNR ↑SSIM ↑LPIPS ↓PSNR ↑SSIM ↑LPIPS ↓
+> 0.01 32.217 0.885 0.200 30.201 0.848 0.259 3.0 31.945 0.881 0.195 29.737 0.841 0.254 0.05 (base) 31.913 0.880 0.194 29.793 0.842 0.252 1.0 31.210 0.867 0.193 28.820 0.822 0.250 0.1 30.647 0.853 0.196 28.108 0.799 0.251 0.5 29.724 0.823 0.227 27.241 0.766 0.295
+
+CLAMP (Ours)  DAPS  SITCOM 
+
+DMPlug  DCDP 
+
+Figure 6. Measurement-space calibration on Box Inpainting. Histogram of the normalized measurement residual rs := ∥y −
+
+A(x)∥22/(β2 
+
+> y
+
+m) for the box inpainting operator, where y is the masked observation, A(·) applies the same box mask, βy is the measurement-noise standard deviation, and m is the number of measurement entries. The red line denotes the empirical mean and the green line indicates the ideal value rs = 1 .
+
+mis-calibration: rs ≫ 1 indicates under-enforcing measurement consistency (insufficient likelihood correction), whereas 
+
+rs ≪ 1 indicates over-enforcing data consistency (overconfident and potentially over-smoothed samples). Figure 6 reports the empirical distribution of rs for the box inpainting operator, and Table 12 summarizes the mean rs
+
+across tasks on FFHQ dataset. CLAMP yields residual distributions most tightly centered near the ideal value 1 and achieves mean rs closest to 1 on the majority of tasks, providing evidence that CLAMP produces samples that are better calibrated in measurement space under the same physical measurement-noise level. While this diagnostic does not fully characterize posterior uncertainty, it serves as a practical sanity check that complements reconstruction metrics by directly probing sample-level consistency with the observation model. 
+
+Table 12. Measurement-space calibration (normalized residual). We report the mean measurement residual normalized by the mea-surement noise level for posterior samples across inverse problems. Values closer to 1 indicate better calibration/coverage in measurement space; systematic deviations imply over- or under-enforcing data consistency. Columns correspond to different operators/tasks (SR, BIP, RIP, GB, MB, PR, NB, HDR). 
+
+Method SR BIP RIP GB MB PR NB HDR 
+
+Ours 1.272 1.131 1.078 1.030 1.052 1.045 1.118 1.412 
+
+DAPS 1.361 1.605 1.285 1.031 1.071 1.054 1.290 2.391 SITCOM 1.364 1.302 1.114 1.041 1.059 1.056 1.243 1.528 DMPlug 1.117 2.014 1.344 1.072 1.216 - 1.190 3.651 DCDP 1.676 2.237 1.955 1.174 1.760 1.082 1.528 -
+
+26 Geometry-Correct Diffusion Posterior Sampling with Denoiser-Pullback Curvature Guidance and Manifold-Aligned Damping                                                                                   
+
+> Table 13. Comparison with specialized diffusion solvers on FFHQ linear pixel-space inverse problems. We report average PSNR/SSIM, LPIPS, and wall-clock runtime under the same noisy-measurement protocol. CLAMP uses the task-specific settings in Table 14 to provide a comparable runtime–quality trade-off against specialized linear solvers.
+> Task Method PSNR ↑SSIM ↑LPIPS ↓Run-time (s)
+> Super resolution 4 ×
+> Ours 28.37 0.813 0.251 1.7 DDRM 28.01 0.792 0.257 0.5
+> DDPG 28.22 0.809 0.265 1.9 Box inpainting Ours 25.12 0.853 0.173 1.7 DDRM 22.31 0.800 0.206 0.6
+> DDNM 24.05 0.849 0.175 1.7 DDPG 24.88 0.820 0.229 1.9 Random inpainting Ours 31.46 0.884 0.186 1.1 DDRM 25.79 0.760 0.268 0.5
+> DDNM 29.80 0.861 0.192 1.7 DDPG 30.43 0.870 0.225 1.9 Gaussian deblurring Ours 29.96 0.845 0.221 2.5 DDRM 30.08 0.836 0.228 0.5
+> DDPG 29.75 0.841 0.203 1.9 Motion deblurring Ours 27.89 0.802 0.255 4.2 DDPG 27.98 0.802 0.236 2.6
+> Table 14. CLAMP settings used in Table 13.
+> Tis the number of diffusion steps, Kis the number of GMRES iterations per step, and λid
+> is the identity-damping coefficient.
+
+Task T K λid 
+
+Super resolution 4 × 25 2 3.0 Box inpainting 15 5 2.0 Random inpainting 12 4 2.0 Gaussian deblurring 25 4 1.0 Motion deblurring 34 6 2.0 
+
+Comparison for linear diffusion solvers. We additionally compare CLAMP with diffusion solvers specialized for linear pixel-space inverse problems, including DDRM, DDNM, and DDPG, on FFHQ linear tasks. For CLAMP , we use the task-specific compute settings reported in Table 14, with relatively small diffusion-step and Krylov budgets chosen to yield a runtime range comparable to these specialized solvers. As shown in Table 13, CLAMP is competitive across the linear tasks. On super-resolution and both inpainting tasks,  
+
+> CLAMP
+
+achieves the best reconstruction quality among the compared methods, improving PSNR, SSIM, and LPIPS while maintaining comparable runtime. For example, CLAMP obtains the strongest scores on box inpainting and random inpainting, where it outperforms DDRM, DDNM, and DDPG in all three quality metrics. On Gaussian deblurring, the result is mixed: DDRM attains slightly higher PSNR and DDPG obtains lower LPIPS, while CLAMP gives the best SSIM and remains close in the other metrics. On motion deblurring, DDPG is faster and slightly better in PSNR/LPIPS, while CLAMP matches its SSIM. Overall, Table 13 shows that modest task-specific compute tuning can make CLAMP competitive with strong linear-specialized diffusion solvers. At the same time, the comparison also clarifies the scope of our claim: CLAMP is not intended to be the fastest or best solver for every linear pixel-space problem. Its main advantage is that the same denoiser-pullback, curvature-guided correction applies beyond this specialized setting, including nonlinear tasks and latent-prior inverse problems, where SVD-based or pixel-space preconditioned linear solvers are not directly applicable. 
+
+Large-update frozen-step diagnostic. Equation 18 relies on a local residual linearization. The relevant failure mode is therefore not the magnitude of ∥∆t∥2 alone, but whether the realized CLAMP update remains close to the best step for the same frozen local problem in the regime where the linearization is most stressed. To test this directly, we rank solver-produced updates by 
+
+ηt = ∥Jt∆t∥2
+
+∥rt∥2 + ε ,
+
+keep the top 25% , and compare the actual CLAMP step ∆t to ∆⋆t , the optimizer of the exact frozen local subproblem in the same GMRES Krylov subspace. This comparison includes both the residual linearization and the one-sided curvature approximation, while isolating local-model mismatch from solver-budget effects. We report the relative objective gap 
+
+objgap t = Efrz  
+
+> t
+
+(∆ t) − E frz  
+
+> t
+
+(∆ ⋆t )
+
+Efrz  
+
+> t
+
+(0) − E frz  
+
+> t
+
+(∆ ⋆t ) + ε ,
+
+27 Geometry-Correct Diffusion Posterior Sampling with Denoiser-Pullback Curvature Guidance and Manifold-Aligned Damping 
+
+Table 15. Top-25% large-update frozen-step diagnostic. Steps are ranked by ηt = ∥Jt∆t∥2/(∥rt∥2 + ε). The CLAMP step ∆t is compared with ∆⋆t , the optimizer of the exact frozen local subproblem restricted to the same GMRES Krylov subspace. 
+
+Task med . η t objgap t align t modelerr t
+
+Gaussian deblurring 0.66 0.14 0.92 0.28 Nonlinear deblurring 0.63 0.21 0.83 0.36 
+
+Table 16. Prior-aligned damping on latent phase retrieval. We report averages over 10 samples. Here q⊤ 
+
+> t
+
+ut = 0 , and ρt is a random unit vector. Higher PSNR/SSIM and lower LPIPS are better. 
+
+Variant PSNR ↑ SSIM ↑ LPIPS ↓
+
+utu⊤ 
+
+> t
+
+30.74 0.858 0.241 
+
+qtq⊤ 
+
+> t
+
+28.93 0.812 0.270 
+
+ρtρ⊤ 
+
+> t
+
+28.92 0.814 0.270 
+
+λid I + utu⊤ 
+
+> t
+
+30.77 0.857 0.243 
+
+λid I + qtq⊤ 
+
+> t
+
+28.95 0.814 0.271 
+
+λid I + ρtρ⊤ 
+
+> t
+
+28.96 0.811 0.271 
+
+the cosine alignment 
+
+align t = ⟨∆t, ∆⋆t ⟩∥∆t∥2∥∆⋆t ∥2 + ε ,
+
+and the residual linearization error 
+
+modelerr t = ∥rt(xt + ∆ t) − (rt + Jt∆t)∥2
+
+∥Jt∆t∥2 + ε .
+
+Here 
+
+Efrz  
+
+> t
+
+(∆) := Et(xt + ∆) 
+
+denotes the frozen local objective evaluated at xt + ∆ .Table 15 shows that, at similar realized update sizes, Gaussian deblurring remains reasonably close to the exact frozen-local optimum, with objgap = 0 .14 and align = 0 .92 . Nonlinear deblurring is clearly harder, with a larger objective gap, lower alignment, and larger model error. Thus, sensitivity is not explained by step size alone and is operator dependent. Nevertheless, even for nonlinear deblurring, the realized step remains substantially aligned with the exact frozen-local optimizer. This suggests that damping and repeated re-linearization keep CLAMP updates in a reliable operating regime. 
+
+Direction of prior-aligned damping. We examine the direction used in the rank-one damping metric. Recall that 
+
+dt = xt − ˆx0|t, ut = dt
+
+∥dt∥2
+
+,
+
+and CLAMP uses 
+
+Ht = λid I + utu⊤ 
+
+> t
+
+.
+
+The vector ut spans the denoiser-residual direction between the current diffusion state and the denoised prediction. Extra damping along this direction limits updates in the subspace most directly associated with the local prior correction, while orthogonal directions remain controlled by the isotropic floor. To test whether the benefit is specific to this direction, we compare utu⊤ 
+
+> t
+
+with an orthogonal rank-one metric qtq⊤ 
+
+> t
+
+, where 
+
+q⊤ 
+
+> t
+
+ut = 0 , and a random rank-one metric ρtρ⊤ 
+
+> t
+
+, where ρt is a random unit vector. Table 16 shows that the benefit is specific to the prior-aligned direction. Orthogonal and random directions degrade performance markedly, whereas the aligned rank-one metric remains competitive. The default metric λid I + utu⊤ 
+
+> t
+
+gives the best PSNR overall and retains strong SSIM and LPIPS. The isotropic floor improves robustness, while the directional gain comes from alignment with the denoiser-residual direction. 28 Geometry-Correct Diffusion Posterior Sampling with Denoiser-Pullback Curvature Guidance and Manifold-Aligned Damping                                                                          
+
+> Table 17. Curvature variants on super resolution 4×and nonlinear deblurring. We report PSNR/SSIM/LPIPS and wall-clock runtime in seconds.
+> Variant Super resolution 4 ×Nonlinear deblurring PSNR ↑SSIM ↑LPIPS ↓Run-time (s) PSNR ↑SSIM ↑LPIPS ↓Run-time (s)
+> J⊤
+> AJA28.50 0.758 0.334 1.7 24.85 0.634 0.339 18.1
+> J⊤
+> AJAJF28.18 0.737 0.356 28.6 22.06 0.342 0.537 116.9
+> J⊤
+> FJ⊤
+> AJA29.81 0.841 0.229 6.4 30.52 0.859 0.170 30.3
+> J⊤
+> FJ⊤
+> AJAJF29.81 0.841 0.227 32.0 30.42 0.843 0.170 132.6
+> Table 18. Jacobian primitive costs in milliseconds. The forward denoiser JVP JFvis the dominant extra cost required by the full curvature operator.
+> Primitive Super resolution 4 ×Nonlinear deblurring
+> JAv1.2 13.2
+> J⊤
+> Av1.2 5.2
+> JFv112.9 108.5
+> J⊤
+> Fv15.9 15.8
+
+Curvature variants and Jacobian-action costs. We compare curvature variants to justify the one-sided approximation used by CLAMP. The exact denoiser-pullback Gauss–Newton curvature contains both the left denoiser pullback and the right denoiser forward action, 
+
+J⊤ 
+
+> F
+
+J⊤ 
+
+> A
+
+JAJF .
+
+CLAMP keeps the left factor J⊤ 
+
+> F
+
+, which maps curvature information back to diffusion-state coordinates, but drops the rightmost JF in the curvature action, yielding the one-sided operator 
+
+J⊤ 
+
+> F
+
+J⊤ 
+
+> A
+
+JA.
+
+All variants in Table 17 use the same transition rule, damping, and Krylov budget. For efficiency, the dominant extra cost in the full curvature is the forward denoiser JVP JF v. Table 18 shows that JF v
+
+costs about 113 ms on super resolution and 109 ms on nonlinear deblurring, whereas J⊤ 
+
+> F
+
+v costs about 16 ms and the forward-operator Jacobian actions, JAv and J⊤ 
+
+> A
+
+v, are much cheaper. Table 17 shows that paying for JF v does not improve quality: the full curvature changes PSNR little but increases runtime from 6.4 s to 32.0 s on super resolution and from 30.3 s to 132.6 s on nonlinear deblurring. In contrast, dropping the left factor J⊤ 
+
+> F
+
+loses the pullback that maps curvature information back to diffusion-state coordinates and substantially hurts performance, especially on nonlinear deblurring. Therefore, retaining J⊤ 
+
+> F
+
+while omitting the rightmost JF preserves the essential pullback geometry and avoids the dominant computational bottleneck, which supports the one-sided curvature operator as the best accuracy–efficiency trade-off. 
+
+## E. Qualitative MRI Results and Implementation Details 
+
+This section provides supplementary implementation details and qualitative comparisons for accelerated multi-coil MRI reconstruction. We adopt the standard linear forward model 
+
+y = Ax 0 + n, A = MFS ,
+
+where M is a k-space subsampling mask, F is the 2D Fourier transform, and S denotes the coil-sensitivity operator applied coil-wise, with measurements stacked across coils. For subsampling, we use Poisson-disc masks at the target acceleration factors. We conduct experiments on the SKM-TEA dataset (Desai et al., 2021). We estimate sensitivity maps S using JSENSE and use SENSE for coil combination as well as to generate fully-sampled reference reconstructions from fully-sampled data. We compare against baselines, including DPS (Chung et al., 2023a), DAPS (Zhang et al., 2025), DDS (Chung et al., 2024), and Score-Med (Song et al., 2022). Our diffusion-based prior is built upon a U-Net backbone consisting of approximately 167 million parameters, integrated within the EDM framework. The model was trained for 200,000 iterations using the RAdam (Liu et al., 2020) optimizer with 29 Geometry-Correct Diffusion Posterior Sampling with Denoiser-Pullback Curvature Guidance and Manifold-Aligned Damping GT DPS 
+
+> PSNR: 25.98 dB DAPS
+> PSNR: 30.56 dB DDS
+> PSNR: 31.28 dB Score-Med
+> PSNR: 31.98 dB CLAMP
+> PSNR: 33.79 dB
+
+Figure 7. Reconstructions from ×8 undersampled measurements are shown for various diffusion-based baselines. The top row displays the full magnitude images with their respective PSNR (dB) values. The bottom row provides zoomed-in crops of the region highlighted by the green box. CLAMP demonstrates superior restoration of fine anatomical details and sharper edges compared to other baselines. 
+
+a learning rate of 1 × 10 −4 and a batch size of 4 on two NVIDIA RTX 4090 GPUs. The model processes complex-valued images as two-channel (real/imaginary) inputs at a resolution of 512 × 512. For testing, we evaluate the model on the SKM-TEA test split, which comprises 39 3D volumes. From these volumes, we randomly sample 100 slices to conduct a robust comparative analysis of the reconstruction performance. During inference, we set the number of diffusion steps to T = 25 , the number of GMRES iterations to K = 10 , and the identity-damping parameter to λid = 1 .0. To evaluate reconstruction fidelity, we measure PSNR and SSIM on magnitude images. These metrics are calculated per slice and averaged across the sampled test set to yield the quantitative scores. Table 2 presents the quantitative results and Figure 7 shows qualitative comparisons including reconstructed magnitude images and zoomed-in crops of anatomical structures. 
+
+## F. Future work and Limitations 
+
+Our method relies on automatic differentiation to compute Jacobian actions of the forward operator, specifically VJPs and JVPs. As a result, the framework may be difficult to apply directly when the measurement process contains non-differentiable components, such as hard quantization, clipping, or codec pipelines (e.g., JPEG). While replacing such operators with differentiable surrogates provides a practical workaround, this can introduce modeling mismatch between the true measurement process and its surrogate, which may adversely affect reconstruction quality. Developing principled and robust mechanisms to handle non-differentiable or black-box forward operators remains an important direction for future research. Furthermore, our current experimental validation focuses on 2D image data. Extending the proposed framework to higher-dimensional modalities is a promising avenue for future work, including 3D reconstruction and video inverse problems. In these settings, scaling the curvature-guided corrections and associated linear solves to accommodate increased dimensionality—as well as exploiting spatiotemporal structure and temporal consistency—will be key challenges. 30 Geometry-Correct Diffusion Posterior Sampling with Denoiser-Pullback Curvature Guidance and Manifold-Aligned Damping CLAMP 
+
+Referenc e Run 0 Run 1 Run 2 Run 3
+
+> LatentCLAMP
+
+Figure 8. Additional visualizations: phase retrieval (FFHQ and ImageNet). Additional reconstructions on FFHQ and ImageNet for phase retrieval; for each input, we visualize all reconstructions obtained from four independent trials. CLAMP  LatentCLAMP 
+
+> Measurement Reconstruction Referenc e
+
+Figure 9. Additional visualizations: super resolution 4 × (FFHQ and ImageNet). Additional reconstructions on FFHQ and ImageNet for super resolution 4 ×.
+
+31 Geometry-Correct Diffusion Posterior Sampling with Denoiser-Pullback Curvature Guidance and Manifold-Aligned Damping CLAMP  LatentCLAMP 
+
+> Measurement Reconstruction Referenc e
+
+Figure 10. Additional visualizations: box inpainting (FFHQ and ImageNet). Additional reconstructions on FFHQ and ImageNet for box inpainting CLAMP  LatentCLAMP 
+
+> Measurement Reconstruction Referenc e
+
+Figure 11. Additional visualizations: random inpainting (FFHQ and ImageNet). Additional reconstructions on FFHQ and ImageNet for random inpainting. CLAMP  LatentCLAMP 
+
+> Measurement Reconstruction Referenc e
+
+Figure 12. Additional visualizations: Gaussian deblurring (FFHQ and ImageNet). Additional reconstructions on FFHQ and ImageNet for Gaussian deblurring. 
+
+32 Geometry-Correct Diffusion Posterior Sampling with Denoiser-Pullback Curvature Guidance and Manifold-Aligned Damping CLAMP  LatentCLAMP 
+
+> Measurement Reconstruction Referenc e
+
+Figure 13. Additional visualizations: motion deblurring (FFHQ and ImageNet). Additional reconstructions on FFHQ and ImageNet for motion deblurring. CLAMP  LatentCLAMP 
+
+> Measurement Reconstruction Referenc e
+
+Figure 14. Additional visualizations: nonlinear deblurring (FFHQ and ImageNet). Additional reconstructions on FFHQ and ImageNet for nonlinear deblurring. CLAMP  LatentCLAMP 
+
+> Measurement Reconstruction Referenc e
+
+Figure 15. Additional visualizations: high dynamic range (FFHQ and ImageNet). Additional reconstructions on FFHQ and ImageNet for high dynamic range reconstruction. 
+
+33

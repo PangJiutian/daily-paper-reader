@@ -1,0 +1,1502 @@
+Title: Learning Normalized Energy Models for Linear Inverse Problems
+
+URL Source: https://arxiv.org/pdf/2605.15487v1
+
+Published Time: Mon, 18 May 2026 00:25:27 GMT
+
+Number of Pages: 35
+
+Markdown Content:
+Learning Normalized Energy Models for Linear Inverse Problems 
+
+Nicolas Zilberstein 1 Santiago Segarra 1 Eero P. Simoncelli 2 3 Florentin Guth 2 3 
+
+Abstract 
+
+Generative diffusion models can provide powerful prior probability models for inverse problems in imaging, but existing implementations suffer from two key limitations: (i) the prior density is represented implicitly, and (ii ) they rely on likelihood approximations that introduce sampling biases. We address these challenges by introducing a new energy-based model trained for denoising with a covariance-based regularization term that enforces consistency across different measurement conditions. The trained model can compute normalized posterior densities for diverse linear inverse problems, without additional retraining or fine tuning. In addition to preserving the sampling capabilities of diffusion models, this enables previously unavailable capabilities: energy-guided adaptive sampling that adjusts schedules on-the-fly, unbiased Metropolis-Hastings correction steps, and blind estimation of the degradation operator via Bayes rule. We validate the method on multiple datasets (ImageNet, CelebA, AFHQ) and tasks (inpainting, deblurring), demonstrat-ing competitive or superior performance to established baselines. Code is available at 
+
+https://github.com/nzilberstein/ Anisotropic-energy-Model .
+
+1. Introduction 
+
+Generative diffusion models (Sohl-Dickstein et al., 2015; Ho et al., 2020; Song & Ermon, 2019; Song et al., 2021b) have achieved remarkable success in image generative mod-eling. Beyond sampling, the primary use of such models is to provide prior probabilities for inverse problems (Daras et al., 2024), such as deblurring or inpainting. For this pur-pose, current solutions fall into two categories: Bayesian 
+
+> 1
+
+Rice University, Houston, TX, USA 2Flatiron Institute, New York, NY, USA 3New York University, New York, NY, USA. Correspondence to: Nicolas Zilberstein <nzilberstein@rice.edu >.
+
+Proceedings of the 43 rd International Conference on Machine Learning , Seoul, South Korea. PMLR 306, 2026. Copyright 2026 by the author(s). 
+
+methods (Kadkhodaie & Simoncelli, 2021; Kawar et al., 2022; Chung et al., 2023) combine the prior embedded in a pre-trained unconditional diffusion model, with measure-ment likelihoods via Bayes rule. While this separation offers flexibility, the likelihood term is intractable, and thus com-puting solutions relies on approximations that can lead to biased sampling (Chung et al., 2023; Bruna & Han, 2024). 
+
+Regression methods (Saharia et al., 2022; Liu et al., 2023; Delbracio & Milanfar, 2023; Negrel et al., 2025; Elata et al., 2025) learn conditional diffusion models that bridge mea-surements and clean signals directly. Such methods avoid likelihood approximations, but this comes at the cost of having a unique prior that is independent of the considered degradation. In addition, both approaches are score-based, rendering posterior density evaluation computationally ex-pensive. We address these challenges by developing an energy-based model (EBM) that learns explicit and normalized prior and posterior densities while providing efficient access to both posterior means and posterior samples. A single trained model can be used to recover images corrupted by a diverse range of degradations in a consistent manner. This unified formulation, which leverages the connection between linear inverse problems and anisotropic denoising, also unlocks novel capabilities that we detail below. A number of previ-ous publications have combined unnormalized EBMs with unconditional diffusion models (Du et al., 2023; Thornton et al., 2025), leveraging explicit energy values for composi-tional generation. While recent proposals use regularization terms that enable proper normalization (Guth et al., 2025; Yu et al., 2025; Plainer et al., 2025), these methods have so far been limited to isotropic noise and cannot properly han-dle the correlated noise that commonly arises when solving linear inverse problems. Here, we introduce Anisotropic Covariance Score Match-ing (A-CSM), an extension of the “dual score-matching” framework of (Guth et al., 2025) that can handle anisotropic (colored) noise. We develop a novel regularizer that enforces consistency by constraining the gradient of the energy with respect to the noise covariance. Our primary contributions are: • a novel training objective derived from the Fokker-Planck equation that enforces consistency of energies 1
+
+> arXiv:2605.15487v1 [cs.LG] 15 May 2026 Learning Normalized Energy Models for Linear Inverse Problems
+
+across noise covariance matrices; • a complementary architecture that supports anisotropic noise scheduling via a novel noise embedding; • experiments demonstrating that the resulting learned normalized densities enable new capabilities: energy-guided adaptive sampling, unbiased MCMC correction steps, and blind inverse problem solutions; • experiments validating the model across multiple datasets (ImageNet, CelebA, AFHQ) and tasks (in-painting, deblurring), demonstrating that our single unified model can achieve performance competitive with or superior to established diffusion-based solvers. 
+
+2. Background and related works 
+
+2.1. Diffusion models 
+
+Diffusion models (Sohl-Dickstein et al., 2015; Ho et al., 2020; Song et al., 2021b) are derived from two continuous-time Markov processes: (i) a forward process that gradually corrupts clean data with noise, and (ii ) a reverse process that generates samples by iterative denoising. Throughout this work, we assume a variance-exploding (VE) formulation of the forward process (Song et al., 2021b): 
+
+xt = x + σtv, v ∼ N (0 , I). (1) The corresponding discrete reverse process is 
+
+xt−1 = xt + δσ 2 
+
+> t
+
+∇ log p(xt) + δσ tvt, (2) where δσ 2 
+
+> t
+
+= σ2 
+
+> t
+
+− σ2 
+
+> t−1
+
+and the unknown score function 
+
+∇xt log p(xt) is approximated by a neural network sθ (xt, t )
+
+trained with denoising score matching (DSM) (Vincent, 2011; Raphan & Simoncelli, 2011). The DSM loss pro-vides an upper-bound on KL( p(x) ∥ pθ (x)) , and is there-fore equivalent to maximum-likelihood training (Song et al., 2021a) for a particular weighting of the loss. Notably, the model provides an implicit representation of p(x), repre-sented using a family of score functions learned for all noise levels (Kadkhodaie & Simoncelli, 2021). 
+
+Beyond isotropic noise. While the majority of diffusion models assume an isotropic forward process, several re-cent studies have explored more general processes, includ-ing anisotropic processes with vector-valued parameteriza-tions (Daras et al., 2023; Hoogeboom & Salimans, 2023; Bansal et al., 2023; Gerdes et al., 2024; Chen et al., 2024; Asthana et al., 2025) and learnable (Bartosh et al., 2024; Sahoo et al., 2024) and higher-order processes (Dockhorn et al., 2021; Singhal et al., 2023). Here, we make use of anisotropic forward diffusion process with covariance sched-ule (Σt)Tt=0 :
+
+xt = x + Σ 12 
+
+> t
+
+v, v ∼ N (0 , I), (3) with the corresponding reverse process 
+
+xt−1 = xt + δΣt∇ log p(xt) + δΣ 12 
+
+> t
+
+vt. (4) 
+
+2.2. Linear inverse problems 
+
+Linear inverse problems consist of estimating an unknown signal x from a noisy measurement y, obtained via a degra-dation operator H (assumed linear): 
+
+y = Hx + σv, v ∼ N (0 , I). (5) While most solutions aim for a point estimate (typically the posterior mean), one can also consider sampling from the posterior p(x|y) ∝ p(y|x)p(x), where p(y|x) is the measurement model (5) and p(x) is the prior implicitly em-bedded in a diffusion model. Two classes of solutions exist in the literature: Bayesian approaches , which approximate the prior p(x) via a diffusion model and combine it with the measurement model at inference time; and regression ap-proaches , which approximate the posterior p(x|y) directly through supervised regression on paired data (x, y).
+
+Bayesian approaches. These methods generate a sample from the posterior by conditioning the reverse process (2) on the observation y, through use of Bayes’ rule: 
+
+∇xt log p(xt|y) = ∇xt log p(xt) + ∇xt log p(y|xt). (6) While the first term is typically computed using a pre-trained isotropic diffusion model, the second term (the so-called “guidance”) is intractable, due to the need for high-dimensional integration: p(y|xt) = R p(y|x)p(x|xt)d x.Previous methods (Kadkhodaie & Simoncelli, 2021; Kawar et al., 2022; Chung et al., 2023) have resorted to approx-imations. But computational costs are high even for sim-ple Gaussian approximations (Chung et al., 2023; Song et al., 2022), as the guidance term involves the Jacobian 
+
+of the learned score. Beyond these guidance approaches, more recent studies have explored optimization-based ap-proaches (Mardani et al., 2024; Zilberstein et al., 2025; Zhu et al., 2023; Feng et al., 2023), which frame posterior sampling as stochastic optimization; and sequential Monte Carlo-based (Wu et al., 2023) approaches, which leverage particle methods. 
+
+Regression-based approaches. A second category fo-cuses on directly learning the conditional score (6). Such works learn a diffusion model between the noisy measure-ment y and the clean signal x, effectively treating the in-verse problem as conditional generation by absorbing the degradation into the training data (Liu et al., 2023; Del-bracio & Milanfar, 2023; Negrel et al., 2025; Hu et al., 2025). While these methods do not explicitly input the degradation operator H into the score network, a few recent 2Learning Normalized Energy Models for Linear Inverse Problems <latexit sha1_base64="ImaF3xCWon7KE3QtckYZ/qvrgXY=">AAAB73icbVDLSgNBEOyNrxhfUY9eBoPgKeyKRI9BLx4jmAckS5idzCZD5rHOzAphyU948aCIV3/Hm3/jJNmDJhY0FFXddHdFCWfG+v63V1hb39jcKm6Xdnb39g/Kh0cto1JNaJMornQnwoZyJmnTMstpJ9EUi4jTdjS+nfntJ6oNU/LBThIaCjyULGYEWyd1eoYNBe4H/XLFr/pzoFUS5KQCORr98ldvoEgqqLSEY2O6gZ/YMMPaMsLptNRLDU0wGeMh7ToqsaAmzOb3TtGZUwYoVtqVtGiu/p7IsDBmIiLXKbAdmWVvJv7ndVMbX4cZk0lqqSSLRXHKkVVo9jwaME2J5RNHMNHM3YrICGtMrIuo5EIIll9eJa2LalCr1u4vK/WbPI4inMApnEMAV1CHO2hAEwhweIZXePMevRfv3ftYtBa8fOYY/sD7/AHJV4/S</latexit> 
+
+ 1 
+
+> <latexit sha1_base64="BCCCcmnX/zWkIYMfm+jjwrFlVno=">AAAB73icbVBNSwMxEJ34WetX1aOXYBE8ld0i1WPRi8cK9gPapWTTbBuaZNckK5Slf8KLB0W8+ne8+W9M2z1o64OBx3szzMwLE8GN9bxvtLa+sbm1Xdgp7u7tHxyWjo5bJk41ZU0ai1h3QmKY4Io1LbeCdRLNiAwFa4fj25nffmLa8Fg92EnCAkmGikecEuukTs/woST9ar9U9ireHHiV+DkpQ45Gv/TVG8Q0lUxZKogxXd9LbJARbTkVbFrspYYlhI7JkHUdVUQyE2Tze6f43CkDHMXalbJ4rv6eyIg0ZiJD1ymJHZllbyb+53VTG10HGVdJapmii0VRKrCN8ex5POCaUSsmjhCqubsV0xHRhFoXUdGF4C+/vEpa1Ypfq9TuL8v1mzyOApzCGVyAD1dQhztoQBMoCHiGV3hDj+gFvaOPResaymdO4A/Q5w/K24/T</latexit>
+
+ 2 
+
+> <latexit sha1_base64="Fpo+bbgoJhTaWRrAYE0bGDSp+p0=">AAACaXicbZFPa9wwEMW1Ttuk7r9NcyntRXRp6WmxQ0hCoRCSS44p7SaBlTGyPLbVyLKRxgVj/B1z7Tco5J5rIm98aJIOCB7vzWjET0mtpMUg+DPx1p48fba+8dx/8fLV6zfTzbentmqMgIWoVGXOE25BSQ0LlKjgvDbAy0TBWXJxNORnv8FYWemf2NYQlTzXMpOCo7Pi6S9WciySrGM/ZF7yPkb6jfpMQYZLnyWQS91xY3jbd+Kr6H1mh7Y4pJ9pQBmjrEi5LYbtfuC8Md72Geh0HPSZkXmBUTydBfNgVfSxCEcxI2OdxNO/LK1EU4JGobi1yzCoMXK3ohQK3L2NhZqLC57D0knNS7BRt2LS00/OSWlWGXc00pX770THS2vbMnGdAwH7MBvM/2XLBrP9qJO6bhC0uFuUNYpiRQfANJUGBKrWCS6MdG+louCGC3TfcH+LaVPHTve+QxM+BPFYnG7Pw9357ved2cHhCGmDfCAfyRcSkj1yQI7JCVkQQS7JNbmZkMmVt+m9897ftXqTcWaL3CtvdgsxELpc</latexit>
+
+⌃t =
+
+  1 0
+
+0  2
+
+  
+
+> <latexit sha1_base64="z2dPAEImgMCAR7DGMTTGanV8Fx8=">AAAB+HicbVDLSsNAFJ34rPXRqEs3g0VwFZJq27grunFZ0T6gCWUynbRDZ5IwMxFq6Je4caGIWz/FnX/jpC2i1gMDh3Pu5Z45QcKoVLb9aaysrq1vbBa2its7u3slc/+gLeNUYNLCMYtFN0CSMBqRlqKKkW4iCOIBI51gfJX7nXsiJI2jOzVJiM/RMKIhxUhpqW+WPI7UKAgz75YOOZr2zbJtVasXZ44NbavuuhW3Bh3LnuGblMECzb754Q1inHISKcyQlD3HTpSfIaEoZmRa9FJJEoTHaEh6mkaIE+lns+BTeKKVAQxjoV+k4Ez9uZEhLuWEB3oyjyn/ern4n9dLVej6GY2SVJEIzw+FKYMqhnkLcEAFwYpNNEFYUJ0V4hESCCvdVVGXsPTlZdKuWE7Nqt2clxuXizoK4Agcg1PggDpogGvQBC2AQQoewTN4MR6MJ+PVeJuPrhiLnUPwC8b7F2xkk54=</latexit>
+
+⌃ 
+
+> <latexit sha1_base64="deBVdADEFvdRCqE9IsIuSLe6UK8=">AAAB6HicbVDJSgNBEO2JW4xb1KOXxiB4GnqiScZb0IvHBMwCyRB6OjVJm56F7h4hhHyBFw+KePWTvPk3dhZEjQ8KHu9VUVXPTwRXmpBPK7O2vrG5ld3O7ezu7R/kD4+aKk4lgwaLRSzbPlUgeAQNzbWAdiKBhr6Alj+6mfmtB5CKx9GdHifghXQQ8YAzqo1UJ718gdil0tWFQzCxK65bdMvYsckc36SAlqj18h/dfszSECLNBFWq45BEexMqNWcCprluqiChbEQH0DE0oiEobzI/dIrPjNLHQSxNRRrP1Z8TExoqNQ590xlSPVR/vZn4n9dJdeB6Ex4lqYaILRYFqcA6xrOvcZ9LYFqMDaFMcnMrZkMqKdMmm5wJYeXlVdIs2k7ZLtcvC9XrZRxZdIJO0TlyUAVV0S2qoQZiCNAjekYv1r31ZL1ab4vWjLWcOUa/YL1/Adi+jP4=</latexit>
+
+0
+
+Figure 1. Illustration of possible paths in image space (left) and covariance space (right). Isotropic models are limited to covariance schedules that are reparameterizations of the diagonal (orange), while anisotropic models can explore paths where different signal components are noise-corrupted at different rates (red, black, and purple). 
+
+papers (Elata et al., 2025; Terris et al., 2026) have proposed degradation-aware parameterizations of the conditional de-noiser E[x | y, H]. However, they rely on a conditioning mechanism that requires repeated mappings between the ambient and feature spaces at each level of the architecture, increasing the computational complexity. 
+
+3. Learning EBMs through anisotropic denoising 
+
+We aim to learn a single model pθ (x|y) that explicitly ap-proximates the posterior density for measurements y arising from a variety of different degradation operators, in contrast to previous score-based approaches. Learning the posterior density gives access not only to the conditional score (6) through differentiation, but also unlocks several new appli-cations that we describe in Section 4. We first describe in Section 3.1 the connection between linear inverse problems and anisotropic denoising, and how this can be leveraged to learn an energy model. We introduce our generalized dual score matching loss in Section 3.2 and our anisotropic energy architecture in Section 3.3. Finally, we show in Section 3.4 how our energy model can be used both as a denoiser and as a posterior sampler for linear inverse prob-lems. 
+
+3.1. Energy-based linear inverse problem solvers 
+
+We leverage the equivalence between linear degradations and colored noise to show how an energy-based model con-ditioned on different noise covariances enables access to normalized posterior densities, posterior means, and poste-rior samples. 
+
+From linear inverse problems to anisotropic denoising. 
+
+Consider a linear inverse problem of the form y = Hx +σv.The posterior is unchanged by redefining y as H−1y, which corresponds to observing 
+
+y = x + Σ 12 v′, v′ ∼ N (0 , I), (7) where Σ = σ2H−1(H−1)⊤. Linear inverse problems are thus equivalent to denoising problems for images contami-nated with correlated additive noise, with the noise covari-ances Σ depending on the linear measurement H. If H is not invertible, it can be stabilized by addition of a small multiple of the identity, which corresponds to adding large noise in the nullspace of H. In the following, y refers to the observation model (7). 
+
+Anisotropic EBMs. Using Bayes rule, the posterior dis-tribution can be expressed as p(x|y) = p(x)p(y|x)/p (y).Its normalization requires having a model of p(y), which depends on Σ. To this end, we propose to learn an energy model Uθ (y, Σ) that approximates U (y, Σ) =
+
+− log p(y|Σ). Notice that we can recover p(x) by setting 
+
+Σ = 0 .The posterior mean can be computed using an anisotropic generalization of Tweedie’s identity: (Robbins, 1956; Miya-sawa et al., 1961; Raphan & Simoncelli, 2011): 
+
+E[x | y, Σ] = y − Σ∇yU (y, Σ), (8) where the score can be recovered from the energy model as ∇yU (y, Σ) ≈ ∇ yUθ (y, Σ). Therefore, by learning an anisotropic denoiser , we gain access to the posterior mean for different linear inverse problems. Learning a score model over a family of covariances Σ en-ables posterior sampling. This is achieved by defining a noise schedule that bridges between measurements and the corresponding clean data. In particular, we need to specify a sequence of covariance matrices (Σt)Tt=0 that interpolate between the measurement covariance Σ at t = T and the zero covariance at t = 0 , as in (4) . Several potential paths are illustrated in Figure 1. Note that unlike the isotropic set-ting, these schedules do not simply correspond to different discretizations of a correponsding continuous-time process. 
+
+3.2. Learning with anisotropic dual score matching 
+
+We learn a model of the energy U (y, Σ) = − log p(y|Σ) by developing an anisotropic generalization of the (isotropic) dual score matching approach of Guth et al. (2025). In a nutshell, dual score matching consists of matching both 
+
+derivatives of an energy model Uθ (y, Σ) to the data, i.e., the gradients of the energy with respect to (i) the noisy input y (the “data score” used in diffusion models) and (ii) 
+
+the covariance Σ (which we dub the “covariance score”). Each of these derivatives can be trained by minimizing a corresponding loss function. As we explain below, the dual score matching formulation enables learning of normalized 
+
+densities. 3Learning Normalized Energy Models for Linear Inverse Problems 
+
+Data score. The data score can be learned using the anisotropic generalization of Tweedie’s formula (8), which leads to the anisotropic denoising score matching objective: 
+
+ℓA−DSM (θ) = E
+
+h
+
+∥Σ 12 ∇yUθ (y, Σ) − Σ− 12 (y − x)∥2i
+
+.
+
+(9) The reweighting by Σ 12 leads to a scale-invariant loss, a generalization of the maximum-likelihood weighting used in (Song et al., 2021a; Guth et al., 2025). 
+
+Covariance score. The covariance score can be shown to satisfy an analogue of the Tweedie formula (see Ap-pendix A): 
+
+∇ΣU (y, Σ) = E
+
+ 12 Σ−1 − 12 Σ−1(y − x)( y − x)⊤Σ−1
+
+
+
+.
+
+This expression generalizes the time score identity of Guth et al. (2025); Yu et al. (2025); Plainer et al. (2025), and leads to a covariance score matching objective: 
+
+ℓA−CSM (θ) = Ex,y,Σ
+
+h
+
+Σ 12 ∇ΣUθ (y, Σ)Σ 12 −
+
+12 I + 12 Σ− 12 (y − x)( y − x)⊤Σ− 12 22
+
+i
+
+, (10) that has been weighted by Σ 12 on both sides to be scale-invariant, and where ∥ · ∥ 2 is the Frobenius norm. The A-CSM objective (10) acts as a regularizer that ties all the different marginals p(y|Σ) together in a meaningful way. It can be thought of as a proxy to enforce the continuity equation given by the Fokker-Planck equation (Pavliotis, 2014). This allows learning of a normalized density (as we show below), but also improves the denoising performance of the model, as illustrated in Appendix D.2. 
+
+Normalization of the learned density model. We de-fine an overall objective as a weighted sum of the two objectives defined above: 1 
+
+> d
+
+ℓA−DSM + 1 
+
+> d2
+
+ℓA−CSM (see Appendix A). After training, the learned energy model 
+
+Uθ (y, Σ) approximates the true energy up to a constant: 
+
+Uθ (y, Σ) ≈ U (y, Σ) + cst . Importantly, the A-CSM objec-tive ensures mass conservation through the space of covari-ances, and thus this constant is independent of Σ. For large 
+
+Σ, y is approximately distributed as N (0 , Σ), allowing to normalize the trained energy model as follows: 
+
+Uθ (y, Σ) → Uθ (y, Σ)
+
+− Ey[Uθ (y, Σ) | Σ] + 12 log det(2 πeΣ). (11) 
+
+3.3. Architecture and covariance conditioning 
+
+We compute Uθ (y, Σ) with a neural network, with a novel architecture that is suitable for the problem. Since our pro-posed energy model is trained as an anisotropic denoiser, the first requirement is that the score ∇yUθ (y, Σ) derived from the energy preserves the inductive biases of score archi-tectures used in previous literature to achieve high-quality denoising (and thus, score estimation). Following Romano et al. (2017); Guth et al. (2025); Thornton et al. (2025), we define 
+
+Uθ (y, Σ) = 12 ⟨y, sθ (y, Σ)⟩, (12) where sθ is an existing score network. Specifically, we implement sθ using the UNet architecture of Song et al. (2021b); Karras et al. (2022). The second requirement is that the architecture can oper-ate under conditioning with a wide range of covariances 
+
+Σ arising from different linear inverse problems. How-ever, an arbitrary covariance has d(d − 1) /2 degrees of freedom, which is problematic in terms of both memory and computational cost. To alleviate this, we limit our-selves to covariances that are diagonal in either the spatial or spatial frequency domain. This reduces the parameteri-zation to d coefficients, while still covering many standard inverse problems: inpainting (block-diagonal covariances in pixel space), deblurring (diagonal in frequency domain), and super-resolution (approximately diagonal in frequency domain). Finally, we must define a mechanism by which the condi-tioning covariance matrix Σ is incorporated into the score network. Our design builds on the multiplicative condition-ing mechanism used in isotropic score architectures via gain control (Karras et al., 2024). At each layer ℓ, consisting of 
+
+cℓ feature channels, an embedding vector eℓ ∈ Rcℓ of the input noise variance σ2 is computed and used to modulate (multiply) the channels. We represent spatial covariance matrices as spatially varying noise maps in Rd, yielding 
+
+spatially varying embeddings eℓ ∈ Rcℓ×dℓ , where dℓ de-notes the spatial resolution at layer ℓ. Spectral covariance matrices are incorporated through an analogous mechanism in the frequency domain, producing embeddings that modu-late the corresponding feature channels (but not the spatial dimensions). At each layer, conditioning is applied through a gain modulation of the form xℓ ← SiLU( xℓ ⊙ (1 + eℓ)) ,where SiLU( .) is the swish function (Elfwing et al., 2018). The resulting architecture is schematically illustrated in Fig. 2. Additional implementation details are provided in Appendix C.1. We emphasize that this new embedding mod-ule does not introduce significant additional computational overhead relative to those used for isotropic noise Karras et al. (2022). 
+
+Training and sampling. We now describe our implemen-tation and training pipeline. We assume a covariance distri-bution p(Σ) for training in which the two classes (spatial and frequency covariances) are selected with probability 
+
+0.5. In the spatial domain, we consider center-box and 4Learning Normalized Energy Models for Linear Inverse Problems <latexit sha1_base64="D2SvYEDIUYhZI+wI10MIyqkkRTM=">AAAB+HicbVBNT8JAEN3iF+IHVY9eNhITvJCWA3ok6sGTwcQiCTRku0xhw3bb7G5NsOGXePGgMV79Kd78Ny7Qg4IvmeTlvZnMzAsSzpR2nG+rsLa+sblV3C7t7O7tl+2Dw7aKU0nBozGPZScgCjgT4GmmOXQSCSQKODwE46uZ//AIUrFY3OtJAn5EhoKFjBJtpL5dvgYRMwUSV71b0Gd9u+LUnDnwKnFzUkE5Wn37qzeIaRqB0JQTpbquk2g/I1IzymFa6qUKEkLHZAhdQwWJQPnZ/PApPjXKAIexNCU0nqu/JzISKTWJAtMZET1Sy95M/M/rpjq88DMmklSDoItFYcqxjvEsBTxgEqjmE0MIlczciumISEK1yapkQnCXX14l7XrNbdQad/VK8zKPo4iO0QmqIhedoya6QS3kIYpS9Ixe0Zv1ZL1Y79bHorVg5TNH6A+szx+kkZJw</latexit> 
+
+Denoiser (UNet) 
+
+<latexit sha1_base64="AC/pFt7vfzT9x/xz2j7vugVWyDg=">AAAB8XicbVDLSgMxFL1TX7W+qi7dBIvgqsyIVJdFNy4r2Ae2Q8mkmTY0kwxJRhiG/oUbF4q49W/c+Tdm2llo64HA4Zx7ybkniDnTxnW/ndLa+sbmVnm7srO7t39QPTzqaJkoQttEcql6AdaUM0HbhhlOe7GiOAo47QbT29zvPlGlmRQPJo2pH+GxYCEj2FjpcRBhMwnCLJ0NqzW37s6BVolXkBoUaA2rX4ORJElEhSEca9333Nj4GVaGEU5nlUGiaYzJFI9p31KBI6r9bJ54hs6sMkKhVPYJg+bq740MR1qnUWAn84R62cvF/7x+YsJrP2MiTgwVZPFRmHBkJMrPRyOmKDE8tQQTxWxWRCZYYWJsSRVbgrd88irpXNS9Rr1xf1lr3hR1lOEETuEcPLiCJtxBC9pAQMAzvMKbo50X5935WIyWnGLnGP7A+fwBAl+RKA==</latexit> 
+
+y <latexit sha1_base64="J4xMTCUjcTeBRVtBlkhtxdvo7VE=">AAACHXicbVDLSsNAFJ34rPVVdelmsAgVpCRSqsuiG5cV7QOaUCbTSTt08mDmRgghP+LGX3HjQhEXbsS/cdJW0NYLwxzOuZd77nEjwRWY5pextLyyurZe2Chubm3v7Jb29tsqjCVlLRqKUHZdopjgAWsBB8G6kWTEdwXruOOrXO/cM6l4GNxBEjHHJ8OAe5wS0FS/VLN9AiPXS1XWT20YMSBZ5YdLslNsu6EYqMTXX2rf8qFPspN+qWxWzUnhRWDNQBnNqtkvfdiDkMY+C4AKolTPMiNwUiKBU8Gyoh0rFhE6JkPW0zAgPlNOOrkuw8eaGWAvlPoFgCfs74mU+Co3qDtz32pey8n/tF4M3oWT8iCKgQV0usiLBYYQ51HhAZeMgkg0IFRy7RXTEZGEgg60qEOw5k9eBO2zqlWv1m9q5cblLI4COkRHqIIsdI4a6Bo1UQtR9ICe0At6NR6NZ+PNeJ+2LhmzmQP0p4zPb5HTo3Q=</latexit> 
+
+s✓ (y, ⌃)
+
+<latexit sha1_base64="28pvTt/QuMgymJUfsKaJsLxznFs=">AAAB+HicbVDLSsNAFL2pr1ofjbp0EyyCq5KIVJdFNy4r2gc0oUymk3bozCTMTIQa+iVuXCji1k9x5984abPQ1gMDh3Pu5Z45YcKo0q77bZXW1jc2t8rblZ3dvf2qfXDYUXEqMWnjmMWyFyJFGBWkralmpJdIgnjISDec3OR+95FIRWPxoKcJCTgaCRpRjLSRBnbV50iPwyjz7+mIo9nArrl1dw5nlXgFqUGB1sD+8ocxTjkRGjOkVN9zEx1kSGqKGZlV/FSRBOEJGpG+oQJxooJsHnzmnBpl6ESxNE9oZ67+3sgQV2rKQzOZx1TLXi7+5/VTHV0FGRVJqonAi0NRyhwdO3kLzpBKgjWbGoKwpCarg8dIIqxNVxVTgrf85VXSOa97jXrj7qLWvC7qKMMxnMAZeHAJTbiFFrQBQwrP8Apv1pP1Yr1bH4vRklXsHMEfWJ8/EFGTXw==</latexit> 
+
+⌃ <latexit sha1_base64="Rm+db3xB0WAT3WX034EQQcwhWMw=">AAAB8HicbVBNS8NAEJ3Ur1q/qh69BIvgqSQ9VI9FETxWsK3ShrLZTNqlu5uwuxFK6a/w4kERr/4cb/4bt20O2vpg4PHeDDPzwpQzbTzv2ymsrW9sbhW3Szu7e/sH5cOjtk4yRbFFE56oh5Bo5ExiyzDD8SFVSETIsROOrmd+5wmVZom8N+MUA0EGksWMEmOlxxsRYhQxOeiXK17Vm8NdJX5OKpCj2S9/9aKEZgKloZxo3fW91AQTogyjHKelXqYxJXREBti1VBKBOpjMD566Z1aJ3DhRtqRx5+rviQkRWo9FaDsFMUO97M3E/7xuZuLLYMJkmhmUdLEozrhrEnf2vRsxhdTwsSWEKmZvdemQKEKNzahkQ/CXX14l7VrVr1frd7VK4yqPowgncArn4MMFNOAWmtACCgKe4RXeHOW8OO/Ox6K14OQzx/AHzucPtN2QXA==</latexit> 
+
+Embedding 
+
+<latexit sha1_base64="w3hz8lCClsmA1UVYXtItRhd2G68=">AAAB/XicbVDLSsNAFJ3UV62v+Ni5CRbBVUlEqsuiG5cV7AOaECbTm3boZBJmJkINwV9x40IRt/6HO//GSZuFth4YOJxzL/fMCRJGpbLtb6Oysrq2vlHdrG1t7+zumfsHXRmngkCHxCwW/QBLYJRDR1HFoJ8IwFHAoBdMbgq/9wBC0pjfq2kCXoRHnIaUYKUl3zxyI6zGQZhB7mcuMOY7ec0363bDnsFaJk5J6qhE2ze/3GFM0gi4IgxLOXDsRHkZFooSBnnNTSUkmEzwCAaachyB9LJZ+tw61crQCmOhH1fWTP29keFIymkU6Mkiq1z0CvE/b5Cq8MrLKE9SBZzMD4Ups1RsFVVYQyqAKDbVBBNBdVaLjLHAROnCihKcxS8vk+55w2k2mncX9dZ1WUcVHaMTdIYcdIla6Ba1UQcR9Iie0St6M56MF+Pd+JiPVoxy5xD9gfH5A2dZlTM=</latexit> 
+
+e`1
+
+<latexit sha1_base64="Lo6ASdoBIk+GxavcUD0neFhuoQU=">AAAB/XicbVDLSsNAFJ34rPUVHzs3wSK4KkmR6rLoxmUF+4AmhMn0ph06mYSZiVBD8FfcuFDErf/hzr9x0mahrQcGDufcyz1zgoRRqWz721hZXVvf2KxsVbd3dvf2zYPDroxTQaBDYhaLfoAlMMqho6hi0E8E4Chg0AsmN4XfewAhaczv1TQBL8IjTkNKsNKSbx67EVbjIMwg9zMXGPMbedU3a3bdnsFaJk5JaqhE2ze/3GFM0gi4IgxLOXDsRHkZFooSBnnVTSUkmEzwCAaachyB9LJZ+tw608rQCmOhH1fWTP29keFIymkU6Mkiq1z0CvE/b5Cq8MrLKE9SBZzMD4Ups1RsFVVYQyqAKDbVBBNBdVaLjLHAROnCihKcxS8vk26j7jTrzbuLWuu6rKOCTtApOkcOukQtdIvaqIMIekTP6BW9GU/Gi/FufMxHV4xy5wj9gfH5A2jflTQ=</latexit> 
+
+e`2
+
+<latexit sha1_base64="rtPcRywXZveZBCYIPYSCc+K2DUk=">AAAB/XicbVDLSsNAFJ34rPUVHzs3g0VwVRKR6rLoxpVUsA9oQphMb9qhkwczE6GG4K+4caGIW//DnX/jpM1CWw8MHM65l3vm+AlnUlnWt7G0vLK6tl7ZqG5ube/smnv7HRmngkKbxjwWPZ9I4CyCtmKKQy8RQEKfQ9cfXxd+9wGEZHF0ryYJuCEZRixglCgteeahExI18oMMci9zgHPvNq96Zs2qW1PgRWKXpIZKtDzzyxnENA0hUpQTKfu2lSg3I0IxyiGvOqmEhNAxGUJf04iEIN1smj7HJ1oZ4CAW+kUKT9XfGxkJpZyEvp4sssp5rxD/8/qpCi7djEVJqiCis0NByrGKcVEFHjABVPGJJoQKprNiOiKCUKULK0qw57+8SDpndbtRb9yd15pXZR0VdISO0Smy0QVqohvUQm1E0SN6Rq/ozXgyXox342M2umSUOwfoD4zPH5OHlVA=</latexit> 
+
+e`N
+
+<latexit sha1_base64="1sIzTSu8IkL52un9gosV5R6TJ7g=">AAACBnicbVA9SwNBEN2LXzF+nVqKsJgIsQl3KaJlUAQbIYL5gOQIe3uTZMne3rG7J4SQysa/YmOhiK2/wc5/4ya5QhMfDDzem2Fmnh9zprTjfFuZldW19Y3sZm5re2d3z94/aKgokRTqNOKRbPlEAWcC6pppDq1YAgl9Dk1/eDX1mw8gFYvEvR7F4IWkL1iPUaKN1LWPr0MfgoCJPr6NgoQDLhY6moWgcLlw1rXzTsmZAS8TNyV5lKLWtb86QUSTEISmnCjVdp1Ye2MiNaMcJrlOoiAmdEj60DZUELPIG8/emOBTowS4F0lTQuOZ+ntiTEKlRqFvOkOiB2rRm4r/ee1E9y68MRNxokHQ+aJewrGO8DQTHDAJVPORIYRKZm7FdEAkodoklzMhuIsvL5NGueRWSpW7cr56mcaRRUfoBBWRi85RFd2gGqojih7RM3pFb9aT9WK9Wx/z1oyVzhyiP7A+fwDFHpdk</latexit> 
+
+Embedding Module ( ⇥2) 
+
+<latexit sha1_base64="vM2+r45e7Qm7BdsQd37D3A4O6t8=">AAACBHicbVC7TsMwFL0pr1JeAcYuFhUSU5R0KIwVLAwMRaItUhNVjuO0Vh0nsh2kKurAwq+wMIAQKx/Bxt/gPgZoOZKlo3Puvb73hBlnSrvut1VaW9/Y3CpvV3Z29/YP7MOjjkpzSWibpDyV9yFWlDNB25ppTu8zSXESctoNR1dTv/tApWKpuNPjjAYJHggWM4K1kfp21RcpExEVGt2YEVgi30daYqFip2/XXMedAa0Sb0FqsECrb3/5UUryxEwjHCvV89xMBwWWmhFOJxU/VzTDZIQHtGeowAlVQTE7YoJOjRKhOJXmmW1m6u+OAidKjZPQVCZYD9WyNxX/83q5ji+Cgoks11SQ+UdxzpFO0TQRFDFJieZjQzCRzOyKyBBLTLTJrWJC8JZPXiWduuM1nMZtvda8XMRRhiqcwBl4cA5NuIYWtIHAIzzDK7xZT9aL9W59zEtL1qLnGP7A+vwB+pyXrA==</latexit> 
+
+Linear 
+
+transf. 
+
+<latexit sha1_base64="vM2+r45e7Qm7BdsQd37D3A4O6t8=">AAACBHicbVC7TsMwFL0pr1JeAcYuFhUSU5R0KIwVLAwMRaItUhNVjuO0Vh0nsh2kKurAwq+wMIAQKx/Bxt/gPgZoOZKlo3Puvb73hBlnSrvut1VaW9/Y3CpvV3Z29/YP7MOjjkpzSWibpDyV9yFWlDNB25ppTu8zSXESctoNR1dTv/tApWKpuNPjjAYJHggWM4K1kfp21RcpExEVGt2YEVgi30daYqFip2/XXMedAa0Sb0FqsECrb3/5UUryxEwjHCvV89xMBwWWmhFOJxU/VzTDZIQHtGeowAlVQTE7YoJOjRKhOJXmmW1m6u+OAidKjZPQVCZYD9WyNxX/83q5ji+Cgoks11SQ+UdxzpFO0TQRFDFJieZjQzCRzOyKyBBLTLTJrWJC8JZPXiWduuM1nMZtvda8XMRRhiqcwBl4cA5NuIYWtIHAIzzDK7xZT9aL9W59zEtL1qLnGP7A+vwB+pyXrA==</latexit> 
+
+Linear 
+
+transf. 
+
+<latexit sha1_base64="vM2+r45e7Qm7BdsQd37D3A4O6t8=">AAACBHicbVC7TsMwFL0pr1JeAcYuFhUSU5R0KIwVLAwMRaItUhNVjuO0Vh0nsh2kKurAwq+wMIAQKx/Bxt/gPgZoOZKlo3Puvb73hBlnSrvut1VaW9/Y3CpvV3Z29/YP7MOjjkpzSWibpDyV9yFWlDNB25ppTu8zSXESctoNR1dTv/tApWKpuNPjjAYJHggWM4K1kfp21RcpExEVGt2YEVgi30daYqFip2/XXMedAa0Sb0FqsECrb3/5UUryxEwjHCvV89xMBwWWmhFOJxU/VzTDZIQHtGeowAlVQTE7YoJOjRKhOJXmmW1m6u+OAidKjZPQVCZYD9WyNxX/83q5ji+Cgoks11SQ+UdxzpFO0TQRFDFJieZjQzCRzOyKyBBLTLTJrWJC8JZPXiWduuM1nMZtvda8XMRRhiqcwBl4cA5NuIYWtIHAIzzDK7xZT9aL9W59zEtL1qLnGP7A+vwB+pyXrA==</latexit> 
+
+Linear 
+
+transf. 
+
+<latexit sha1_base64="vM2+r45e7Qm7BdsQd37D3A4O6t8=">AAACBHicbVC7TsMwFL0pr1JeAcYuFhUSU5R0KIwVLAwMRaItUhNVjuO0Vh0nsh2kKurAwq+wMIAQKx/Bxt/gPgZoOZKlo3Puvb73hBlnSrvut1VaW9/Y3CpvV3Z29/YP7MOjjkpzSWibpDyV9yFWlDNB25ppTu8zSXESctoNR1dTv/tApWKpuNPjjAYJHggWM4K1kfp21RcpExEVGt2YEVgi30daYqFip2/XXMedAa0Sb0FqsECrb3/5UUryxEwjHCvV89xMBwWWmhFOJxU/VzTDZIQHtGeowAlVQTE7YoJOjRKhOJXmmW1m6u+OAidKjZPQVCZYD9WyNxX/83q5ji+Cgoks11SQ+UdxzpFO0TQRFDFJieZjQzCRzOyKyBBLTLTJrWJC8JZPXiWduuM1nMZtvda8XMRRhiqcwBl4cA5NuIYWtIHAIzzDK7xZT9aL9W59zEtL1qLnGP7A+vwB+pyXrA==</latexit> 
+
+Linear 
+
+transf. 
+
+<latexit sha1_base64="vM2+r45e7Qm7BdsQd37D3A4O6t8=">AAACBHicbVC7TsMwFL0pr1JeAcYuFhUSU5R0KIwVLAwMRaItUhNVjuO0Vh0nsh2kKurAwq+wMIAQKx/Bxt/gPgZoOZKlo3Puvb73hBlnSrvut1VaW9/Y3CpvV3Z29/YP7MOjjkpzSWibpDyV9yFWlDNB25ppTu8zSXESctoNR1dTv/tApWKpuNPjjAYJHggWM4K1kfp21RcpExEVGt2YEVgi30daYqFip2/XXMedAa0Sb0FqsECrb3/5UUryxEwjHCvV89xMBwWWmhFOJxU/VzTDZIQHtGeowAlVQTE7YoJOjRKhOJXmmW1m6u+OAidKjZPQVCZYD9WyNxX/83q5ji+Cgoks11SQ+UdxzpFO0TQRFDFJieZjQzCRzOyKyBBLTLTJrWJC8JZPXiWduuM1nMZtvda8XMRRhiqcwBl4cA5NuIYWtIHAIzzDK7xZT9aL9W59zEtL1qLnGP7A+vwB+pyXrA==</latexit> 
+
+Linear 
+
+transf. 
+
+<latexit sha1_base64="vM2+r45e7Qm7BdsQd37D3A4O6t8=">AAACBHicbVC7TsMwFL0pr1JeAcYuFhUSU5R0KIwVLAwMRaItUhNVjuO0Vh0nsh2kKurAwq+wMIAQKx/Bxt/gPgZoOZKlo3Puvb73hBlnSrvut1VaW9/Y3CpvV3Z29/YP7MOjjkpzSWibpDyV9yFWlDNB25ppTu8zSXESctoNR1dTv/tApWKpuNPjjAYJHggWM4K1kfp21RcpExEVGt2YEVgi30daYqFip2/XXMedAa0Sb0FqsECrb3/5UUryxEwjHCvV89xMBwWWmhFOJxU/VzTDZIQHtGeowAlVQTE7YoJOjRKhOJXmmW1m6u+OAidKjZPQVCZYD9WyNxX/83q5ji+Cgoks11SQ+UdxzpFO0TQRFDFJieZjQzCRzOyKyBBLTLTJrWJC8JZPXiWduuM1nMZtvda8XMRRhiqcwBl4cA5NuIYWtIHAIzzDK7xZT9aL9W59zEtL1qLnGP7A+vwB+pyXrA==</latexit> 
+
+Linear 
+
+transf. 
+
+Figure 2. Proposed architecture based on UNet. We incorporate the covariance information through the embedding network, with two dedicated branches for the two covariance domains (spatial and spectral). 
+
+horizontal-box masks with sizes from 1 to d2 = 64 2. In the spectral domain, we consider Gaussian deblurring and 
+
+×4 super-resolution. Additional details regarding hyper-parameters and examples of the different covariances are provided in Appendix C, and the full training and sampling algorithms are provided in Appendix A.1. 
+
+3.4. Validation: comparison to baselines Experimental setting. We compare our energy-based ap-proach with several well-established methods (Daras et al., 2024). Among Bayesian baselines, we include the guidance methods DPS (Chung et al., 2023) and DAPS (Zhang et al., 2025a) and the variational inference-based RED-Diff (Mar-dani et al., 2024). We also include Palette (Saharia et al., 2022) as a conditional model trained to solve a particular inverse problem via regression. Details of each method are provided Appendix C.4. We implement all methods, including our own, using the base architecture illustrated in Fig. 2. The differences lie in p(Σ)—Bayesian models have Σ = σ2I—and in the input provided to the model— conditional models stack the measurements with the input noisy image. Models were trained on CelebA ( 64 × 64 ) (Liu et al., 2015), ImageNet64 ( 64 × 64 ) (Russakovsky et al., 2015), AFHQ-Cat ( 192 × 192 ) (Choi et al., 2020), and MNIST ( 28 × 28 ) (LeCun et al., 2010). We assess the reconstruction quality of the different sam-plers with mean squared error (in terms of PSNR =
+
+−10 log 10 MSE ) and two perceptual metrics, LPIPS (Zhang et al., 2018) and DISTS (Ding et al., 2020). Each metric is averaged over 400 examples with ground truth images from the test set. In addition, we compute the FID (Heusel et al., 2017) between ensembles of test set images and posterior samples. All methods use up to 1, 000 neural function eval-uations ( 1, 200 for inpainting on CelebA). For each method, the number of steps is tuned via ablation and then fixed for all experiments; no ground-truth information is used at test time. This is especially relevant for RED-Diff, which performs better with fewer noise levels, consistent with <latexit sha1_base64="8focql/LDclDup4UgU/e8GoKDxo=">AAAB8nicbVDLSgMxFM3UV62vqks3wSK4KjNdVJdFN26ECvYB06Fk0jttaCYZkoxQhn6GGxeKuPVr3Pk3ZtpZaOuBwOGce8i9J0w408Z1v53SxubW9k55t7K3f3B4VD0+6WqZKgodKrlU/ZBo4ExAxzDDoZ8oIHHIoRdOb3O/9wRKMykezSyBICZjwSJGibGSfw9EpwpiEGZYrbl1dwG8TryC1FCB9rD6NRhJmuZZyonWvucmJsiIMoxymFcGqYaE0CkZg2+pIDHoIFusPMcXVhnhSCr7hMEL9XciI7HWszi0kzExE73q5eJ/np+a6DrImEhSA4IuP4pSjo3E+f14xBRQw2eWEKqY3RXTCVGEGttSxZbgrZ68TrqNutesNx8atdZNUUcZnaFzdIk8dIVa6A61UQdRJNEzekVvjnFenHfnYzlacorMKfoD5/MHleSRdw==</latexit> 
+
+Measurement <latexit sha1_base64="JoG23loqwJjwecoMf5I3Qq522oA=">AAAB63icbVBNS8NAEJ3Ur1q/qh69LBbBU0l6qB6LXrxZwX5AG8pmu2mX7m7C7kYooX/BiwdFvPqHvPlv3KQ5aOuDgcd7M8zMC2LOtHHdb6e0sbm1vVPereztHxweVY9PujpKFKEdEvFI9QOsKWeSdgwznPZjRbEIOO0Fs9vM7z1RpVkkH808pr7AE8lCRrDJpPtE6VG15tbdHGideAWpQYH2qPo1HEckEVQawrHWA8+NjZ9iZRjhdFEZJprGmMzwhA4slVhQ7af5rQt0YZUxCiNlSxqUq78nUiy0novAdgpspnrVy8T/vEFiwms/ZTJODJVkuShMODIRyh5HY6YoMXxuCSaK2VsRmWKFibHxVGwI3urL66TbqHvNevOhUWvdFHGU4QzO4RI8uIIW3EEbOkBgCs/wCm+OcF6cd+dj2VpyiplT+APn8wcol45U</latexit> 
+
+Ours <latexit sha1_base64="7vucOQAqMsNjAfrQNqa2Izws++8=">AAAB6nicbVA9TwJBEJ3DL8Qv1NJmIzGxIncUaEnUwhKDfCRwIXvLHGzY27vs7pkQwk+wsdAYW3+Rnf/GBa5Q8CWTvLw3k5l5QSK4Nq777eQ2Nre2d/K7hb39g8Oj4vFJS8epYthksYhVJ6AaBZfYNNwI7CQKaRQIbAfj27nffkKleSwfzSRBP6JDyUPOqLFS467e6BdLbtldgKwTLyMlyFDvF796g5ilEUrDBNW667mJ8adUGc4Ezgq9VGNC2ZgOsWuppBFqf7o4dUYurDIgYaxsSUMW6u+JKY20nkSB7YyoGelVby7+53VTE177Uy6T1KBky0VhKoiJyfxvMuAKmRETSyhT3N5K2IgqyoxNp2BD8FZfXietStmrlqsPlVLtJosjD2dwDpfgwRXU4B7q0AQGQ3iGV3hzhPPivDsfy9ack82cwh84nz/cGI2I</latexit> 
+
+DPS <latexit sha1_base64="7J2H11MTO8G+HeT2J/APMK15M6U=">AAAB73icbVBNSwMxEJ31s9avqkcvwSJ4sez2UD0WreCxiv2AdinZNNuGJtk1yQpl6Z/w4kERr/4db/4b03YP2vpg4PHeDDPzgpgzbVz321lZXVvf2Mxt5bd3dvf2CweHTR0litAGiXik2gHWlDNJG4YZTtuxolgEnLaC0fXUbz1RpVkkH8w4pr7AA8lCRrCxUvv+pnZeY2HYKxTdkjsDWiZeRoqQod4rfHX7EUkElYZwrHXHc2Pjp1gZRjid5LuJpjEmIzygHUslFlT76ezeCTq1Sh+FkbIlDZqpvydSLLQei8B2CmyGetGbiv95ncSEl37KZJwYKsl8UZhwZCI0fR71maLE8LElmChmb0VkiBUmxkaUtyF4iy8vk2a55FVKlbtysXqVxZGDYziBM/DgAqpwC3VoAAEOz/AKb86j8+K8Ox/z1hUnmzmCP3A+fwAJaI9U</latexit> 
+
+RED-Di ↵ <latexit sha1_base64="MkViSq9IXZiurwpiWoPEH8RvbwA=">AAAB83icbVBNSwMxEM36WetX1aOXYBG8WHZ7qB6LHvRYwX5Au5RsNtuGZpMlmQil9G948aCIV/+MN/+NabsHbX0w8Hhvhpl5USa4Ad//9tbWNza3tgs7xd29/YPD0tFxyyirKWtSJZTuRMQwwSVrAgfBOplmJI0Ea0ej25nffmLacCUfYZyxMCUDyRNOCTipd6eVlfElaAvDfqnsV/w58CoJclJGORr90lcvVtSmTAIVxJhu4GcQTogGTgWbFnvWsIzQERmwrqOSpMyEk/nNU3zulBgnSruSgOfq74kJSY0Zp5HrTAkMzbI3E//zuhaS63DCZWaBSbpYlFiBQeFZADjmmlEQY0cI1dzdiumQaELBxVR0IQTLL6+SVrUS1Cq1h2q5fpPHUUCn6AxdoABdoTq6Rw3URBRl6Bm9ojfPei/eu/exaF3z8pkT9Afe5w8zp5HO</latexit> 
+
+Ground-truth 
+
+<latexit sha1_base64="DS2kRM6EytU0D6Q6F1KEiYw9iks=">AAACAXicbVC7TsNAEFyHVwivACWNRYREFdkpAmV4FJRBkIeUWNH5fI5POZ+tuzOSZaWip4VfoEO0fAl/wGdwTlyQhJFWGs3sanfHjRmVyrK+jdLa+sbmVnm7srO7t39QPTzqyigRmHRwxCLRd5EkjHLSUVQx0o8FQaHLSM+d3OR+74kISSP+qNKYOCEac+pTjFQu3V61H0bVmlW3ZjBXiV2QGhRoj6o/Qy/CSUi4wgxJObCtWDkZEopiRqaVYSJJjPAEjclAU45CIp1sduvUPNOKZ/qR0MWVOVP/TmQolDINXd0ZIhXIZS8X//MGifIvnYzyOFGE4/kiP2Gmisz8cdOjgmDFUk0QFlTfauIACYSVjmdxi0g9GTA+reho7OUgVkm3Ubeb9eZ9o9a6LkIqwwmcwjnYcAEtuIM2dABDAC/wCm/Gs/FufBif89aSUcwcwwKMr18NYZcz</latexit> 
+
+DAPS 
+
+Figure 3. Inpainting results on CelebA. DPS and our method generate sharper images while RED-Diff’s solutions are smoother, which is consistent with our analysis of their posterior density values in Section 4.1. 
+
+Mardani et al. (2024). 
+
+Experimental results. We consider the two linear inverse problems that were used to jointly train the model. To test the spatial covariance configuration, we perform inpaint-ing on a square of size 45 × 45 in the center of the image, with σ = 10 −4. For the spectral configuration, we perform deblurring with a Gaussian kernel of size 8 × 8 and a stan-dard deviation of 0.8, with σ = 10 −2. Results are shown in Table 1 for both CelebA and ImageNet, and in Fig. 3 we illustrate a few inpainting examples on CelebA. We ob-serve that our proposed sampler is competitive with, and in most cases outperforms, the baseline samplers. We include additional comparisons on AFHQ-Cat ( 192 × 192 ) (Choi et al., 2020) in Appendix D.1.3. Overall, these experiments demonstrate that energy models are fully competitive with or even improves on score models for solving linear inverse problems, and that a single trained model can be used to tackle a variety of inverse problems. 
+
+4. Applications of anisotropic energy models 
+
+Our energy model offers benefits beyond its use in solving linear inverse problems. We demonstrate in Section 4.1 that having access to the learned energy enables more refined comparisons between posterior sampling algorithms. In Sections 4.2.1 and 4.2.2, we develop samplers that lever-age access to the energy to automatically define adaptive anisotropic schedules and use unbiased corrector steps via Metropolis-Hastings proposals. Finally, we show in Sec-tion 4.3 that our energy model can estimate unknown degra-dation operators and noise levels, enabling blind inverse problem solvers. 5Learning Normalized Energy Models for Linear Inverse Problems 
+
+Table 1. Quantitative results for inpainting and Gaussian deblurring across the CelebA and ImageNet64 datasets.                                                                                                          
+
+> Sampler CelebA 64 ×64 ImageNet 64 ×64
+> Inpainting Deblurring Inpainting Deblurring
+> PSNR ↑LPIPS ↓FID ↓DISTS ↓PSNR ↑LPIPS ↓FID ↓DISTS ↓PSNR ↑LPIPS ↓FID ↓DISTS ↓PSNR ↑LPIPS ↓FID ↓DISTS ↓
+> DPS (Chung et al., 2023) 16.10 0.110 36.76 0.19 32.98 0.004 43.01 0.08 23.01 0.051 55.61 0.114 29.10 0.007 59.09 0.10 RED-Diff (Mardani et al., 2024) 17.96 0.100 47.82 0.17 34.53 0.006 44.33 0.08 24.22 0.065 58.50 0.135 29.93 0.008 63.10 0.11 DAPS (Zhang et al., 2025a) 17.25 0.098 45.76 0.16 30.86 0.005 65.41 0.10 23.87 0.048 54.07 0.113 27.54 0.013 79.43 0.15 Palette (Saharia et al., 2022) 15.23 0.154 75.22 0.2 17.28 0.348 148.04 0.44 ––––––––
+> Ours 17.70 0.093 34.57 0.14 32.27 0.002 41.87 0.04 22.90 0.052 47.54 0.108 29.10 0.004 44.82 0.07
+
+4.1. The probabilities of posterior samples 
+
+In this section, we compare the prior and posterior prob-abilities of samples generated by three solvers, which in-clude a Bayesian model that relies on likelihood approx-imation (DPS), a variational inference procedure that ap-proximates maximum-a-posterior optimization (RED-Diff), and a learned posterior sampler (ours). We fix one partic-ular observation y and generate several potential solutions 
+
+{ˆxi}Ni=1 with each sampler. We then compute the probabili-ties of these samples under the prior p(x) and the posterior 
+
+p(x|y) (via Bayes rule) using our learned energy model. The resulting distributions of log probabilities are shown in Fig. 4. Examples of solutions at different prior probabilities are shown in the right panel: generally, smoother images tend to have higher probability, while more detailed, tex-tured images have lower probability. In particular, we see that DPS generates samples that are lower-probability under the prior due to their likelihood approximations, whereas RED-Diff generates higher-probability samples due to its a maximum-a-posterior behavior. Both methods produce sam-ples of low posterior probability. Our energy-based sampler achieves a better balance: notably, the prior probabilities of solutions lie near the ground truth, and their posterior prob-ability is only slightly lower than that of the ground truth. These results demonstrate that our anisotropic energy-based approach leads to accurate posterior samples that are con-sistent with both the prior and the measurements. A similar analysis across multiple observations y pairs is provided in Appendix D.3. 
+
+4.2. Energy-based schedules and corrector steps 4.2.1. Energy-guided generation 
+
+An important feature of anisotropic diffusion is the freedom it allows in designing sampling paths (Negrel et al., 2025; Gerdes et al., 2024), as illustrated in Fig. 1. For any se-quence of covariance steps δΣt = Σt − Σt−1, a sample can be generated with the iterations 
+
+(
+
+xt−1 = xt − δΣt∇yUθ (xt, Σt) + ( δΣt) 12 vt
+
+Σt−1 = Σt − δΣt
+
+(13) Designing samplers therefore reduces to selecting the co-variance step δΣt at each iteration. After demonstrating this flexibility in the setting of any-order generation, we introduce an energy-guided sampler that selects δΣt au-tomatically and adaptively by exploiting the variations of the energy with the noise covariance Σ, leading to superior sampling quality. 
+
+Any-order generation. We consider a family of block-diagonal covariances in pixel space. Each covariance from the family has a fixed variance on each b × b image patch, where b can take any value in {1, 2, 4, 7, 14 , 28 } (see Fig. 9 in Appendix C.2 for an illustration). We trained a model on MNIST with this set of covariances, where the noise variance in each patch was independent and log uniformly distributed in [10 −9, 10 3]. This allows generating image patches in any order in an autoregressive manner. We il-lustrate three different orders with different values of b in Fig. 5. Each path generates a different solution even with identical random seeds. 
+
+Energy-guided adaptive sampler. In theory, with a per-fect score and an infinite number of sampling steps, all covariance schedules are equivalent. In practice, different schedules yield different approximations to the score and discretization errors. Which covariance paths lead to higher sampling quality, and how can we define them? We intro-duce a heuristically motivated energy-guided schedule that sets the covariance step δΣt adaptively by doing a descent step on the energy with respect to Σt, using the covariance score ∇ΣUθ (xt, Σt). Specifically, we set 
+
+δΣt ∝ Σt∇ΣUθ (xt, Σt)Σt. (14) The multiplication by Σt on both sides can be thought of as a preconditioning of the gradient (notice that δΣt has the same units as Σt) and can be motivated as a steepest descent in the Bregman geometry generated by − log det Σt (see Appendix B). Equation (14) removes the need for choosing a discretization schedule during sampling and instead de-fines one automatically and adaptively to the current iterate 
+
+xt, a property shared by the algorithm of Kadkhodaie & Simoncelli (2021) but in a different setting. To illustrate the behavior of this sampler, we consider the 6Learning Normalized Energy Models for Linear Inverse Problems 
+
+Figure 4. Left and middle: Histograms of log pθ (ˆ x) and log pθ (ˆ x|y) for inpainting solutions ˆx generated by DPS, RED-Diff, and our energy model from a given measurement y, along with the ground truth x. Our energy model is well-calibrated with respect to both prior and posterior probabilities. Right: Examples of generated images ˆx sorted from lowest to highest prior probability (in reading order). The colored border indicates the sampler used to produce the image (green for DPS, red for RED-Diff, blue for ours) and its prior probability (darker shades for lower probability images), matching the arrows in the left panel. Note that higher-probability images are smoother and less detailed. The ground truth and measurements are shown on the left with blue/black borders, respectively. 
+
+Figure 5. Three autoregressive generations for a model trained on MNIST, with identical initial and injected noise. The first two rows generate the four quadrants of the image respectively in reading and reversed reading order. The third row generates the image in 16 patches, ordered from the center to the outer border. 
+
+task of reconstructing MNIST digits from a subset of k ran-domly selected pixels (unobserved pixels are replaced by high-variance noise). Fig. 6 shows the classification error over 1, 000 samples as a function of the number of measure-ments k (experimental details provided in Appendix C.1). Both samplers converge to clean-image baseline perfor-mance for large k, but the energy-guided sampler (14) achieves a better classification error than a geometric sched-ule δΣt ∝ Σt for smaller k. This illustrates the advantage of allowing the model to unmask different pixels at different rates in challenging inverse problems. Preliminary experiments on a CelebA inpainting task indi-cate that the energy-guided sampler underperforms prede-fined schedules in this setting. We hypothesize that on more challenging tasks with more spatial variability, diagonal co-variances in the spatial domain are not flexible enough to define meaningful paths. We believe that more general co-variance spaces that are not restricted to a fixed basis should lead to gains similar to those we observe on MNIST, and leave exploration of those questions to future research. 50 100 150 200 250 300 
+
+> Number of measurements
+> 0%
+> 10%
+> 20%
+> 30%
+> 40%
+> Classification error
+> Geometric scheduling
+> Energy-guided scheduling
+> Clean images
+
+Figure 6. Classification error as a function of the number of mea-surements. The energy-guided scheduling (14, orange) consistently achieves a lower error rate than the fixed geometric scheduling 
+
+δΣ ∝ Σ (blue) with few measurements, with both methods reach-ing the baseline classifier error at 300 measurements. 
+
+4.2.2. Unbiased corrector steps with MALA 
+
+Typically, diffusion-based posterior samplers iterate be-tween prediction and correction steps (Song et al., 2021b; Bradley & Nakkiran, 2025), where the correction is given by a version of the Unadjusted Langevin Algorithm (ULA): 
+
+x′ 
+
+> t
+
+= xt − η
+
+2 [∇yUθ (xt, Σt) − ∇ xt log p(xT |xt)] + √ηv′
+
+> t
+
+.
+
+(15) where xT = y and p(xT |xt) ∼ N (xT ; xt, ΣT − Σt).Notice that we need an additional term in the correction step as we aim to sample from p(xt|Σt, y) rather than just 
+
+p(xt|Σt). Since the energy model provides Uθ (xt, Σt) ≈− log p(xt|Σt), the likelihood term ∇xt log p(xT = y|xt)
+
+acts as guidance to keep the iterates consistent with the observation y at covariance ΣT . It has been shown that using better MCMC samplers than ULA can boost the per-formance of diffusion-based samplers (Du et al., 2023). In this context, an advantage of our energy formulation is that it provides access to the density p(xt|Σt), in addition to 7Learning Normalized Energy Models for Linear Inverse Problems 
+
+the score, at every step. This enables the use of unbiased 
+
+correctors such as the Metropolis-Adjusted Langevin Algo-rithm (MALA) (Roberts & Tweedie, 1996), which treats (15) as a proposal q(x′
+
+> t
+
+|x) that is accepted with probability 
+
+min 
+
+
+
+1, p(x′    
+
+> t|ΣT,y)q(xt|x′
+> t)
+> p(xt|ΣT,y)q(x′
+> t|xt)
+
+
+
+. We emphasize that the ability to compute this acceptance probability during posterior sam-pling is a distinctive feature of our anisotropic energy model, which explicitly provides access to the density p(y|Σ), set-ting it apart from prior isotropic energy-based diffusion approaches (Du et al., 2023; Thornton et al., 2025). We report in Table 2 a comparison between ULA and MALA as a function of the number of corrector steps. We observe that increasing the number of MALA steps consistently improves reconstruction quality as measured by LPIPS with the ground truth, whereas ULA does not yield further gains. A visual comparison is provided in Fig. 29.              
+
+> Table 2. LPIPS distance between ground truth xand reconstruction
+> ˆxfor different correction schemes on a CelebA inpainting task.
+> Sampler Number of corrector steps
+> 158ULA corrector 0.093 0.093 0.093 MALA corrector 0.093 0.091 0.089
+
+4.3. Blind inverse problems 
+
+We show that our normalized energy model can be used to solve blind inverse problems , where the noise covari-ance Σ (or equivalently, the measurement operator H)is unknown. Our proposed strategy is straightforward: we estimate Σ by maximizing the posterior probability 
+
+log p(Σ|y) = log p(y|Σ) + log p(Σ) + cst , given a prior on covariance matrices p(Σ). Here, we choose a uniform prior over a set S of covariances, leading to 
+
+ˆΣ = argmax 
+
+> Σ∈S
+
+log pθ (y|Σ). (16) We illustrate this procedure on an inpainting task where the box size is unknown and is estimated through (16) . More precisely, we observe y = x + Σ1/2 
+
+> s
+
+v, where Σs is a block-diagonal covariance with noise standard deviation σ1 inside a central s×s box and σ2 = 10 −4 outside of it. Fig. 7 shows that our energy model estimates accurately both the box size 
+
+s and the noise level σ1. This success critically relies on the normalization of the energy values across covariances 
+
+Σ: an energy model trained without the covariance score matching objective fails at this task. 
+
+5. Discussion 
+
+We have introduced a framework for learning normalized conditional densities that can be used to solve linear in-verse problems. At the core of our method is Anisotropic                     
+
+> Figure 7. Blind reconstruction experiment. Top: two observations corrupted by noise of standard deviation σ1inside a central s×s
+> square, with (σ1, s )∈ { (0 .1,14) ,(2 ,20) }). Middle and bottom:
+> Log probability log pθ(y|Σs)as a function of box size sand
+> σ1, respectively. The noise covariance parameters estimated by the energy model trained with dual score matching (red dashed vertical lines) accurately track their ground truth values (solid green vertical lines).
+
+Covariance Score Matching (A-CSM), a regularization that enforces consistency across covariance matrices via the Fokker-Planck equation, allowing accurate normaliza-tion of the learned density. We validate our approach on multiple datasets and inverse problems, demonstrating that covariance-conditioned energy-based models share the strong performance of current diffusion solvers while en-abling new capabilities that score-based models do not have. In particular, explicit access to normalized densities enables blind estimation, energy-guided adaptive sampling, unbi-ased MCMC correction steps, and principled comparisons between posterior sampling algorithms. It is useful to position our method within the literature on linear inverse problems, building on the distinction between Bayesian and regression-based methods introduced in Sec-tion 2.2. Bayes’ rule, p(x|y) ∝ p(x) p(y|x), implies an appealing separation between a prior model p(x) and a likelihood term p(y|x): once a prior is learned, it can in principle be applied to any inverse problem with an explicit forward model without additional training. This approach however faces a fundamental challenge: computing pos-terior means E[x | y] or drawing posterior samples is in-tractable in high dimensions. For instance, for diffusion priors, posterior sampling requires the likelihood p(y|xt) at 8Learning Normalized Energy Models for Linear Inverse Problems 
+
+every noise level, which involves an intractable marginaliza-tion over the clean signal. The opposite approach—directly learning E[x | y], or more generally the conditional score 
+
+∇ log p(xt|y), via regression—can be both efficient and ac-curate, but it breaks the separation between an explicit prior shared across degradations and a problem-specific likeli-hood. As a result, modifying the likelihood term requires in principle additional training, and the relationships be-tween the learned conditional expectation operators across different degradations are no longer explicit. Within this context, our anisotropic energy model can be viewed as an intermediate approach that aims to reconcile these two viewpoints and combine their respective advan-tages of flexibility and tractability. Because it yields a learned normalized posterior density—and therefore the corresponding score function—it can be regarded as a gen-eralization of the standard score-based methods discussed in Section 2.2. It also amounts to a change of perspective: rather than forming the posterior p(x|y) from a prior p(x)
+
+and a likelihood p(y|x), we rely on the anisotropic diffusion (Fokker–Planck) equation ∇Σ p(y|Σ) = 12 ∇2 
+
+> y
+
+p(y|Σ) to characterize the measurement density p(y|Σ), whose score gives efficient access to the posterior mean. The diffusion equation is enforced implicitly by the A-CSM objective, which guarantees consistency between a common prior and the posterior means associated with each Σ. In this formula-tion, adding a novel degradation (i.e., covariance matrix Σ)not seen during training requires additional learning to ex-tend the range of log p(y|Σ), but regularized by the A-CSM objective, leveraging what has already been learned. Our method has several limitations. First, training energy-based models via (dual) score matching is more computa-tionally intensive than training score-based models. It could be accelerated using sliced score matching (Song et al., 2020), which enables replacing the extra backpropagation step with more memory-efficient (forward-mode) Jacobian vector products. Second, the spatial and spectral diagonal covariance parameterization covers a variety of standard inverse problems. Extending it to more general covariances would broaden the applications of our model and unlock the full potential of energy-guided sampling (at the cost of additional memory and computation). We envision several applications of energy-based models that should be explored. First, they can provide estimates of posterior entropy and mutual information between mea-surements and ground truth signals, which could be used to optimize measurement design , offering a more direct method than Zhang et al. (2025b). Second, the dependence of the energy Uθ (y, Σ) on the noise covariance Σ provides valuable information about the local geometry of the prior 
+
+p(x), allowing for example estimation of local curvature and “tangent subspaces” in the vicinity of individual images. 
+
+Acknowledgments 
+
+The majority of this work was conducted during Nicolas Zil-berstein’s summer internship at Center for Computational Neuroscience, Flatiron Institute, a division of the Simons Foundation. The authors thank Jona Bruna, Florentin Coeur-doux, Pierre-Etienne Fiquet, Zahra Kadkhodaie, and Guy Ohayon for useful discussions. The authors thank the Sci-entific Computing Core, Flatiron Institute, for computing facilities and support. This research was partially spon-sored by the Army Research Office under Grant Number W911NF-17-S-0002 and by the National Science Founda-tion under awards CCF-2340481 and EF-2126387. The views and conclusions contained in this document are those of the authors and should not be interpreted as representing the official policies, either expressed or implied, of the Army Research Office, the U.S. Army, or the U.S. Government. The U.S. Government is authorized to reproduce and dis-tribute reprints for Government purposes, notwithstanding any copyright notation herein. 
+
+References 
+
+Ai, X., He, Y., Gu, A., Salakhutdinov, R., Kolter, J. Z., Boffi, N. M., and Simchowitz, M. Joint distillation for fast likelihood evaluation and sampling in flow-based models. 
+
+Intl. Conf. Learn. Repr. (ICLR) , 2026. Asthana, T., Bao, Y., Awad, A., and Krim, H. Accelerated image-aware diffusion modeling. In European Signal Process. Conf. (EUSIPCO) , pp. 1862–1866. IEEE, 2025. Balcerak, M., Amiranashvili, T., Terpin, A., Shit, S., Bo-gensperger, L., Kaltenbach, S., Koumoutsakos, P., and Menze, B. Energy matching: Unifying flow matching and energy-based models for generative modeling. In 
+
+Advances in Neural Inf. Process. Syst. (NIPS) , 2025. Bansal, A., Borgnia, E., Chu, H.-M., Li, J., Kazemi, H., Huang, F., Goldblum, M., Geiping, J., and Goldstein, T. Cold diffusion: Inverting arbitrary image transforms without noise. Advances in Neural Inf. Process. Syst. (NIPS) , 36:41259–41282, 2023. Bartosh, G., Vetrov, D., and Naesseth, C. A. Neural flow dif-fusion models: Learnable forward process for improved diffusion modelling. Advances in Neural Inf. Process. Syst. (NIPS) , 37:73952–73985, 2024. Bradley, A. and Nakkiran, P. Classifier-free guidance is a predictor-corrector. Trans. Mach. Learn. Res. , 2025. Bruna, J. and Han, J. Provable posterior sampling with denoising oracles via tilted transport. Advances in Neural Inf. Process. Syst. (NIPS) , 37:82863–82894, 2024. 9Learning Normalized Energy Models for Linear Inverse Problems 
+
+Chen, B., Mart ´ı Mons ´o, D., Du, Y., Simchowitz, M., Tedrake, R., and Sitzmann, V. Diffusion forcing: Next-token prediction meets full-sequence diffusion. Advances in Neural Inf. Process. Syst. (NIPS) , 37:24081–24125, 2024. Choi, Y., Uh, Y., Yoo, J., and Ha, J.-W. StarGAN v2: Diverse image synthesis for multiple domains. In Pro-ceedings of the IEEE/CVF Int. Conf. Comput. Vis. Pattern Recogn. (CVPR) , 2020. Chung, H., Kim, J., Mccann, M. T., Klasky, M. L., and Ye, J. C. Diffusion posterior sampling for general noisy inverse problems. In Intl. Conf. Learn. Repr. (ICLR) ,2023. Daras, G., Delbracio, M., Talebi, H., Dimakis, A., and Milanfar, P. Soft diffusion: Score matching with general corruptions. Trans. Mach. Learn. Res. , 2023. Daras, G., Chung, H., Lai, C.-H., Mitsufuji, Y., Ye, J. C., Milanfar, P., Dimakis, A. G., and Delbracio, M. A survey on diffusion models for inverse problems. arXiv preprint arXiv:2410.00083 , 2024. Delbracio, M. and Milanfar, P. Inversion by direct iteration: An alternative to denoising diffusion for image restoration. 
+
+Trans. Mach. Learn. Res. , 2023. Ding, K., Ma, K., Wang, S., and Simoncelli, E. P. Image quality assessment: Unifying structure and texture sim-ilarity. IEEE Trans. Pattern Anal. Mach. Intell. , 44(5): 2567–2581, 2020. Dockhorn, T., Vahdat, A., and Kreis, K. Score-based genera-tive modeling with critically-damped Langevin diffusion. In Intl. Conf. Learn. Repr. (ICLR) , 2021. Du, Y., Durkan, C., Strudel, R., Tenenbaum, J. B., Dieleman, S., Fergus, R., Sohl-Dickstein, J., Doucet, A., and Grath-wohl, W. S. Reduce, reuse, recycle: Compositional gen-eration with energy-based diffusion models and MCMC. In Intl. Conf. on Mach. Learn. (ICML) , pp. 8489–8510. PMLR, 2023. Elata, N., Chung, H., Ye, J. C., Michaeli, T., and Elad, M. InvFussion: Bridging supervised and zero-shot diffusion for inverse problems. Advances in Neural Inf. Process. Syst. (NIPS) , 2025. Elfwing, S., Uchibe, E., and Doya, K. Sigmoid-weighted linear units for neural network function approximation in reinforcement learning. Neural Netw. , 107:3–11, 2018. Feng, B. T., Smith, J., Rubinstein, M., Chang, H., Bouman, K. L., and Freeman, W. T. Score-based diffusion models as principled priors for inverse imaging. In Proceedings of the IEEE/CVF International Conference on Computer Vision , pp. 10520–10531, 2023. Gerdes, M., Welling, M., and Cheng, M. C. GUD: Generation with unified diffusion. arXiv preprint arXiv:2410.02667 , 2024. Guth, F., Kadkhodaie, Z., and Simoncelli, E. P. Learning normalized image densities via dual score matching. Ad-vances in Neural Inf. Process. Syst. (NIPS) , 2025. He, K., Zhang, X., Ren, S., and Sun, J. Deep residual learn-ing for image recognition. 2016 ieee conf. In Proceedings of the IEEE/CVF Int. Conf. Comput. Vis. Pattern Recogn. (CVPR) , pp. 770–778, 2015. Heusel, M., Ramsauer, H., Unterthiner, T., Nessler, B., and Hochreiter, S. GANs trained by a two time-scale update rule converge to a local Nash equilibrium. Advances in Neural Inf. Process. Syst. (NIPS) , 30, 2017. Ho, J., Jain, A., and Abbeel, P. Denoising diffusion prob-abilistic models. Advances in Neural Inf. Process. Syst. (NIPS) , 33:6840–6851, 2020. Hoogeboom, E. and Salimans, T. Blurring diffusion models. In Intl. Conf. Learn. Repr. (ICLR) , 2023. Hu, Y., Peng, A., Gan, W., Milanfar, P., Delbracio, M., and Kamilov, U. S. Stochastic deep restoration priors for imaging inverse problems. In Intl. Conf. on Mach. Learn. (ICML) , 2025. Kadkhodaie, Z. and Simoncelli, E. Stochastic solutions for linear inverse problems using the prior implicit in a denoiser. Advances in Neural Inf. Process. Syst. (NIPS) ,34:13242–13254, 2021. Karras, T., Aittala, M., Aila, T., and Laine, S. Elucidating the design space of diffusion-based generative models. 
+
+Advances in Neural Inf. Process. Syst. (NIPS) , 35:26565– 26577, 2022. Karras, T., Aittala, M., Lehtinen, J., Hellsten, J., Aila, T., and Laine, S. Analyzing and improving the train-ing dynamics of diffusion models. In Proceedings of the IEEE/CVF Int. Conf. Comput. Vis. Pattern Recogn. (CVPR) , pp. 24174–24184, 2024. Kawar, B., Elad, M., Ermon, S., and Song, J. Denoising diffusion restoration models. Advances in Neural Inf. Process. Syst. (NIPS) , 35:23593–23606, 2022. LeCun, Y., Cortes, C., and Burges, C. MNIST hand-written digit database. ATT Labs [Online]. Available: http://yann.lecun.com/exdb/mnist , 2, 2010. Liu, G.-H., Vahdat, A., Huang, D.-A., Theodorou, E., Nie, W., and Anandkumar, A. I2SB: Image-to-image Schr ¨odinger bridge. In Intl. Conf. on Mach. Learn. (ICML) , pp. 22042–22062. PMLR, 2023. 10 Learning Normalized Energy Models for Linear Inverse Problems 
+
+Liu, Z., Luo, P., Wang, X., and Tang, X. Deep learning face attributes in the wild. In Proceedings of the IEEE/CVF Int. Conf. Comput. Vis. (ICCV) , December 2015. Mardani, M., Song, J., Kautz, J., and Vahdat, A. A varia-tional perspective on solving inverse problems with diffu-sion models. Intl. Conf. Learn. Repr. (ICLR) , 2024. Miyasawa, K. et al. An empirical Bayes estimator of the mean of a normal population. Bull. Inst. Internat. Statist ,38(181-188):1–2, 1961. Negrel, H., Coeurdoux, F., Albergo, M. S., and Vanden-Eijnden, E. Multitask learning with stochastic inter-polants. In Advances in Neural Inf. Process. Syst. (NIPS) ,2025. Pavliotis, G. A. Stochastic Processes and Applications: Diffusion Processes, the Fokker-Planck and Langevin Equations . Springer, 2014. Plainer, M., Wu, H., Klein, L., G¨ unnemann, S., and No´ e, F. Consistent sampling and simulation: Molecular dynamics with energy-based diffusion models. Advances in Neural Inf. Process. Syst. (NIPS) , 2025. Raphan, M. and Simoncelli, E. P. Least squares estimation without priors or supervision. Neural Comp. , 23(2):374– 420, 2011. Robbins, H. E. An empirical Bayes approach to statistics. In Proc. Third Berkeley Symp. Math. Statist. Prob. , pp. 388–394. Springer, 1956. Roberts, G. O. and Tweedie, R. L. Exponential convergence of Langevin distributions and their discrete approxima-tions. Bernoulli , 2:341–363, 1996. Romano, Y., Elad, M., and Milanfar, P. The little engine that could: Regularization by denoising (RED). SIAM J. Imag. Sciences , 10(4):1804–1844, 2017. Russakovsky, O., Deng, J., Su, H., Krause, J., Satheesh, S., Ma, S., Huang, Z., Karpathy, A., Khosla, A., Bern-stein, M., et al. Imagenet large scale visual recognition challenge. Int. J. Comp. Vision , 115:211–252, 2015. Saharia, C., Chan, W., Chang, H., Lee, C., Ho, J., Salimans, T., Fleet, D., and Norouzi, M. Palette: Image-to-image diffusion models. In ACM SIGGRAPH , pp. 1–10, 2022. Sahoo, S., Gokaslan, A., De Sa, C. M., and Kuleshov, V. Diffusion models with learned adaptive noise. Advances in Neural Inf. Process. Syst. (NIPS) , 37:105730–105779, 2024. Singhal, R., Goldstein, M., and Ranganath, R. Where to diffuse, how to diffuse, and how to get back: Automated learning for multivariate diffusions. In Intl. Conf. Learn. Repr. (ICLR) , 2023. Sohl-Dickstein, J., Weiss, E., Maheswaranathan, N., and Ganguli, S. Deep unsupervised learning using nonequi-librium thermodynamics. In Intl. Conf. on Mach. Learn. (ICML) , 2015. Song, J., Vahdat, A., Mardani, M., and Kautz, J. Pseudoinverse-guided diffusion models for inverse prob-lems. In Intl. Conf. Learn. Repr. (ICLR) , 2022. Song, Y. and Ermon, S. Generative modeling by estimating gradients of the data distribution. Advances in neural information processing systems , 32, 2019. Song, Y., Garg, S., Shi, J., and Ermon, S. Sliced score matching: A scalable approach to density and score es-timation. In Uncertainty in artificial intelligence , pp. 574–584. PMLR, 2020. Song, Y., Durkan, C., Murray, I., and Ermon, S. Maxi-mum likelihood training of score-based diffusion models. 
+
+Advances in Neural Inf. Process. Syst. (NIPS) , 34:1415– 1428, 2021a. Song, Y., Sohl-Dickstein, J., Kingma, D. P., Kumar, A., Er-mon, S., and Poole, B. Score-based generative modeling through stochastic differential equations. In Intl. Conf. Learn. Repr. (ICLR) , 2021b. Terris, M., Hurault, S., Song, M., and Tachella, J. Recon-struct anything model: a lightweight foundation model for computational imaging. Intl. Conf. Learn. Repr. (ICLR) ,2026. Thornton, J., B ´ethune, L., Zhang, R., Bradley, A., Nakkiran, P., and Zhai, S. Composition and control with distilled energy diffusion models and sequential monte carlo. In 
+
+Int. Conf. on Artif. Intell. and Stat. , 2025. Vincent, P. A connection between score matching and de-noising autoencoders. Neural computation , 23(7):1661– 1674, 2011. Wu, L., Trippe, B., Naesseth, C., Blei, D., and Cunning-ham, J. P. Practical and asymptotically exact conditional sampling in diffusion models. Advances in Neural Inf. Process. Syst. (NIPS) , 2023. Yu, H., Klami, A., Hyvarinen, A., Korba, A., and Chehab, O. Density ratio estimation with conditional probability paths. In Intl. Conf. on Mach. Learn. (ICML) , 2025. Zhang, B., Chu, W., Berner, J., Meng, C., Anandkumar, A., and Song, Y. Improving diffusion inverse problem solving with decoupled noise annealing. In Proceedings of the IEEE/CVF Int. Conf. Comput. Vis. Pattern Recogn. (CVPR) , pp. 20895–20905, 2025a. 11 Learning Normalized Energy Models for Linear Inverse Problems 
+
+Zhang, L.-Q., Kadkhodaie, Z., Simoncelli, E. P., and Brainard, D. H. Generalized compressed sensing for image reconstruction with diffusion probabilistic models. 
+
+Trans. Mach. Learn. Res. , 2025b. Zhang, R., Isola, P., Efros, A. A., Shechtman, E., and Wang, O. The unreasonable effectiveness of deep features as a perceptual metric. In Proceedings of the IEEE/CVF Int. Conf. Comput. Vis. (ICCV) , pp. 586–595, 2018. Zhu, Y., Zhang, K., Liang, J., Cao, J., Wen, B., Timo-fte, R., and Van Gool, L. Denoising diffusion models for plug-and-play image restoration. In Proceedings of the IEEE/CVF Int. Conf. Comput. Vis. Pattern Recogn. (CVPR) , pp. 1219–1229, 2023. Zilberstein, N., Mardani, M., and Segarra, S. Repulsive latent score distillation for solving inverse problems. In 
+
+Intl. Conf. Learn. Repr. (ICLR) , 2025. 12 Learning Normalized Energy Models for Linear Inverse Problems 
+
+Appendices 
+
+A Dual-score matching for anisotropic noise 13 
+
+A.1 Algorithms . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 15 
+
+B Energy-guided sampling as a Bregman mirror descent 17 C Implementation 17 
+
+C.1 Architecture and training hyperparameters . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 17 C.2 Distribution covariances used for training . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 19 C.3 Comparison with previous energy-based models . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 19 C.4 Details of baselines . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 20 
+
+D Additional experiments 21 
+
+D.1 Additional inverse problems . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 21 D.1.1 In-distribution covariances . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 21 D.1.2 Out-of-distribution covariances . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 21 D.1.3 Large-scale experiments . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 22 D.2 Comparison between dual and single score matching . . . . . . . . . . . . . . . . . . . . . . . . . . . . 23 D.3 Analysis of the posterior distribution . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 24 D.4 Recovering the Gumbel distribution for the isotropic case . . . . . . . . . . . . . . . . . . . . . . . . . . 26 D.5 Validation of the normalization constant in synthethic experiment . . . . . . . . . . . . . . . . . . . . . . 27 D.6 Reconstructed images . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 29 
+
+A. Dual-score matching for anisotropic noise 
+
+We expand on the dual-score matching formulation for anisotropic noise introduced in Section 3.2. Recall that we want to learn a covariance-dependent energy function, Uθ (y, Σ) = − log p(y|Σ), to approximate the negative log-likelihood (NLL) of the noisy image distribution, for a family of covariance matrices Σ. We model this energy as follows 
+
+Uθ (y, Σ) = − log p(y|Σ) = − log 
+
+Z 
+
+p(x)p(y|x, Σ)d x
+
+
+
+(17) To learn this model, we use dual score matching, which requires computing the gradients w.r.t. y and Σ.
+
+Data score. We can use the Miyasawa-Tweedie identity (Miyasawa et al., 1961; Raphan & Simoncelli, 2011) given by 
+
+∇yUθ (y, Σ) = Ex
+
+Σ−1(y − x)|y. (18) We define the anisotropic denoising score matching loss as 
+
+˜ℓA−DSM = Ex,y
+
+∥∇ yUθ (y, Σ) − Σ−1(y − x)∥22
+
+ (19) To have a scale-invariant loss, we reweight by Σ 12 :
+
+ℓA−DSM = E
+
+h
+
+∥Σ 12 ∇yUθ (y, Σ) − Σ− 12 (y − x)∥2i
+
+. (20) 13 Learning Normalized Energy Models for Linear Inverse Problems 
+
+Covariance score. To obtain this second score, we differentiate the energy in (17) w.r.t. Σ. Given that p(y|x, Σ) = 
+
+e− 12 (y−x)⊤Σ−1(y−x)− d   
+
+> 2log(2 π)−12log det( Σ)
+
+, we obtain 
+
+∇ΣUθ (y, Σ) = Ex[−∇ Σ log p(y|x, Σ)|y, Σ] (21) 
+
+= Ex
+
+
+
+−∇ Σ
+
+
+
+− 12 (y − x)⊤Σ−1(y − x) − d
+
+2 log(2 π) − 12 log det( Σ)
+
+
+
+y, Σ
+
+
+
+.
+
+The two gradient terms can be simplified as follows: 
+
+∇Σ
+
+
+
+− 12 (y − x)⊤Σ−1(y − x)
+
+
+
+= 12 Σ−1(y − x)( y − x)⊤Σ−1 (22) 
+
+∇Σ
+
+
+
+− 12 log det Σ
+
+
+
+= − 12 Σ−1. (23) Substituting (22) and (23) into (21) gives 
+
+∇ΣUθ (y, Σ) = Ex
+
+ 12 Σ−1 − 12 Σ−1(y − x)( y − x)⊤Σ−1 y, Σ
+
+
+
+. (24) Finally, we define the anisotropic covariance score matching loss as 
+
+˜ℓA−CSM = Ex,y
+
+"
+
+∇ΣUθ (y, Σ) −
+
+ 12 Σ−1 − 12 Σ−1(y − x)( y − x)⊤Σ−1
+
+ 2
+
+> F
+
+#
+
+, (25) Similarly to the data score, we weight the loss by Σ 12 on both sides to be scale-invariant: 
+
+ℓA−CSM = Ex,y,Σ
+
+h
+
+Σ 12 ∇ΣUθ (y, Σ)Σ 12 − 12 I + 12 Σ− 12 (y − x)( y − x)⊤Σ− 12 22
+
+i
+
+. (26) 
+
+Final loss. Now that we have the dual-score matching loss, we define an overall objective by integrating over all possible covariance matrices Σ. Directly extending the combined loss from the paper yields 
+
+ℓ(θ, Σ) = EΣ[k1ℓA−DSM (θ, Σ) + k2ℓA−CSM (θ, Σ)] (27) where k1, k 2 are constants that normalize each term with respect to the ambient dimension d. In particular, we consider 
+
+k1 = 1 /d and k2 = 1 /d 2:
+
+ℓ(θ, Σ) = EΣ
+
+ 1
+
+d ℓA−DSM (θ, Σ) + 1
+
+d2 ℓA−CSM (θ, Σ)
+
+
+
+(28) While this loss is appealing, it is impractical due to the size of the covariance. As mentioned in Section 3.2, we consider a diagonal matrix instead. 
+
+Diagonal Σ with independent parameters. We consider diagonal matrices where Σ = diag( Φ) with Φ =[Φ 1, . . . , Φd]⊤. Each parameter is independent with prior p(Φ) = Qdi=1 p(Φ i), where p(Φ i) ∝ Φ−1 
+
+> i
+
+for Φi ∈ [Φ min , Φmax ].To compute the gradient with respect to Φ, we utilize the chain rule. Note that ∂ vec( Σ) 
+
+> ∂Φi
+
+is a vector of length d2 with a 1 at the position corresponding to the i-th diagonal element Σii , and 0 elsewhere. For a generic function Uθ (y, Σ), the gradient component i is: 
+
+[∇ΦUθ (y, Σ(Φ))] i = vec( ∇ΣUθ (y, Σ)) ⊤ · ∂ vec( Σ)
+
+∂Φi
+
+(29) 
+
+= [ ∇ΣUθ (y, Σ)] ii (30) Specifically, for the log-determinant term in (21), the gradient is: 
+
+
+
+∇Φ
+
+
+
+− 12 log det Σ
+
+ 
+
+> i
+
+= vec 
+
+
+
+− 12 Σ−1
+
+⊤
+
+· ∂ vec( Σ)
+
+∂Φi
+
+(31) 
+
+= − 12 (Σ−1)ii = − 12Φ i
+
+(32) 14 Learning Normalized Energy Models for Linear Inverse Problems 
+
+Thus, in vector form, we obtain the simplified result: 
+
+∇Φ
+
+
+
+− 12 log det Σ
+
+
+
+= − 12 Φ−1 (33) For the quadratic term, we have the following (assuming z = ( y − x))
+
+∇Φ
+
+
+
+− 12 (y − x)⊤Σ−1(y − x)
+
+
+
+= vec 
+
+ 12 Σ−1zz ⊤Σ−1
+
+
+
+· ∂ vec( Σ)
+
+∂Φ , (34) 
+
+= 12 vec  (Φ−1 ◦ z)( Φ−1 ◦ z)⊤ · ∂ vec( Σ)
+
+∂Φ ,
+
+where ◦ is the element-wise product. The i-th element is 
+
+
+
+∇Φ
+
+
+
+− 12 (y − x)⊤Σ−1(y − x)
+
+ 
+
+> i
+
+=
+
+ 12 vec  (Φ−1 ◦ z)( Φ−1 ◦ z)⊤
+
+> ii
+
+. (35) Combining both (35) and (33), we get 
+
+∇ΦUθ (y, Σ(Φ)) = Ex
+
+ 12 Φ−1 − 12 (Φ−1 ◦ z)2 y, Σ(Φ)
+
+
+
+. (36) The training algorithm is described in Alg. 1. Notice we are using λ = d− 12 in (28) , which corresponds to the loss in the main paper. 
+
+A.1. Algorithms Algorithm 1 Training 
+
+repeat 
+
+x ∼ p(x) (This is the dataset given beforehand) 
+
+Φ ∼ p(Φ)
+
+v ∼ N (0 , I)
+
+y = x + Σ(Φ)1/2v
+
+Compute ℓA−DSM (θ, Σ(Φ)) = 1
+
+> N
+
+P
+
+> x,y
+
+∥∇ yUθ (y, Σ(Φ)) − Φ−1 ◦ (y − x)∥2
+
+> Φ
+> d
+
+Compute ℓA−CSM (θ, Σ(Φ)) = 1
+
+> N
+
+P 
+
+> x,y
+
+∇ΦUθ (y, Σ(Φ)) −   12 Φ−1 − 12 (Φ−1 ◦ (y − x)) 2 Φ2
+
+> d2
+
+Combine ℓ(θ) = ℓA−DSM (θ, Σ(Φ)) + ℓA−CSM (θ, Σ(Φ)) 
+
+Perform one gradient descent step on ℓ(θ) w.r.t. θ
+
+until Convergence 15 Learning Normalized Energy Models for Linear Inverse Problems 
+
+Algorithm 2 Predictor–Corrector Sampling 
+
+Require: Noise schedule {Σ0, . . . , ΣT }, number of corrector steps nsteps , energy model Uθ , measurement y, binary matrix with the structure of the degradation Σid = clamp (H−1, 0, 1) , r, temperature η
+
+1: Initialize xT ← y
+
+2: for c = T − 1 to 0 do 
+
+3: // PREDICTOR STEP .
+
+4: Compute score gradient gc = −∇ xc Uθ (xc, Σc)
+
+5: if Schedule = Adaptive then 
+
+6: Compute covariance gradients gΣc = −∇ ΣUθ (xc, 0, Σc)
+
+7: Covariance gradient descent + PSD constraint: 
+
+Σc+1 ← max( Σc − ηΣ Σ ◦ gΣ ◦ Σ, ε I)
+
+8: Define ∆Σ = Σc ◦ gΣc ◦ Σc
+
+9: else if Schedule = Fixed then 
+
+10: ∆Σ = Σc − Σc+1 
+
+11: end if 
+
+12: Sample noise z ∼ N (0 , I)
+
+xc+1 ,0 ← xc + ∆ Σ ◦ g + ∆ Σ1/2 ◦ z
+
+13: // CORRECTOR STEP .
+
+14: for s = 0 to nsteps do 
+
+15: Compute score gradient gc+1 ,s = −∇ xc+1 ,s Uθ (xc+1 ,s , Σc+1 )
+
+16: Sample noise z ∼ N (0 , I)
+
+17: if Domain = pixel then 
+
+18: Compute step size ϵ ←
+
+ r·∥ Σid ◦z∥∥Σid ◦g∥
+
+2
+
+· 2
+
+19: Construct element-wise step size Σϵ = Σid ◦ ϵ
+
+xc+1 ,s +1 ← xc+1 ,s + Σϵ ◦ gc+1 ,s + √2 T Σ1/2 
+
+> ϵ
+
+◦ z
+
+20: else if Domain = frequency then 
+
+21: Compute step size ϵ ←
+
+ r·∥ z∥∥g∥
+
+2
+
+· 2
+
+xc+1 ,s +1 ← xc+1 ,s + ϵ(gc+1 ,s + ∇xt log p(xT = y|xc+1 ,s )) + √2 T ϵ z
+
+22: end if 
+
+23: if MALA then 
+
+24: Compute Metropolis–Hastings acceptance probability α = min 
+
+
+
+1, exp 
+
+ −Uθ (x⋆,Σc+1 )
+
+ q(xc+1 ,s |x⋆)exp 
+
+ −Uθ (xc+1 ,s ,Σc+1 )
+
+ q(x⋆|xc+1 ,s )
+
+
+
+25: Sample u ∼ U (0 , 1) and accept/reject 
+
+26: 
+
+xc+1 ,s +1 ←
+
+(
+
+x⋆, u < α 
+
+xc+1 ,s , otherwise 
+
+27: end if 
+
+28: end for 
+
+29: end for 
+
+Return x0,n steps 
+
+16 Learning Normalized Energy Models for Linear Inverse Problems 
+
+B. Energy-guided sampling as a Bregman mirror descent 
+
+While the gradient ∇ΣUθ (y, Σ) corresponds to the steepest descent with respect to the Euclidean norm, it is more natural here to consider the steepest descent with respect to the Bregman divergence generated by the negative log determinant: 
+
+D(Σ ∥ Σ′) = tr (Σ′− 1Σ) − log det( Σ′− 1Σ) − d. (37) Note that this Bregman divergence corresponds to twice the KL divergence between two zero-mean Gaussian distributions with covariance Σ and Σ′. For a stepsize parameter γ > 0, a Bregman mirror descent step computes 
+
+argmin 
+
+> Σ′
+
+Uθ (y, Σ′) + 1
+
+γ D(Σ′ ∥ Σ) = ( Σ−1 + γ∇ΣUθ (y, Σ)) −1 (38) 
+
+= Σ − γΣ∇ΣUθ (y, Σ)Σ + o(γ), (39) where the last step is a first-order Taylor approximation for small stepsizes γ → 0. This leads to the update 
+
+δΣ = Σ∇ΣU (y, Σ)Σ. (40) 
+
+C. Implementation 
+
+C.1. Architecture and training hyperparameters 
+
+Our architecture is a modification of the SongNet NCSNPP network (Song et al., 2021b) implemented in Karras et al. (2022). We use the same hyperparameters as the original implementation, which are reported in Table 3; the only modification is the noise embedding, which we describe below. We also describe in Table 4 the hyperparameters of the training. The MNIST classifier used in Figure 6 is a CNN with 3 layers and ReLU activation functions. 
+
+Noise Embedding Modulation. Given the diagonal noise of the covariance diag (Σt), we first compute embeddings: 
+
+espatial ← fspatial (diag (Σt)) ∈ RB×cemb ×H×W , (41) 
+
+efrequency ← ffrequency (diag (Σt)) ∈ RB×cemb ×1×1, (42) where fspatial (.) and ffrequency (Σt) are two residual architectures (ResNet) (He et al., 2015), consisting of 3 × 3 convolutions paired with Group Normalization and SiLU activations, and a residual connection. Given that the main architecture (a UNet) performs down and up-sampling operations both in the channel and in the spatial domain, we need to accommodate the dimensions of the embedding network to each layer ℓ. For the channel dimension, we use 1 × 1 convolutional layers as follows: 
+
+eℓ, spatial ← Conv 1×1(espatial ) ∈ RB×cℓ×H×W (43) 
+
+eℓ, frequency ← Conv 1×1(efrequency ) ∈ RB×cℓ×1×1 (44) For the spatial dimensions, we use the following operations 
+
+eℓ, spatial ← Interpolate (eℓ, spatial ) ∈ RB×cℓ×Hℓ×Wℓ (45) Given the embedding vector for each layer, we apply a multiplicative conditioning mechanism, given by 
+
+xℓ = SiLU (GroupNorm (xℓ) ⊙ (1 + eℓ, spatial/frequency )) (46) where GroupNorm (.) is the group normalization, with a number of channels in each group of min(32 , c ℓ/4) .17 Learning Normalized Energy Models for Linear Inverse Problems  
+
+> Table 3. SongUNet Architecture Summary
+
+Variable/Module Configuration 
+
+Network Parameters 
+
+Image Resolution 64 × 64 Input/Output Channels 3Model Channels 128 Channel Multipliers [1, 2, 2, 2] Embedding Channels 512 (128 × 4) Number of Blocks per Resolution 4Attention Resolutions [16] Dropout 0.10 
+
+Embedding Configuration 
+
+Embedding Type Positional Noise Channel Multiplier 2Noise Embedding Channels 256 (128 × 2) Anisotropic Noise True 
+
+Anisotropic Gamma Embedding Network 
+
+Fourier Dimension 256 Base Channels 128 Residual Blocks 4Output Channels 512 Time Range [10 −9, 10 3]
+
+Encoder Architecture 
+
+Resolution Levels 64, 32, 16, 8 Channels per Level 128, 256, 256, 256 Encoder Type Standard 
+
+Decoder Architecture 
+
+Decoder Type Standard Skip Connections Yes Adaptive Scaling False Resampling Filter [1, 3, 3, 1] 
+
+UNet Block Configuration 
+
+Attention Heads 1 (at 16 ×16) Skip Scale √0.5
+
+Normalization GroupNorm ( ϵ = 10 −6) 
+
+> Table 4. Training hyperparameters for CelebA and ImageNet64
+
+Hyperparameter Value 
+
+Number of GPUs 6Dataset CelebA/ImageNet64 Training batch size 128 
+
+σ2 
+
+> min
+
+1 × 10 −9
+
+σ2 
+
+> max
+
+1 × 10 3
+
+Learning rate 2 × 10 −4
+
+Total steps 400,000 LR decay 100,000 steps Warmup steps 1,000 Grad. clipping Norm = 20  
+
+> Table 5. Training hyperparameters for AFHQ
+
+Hyperparameter Value 
+
+Number of GPUs 8Dataset AFHQ ( 192 × 192 )Training batch size 64 
+
+σ2 
+
+> min
+
+1 × 10 −9
+
+σ2 
+
+> max
+
+1 × 10 3
+
+Learning rate 2 × 10 −4
+
+Total steps 100,000 Warmup steps 1,000 Grad. clipping Norm = 20 18 Learning Normalized Energy Models for Linear Inverse Problems 
+
+C.2. Distribution covariances used for training 
+
+As described in Section 3.3, we used four types of covariances: Gaussian deblurring, shown in Fig. 8a, super-resolution (a combination of Gaussian kernel with a downsampling operation), and box and half-mask inpainting, illustrated in Fig. 8b. The family of autoregressive patch-based covariances used in the MNIST experiments in Section 4.2.1 are shown in Fig. 9. Gaussian kernel of size 8 and = 0.8 FFT of Gaussian kernel 
+
+(a) Gaussian Kernel Half mask Box mask covariance (b) Box and half-mask inpainting 
+
+Figure 8. Examples of particular Σt for different kernels and masks. 0 5 10 15 20 25                          
+
+> X
+> 0
+> 5
+> 10
+> 15
+> 20
+> 25
+> Y
+> num_boxes=1
+> box_size=28x28
+> 0510 15 20 25
+> X
+> 0
+> 5
+> 10
+> 15
+> 20
+> 25
+> Y
+> num_boxes=4
+> box_size=14x14
+> 0510 15 20 25
+> X
+> 0
+> 5
+> 10
+> 15
+> 20
+> 25
+> Y
+> num_boxes=16
+> box_size=7x7
+> 0510 15 20 25
+> X
+> 0
+> 5
+> 10
+> 15
+> 20
+> 25
+> Y
+> num_boxes=49
+> box_size=4x4
+> 0510 15 20 25
+> X
+> 0
+> 5
+> 10
+> 15
+> 20
+> 25
+> Y
+> num_boxes=196
+> box_size=2x2
+> 0510 15 20 25
+> X
+> 0
+> 5
+> 10
+> 15
+> 20
+> 25
+> Y
+> num_boxes=784
+> box_size=1x1
+> 0.0
+> 0.2
+> 0.4
+> 0.6
+> 0.8
+> 1.0
+> Noise
+> 0.0
+> 0.2
+> 0.4
+> 0.6
+> 0.8
+> 1.0
+> Noise
+> 0.0
+> 0.2
+> 0.4
+> 0.6
+> 0.8
+> 1.0
+> Noise
+> 0.0
+> 0.2
+> 0.4
+> 0.6
+> 0.8
+> 1.0
+> Noise
+> 0.0
+> 0.2
+> 0.4
+> 0.6
+> 0.8
+> 1.0
+> Noise
+> 0.0
+> 0.2
+> 0.4
+> 0.6
+> 0.8
+> 1.0
+> Noise
+
+Figure 9. Examples of autoregressive patch-based covariances Σt used for training. We first sample the number of boxes, and then the variance of each box. 
+
+C.3. Comparison with previous energy-based models 
+
+Our method is more computationally intensive to train than standard score-based models. This overhead primarily comes from double backpropagation, which is inherent to energy-based formulations and is widely acknowledged in prior work (Thornton et al., 2025; Balcerak et al., 2025; Ai et al., 2026; Du et al., 2023). In this sense, the increased cost is not specific to our method, but rather a known trade-off when learning energy models. That said, we further contextualize below that our model has a computational cost comparable to prior work when accounting for model size and resolution. 1. We use the Song architecture from EDM ( ≈ 70 M parameters), which is substantially larger than the network used in the original DSM paper (Guth et al., 2025) ( ≈ 13 M parameters). The larger architecture naturally increases training time, while also yielding improved performance. For reference, EDM training at 64 × 64 takes approximately 4 days on 8 V100 GPUs ( ≈ 4 A100s) with a batch size of 256 (see https://github.com/NVlabs/edm ). Scaling to 
+
+192 × 192 increases the pixel count by 9×, which significantly increases the computational cost, either in terms of GPU count or total training time. 19 Learning Normalized Energy Models for Linear Inverse Problems 
+
+2. This computational challenge is shared by energy-based models more broadly: • Thornton (Thornton et al., 2025) used 8 A100 GPUs at 64 × 64 resolution (without the dual objective). • Balcerak (Balcerak et al., 2025) trained at 64 ×64 on CelebA with 4 A100s and a batch size of 32; neither (Thornton et al., 2025) nor (Balcerak et al., 2025) report total training time. • Boffi (Ai et al., 2026) required approximately 8 days for the flow matching teacher and 6 days for the shortcut model on ImageNet 64 × 64 .• Du (Du et al., 2023) trained at 128 × 128 using TPU clusters, making direct comparison difficult. 
+
+C.4. Details of baselines RED-Diff. It is a variational framework that frames the sampling problem as stochastic optimization by minimizing the KL divergence 
+
+q(x0|y) = argmin 
+
+> q(x0|y)
+
+KL( q(x0|y)|| p(x0|y)) . (47) When q(x0|y) ∼ N (μ, σ 2I), the gradient update boils down to 
+
+∇μ = Et∼U [0 ,T ]
+
+∇μ∥y − Hμ∥2 + Eϵ∼N (0 ,I )[λt(ϵθ (xt, σ t) − ϵ)] 
+
+where ϵθ (xt, σ t) = −σtsθ (xt, σ t) and xt = αtμ + σtϵ; in the signal domain, we have (ϵθ (xt, σ t) − ϵ) ∝ (μ − E[x0|xt]) .In this formulation, the full trajectory acts as multi-scale regularizer, imposing coarse-to-fine details. We adapted the implementation from the original paper (Mardani et al., 2024) to our code. We follow the same weighting scheme for inpainting, and we use λ = 0 .25 and lr = 0 .1, while for Gaussina deblurring we use λ = 2 . As mentioned in Section 3.4, we train from scratch an isotropic version of the proposed network. 
+
+DPS. We adapted the implementation of the original paper (Chung et al., 2023) to our code. We tried using the same weight for the gradient of the likelihood, but for our implementation and a box size of 45, the sampler was diverging. Hence, we perform a grid search to get the best performance, with 0.05 the best one for inpainting, while 0.01 for deblurring. For all the experiments, we match the number of steps than our energy-guided sampler to have a fair comparison. We use the same base network as RED-Diff. 
+
+DAPS. We also implemented DAPS (Zhang et al., 2025a), which alternates between ODE-based denoising and Langevin dynamics for measurement consistency at each noise level. At each step, a short ODE flow (5 steps) estimates the clean image ˆx0, followed by Langevin sampling that minimizes both the measurement residual and a prior term anchored to ˆx0.We use 100 Langevin steps per noise level with step size η = 2 × 10 −6, and 250 (for inpainting) and 200 (for deblurring) number of ODE runs. We use the same base network as RED-Diff. 
+
+Palette. We follow the formulation from the original paper (Saharia et al., 2022). Hence, we modified the Song architecture by stacking the noisy image xt with the measurement y, and using the same base architecture that we used for the guidance methods. 
+
+Ours. We describe the setup for our method in Table 6.                   
+
+> Table 6. Inpainting - Hyperparameters for the Predictor-Corrector Sampler with fixed corrector.
+> Parameter Value Description
+> σbegin 25 Initial (maximum) noise standard deviation inside the mask.
+> σend 10 −3Final (minimum) noise standard deviation inside the mask.
+> T600 Number of discretized noise levels.
+> σdist Geometric Progression type of the noise schedule.
+> Nsteps 1Number of corrector steps per noise level.
+> r0.15 step-size for the Langevin update.
+> ζ(temp) 0.9 Temperature scaling for score-based sampling.
+
+20 Learning Normalized Energy Models for Linear Inverse Problems 
+
+Computational cost for inference. We expand on the running times for Gaussian deblurring across all methods, consider-ing the running time for sampling a batch of 16 images at 64 × 64 :Sampler Time [sec] Computational cost (NFE) Ours 139 (Np) NFEs + ( Np) grad w.r.t. input for energy DPS 167 N NFEs + N grad w.r.t. denoiser RED-Diff 22 N NFEs Importantly, the inference time of our method is comparable to DPS and standard diffusion samplers, so the computational overhead is concentrated entirely in training and does not affect sampling time. In contrast to these methods, our energy formualtion learns a full posterior density. We believe this makes the overhead modest relative to the added capabilities our approach unlocks, such as blind estimation and normalization constant computation, which are not possible with DPS or RED-Diff. For sampling, the additional ∇y Uθ gradient is similar in cost to DPS’s backpropagation and architectural overhead is minimal. Thus, wall-clock time is approximately equal at the same NFEs. For AFHQ 192 × 192 : DPS 55 sec, ours 74 sec. 
+
+D. Additional experiments 
+
+D.1. Additional inverse problems D.1.1. In-distribution covariances 
+
+We include the results for super-resolution ×4 and horizontal half-mask inpainting in Table 7; visual results can be found in Appendix D.6. For super-resolution, we do not use corrector steps; in terms of numerical results, our method outperforms Bayesian approaches by a significant margin, similarly to the deblurring case. As illustrated in Fig. 26, the generated images present some artifacts. We attribute this partly to the known limitations of the frequency-domain conditioning: our frequency-domain degradations are defined with a Fourier transform with periodic boundary conditions, which can cause border effects. For practical use, a more careful implementation with more advanced boundary handling (e.g., a suitable discrete cosine transform) should be preferred. Regarding half-mask inpainting, our method achieves better FID than baselines. However, in contrast to box inpainting, our method have a similar LPIPS than Bayesian baselines.                                 
+
+> Table 7. Experiments on CelebA 64 ×64 : Comparison on super-resolution ×4and half-mask inpainting.
+> Sampler Super-resolution ×4Half-mask Inpainting PSNR ↑LPIPS ↓FID ↓PSNR ↑LPIPS ↓FID ↓
+> DPS (Chung et al., 2023) 15.38 0.09 74.31 13.99 0.11 29.22 RED-Diff (Mardani et al., 2024) 15.22 0.08 64.75 15.65 0.10 34.84
+> Ours 22.41 0.01 93.72 14.00 0.10 28.15
+
+D.1.2. Out-of-distribution covariances 
+
+In this subsection, we illustrate how our method can handle out-of-distribution degradations, i.e., those inverse problems with an associated covariance Σ not used for training. In particular, we consider random inpainting , where we mask out a 70% of pixels, vertical half mask inpainting , with a mask of size of 64 × 30 , and motion deblurring ; for the latter, we considered the kernel from https://github.com/LeviBorodenko/motionblur of size 15 × 15 and intensity 0.3, and σv = 2 × 10 −3; and for scheduling, we use a Gaussian deblurring kernel of size 15 × 15 and intensity 0.8, which serves as an approximation. The results are shown in Table 8 and Table 9. Remarkably, we observe that our models achieves a similar performance than Bayesian methods. 21 Learning Normalized Energy Models for Linear Inverse Problems                                                  
+
+> Table 8. Experiments on CelebA 64 ×64 : Comparison on random inpainting (0.7%) and vertical half-mask inpainting.
+> Sampler Random Inpainting (0.7%) Vertical-half Mask PSNR ↑LPIPS ↓FID ↓PSNR ↑LPIPS ↓FID ↓
+> DPS (Chung et al., 2023) 29.58 0.01 21.83 14.21 0.085 31.54
+> RED-Diff (Mardani et al., 2024) 30.25 0.01 22.20 15.80 0.083 38.78
+> Ours 28.90 0.01 23.54 13.26 0.090 32.22
+> Table 9. Experiments on CelebA 64 ×64 : Comparison on motion deblurring.
+> Sampler PSNR [dB] ↑LPIPS ↓FID ↓DISTS ↓
+> DPS 28.63 0.02 45.65 0.094 RED-Diff 31.00 0.02 44.33 0.085
+> Ours 29.42 0.007 50.6 0.083
+
+D.1.3. Large-scale experiments 
+
+In this subsection, we include experiments on AFHQ-Cat 192 × 192 , demonstrating that our proposed model can be trained on large-scale images. To simplify training, we consider only inpainting with a center-box of sizes s × s, with values from 
+
+s = 20 to s = 50 , and half-mask with sizes s × 64 , for the same values of s.
+
+Comparison with baselines. We compare with DPS for a box inpainting task; the result is shown in Tables 11 and 13.     
+
+> Table 10. Box 30 ×30
+
+Sampler Inpainting (box of 30 × 30 )
+
+PSNR [dB] ↑ LPIPS ↓ FID ↓ DISTS ↓
+
+Ours 33.78 0.005 3.04 0.0095 
+
+DPS 31.91 0.007 3.59 0.0113 RED-Diff 37.58 0.008 4.81 0.0128            
+
+> Table 11. Experiments on CelebA 64 ×64 : Comparison on box inpainting 30 ×30 .
+> Table 12. Box 50 ×50
+
+Sampler Inpainting (box of 30 × 30 )
+
+PSNR [dB] ↑ LPIPS ↓ FID ↓ DISTS ↓
+
+Ours 26.45 0.021 9.43 0.029 
+
+DPS 25.21 0.023 10.71 0.031 RED-Diff 28.22 0.028 13.28 0.037        
+
+> Table 13. Experiments on CelebA 64 ×64 : Comparison on box inpainting 50 ×50 .
+
+Blind experiment. We also consider a blind experiment, following the setup from Section 4.3. In particular, we consider 
+
+σ2 = 10 −4, and σ1, s = {1, 30 }. The result is illustrated in Fig. 11; the value of the estimated σ1 is 0.2. 22 Learning Normalized Energy Models for Linear Inverse Problems Clean Image Noisy Image 
+
+Figure 10. Noisy observation with a box covariance of size 30 × 30 and σ1 = 1 .20 25 30 35 40 45 50       
+
+> Box size s
+> 10.5
+> 11.0
+> 11.5
+> 12.0
+> 12.5
+> 13.0
+> log  p (x) [dB/dim]
+> Dual score matching
+> Ground-truth 020 40 60 80 100
+> 1
+> 2
+> 4
+> 6
+> 8
+> 10
+> log  p (x) [dB/dim]
+> Dual score matching
+> Ground-truth
+
+Figure 11. Blind reconstruction experiment. Log probability log pθ (y|Σs) as a function of box size s and σ1, respectively. The energy model trained with dual score matching correctly identifies the true box size (dashed red for estimated size and solid green vertical lines). 
+
+D.2. Comparison between dual and single score matching Blind experiment. Validating the correctness of the dual score matching is difficult since we do not have access to the the true density. However, we can use some experiments to assess this, like the blind experiment in Section 4.3. In particular, this experiment aims to find the covariance that best explains a given measurement, relying on a proper density across different covariances. While in Section 4.3 we ony compared the dual score matching with the ground truth, here we add the single objective to show that, in this additional case, the estimation fails; this is illustrated in Fig. 12. 
+
+Figure 12. Log probability log pθ (y|Σs) as a function of box size s for s = {5, 14 , 20 } with σ1 = {2, 0.1, 2} respectively. The energy model trained with dual score matching correctly identifies the true box size (dashed red for estimated size and solid green vertical lines), which is not the case for the model trained with single score matching (dashed blue vertical line). 
+
+One-shot conditional MMSE estimator. One advantage of our proposed method is that we can compute E[x|y, Σ] in one shot. We illustrate this for a denoising task with box of size 20 × 20 (the outside does not have noise), where we evaluate the one-shot denoiser for multiple noise level in the box. The ablation is shown in Fig. 13, where we compute the MSE as a function of σ21 , the noise inside the box. In this experiment, we also consider our proposed energy model trained with the single objective (only A-DSM). From this experiment, we observe that the energy-model trained with the dual-objective yields a better model in terms of denoising performance, showcasing that the regularization not only allows learning a normalized density model, but also helps for improving the denoising performance. To complement this experiment, we 23 Learning Normalized Energy Models for Linear Inverse Problems 
+
+illustrate a few visual examples in Fig. 14 using our energy model trained with the dual objective, and for a covariance with box of size 10 × 10 , σ1 = 0 .5 (inside the box) and σ2 = 0 .1 (outside the box). 10 8 10 6 10 4 10 2 10 0 10 2                 
+
+> Noise variance 21
+> 10 8
+> 10 6
+> 10 4
+> 10 2
+> 10 0
+> Denoising MSE
+> Energy-Dual
+> Energy-Single
+> Data variance 10 310 210 110 010 1
+> Noise variance 21
+> 10 8
+> 10 6
+> 10 4
+> 10 2
+> 10 0
+> Denoising MSE
+> Energy-Dual
+> Energy-Single
+> Data variance
+
+Figure 13. MMSE for one-shot denoising in box inpainting ( 10 × 10 ) as a function of the noise in the box. Noisy images MMSE estimator 
+
+Figure 14. MMSE estimator computed by our model, which corresponds to ˆx = E[x|y, Σ].
+
+D.3. Analysis of the posterior distribution CelebA. We include here additional results for the analysis of the posterior distribution described in Section 4.1. We start showing the distribution across multiple (x, y) in Fig. 15, with generated images sorted from high to low probability in Fig. 16. Notice that the behavior is similar to the single case, where our energy model is the one closer the posterior (left figure). 
+
+Figure 15. Histograms of log pθ (ˆ x) and log pθ (ˆ x|y) for inpainting solutions ˆx generated by DPS, RED-Diff, and our energy model for different measurements y associated to different x, along with the ground truths x. Our energy model is well-calibrated with respect to both prior and posterior probabilities. 
+
+24 Learning Normalized Energy Models for Linear Inverse Problems <latexit sha1_base64="y/j2Pdp4MQCcAu1IGBzphF/HEOs=">AAACBHicbVDLSsNAFJ34rPUVddnNYBHqpiQi1WXRjcsK9gFNCJPppB06eTBzI5bQhRt/xY0LRdz6Ee78GydtFtp64MLhnHu59x4/EVyBZX0bK6tr6xubpa3y9s7u3r55cNhRcSopa9NYxLLnE8UEj1gbOAjWSyQjoS9Y1x9f5373nknF4+gOJglzQzKMeMApAS15ZsUR8RAnXubAiAGZ1pyQwMgPsofpqWdWrbo1A14mdkGqqEDLM7+cQUzTkEVABVGqb1sJuBmRwKlg07KTKpYQOiZD1tc0IiFTbjZ7YopPtDLAQSx1RYBn6u+JjIRKTUJfd+YnqkUvF//z+ikEl27GoyQFFtH5oiAVGGKcJ4IHXDIKYqIJoZLrWzEdEUko6NzKOgR78eVl0jmr24164/a82rwq4iihCjpGNWSjC9REN6iF2oiiR/SMXtGb8WS8GO/Gx7x1xShmjtAfGJ8/6vWYSg==</latexit> 
+
+log p✓ (x)
+
+log p✓ (x|y)
+
+<latexit sha1_base64="y/j2Pdp4MQCcAu1IGBzphF/HEOs=">AAACBHicbVDLSsNAFJ34rPUVddnNYBHqpiQi1WXRjcsK9gFNCJPppB06eTBzI5bQhRt/xY0LRdz6Ee78GydtFtp64MLhnHu59x4/EVyBZX0bK6tr6xubpa3y9s7u3r55cNhRcSopa9NYxLLnE8UEj1gbOAjWSyQjoS9Y1x9f5373nknF4+gOJglzQzKMeMApAS15ZsUR8RAnXubAiAGZ1pyQwMgPsofpqWdWrbo1A14mdkGqqEDLM7+cQUzTkEVABVGqb1sJuBmRwKlg07KTKpYQOiZD1tc0IiFTbjZ7YopPtDLAQSx1RYBn6u+JjIRKTUJfd+YnqkUvF//z+ikEl27GoyQFFtH5oiAVGGKcJ4IHXDIKYqIJoZLrWzEdEUko6NzKOgR78eVl0jmr24164/a82rwq4iihCjpGNWSjC9REN6iF2oiiR/SMXtGb8WS8GO/Gx7x1xShmjtAfGJ8/6vWYSg==</latexit> 
+
+log p✓ (x)
+
+<latexit sha1_base64="B4kgeuG2ptqe0k1iuRe9/fnPioI=">AAACD3icbZDLSsNAFIYnXmu9RV26GSxK3ZREpLosunFZwV6gKWUynbRDJxdmTsQS8wZufBU3LhRx69adb+OkjaCtPwx8/Occ5pzfjQRXYFlfxsLi0vLKamGtuL6xubVt7uw2VRhLyho0FKFsu0QxwQPWAA6CtSPJiO8K1nJHl1m9dcuk4mFwA+OIdX0yCLjHKQFt9cwjR4QDHPUSB4YMSFp2fAJD10vu0vsfHKfHPbNkVayJ8DzYOZRQrnrP/HT6IY19FgAVRKmObUXQTYgETgVLi06sWEToiAxYR2NAfKa6yeSeFB9qp4+9UOoXAJ64vycS4is19l3dma2oZmuZ+V+tE4N33k14EMXAAjr9yIsFhhBn4eA+l4yCGGsgVHK9K6ZDIgkFHWFRh2DPnjwPzZOKXa1Ur09LtYs8jgLaRweojGx0hmroCtVRA1H0gJ7QC3o1Ho1n4814n7YuGPnMHvoj4+MbPoidcw==</latexit> 
+
+log p✓ (x|y)
+
+Figure 16. Images sorted from high to low probability (from left-up corner to right-down corner). Images with highest prior probability contains less details than those associated with higer probability. 
+
+ImageNet. We evaluate our model on ImageNet64, first validating that the learned prior aligns with the complexity-probability relationship described in Guth et al. (2025). As illustrated in Fig. 17, images sorted by decreasing probability transition from sparse, low-detail structures to high-complexity textures; the highest-probability samples typically feature single objects on plain backgrounds, while the lowest-probability samples are densely textured. We extend this analysis to samples sorted by the posterior distribution log p(x|y) in Fig. 18. We observe that the highest posterior probability does not necessarily correlate with the best reconstruction or visual quality. Furthermore, the complexity-probability trend observed in the prior persists in the posterior case. 25 Learning Normalized Energy Models for Linear Inverse Problems 
+
+Figure 17. ImageNet posterior samples for a 21 × 21 center inpainting task, sorted by decreasing prior probability. Consistent with previous observations, samples with the highest probability feature uniform backgrounds and minimal detail, whereas lower-probability samples exhibit significantly higher structural complexity and dense detail. 
+
+Figure 18. ImageNet posterior samples (red border) generated by sampling from measurements y generated using a box inpainting mask with a box of size 21 × 21 , and sorted from high to low posterior probability, next to their corresponding ground truth (blue border). 
+
+D.4. Recovering the Gumbel distribution for the isotropic case 
+
+Our model generalizes the energy model of (Guth et al., 2025), which is recovered as a special case by setting Σt = σ2 
+
+> t
+
+I
+
+(isotropic covariance). Under this reduction, the anisotropic score matching objective reduces to the standard dual score matching of [2], and the Gumbel distribution result therefore carries over directly. We include a curve computed over 50k images alongside with some of the images, which can be found in Figs. 19 and 20 26 Learning Normalized Energy Models for Linear Inverse Problems 15 20 25 30 35 40 45       
+
+> log p(x) [dB/dim]
+> 10 4
+> 10 3
+> 10 2
+> 10 1
+> Frequency
+> Data
+> Gumbel fit
+
+Figure 19. Histogram of log probabilities log pθ (x)[ dB /dim ] for 50k in the ImageNet test set. The distribution is well-fit by a Gumbel distribution (red line), but there is a second mode (centered near 38 dB/dim) in contrast to the model in [1]. This additional mode is caused by grayscale images within ImageNet; these samples possess significantly higher probability under the model Uθ compared to standard RGB samples, creating an additional mode. 
+
+Figure 20. Images from the test set of ImageNet 64 × 64 , sorted from low to high probability (left to right and top to down). 
+
+D.5. Validation of the normalization constant in synthethic experiment 
+
+Analogous to the experiments of (Guth et al., 2025), we generate n = 100 ,000 samples from a mixture of two Gaussian distributions, 12 N (0 , σ 21 Id) + 12 N (0 , σ 22 Id) , with σ1 = 1 and σ2 = 4 , in dimension d = 1 ,000 . Each sample receives a random partition of the d dimensions into two equal groups A and B of size d/ 2, with two independent noise levels 
+
+ttop , t bot ∼ UniformLog( tmin , t max ), yielding per-dimension variance Σt,ii = ttop if i ∈ A and Σt,ii = tbot if i ∈ B. The true (normalized) energy is given by 
+
+U (y, Σt) = − log 
+
+> 2
+
+X
+
+> i=1
+
+e− 12 y⊤(σ2    
+
+> iId+Σ t)−1y−12log det
+
+ 2π(σ2 
+
+> iId+Σ t)
+
+ − log 2 
+
+!
+
+. (48) 27 Learning Normalized Energy Models for Linear Inverse Problems 
+
+We parameterize the energy as a mixture of quadratics Uθ (y, t top , t bot ) = − log 
+
+P2 
+
+> i=1
+
+e−atop         
+
+> i(t)r2top −abot
+> i(t)r2bot −bi(t)
+
+
+
+,
+
+where r2top = ∥yA∥2 and r2bot = ∥yB ∥2 are the squared norms over each group, and the functions atop  
+
+> i
+
+, a bot  
+
+> i
+
+, b i are computed by a 5-layer MLP with a hidden dimension of 256 that takes the 2-dimensional schedule embedding [log( ttop +
+
+tmin ), log( tbot + tmin )] as input (reducing to the isotropic case when ttop = tbot ). This network is trained either with single (space) score matching or with dual score matching, both across noise levels ttop , t bot ∈ [tmin , t max ], where the dual loss includes one time-derivative term per noise level. Training is otherwise similar to the isotropic experiment, for 
+
+50 ,000 training steps with a batch size of 512 and an initial learning rate of 0.0001 , over noise levels from tmin = 10 −2 to 
+
+tmax = 10 2. The comparison is illustrated in Fig. 21 0 1 2 3 4 5         
+
+> x/d
+> 0
+> 5
+> 10
+> 15
+> Log probability (dB/dim)
+> 012345
+> x/d
+> 8
+> 6
+> 4
+> 2
+> 0
+> Score (dB/dim)
+> Data
+> Ground truth
+> Single SM
+> Single SM (adjusted)
+> Dual SM
+
+Figure 21. Comparison of single and dual score matching on a 1000 -dimensional Gaussian scale mixture. Left: Dual score matching (red dashed) captures the true energy (blue solid), whereas single score matching (green) fails, even after global normalization. Right: Radial score components. Single score matching learns the score accurately within the data support (blue bar plot) but lacks accuracy outside of this region. 
+
+28 Learning Normalized Energy Models for Linear Inverse Problems 
+
+D.6. Reconstructed images Measurement Ours DPS RED-Diff DAPS Ground-truth 
+
+Figure 22. Examples of inpainting for CelebA. 
+
+29 Learning Normalized Energy Models for Linear Inverse Problems Measurement Ours DPS RED-Diff DAPS Ground-truth 
+
+Figure 23. Examples of inpainting for ImageNet. 
+
+30 Learning Normalized Energy Models for Linear Inverse Problems Measurement Ours DPS RED-Diff DAPS Ground-truth 
+
+Figure 24. Examples of deblurring for CelebA 
+
+31 Learning Normalized Energy Models for Linear Inverse Problems Measurement Ours DPS RED-Diff DAPS Ground-truth 
+
+Figure 25. Examples of deblurring for ImageNet 
+
+32 Learning Normalized Energy Models for Linear Inverse Problems Measurement Ours DPS RED-Diff Ground-truth 
+
+Figure 26. Examples of super-resolution for CelebA 
+
+33 Learning Normalized Energy Models for Linear Inverse Problems Measurement Ours DPS RED-Diff Ground-truth 
+
+Figure 27. Examples of inpainting for AFHQ-cats. 
+
+34 Learning Normalized Energy Models for Linear Inverse Problems Measurement Ours DPS RED-Diff Ground-truth 
+
+Figure 28. Examples of Motion Deblurring. <latexit sha1_base64="mUjpXGHLtH9d6giiSTzm4uWj5Lw=">AAAB63icbVA9SwNBEJ2LXzF+RS1tFoNgFe5SRMtEGwuFCMYEkiPsbfaSJbt7x+6eEI78BRsLRWz9Q3b+G/eSKzTxwcDjvRlm5gUxZ9q47rdTWFvf2Nwqbpd2dvf2D8qHR486ShShbRLxSHUDrClnkrYNM5x2Y0WxCDjtBJPrzO88UaVZJB/MNKa+wCPJQkawyaS75m1zUK64VXcOtEq8nFQgR2tQ/uoPI5IIKg3hWOue58bGT7EyjHA6K/UTTWNMJnhEe5ZKLKj20/mtM3RmlSEKI2VLGjRXf0+kWGg9FYHtFNiM9bKXif95vcSEl37KZJwYKsliUZhwZCKUPY6GTFFi+NQSTBSztyIyxgoTY+Mp2RC85ZdXyWOt6tWr9ftapXGVx1GEEziFc/DgAhpwAy1oA4ExPMMrvDnCeXHenY9Fa8HJZ47hD5zPH1C8jcY=</latexit> 
+
+MALA 
+
+<latexit sha1_base64="Smy3muTHVOdgQBucTvN8rn2/lcU=">AAAB6nicbVA9TwJBEJ3DL8Qv1NJmIzGxIncUaInaWFhg9IAELmRv2YMNe7uX3T0TcuEn2FhojK2/yM5/4wJXKPiSSV7em8nMvDDhTBvX/XYKa+sbm1vF7dLO7t7+QfnwqKVlqgj1ieRSdUKsKWeC+oYZTjuJojgOOW2H45uZ336iSjMpHs0koUGMh4JFjGBjpQf/7qpfrrhVdw60SrycVCBHs1/+6g0kSWMqDOFY667nJibIsDKMcDot9VJNE0zGeEi7lgocUx1k81On6MwqAxRJZUsYNFd/T2Q41noSh7Yzxmakl72Z+J/XTU10GWRMJKmhgiwWRSlHRqLZ32jAFCWGTyzBRDF7KyIjrDAxNp2SDcFbfnmVtGpVr16t39cqjes8jiKcwCmcgwcX0IBbaIIPBIbwDK/w5nDnxXl3PhatBSefOYY/cD5/ANSijYM=</latexit> 
+
+ULA 
+
+<latexit sha1_base64="0O/0V81L1NRugIalh6tEBHuJBG8=">AAAB9HicbVBNS8NAEN34WetX1aOXxSJ4sSQ9VI9FETxWsB/QhrLZTNKlm03c3RRC6O/w4kERr/4Yb/4bt20O2vpg4PHeDDPzvIQzpW3721pb39jc2i7tlHf39g8OK0fHHRWnkkKbxjyWPY8o4ExAWzPNoZdIIJHHoeuNb2d+dwJSsVg86iwBNyKhYAGjRBvJvRMgw+wyTJkP/rBStWv2HHiVOAWpogKtYeVr4Mc0jUBoyolSfcdOtJsTqRnlMC0PUgUJoWMSQt9QQSJQbj4/eorPjeLjIJamhMZz9fdETiKlssgznRHRI7XszcT/vH6qg2s3ZyJJNQi6WBSkHOsYzxLAPpNANc8MIVQycyumIyIJ1SansgnBWX55lXTqNadRazzUq82bIo4SOkVn6AI56Ao10T1qoTai6Ak9o1f0Zk2sF+vd+li0rlnFzAn6A+vzB65okg4=</latexit> 
+
+Energy-guided 
+
+<latexit sha1_base64="DIKi2woyV/W9tHETnXMyyYZhSY0=">AAAB6HicbVA9SwNBEJ3zM8avqKXNYhCswl2KaBm0sUzAfEByhL3NXLJmb+/Y3RPCkV9gY6GIrT/Jzn/jJrlCEx8MPN6bYWZekAiujet+OxubW9s7u4W94v7B4dFx6eS0reNUMWyxWMSqG1CNgktsGW4EdhOFNAoEdoLJ3dzvPKHSPJYPZpqgH9GR5CFn1Fip6Q1KZbfiLkDWiZeTMuRoDEpf/WHM0gilYYJq3fPcxPgZVYYzgbNiP9WYUDahI+xZKmmE2s8Wh87IpVWGJIyVLWnIQv09kdFI62kU2M6ImrFe9ebif14vNeGNn3GZpAYlWy4KU0FMTOZfkyFXyIyYWkKZ4vZWwsZUUWZsNkUbgrf68jppVyterVJrVsv12zyOApzDBVyBB9dQh3toQAsYIDzDK7w5j86L8+58LFs3nHzmDP7A+fwBfY+Mvg==</latexit> 
+
+1 <latexit sha1_base64="Bu+V4isn/sCXtsRKKFaYuZVui+Q=">AAAB6HicbVDLTgJBEOzFF+IL9ehlIjHxRHZJRI9ELx4hkUcCGzI79MLI7OxmZtaEEL7AiweN8eonefNvHGAPClbSSaWqO91dQSK4Nq777eQ2Nre2d/K7hb39g8Oj4vFJS8epYthksYhVJ6AaBZfYNNwI7CQKaRQIbAfju7nffkKleSwfzCRBP6JDyUPOqLFS46pfLLlldwGyTryMlCBDvV/86g1ilkYoDRNU667nJsafUmU4Ezgr9FKNCWVjOsSupZJGqP3p4tAZubDKgISxsiUNWai/J6Y00noSBbYzomakV725+J/XTU1440+5TFKDki0XhakgJibzr8mAK2RGTCyhTHF7K2EjqigzNpuCDcFbfXmdtCplr1quNiql2m0WRx7O4BwuwYNrqME91KEJDBCe4RXenEfnxXl3PpatOSebOYU/cD5/AIOfjMI=</latexit> 
+
+5 <latexit sha1_base64="l+hzNHqtDzJOJ3GnfMspfaN/JWY=">AAAB6HicbVA9TwJBEJ3DL8Qv1NJmIzGxIncUSEm0sYREPhK4kL1lgJW9vcvungm58AtsLDTG1p9k579xgSsUfMkkL+/NZGZeEAuujet+O7mt7Z3dvfx+4eDw6PikeHrW1lGiGLZYJCLVDahGwSW2DDcCu7FCGgYCO8H0buF3nlBpHskHM4vRD+lY8hFn1FipWRsUS27ZXYJsEi8jJcjQGBS/+sOIJSFKwwTVuue5sfFTqgxnAueFfqIxpmxKx9izVNIQtZ8uD52TK6sMyShStqQhS/X3REpDrWdhYDtDaiZ63VuI/3m9xIxqfsplnBiUbLVolAhiIrL4mgy5QmbEzBLKFLe3EjahijJjsynYELz1lzdJu1L2quVqs1Kq32Zx5OECLuEaPLiBOtxDA1rAAOEZXuHNeXRenHfnY9Wac7KZc/gD5/MHiCuMxQ==</latexit> 
+
+8
+
+<latexit sha1_base64="TUzHMvMbt3pRcOZzywPVCMw2E+E=">AAAB7XicbVA9TwJBEJ3DL8Qv1NJmIzGxIncUaKyINpYY5SOBC9lb5mBlb++yu2dCCP/BxkJjbP0/dv4bF7hCwZdM8vLeTGbmBYng2rjut5NbW9/Y3MpvF3Z29/YPiodHTR2nimGDxSJW7YBqFFxiw3AjsJ0opFEgsBWMbmZ+6wmV5rF8MOME/YgOJA85o8ZKzXuDib7qFUtu2Z2DrBIvIyXIUO8Vv7r9mKURSsME1brjuYnxJ1QZzgROC91UY0LZiA6wY6mkEWp/Mr92Ss6s0idhrGxJQ+bq74kJjbQeR4HtjKgZ6mVvJv7ndVITXvoTLpPUoGSLRWEqiInJ7HXS5wqZEWNLKFPc3krYkCrKjA2oYEPwll9eJc1K2auWq3eVUu06iyMPJ3AK5+DBBdTgFurQAAaP8Ayv8ObEzovz7nwsWnNONnMMf+B8/gBopI8I</latexit> 
+
+Steps: 
+
+Figure 29. Comparison of the different corrector samplers a function of the number of steps. 
+
+35

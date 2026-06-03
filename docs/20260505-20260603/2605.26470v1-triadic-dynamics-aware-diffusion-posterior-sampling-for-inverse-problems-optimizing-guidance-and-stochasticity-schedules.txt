@@ -1,0 +1,1236 @@
+Title: Triadic Dynamics Aware Diffusion Posterior Sampling for Inverse Problems: Optimizing Guidance and Stochasticity Schedules
+
+URL Source: https://arxiv.org/pdf/2605.26470v1
+
+Published Time: Wed, 27 May 2026 00:30:44 GMT
+
+Number of Pages: 32
+
+Markdown Content:
+# Triadic Dynamics Aware Diffusion Posterior Sampling for Inverse Problems: Optimizing Guidance and Stochasticity Schedules 
+
+Junseo Bang * 1 Dong Ju Mun * 1 Hoigi Seo 1 Seongmin Hong 2 Se Young Chun 1 2 3 
+
+## Abstract 
+
+Generative posterior sampling using diffusion models has emerged as a dominant paradigm for solving inverse problems in imaging, which usu-ally consists of three main components: data con-sistency (DC) guidance, classifier-free guidance (CFG) and stochasticity. While prior arts have focused on how to develop each or all compo-nents, less attention has given to how to schedule them, leading to heuristically fixed or partially adjusted suboptimal schedules. In this work, we argue that the interactions among all three compo-nents in terms of scheduling are crucial for signif-icantly improved performance in solving inverse problems in imaging. Our analysis shows that aggressive CFG early in sampling conflict with DC guidance, while stochasticity brings the tra-jectory back to higher-probability regions. Based on these findings, we propose Triadic Dynamics Aware Posterior Sampling (TriPS), which refor-mulates posterior sampling as a time-varying con-trol problem and optimizes schedules following a triadic trend of decreasing DC and stochastic-ity scales alongside increasing CFG scale. TriPS achieves this through two strategies: template-based search over functional priors for reliable baseline schedules, and Group Relative Policy Op-timization (GRPO)-based reinforcement learning for more flexible temporal curves. Experiments demonstrate TriPS outperforms state-of-the-art baselines in data fidelity and perceptual realism. 
+
+> *
+
+Equal contribution 1Dept. of Electrical and Computer En-gineering 2INMC, 3IPAI & AIIS, Seoul National University, Republic of Korea. Correspondence to: Se Young Chun <sy-chun@snu.ac.kr >.
+
+Proceedings of the 43 rd International Conference on Machine Learning , Seoul, South Korea. PMLR 306, 2026. Copyright 2026 by the author(s). 
+
+## 1. Introduction 
+
+Inverse problems aim to recover an unknown signal x0 ∈
+
+Rd from noisy measurements y = Ax0 + n, where 
+
+A : Rd → Rm is a known forward operator and n ∈
+
+Rm ∼ N (0 , σ 2
+
+> n
+
+Im) represents measurement noise. While classical methods often rely on hand-crafted priors (Rudin et al., 1992; Donoho, 1995; Beck & Teboulle, 2009), the paradigm has shifted toward leveraging expressive genera-tive priors via diffusion models (Ho et al., 2020; Song et al., 2021) and flow matching (Lipman et al., 2023; Esser et al., 2024). Since the reverse diffusion process involves the score function of the prior, we can sample from the posterior by estimating the score of the posterior distribution (Hyv ¨arinen, 2005; Song et al., 2021): 
+
+∇xt log p(xt|y)
+
+| {z }
+
+> Posterior score
+
+= ∇xt log p(y|xt)
+
+| {z }
+
+> Log-likelihood score
+
++ ∇xt log p(xt)
+
+| {z }
+
+> Prior score
+
+,
+
+(1) where t ∈ [0 , T ] denotes the timestep. Existing methods focuses on explicitly approximating the log-likelihood score term through three primary categories: (i) projection-based methods project the intermediate state 
+
+xt or ˆx0|t := E[x0|xt] onto the measurement subspace 
+
+{x|A x = y} via singular value decomposition or range-null space decomposition (Kawar et al., 2021; 2022; Wang et al., 2023b); (ii) gradient-based methods enforce consis-tency by taking a single gradient step on xt to align the sample with the measurements at each timestep (Chung et al., 2023b; Song et al., 2023; Chung et al., 2023a; Rozet et al., 2024; Rout et al., 2023); and (iii) optimization-based methods solve local or global optimization problems using proximal updates to approximate the posterior mean toward the measurement manifold (Zhu et al., 2023; Chung et al., 2024a; Pourya et al., 2025; Lee et al., 2025). Complementing these likelihood-centric approaches, the emergence of large-scale text conditional generative mod-els, such as Stable Diffusion (Rombach et al., 2022) and FLUX (Esser et al., 2024), provides powerful implicit priors for solving inverse problems in a zero-shot manner. Since inverse problems are inherently ill-posed ( e.g. , m < d in a linear A) and measurements provide insufficient infor-mation, recent methods incorporate text prompts to steer 1
+
+> arXiv:2605.26470v1 [cs.CV] 26 May 2026 Triadic Dynamics Aware Diffusion Posterior Sampling for Inverse Problems
+
+the sampling process onto the semantic manifold aligned with the text conditioning, thereby regularizing the solution space (Chung et al., 2024b; Kim et al., 2025b) At the core of solving the reverse diffusion process within these diverse methods lie three fundamental components for posterior sampling: (1) Data consistency (DC) guid-ance : Regularizing Ax0 to align with the measurements y,with the strength controlled by the DC guidance scale, as in Eq. (4) . (2) Classifier-free guidance (CFG) : Extrapolat-ing the score estimate toward the conditioning text prompt with the guidance strength controlled by a CFG scale, as in Eq. (2) . (3) Stochasticity : Controlling the additive noise during the reverse diffusion process, with the noise strength governed by the stochasticity scale, as in Eq. (5). Although a time-varying coordination of these components offers greater degrees of freedom to steer the sampling tra-jectory and optimize restoration quality, existing works typi-cally treat them in a time-independent manner. For instance, Flowchef (Patel et al., 2025) employs constant values for the DC guidance and CFG scales without stochasiticity ( i.e. ,
+
+λ(t) = λ, β (t) = β, η(t) = 0 ). Conversely, some methods adjust only the DC guidance scale in a time-varying fash-ion to prevent over-saturation artifacts toward the end of sampling (Song et al., 2023; Pandey et al., 2024). While other methods have attempted to jointly schedule the DC and stochasticity scales to balance data consistency and per-ceptual quality (Song et al., 2024; Garber & Tirer, 2024; Kim et al., 2025a; Park & Ye, 2025; Zhang et al., 2025), the interplay between these two components remains insuffi-ciently characterized. Furthermore, time-varying designs for the CFG scale have yet to be explored in the context of in-verse problems, despite their reported efficacy in enhancing performance and diversity within generation tasks (Chang et al., 2023; Wang et al., 2024; Kynk¨ a¨ anniemi et al., 2024). To address this, we propose TriPS (Triadic Dynamics Aware Posterior Sampling), which reformulates posterior sampling as an optimization problem of time-varying schedules. TriPS characterizes DC guidance, CFG, and stochasticity as a cou-pled triadic system where early stage CFG conflicts with DC guidance, which hinders reducing DC. Furthermore, we em-pirically observe that calibrated stochasticity acts as a regu-larizer, counteracting the tendency of DC guidance and CFG to drive sampling trajectories away from higher-probability regions. Building upon these insight, we introduce a tri-adic scheduling, characterized by monotonically decreasing DC and stochasticity scales while increasing CFG scale, and optimize through two complementary paradigms: (i) Template-based schedule search leverages functional pri-ors to efficiently identify effective schedule by constraining the search space within a set of predefined templates. (ii) Group Relative Policy Optimization (GRPO)-based sched-ule optimization employs a reinforcement learning frame-work to capture complex temporal curves that transcend fixed functional forms, allowing it to effectively navigate the perception-distortion trade-off through a hybrid reward that jointly optimizes perceptual ( e.g. , LPIPS) and distortion metrics ( e.g. , PSNR). Our key contributions are as follow: • Analysis of Triadic Coupling Dynamics : We identify the inherent conflict between DC guidance and CFG and reveal stochasticity as a regularizer that aligns sam-pling trajectories toward higher-probability regions. • Triadic Schedule Optimization Framework : We pro-pose TriPS that finds effective time-varying sched-ules of DC, CFG, and stochasticity scales through the template-based search and GRPO-based optimization. 
+
+## 2. Preliminaries 
+
+2.1. Flow-based Posterior Sampling 
+
+We describe the general formulation of flow-based posterior sampling for solving inverse problems y = Ax0 + n. The sampling process at timestep t is governed by a velocity field derived from a pretrained flow matching model, modified by DC guidance and CFG and stochastic injections. First, the velocity field is adjusted by the CFG scale λ(t) to incorporate conditional information c:
+
+vt(xt) = vθ (xt, c ∅) + λ(t) vθ (xt, c ) − vθ (xt, c ∅). (2) Based on the velocity vt(xt), the clean data prediction ˆx0|t
+
+and the corresponding noise prediction ˆx1|t are estimated via the flow-based Tweedie formula (Kim et al., 2025a): 
+
+ˆx0|t = xt − σtvt(xt), ˆx1|t = xt + (1 − σt)vt(xt), (3) where σt denotes the noise schedule. To enforce consistency with the measurement y, a DC update is applied to the estimated clean data using a DC guidance scale β(t):
+
+˜x0|t(y) = ˆ x0|t − β(t)∇ˆx0|t L(A ˆx0|t, y). (4) Here, L denote the DC loss function ( e.g. , ℓ2 distance) that quantifies the discrepancy between the estimated forward projection and the measurement. Concurrently, to inject stochasticity, the noise component ˆx1|t is perturbed with a stochasticity scale η(t) and Gaussian noise ϵ ∼ N (0 , I d):
+
+˜x1|t = p1 − η2(t) ˆ x1|t + η(t)ϵ. (5) The state for the next timestep xt+∆ t is computed via an Euler method, combining the measurement aligned estimate 
+
+˜x0|t(y) with the stochastically modulated noise term ˜x1|t:
+
+xt+∆ t = (1 − σt+∆ t) ˜ x0|t(y) + σt+∆ t ˜x1|t. (6) We also define xdet  
+
+> t+∆ t
+
+= (1 − σt+∆ t) ˜ x0|t(y) + σt+∆ t ˆx1|t
+
+by setting η(t) = 0 in the above procedure. 2Triadic Dynamics Aware Diffusion Posterior Sampling for Inverse Problems 
+
+To explicitly analyze the contribution of each force driving the sampling trajectory, we define the guidance components. The total drift bdet (xt) is defined as the finite difference velocity of the deterministic update: 
+
+bdet (xt) = xdet  
+
+> t+∆ t
+
+− xt
+
+∆t . (7) We decompose bdet into bprior , bcfg , and bdc :
+
+bprior (xt) = vθ (xt; ∅),bcfg (xt; c) = λ(t) vθ (xt; c) − vθ (xt; ∅) = λ(t)˜bcfg (xt; c),bdc (xt; y) = bdet (xt) − bprior (xt) − bcfg (xt) = β(t)˜bdc (xt; y).
+
+(8) Here, bdc (xt; y) is the effective correction applied by the measurement gradients. The terms ˜bcfg and ˜bdc denote the unit scale guidance for CFG and DC guidance, respectively. 
+
+2.2. TriPS Backbone Sampler 
+
+Based on the flow-based posterior sampling framework, we present the TriPS sampler. The primary distinction of this approach is that the DC guidance scale β(t), CFG scale 
+
+λ(t), and stochasticity scale η(t) are formulated as dynamic, time-varying functions rather than static constants. This formulation allows the sampler to adaptively regulate the sampling dynamics across different noise levels. For the DC loss function L(·, y) in Eq. (4) , we employ a hybrid update scheme that interpolates between Back-Projection and Least-Square objectives for robust reconstruction (Garber & Tirer, 2024). The complete procedure is detailed in Appendix C. 
+
+## 3. Analysis: Triadic Coupling Dynamics 
+
+This section analyzes the triadic coupling dynamics in poste-rior sampling, governed by DC guidance, CFG, and stochas-ticity. We formalize the early-stage conflict of DC guidance, CFG and demonstrate how stochasticity regularizes sam-pling trajectories towards higher-probability regions. 
+
+3.1. Early-Stage Guidance Conflict 
+
+The decomposition in bdet (xt) in Eq. (8) incorporates two potentially competing components: bdc (xt; y), which en-forces DC to align with the measurements y, and bcfg (xt; c),which steers the sampling trajectory toward conditioning text prompt. Since these guidance originate from distinct objectives, their update directions are misaligned, lead-ing to a conflict of DC guidance and CFG. To formal-ize this, we analyze the behavior of the residual norm 
+
+R( ˆ x0|t) ≜ ∥y−A ˆx0|t∥22 with respect to the CFG scale λ(t).This derivative is validated through super-resolution ×8, av-eraged over 100 samples on the DIV2K dataset (Agustsson & Timofte, 2017), where we utilize a fixed set of prompts consistent with our baseline. 𝜆  𝑡 = 7.0 Ground Truth 𝜆  𝑡 = 2.0                                               
+
+> Guidance
+> Conflict
+> COS −SIM 1(𝑥 𝑡 )
+> Time 𝑡
+> "a high quality photo of animal, bengal tiger, creek, pond, pool, puddle, stone, stand, tiger, walk, water, clean"
+> Guidance
+> Conflict
+> ℛ( ො𝑥 0|𝑡 )
+> Time 𝑡
+> 𝜆 𝑡 =1.0
+> 𝜆 𝑡 =2.0
+> 𝜆 𝑡 =3.0
+> 𝜆 𝑡 =4.0
+> 𝜆 𝑡 =5.0
+> 𝜆 𝑡 =6.0
+> 𝜆 𝑡 =7.0
+> 𝜆 𝑡 =1.0
+> 𝜆 𝑡 =2.0
+> 𝜆 𝑡 =3.0
+> 𝜆 𝑡 =4.0
+> 𝜆 𝑡 =5.0
+> 𝜆 𝑡 =6.0
+> 𝜆 𝑡 =7.0
+> (a) (b)
+> (c)
+
+Figure 1. Early stage guidance conflict on super-resolution ×8.(a) Cosine similarity COS-SIM 1(xt) between the unit-scale DC guidance ˜bdc and the unit-scale CFG ˜bcfg across sampling timesteps, shown for varying CFG scales λ(t). As λ(t) increases, COS-SIM 1(xt) at early timesteps becomes more negative. (b) De-cay of the squared residual norm R( ˆ x0|t), defined in Proposition 1, for varying CFG scales λ(t). (c) Visual comparison on the DIV2K dataset. High CFG scales lead to semantic hallucinations ( e.g. ,distorted tiger patterns) that deviate from the measurement y.
+
+Proposition 1 (first-order derivative of the expected residual norm descent to CFG scale) . Let ˜bdc , ˜bcfg be the unit-scale DC guidance, CFG defined in Eq. (8) and R( ˆ x0|t) ≜ ∥y −A ˆx0|t∥22 be the residual norm. If R ∈ C2, the first-order derivative of the next-step ex-pected residual norm conditioned on xt with respect to the CFG scale λ(t) is: 
+
+∂∂λ (t) ER( ˆ x0|t+∆ t)) xt
+
+ =
+
+− ∆t
+
+D˜bdc (xt; y), ˜bcfg (xt; c)
+
+E
+
++ o(∆ t),
+
+(9) 
+
+where ⟨· , ·⟩ denotes the standard Euclidean inner product. 
+
+(Proof in Appendix A.4). Proposition 1 implies that when-ever the CFG opposes the DC guidance direction ( i.e. ,
+
+⟨˜bdc (xt; y), ˜bcfg (xt; c)⟩ ≤ 0), increasing the CFG scale λ(t)
+
+impairs the minimization of the expected residual norm. In such cases, a large λ(t) slows the descent of the R( ˆ x0|t).To quantify this misalignment, we define the cosine similar-ity COS-SIM 1(xt) between the unit-scale DC guidance ˜bdc 
+
+and the unit-scale CFG ˜bcfg :COS-SIM 1(xt) ≜
+
+D˜bdc (xt; y), ˜bcfg (xt; c)
+
+E
+
+˜bdc (xt; y) 2 ˜bcfg (xt; c) 2
+
+, (10) Empirical results in Fig. 1 support this theoretical analy-sis. Fig. 1(a) shows that COS-SIM 1(xt) is predominantly 3Triadic Dynamics Aware Diffusion Posterior Sampling for Inverse Problems Time  𝑡  Time  𝑡  Time  𝑡          
+
+> 𝜁 𝑡 =0𝜁 𝑡 =1.0Ground Truth
+> Drift -Score
+> Alignment
+> Drift -Score
+> Alignment Drift -Score
+> Alignment
+> COS −SIM 2(𝑥 𝑡 )
+> COS −SIM 2(𝑥 𝑡 )
+> COS −SIM 2(𝑥 𝑡 )
+> (a)
+> (b)
+
+Figure 2. Stochasticity as a regularizer for DC guidance and CFG on super-resolution ×8. Note that the stochasticity scale is sched-uled as η(t) = ζ(t)√1 − σt+∆ t for this analysis. (a) Cosine similarity COS-SIM 2(xt) between the total drift bdet (xt) and the score function ∇xt log pt(xt) across sampling timesteps, shown for varying DC guidance scales β(t) (left), CFG scales λ(t) (mid-dle), and stochasticity scales η(t) (right). Increasing scales of DC guidance or CFG leads to lower COS-SIM 2(xt) while increasing the stochasticity scale tends to produce higher COS-SIM 2(xt). (b) Visual comparisons on the FFHQ dataset. The proper injection of stochasticity mitigates over-saturation artifacts, thereby restoring perceptual fidelity and improving overall sample quality. 
+
+negative at early timesteps (i.e., t ≃ 1), indicating that the CFG initially counteracts the DC guidance. As t → 0,COS-SIM 1(xt) approaches zero, suggesting that the direc-tional misalignment diminishes. Consistent with Eq. (9) ,this directional misalignment causes larger CFG scales λ(t)
+
+to hinder squared residual norm minimization, as evidenced by the slower decay of R( ˆ x0|t) in Fig. 1(b). These obser-vations are qualitatively supported by Fig. 1(c), where high CFG scales induce semantic hallucinations that violate DC, whereas lower scales maintain DC. 
+
+3.2. Stochasticity as a Regularizer for DC and CFG 
+
+We examine how stochasticity actively regularizes sampling trajectories to higher-probability regions, specifically coun-teracting the off-manifold phenomenon, where DC guidance and CFG steer the sampling trajectory away from higher-probability regions. To quantify how closely the total drift 
+
+bdet (xt) aligns with the unconditional score function at each timestep t, we define the following cosine similarity: COS-SIM 2(xt) ≜
+
+D
+
+bdet (xt), ∇xt log pt(xt)
+
+E
+
+bdet (xt) 2 ∇xt log pt(xt) 2
+
+, (11) where ∇xt log pt(xt) is the unconditional score function pointing toward higher-probability regions of the data distri-bution. The explicit formulation of the score function within the flow-based framework is detailed in Appendix A.3. Larger COS-SIM 2(xt) values indicate that the total drift aligns more strongly with the score direction, steering the sample back to the data manifold, while lower values reflect a direction pointing towards lower-probability regions. Empirical results in Fig. 2(a) show that increasing the DC guidance or CFG scale reduces COS-SIM 2(xt), indicating that stronger guidance drives sampling away from higher-probability trajectories. In contrast, increasing the stochastic-ity scale consistently improves COS-SIM 2(xt), suggesting that appropriately scaled noise enhances alignment with the data distribution. Moreover, Fig. 2(a) (right) shows that higher stochasticity applied in early sampling stages yields more robust alignment with the score function at later timesteps. This regularizing effect is qualitatively reflected in Fig. 2(b), where suitable stochasticity suppresses artifacts and restores perceptual fidelity. To further validate these effects from a marginal distribu-tional perspective, we evaluate the Kernel Inception Dis-tance (KID) between generated samples x0 and ground-truth images (see Appendix B.3). Increasing the scale of DC guidance or CFG consistently enlarges the distributional dis-crepancy, whereas introducing stochasticity reduces this gap by aligning the marginal distribution of generated samples more closely with that of the ground truth. This indicates that stochasticity acts as a regularizer, guiding sampling toward higher-probability regions of the data distribution and counteracting the tendency of DC guidance and CFG to drive samples toward lower-probability regions. 
+
+3.3. Triadic Scheduling Trend 
+
+We adopt a structured scheduling strategy for the DC guid-ance scale β(t), CFG scale λ(t), and stochasticity scale 
+
+η(t) that aligns with the coarse-to-fine nature of diffusion sampling. In the early high-noise regime, we deliberately set a high DC guidance scale β(t) to strongly enforce data consistency with the measurements y following a practice in prior works (Garber & Tirer, 2024; Kim et al., 2025a). This choice forms the foundation of our design, enabling subsequent scheduling decisions to arise naturally from our analyses. We keep a low λ(t) to suppress the early-stage guidance conflict (Sec. 3.1). We also set η(t) to be a high value because stochasticity in early timestep regularizes the off-manifold phenomenon by promoting alignment of the total drift with the score function in later timestep (Sec. 3.2). As the process transitions toward the low-noise regime, fo-cus shifts to detail refinement. With global structure estab-lished and the residual norm (Proposition 1) reduced, the guidance conflict diminishes, allowing increase of λ(t) to leverage the mode-seeking properties and sharpen seman-tics for enhanced fidelity (Ho & Salimans, 2021; Wang et al., 2024). Concurrently, we reduce β(t) to mitigate the guidance conflict and avoid the over-enforcing of data con-sistency, which can inject measurement noise into the out-put (Wang et al., 2023b). Finally, we anneal the stochasticity 4Triadic Dynamics Aware Diffusion Posterior Sampling for Inverse Problems Schedule 𝑠 1 𝑡     
+
+> Measurement
+> Prompt
+> Reward
+> Function
+> (PSNR /
+> LPIPS /
+> CLIP -IQA /
+> Q-Align)
+> 𝑅 1
+> 𝑅 2
+> 𝑅 𝐺
+> ...
+> GT
+> Group
+> Computation
+> Mean & Std Norm.
+> GRPO
+> Policy Update
+> 𝝅 𝜽 ~𝜔 𝑘
+> 𝑠 𝑠 =𝛽 ,𝜆 ,𝜂 ,0≤𝑘 ≤𝑑
+> ...
+> TriPS
+> Backbone
+> TriPS
+> Backbone
+> TriPS
+> Backbone
+
+GRPO -based Schedule Optimization 
+
+Template -based 
+
+Schedule Search 
+
+> Restored
+> images
+> ...
+> ...
+
+𝜔 0
+
+> 𝑠
+
+𝜔 1
+
+> 𝑠
+
+𝜔 𝑑                
+
+> 𝑠
+> Beta distribution Sampling
+> (For Coefficients)
+> 𝜔 0
+> 𝑠 ~𝐵𝑒𝑡𝑎 (𝛼 0
+> 𝑠 ,𝛽 0
+> 𝑠 )
+> 𝜔 1
+> 𝑠 ~𝐵𝑒𝑡𝑎 (𝛼 1
+> 𝑠 ,𝛽 1
+> 𝑠 )
+> 𝜔 𝑑
+> 𝑠 ~𝐵𝑒𝑡𝑎 (𝛼 𝑑
+> 𝑠 ,𝛽 𝑑
+> 𝑠 )
+> Bernstein basis
+> Schedule Construction
+> (degree 𝑑 )
+> Schedule
+> curve
+> ...
+> 𝑠 1𝑡
+> 𝑠 2𝑡
+> 𝑠 𝐺 𝑡
+> ...
+> Sampled
+> Schedules
+> ×𝑮
+> 𝑠 𝑡 =෍
+> 𝑘 =1
+> 𝑑
+> 𝜔 𝑘
+> 𝑠 ⋅𝐵 𝑘 ,𝑑 (𝑡 )
+> ...
+
+Triadic Scheduling Trend 
+
+𝛽 : monotonic decreasing 
+
+𝜆 : monotonic increasing 
+
+𝜂 : monotonic decreasing 
+
+Templates 𝛵                             
+
+> (Linear, Exp, Log)
+> Optimized Schedule
+> {𝝀 𝝉 ∗,𝜷 𝝉 ∗,𝜼 𝝉 ∗}
+> DC scale 𝛽 ∈𝑇 CFG scale 𝜆 ∈𝑇
+> Schedule 𝑠 2𝑡
+> Measurement
+> Prompt
+> Schedule 𝑠 𝐺 𝑡
+> Measurement
+> Prompt
+> 𝜏 ∗=argmax
+> 𝜏 ∈𝛵 3
+> 𝒰 (𝜏 ;𝒟 cal )
+> Time (𝑡 )
+> Value
+> Max
+> Min
+> 10Time (𝑡 )
+> Value
+> Max
+> Min
+> 10
+> Time (𝑡 )
+> Value
+> Max
+> Min
+> 10
+> Stochasticity
+> scale 𝜂 ∈𝑇
+
+Figure 3. Overview of the triadic schedule optimization framework. (Left) Template-based schedule search explores a discrete search space defined by compact templates (Linear, Exp, Log) that satisfy the triadic scheduling trend ( β(t) ↓, λ (t) ↑, η (t) ↓). (Right) GRPO-based optimization facilitates continuous schedule discovery beyond fixed functional forms. A policy πθ samples coefficients w(s) 
+
+> k
+
+from learnable Beta distributions to parameterize continuous schedules s(t) via Bernstein polynomials Bk,d (t). This formulation strictly constrains s(t)
+
+within the predefined range, while πθ is updated via rewards derived from the restored images. 
+
+scale η(t) to a lower value, as late stage stochasticity intro-duces sampling errors (Xu et al., 2023) and reducing η(t)
+
+achieves more precise approximation of the target distribu-tion (Kang et al., 2024). This triadic scheduling trend is now summarized as: Monotonic decrease in β(t), increase in 
+
+λ(t) and decrease in η(t).
+
+## 4. Method: Triadic Schedule Optimization 
+
+To implement the triadic scheduling trends from Sec. 3.3, we propose a framework comprising two complementary paradigms. First, template-based schedule search exploits a discrete family of functional forms to identify robust sched-ule curves. Second, GRPO-based schedule optimization enables fine-grained schedule adaptation to capture com-plex temporal curves that transcend the fixed functional templates. Both approaches utilize the backbone solver de-scribed in Sec. 2.2 as the underlying sampling mechanism. 
+
+4.1. TriPS T: Template-based Schedule Search 
+
+To instantiate the triadic scheduling trends identi-fied in Sec. 3.3, we first perform a coarse op-timization over a discrete template family T =
+
+{linear, exponential, logarithmic } as shown in Fig. 3. These templates are selected to span a diverse range of temporal dynamics while strictly adhering to the established mono-tonicity constraints. Specifically, linear templates maintain a constant rate of change across all sampling timesteps. The exponential templates are designed to capture trajectories with an accelerated shift which is characterized by gradual adjustments in early timesteps followed by rapid transi-tions toward the end, whereas logarithmic templates model the inverse behavior. By constraining the search to these functional priors, we transform the high-dimensional opti-mization of per-timestep parameters into a low-dimensional selection problem, significantly reducing the degrees of free-dom to ensure practical search efficiency. Each candidate schedule is parameterized as a set τ ∈ T 3,with magnitudes bounded by λ(t) ∈ [1 .0, 6.0] , η(t) ∈ [0 , 1] ,and β(t) ∈ [βT
+
+> min
+
+, β T
+
+> max
+
+]. The optimal template-based sched-ule τ ⋆ is identified via a systematic grid search maximizing a multi-objective utility function U on a small calibration set Dcal , balancing fidelity (PSNR) and perceptual quality (LPIPS (Zhang et al., 2018)): 
+
+τ ⋆ = arg max    
+
+> τ∈T 3
+
+U(τ ; Dcal ). (12) The resulting schedule ST = {λτ ⋆ , β τ ⋆ , η τ ⋆ } provides a robust baseline that also serves as principled warm-start for the subsequent GRPO-based schedule optimization. 
+
+4.2. TriPS G: GRPO-based Schedule Optimization Bernstein-Beta schedule parameterization To capture complex temporal dynamics that exceed the representational 5Triadic Dynamics Aware Diffusion Posterior Sampling for Inverse Problems 
+
+Table 1. Quantitative comparison on linear inverse problems. Results are averaged over 1,000 FFHQ and 800 DIV2K samples using 28 NFEs with Gaussian noise ( σn = 0 .03 ). Bold and underline denote the best and second-best performance, respectively.                                                                                                                                                                                                                                                                                  
+
+> Flow Matching Model (SD3.5-M)
+> Super-Resolution ×8Super-Resolution ×12 Motion Deblurring Gaussian Deblurring Method PSNR ↑SSIM ↑FID ↓LPIPS ↓MUSIQ ↑PSNR ↑SSIM ↑FID ↓LPIPS ↓MUSIQ ↑PSNR ↑SSIM ↑FID ↓LPIPS ↓MUSIQ ↑PSNR ↑SSIM ↑FID ↓LPIPS ↓MUSIQ ↑
+> FFHQ (768 ×768)
+> ReSample 24.65 0.708 98.07 0.196 32.06 22.96 0.632 172.19 0.357 21.09 25.54 0.747 96.62 0.216 31.65 26.37 0.746 97.47 0.160 31.50 FlowChef 27.53 0.759 57.24 0.147 49.05 26.38 0.731 110.15 0.209 38.70 24.88 0.716 63.48 0.237 39.22 27.30 0.754 46.40 0.152 44.26 FlowDPS 27.92 0.772 23.80 0.120 54.36 26.84 0.745 30.54 0.156 48.33 25.15 0.721 43.18 0.222 48.51 26.02 0.731 45.00 0.204 47.11 FLAIR 28.88 0.768 55.51 0.123 52.26 27.25 0.752 29.31 0.158 46.63 28.80 0.695 21.57 0.095 52.48 28.60 0.729 18.41 0.090 54.71 TriPS T(Ours) 29.03 0.789 26.66 0.113 53.65 27.45 0.754 35.13 0.161 52.63 31.20 0.809 17.28 0.060 63.52 29.95 0.804 25.02 0.084 51.12 TriPS G(Ours) 28.55 0.762 22.18 0.107 61.69 27.38 0.762 28.22 0.154 53.92 31.20 0.813 15.89 0.059 64.37 29.60 0.782 21.21 0.074 61.92 DIV2K (768 ×768)
+> ReSample 20.55 0.535 75.67 0.238 26.82 19.54 0.459 119.22 0.372 20.57 21.47 0.588 61.79 0.222 31.17 21.74 0.559 80.79 0.221 24.22 FlowChef 22.08 0.561 47.47 0.213 41.70 20.88 0.508 84.28 0.297 35.94 19.62 0.482 74.01 0.366 41.24 21.57 0.532 52.84 0.251 39.52 FlowDPS 22.14 0.545 35.18 0.175 39.87 21.07 0.469 48.36 0.251 33.47 19.88 0.473 52.23 0.322 40.01 20.46 0.473 58.56 0.307 36.80 FLAIR 22.90 0.592 41.23 0.167 42.30 21.12 0.520 42.16 0.256 46.23 23.90 0.614 22.17 0.129 52.24 22.70 0.561 32.26 0.157 44.96 TriPS T(Ours) 23.05 0.607 31.80 0.158 45.24 21.27 0.518 43.74 0.255 50.14 26.29 0.728 15.49 0.066 59.16 23.94 0.646 28.57 0.123 44.47 TriPS G(Ours) 22.78 0.594 27.84 0.163 50.14 21.13 0.531 37.48 0.257 52.26 26.19 0.715 14.94 0.066 59.89 23.97 0.644 26.88 0.121 45.19
+
+capacity of fixed templates, we introduce a data-driven schedule optimizaiton framework using Group Relative Pol-icy Optimization (GRPO) (Shao et al., 2024), which esti-mates policy gradients via group-wise reward standardiza-tion without a value function. We parameterize each sched-ule component s = {λ, β, η } as a continuous curve: 
+
+˜s(t) = 
+
+> d
+
+X
+
+> k=0
+
+w(s) 
+
+> k
+
+Bk,d (t), (13) where w(s) 
+
+> k
+
+denotes coefficients and Bk,d (t) =  dk
+
+ tk(1 −
+
+t)d−k represents the Bernstein basis functions of degree 
+
+d. We exploit the convex hull property of Bernstein poly-nomials and the bounded support of Beta distributions to intrinsically confine the optimization within physically valid ranges and mitigate policy divergence during GRPO explo-ration. Specifically, we define a stochastic policy πθ where the optimization variables θ = {a(s) 
+
+> k
+
+, b (s) 
+
+> k
+
+}s,k parameterizes Beta distributions from which coefficients are sampled as: 
+
+w(s) 
+
+> k
+
+∼ Beta  a(s) 
+
+> k
+
+, b (s)
+
+> k
+
+, s = {λ, β, η } (14) Crucially, since the Beta samples are bounded in (0 , 1) and the Bernstein basis forms a partition of unity ( P 
+
+> k
+
+Bk,d (t) = 1), the resulting curve ˜s(t) represents a convex combina-tion guaranteed to lie within (0 , 1) for all t. These nor-malized curves are mapped to physical scales via affine rescaling s(t) = smin + ( smax − smin ) ˜ s(t). The boundaries 
+
+[smin , s max ] for each parameter s are fixed constants shared across all tasks and datasets which are detailed in the Ap-pendix E.2. We denote the aggregated vector of all sampled coefficients as w = {w(s) 
+
+> k
+
+}s={λ,β,η },0≤k≤d.
+
+Hybrid IQA reward and group relative policy opti-mization. We drive optimization with a hybrid reward 
+
+R = wdist Rdist +wperc Rperc that combines distortion (PSNR) and perceptual metrics (LPIPS (Zhang et al., 2018), CLIP-IQA+ (Wang et al., 2023a), Q-Align (Wu et al., 2023)). All metrics are unified to a monotonically increasing scale to ensure consistent optimization direction. At each update step, we sample a group of G coefficient vectors {wi}Gi=1 
+
+from the current policy πθold , compute their advantages ˆAi
+
+via group-wise standardization, and updates the policy using the clipped surrogate objective: 
+
+max  
+
+> θ
+
+Ei
+
+h
+
+min  ri(θ) ˆAi, clip( ri(θ), 1 − ϵ, 1 + ϵ) ˆAi
+
+
+
+−βKL DKL 
+
+ πθ ∥ πref 
+
+i (15) where ri(θ) = πθ (wi)/π θold (wi) and πref is the fixed pol-icy reference whose parameters are initialized to approxi-mate the schedule ST obtained via template-based schedule search. The overall optimization pipeline is illustrated in Fig. 3. The resulting schedule enables a controller of the perception-distortion trade-off by discovering complex tem-poral dynamics inaccessible to fixed functional forms. 
+
+## 5. Experiments 
+
+5.1. Experimental Setup Datasets and metrics We evaluate our method on the high-resolution FFHQ (Karras et al., 2019) ( 1024 2, 1k sam-ples) and DIV2K (Agustsson & Timofte, 2017) (2K, 800 samples) benchmarks. Quantitative assessment employs PSNR and SSIM (Wang et al., 2004) as distortion met-rics, alongside LPIPS (Zhang et al., 2018) and patch-based FID (Heusel et al., 2017) for perceptual realism. We addi-tionally report MUSIQ (Ke et al., 2021), a no-reference IQA metric, to effectively capture perception at high resolutions. 
+
+Baselines To evaluate our method, we benchmark against state-of-the-art baselines categorized by their generative backbone. For flow matching models (Stable Diffusion 3.5-Medium, 768 2, NFE 28), we evaluate ReSample (Song et al., 2024), FlowChef (Patel et al., 2025), FlowDPS (Kim et al., 2025a), and FLAIR (Erbach et al., 2025). Detailed hyperpa-rameter configurations are provided in the Appendix E.3 6Triadic Dynamics Aware Diffusion Posterior Sampling for Inverse Problems Super -Resolution  ×8
+
+Measurement  ReSample  FlowChef  FlowDPS  FLAIR  TriPS T (Ours)  TriPS G (Ours)  Ground Truth 
+
+> Motion Deblurring
+
+Measurement  ReSample  FlowChef  FlowDPS  FLAIR  TriPS T (Ours)  TriPS G (Ours)  Ground Truth 
+
+> Gaussian Deblurring
+
+Measurement  ReSample  FlowChef  FlowDPS  FLAIR  TriPS T (Ours)  TriPS G (Ours)  Ground Truth 
+
+> Super -Resolution  ×12
+
+Measurement  ReSample  FlowChef  FlowDPS  FLAIR  TriPS T (Ours)  TriPS G (Ours)  Ground Truth 
+
+Figure 4. Qualitative comparison for FFHQ and DIV2K datasets on linear inverse problems. Best view in zoom. 
+
+Problem setting We evaluate our approach on multi-ple inverse problems under task-specific degradation set-tings. Within the flow matching framework, we test super-resolution 8 ×, 12 × using bicubic downsampling, motion and Gaussian deblurring with 61 × 61 kernels at intensity 0.5 and standard deviation 3.0, respectively. In all cases, a Gaussian noise with a standard deviation of 0.03 (1.5% of the pixel range) is added. We use the fixed prompt ”A high quality photo of a face” for FFHQ and image-specific text prompts generated by DAPE (Wu et al., 2024) for DIV2K. 
+
+5.2. Experimental Results Flow matching model As detailed in Table 1, TriPS T
+
+consistently outperforms flow matching baselines. TriPS G
+
+further advances these results, significantly improving per-ceptual metrics while maintaining high measurement consis-tency. These quantitative gains are demonstrated in Fig. 4, where both variants effectively mitigate structural artifacts and noise present in baseline reconstructions thereby en-
+
+Table 2. Quantitative comparison of the TriPS G, optimized for SR 
+
+×8, against baselines under different degradation settings: (top) Gaussian deblurring and (bottom) SR ×12 on FFHQ 100 samples.                                                
+
+> Method PSNR ↑SSIM ↑KID ↓LPIPS ↓
+> Gaussian Deblurring
+> Resample 26.47 0.755 0.101 0.157 FlowChef 27.59 0.768 0.026 0.140 FlowDPS 26.16 0.743 0.034 0.194 FLAIR 27.74 0.720 0.012 0.109 TriPS Gon SR ×828.90 0.745 0.014 0.089 Super-Resolution ×12
+> Resample 22.92 0.641 0.156 0.355 FlowChef 26.48 0.743 0.089 0.201 FlowDPS 26.93 0.756 0.020 0.147 FLAIR 27.51 0.765 0.017 0.148 TriPS Gon SR ×828.80 0.774 0.012 0.099
+
+hancing visual quality. Extended evaluations on diffusion model backbones are provided in the Appendix D. 
+
+Schedule transferability on degradation shifts We eval-uate whether GRPO-based schedule optimization generalize to different degradation settings. Specifically, we transfer the triadic schedules ( λ(t), β (t), η (t)) optimized on SR ×87Triadic Dynamics Aware Diffusion Posterior Sampling for Inverse Problems 
+
+Table 3. Quantitative comparison on linear inverse problems based on diffusion model. Evalutation metrics are averaged over 1,000 samples from the FFHQ dataset using 50 NFEs under additive Gaussian noise ( σn = 0 .03 ). For each metric, the best and second-best results are indicated in bold and underline, respectively.                                                             
+
+> Diffusion Model (SD1.5)
+> Super-Resolution ×8Motion Deblurring Method PSNR ↑SSIM ↑FID ↓LPIPS ↓PSNR ↑SSIM ↑FID ↓LPIPS ↓
+> PSLD 21.61 0.636 86.96 0.399 21.41 0.582 84.59 0.406 DDPG 22.42 0.689 116.39 0.308 24.48 0.548 100.78 0.275 P2L 25.31 0.711 95.27 0.271 25.52 0.656 55.15 0.230 TReg 26.34 0.733 128.19 0.254 26.36 0.669 57.94 0.200 TriPS T(Ours) 27.07 0.737 52.91 0.192 28.19 0.779 32.58 0.164 TriPS G(Ours) 28.02 0.782 43.04 0.164 28.39 0.782 26.37 0.162
+
+Table 4. Ablation studies of TriPS evaluated on 100 FFHQ samples. TriPS G is optimized via GRPO starting from TriPS T baseline.                                                     
+
+> (a) Reward Guided Perception-Distortion Controller
+> Case PSNR ↑SSIM ↑KID ↓LPIPS ↓
+> TriPS Dist G30.62 0.840 0.036 0.072 TriPS T30.33 0.822 0.016 0.070 TriPS Perc G29.89 0.793 0.011 0.067 (b) Joint Triadic Schedule Optimization
+> DC CFG Stoch. PSNR ↑SSIM ↑KID ↓LPIPS ↓
+> %%%29.04 0.783 0.121 0.155
+> !%%29.43 0.808 0.117 0.125
+> %!%29.05 0.784 0.121 0.154
+> %%!29.51 0.804 0.120 0.133
+> !!!29.77 0.820 0.072 0.101
+
+directly to Gaussian deblurring and SR ×12. As shown in Table 2, TriPS G outperforms established flow matching baselines across both distortion and perceptual metrics. 
+
+Diffusion model We further validate our method within the diffusion based framework, implemented on Stable Dif-fusion 1.5 ( 512 2, NFE 50), against established solvers in-cluding PSLD (Rout et al., 2023), DDPG (Garber & Tirer, 2024), P2L (Chung et al., 2024b), and TReg (Kim et al., 2025b), with all baseline hyperparameters carefully tuned and reported in Appendix E.3. As shown in Table 3, the pro-posed method consistently achieves superior performance over all competing approaches, with qualitative comparisons provided in Appendix D. 
+
+5.3. Ablation Studies Reward guided control of the perception–distortion trade-off The GRPO-based optimization navigates the perception–distortion trade-off by modulating weights in the reward function R = wdist Rdist + wperc Rperc . Initial-ized from TriPS T schedules, we optimize two variants for Gaussian deblurring on FFHQ dataset: TriPS Dist G (( wdist =0.9, w perc = 0 .1)) and TriPS Perc G (wdist = 0 .3, w perc = 0 .7). As shown in Fig. 5(a), each variant successfully maximizes its targeted reward while the alternate reward decreases dur-ing optimization. This aligns with the results in Table 4(a), confirming that each variant effectively enhances perfor-mance in its intended direction. Furthermore, these trends are visually reflected in Fig. 5(b), where TriPS Perc G restores TriPS G  
+
+> Dist TriPS G
+> Perc
+
+Ground Truth Measurement        
+
+> Time 𝑡 Time 𝑡 Time 𝑡
+> DC scale  (𝛽 )
+> CFG  scale  ( λ)
+> Stochasticity  (𝜂 )
+> TriPS G
+> Dist TriPS G
+> Perc TriP ST
+> 𝑅 𝑑𝑖𝑠𝑡
+> 𝑅 𝑝𝑒𝑟𝑐
+> TriPS G
+> Dist
+> TriPS G
+> Perc
+> TriPS G
+> Dist
+> TriPS G
+> Perc
+> Steps Steps
+
+Figure 5. Reward-guided control of the perception-distortion trade-off via TriPS G. (Top) Evolution of distortion and perceptual re-wards ( Rdist and Rperc ) on a validation set during optimization. (Middle) Visual comparison between the perception oriented ( TriPS Perc G ) and distortion oriented ( TriPS Dist G ) variants, both op-timized via GRPO starting from the TriPS T baseline. TriPS Perc G re-covers sharper textures, whereas the TriPS Dist G preserves structural fidelity without artifacts. (Bottom) The optimized triadic schedules for DC guidance, CFG, and stochasticity across the three cases. 
+
+sharper textures and TriPS Dist G preserves high data fidelity without structural artifacts. The resulting triadic schedules for DC guidance, CFG, and stochasticity are presented in Fig. 5(c). Detailed analysis of these curves are provided in the Appendix F.5. 
+
+Impact of joint triadic schedule optimization To val-idate the necessity of joint triadic optimization, we com-pare our fully scheduled TriPS T approach against baselines where only one component, such as DC guidance, CFG, or stochasticity, is optimized while the others are fixed to its search range’s mean. Evaluated on the SR ×8 task, the results in Table 4(b) demonstrate that the the simultaneous optimization of all three temporal schedules consistently yields superior performance compared to the partially fixed variants. These results show that leveraging their interplay in time-varying scheduling plays a constructive role in en-hancing restoration quality. Additional results are provided in Appendix F.4. 
+
+5.4. Discussion 
+
+The optimized TriPS G schedules align with the proposed triadic scheduling trends in Sec. 3.3. Beyond the consistent global patterns, the optimized schedules exhibit fine-grained temporal variations, such as local non-monotonic fluctua-8Triadic Dynamics Aware Diffusion Posterior Sampling for Inverse Problems 
+
+tions and magnitude shifts, that prove critical for pushing the perception-distortion Pareto frontier. This effectiveness extends beyond flow matching frameworks to diffusion mod-els (See Appendix D), demonstrating TriPS generalizabil-ity across generative architectures. Furthermore, applying TriPS to diverse solvers including FlowDPS (Kim et al., 2025a) and FLAIR (Erbach et al., 2025) consistently im-proves perceptual metrics while maintaining competitive distortion performance compared to default configurations, confirming the broad compatibility of triadic schedule opti-mization across inverse problem solvers (See Appendix F.2). 
+
+## 6. Conclusion 
+
+In this work, we propose TriPS, a framework for poste-rior sampling through time-varying coordination of data consistency (DC) guidance, classifier-free guidance (CFG), and stochasticity. We characterize a triadic coupling dy-namic in which excessive CFG scales lead to the guidance conflict that hinder data consistency convergence, while stochasticity regularizes off-manifold phenomena induced by DC guidance and CFG. To optimize these dynamics, two complementary methods are proposed: template-based schedule search that employs fixed functional templates to perform coarse schedule search, providing robust baselines across inverse problems, and GRPO-based schedule opti-mization that captures complex temporal curves beyond fixed functional forms, enabling effective navigation of the perception-distortion trade-off through a hybrid IQA reward that jointly regularizes both metrics. Through these strate-gies, TriPS achieves high fidelity restoration across diverse tasks. The established triadic scheduling principles will pro-vide a robust basis for future research in adaptive control for generative modeling and its broader applications. 
+
+## Acknowledgements 
+
+This work was supported in part by Institute of Informa-tion & Communications Technology Planning & Evalua-tion (IITP) grants funded by the Korea government(MSIT) [No. RS-2021-II211343, Artificial Intelligence Graduate School Program (Seoul National University) / No. RS-2025-02314125, Effective Human-Machine Teaming With Multi-modal Hazy Oracle Models], the National Research Foun-dation of Korea (NRF) grant funded by the Korea govern-ment(MSIT) (No. RS-2025-02263628), the BK21 FOUR program of the Education and Research Program for Fu-ture ICT Pioneers, Seoul National University, and Samsung Electronics Co., Ltd. (IO251217-14748-01). 
+
+## Impact Statement 
+
+Our research introduces TriPS (Triadic Dynamics Aware Posterior Sampling), a novel framework that optimizes the time-varying interplay of data consistency (DC) guidance, classifier-free guidance (CFG), and stochasticity in gen-erative posterior sampling for solving inverse problems with pretrained diffusion and flow matching models. We de-velop two complementary schedule optimization strategies: template-based schedule search using compact functional priors and GRPO-based schedule optimization strategies that discovers complex temporal curves. These advance-ments offer broad practical utility in fields such as medi-cal imaging, scientific reconstruction, and remote sensing, while providing new theoretical and algorithmic insights for conditional generative sampling. This work raises no ethical concerns and focuses on enhancing reconstruction accuracy without adverse societal consequences. 
+
+## References 
+
+Agustsson, E. and Timofte, R. Ntire 2017 challenge on sin-gle image super-resolution: Dataset and study. In CVPRW ,pp. 126–135, 2017. Beck, A. and Teboulle, M. A fast iterative shrinkage-thresholding algorithm for linear inverse problems. SIAM Journal on Imaging Sciences , 2(1):183–202, 2009. Bi ´nkowski, M., Sutherland, D. J., Arbel, M., and Gretton, A. Demystifying mmd gans. In ICLR , 2018. Chang, H., Zhang, H., Barber, J., Maschinot, A., Lezama, J., Jiang, L., Yang, M.-H., Murphy, K., Freeman, W. T., Rubinstein, M., et al. Muse: Text-to-image generation via masked generative transformers. In ICML , pp. 4055– 4075. PMLR, 2023. Chung, H., Kim, J., Kim, S., and Ye, J. C. Parallel diffusion models of operator and image for blind inverse problems. In CVPR , pp. 6059–6069, 2023a. Chung, H., Kim, J., Mccann, M. T., Klasky, M. L., and Ye, J. C. Diffusion posterior sampling for general noisy inverse problems. In ICLR , 2023b. Chung, H., Lee, S., and Ye, J. C. Decomposed diffusion sampler for accelerating large-scale inverse problems. In 
+
+ICLR , 2024a. Chung, H., Ye, J. C., Milanfar, P., and Delbracio, M. Prompt-tuning latent diffusion models for inverse problems. In 
+
+ICML , 2024b. Chung, H., Kim, J., Park, G. Y., Nam, H., and Ye, J. C. Cfg++: Manifold-constrained classifier free guidance for diffusion models. ICLR , 2025. Donoho, D. L. De-noising by soft-thresholding. IEEE Trans-actions on Information Theory , 41(3):613–627, 1995. 9Triadic Dynamics Aware Diffusion Posterior Sampling for Inverse Problems 
+
+Erbach, J., Narnhofer, D., Dombos, A., Schiele, B., Lenssen, J. E., and Schindler, K. Solving inverse problems with flair. arXiv preprint arXiv:2506.02680 , 2025. Esser, P., Kulal, S., Blattmann, A., Entezari, R., M ¨uller, J., Saini, H., Levi, Y., Lorenz, D., Sauer, A., Boesel, F., et al. Scaling rectified flow transformers for high-resolution image synthesis. In ICML , 2024. Garber, T. and Tirer, T. Image restoration by denoising diffusion models with iteratively preconditioned guidance. In CVPR , pp. 25245–25254, 2024. Heusel, M., Ramsauer, H., Unterthiner, T., Nessler, B., and Hochreiter, S. Gans trained by a two time-scale update rule converge to a local nash equilibrium. NeurIPS , 30, 2017. Ho, J. and Salimans, T. Classifier-free diffusion guidance. 
+
+NeurIPSW , 2021. Ho, J., Jain, A., and Abbeel, P. Denoising diffusion proba-bilistic models. In NeurIPS , volume 33, pp. 6840–6851, 2020. Hyv ¨arinen, A. Estimation of non-normalized statistical models by score matching. Journal of Machine Learning Research , 6:695–709, 2005. Kang, W., Galim, K., and Koo, H. I. Eta inversion: Design-ing an optimal eta function for diffusion-based real image editing. In ECCV , pp. 90–106. Springer, 2024. Karras, T., Laine, S., and Aila, T. A style-based generator ar-chitecture for generative adversarial networks. In CVPR ,pp. 4401–4410, 2019. Kawar, B., Vaksman, G., and Elad, M. Snips: Solving noisy inverse problems stochastically. NeurIPS , 34:21757– 21769, 2021. Kawar, B., Elad, M., Ermon, S., and Song, J. Denoising diffusion restoration models. NeurIPS , 35:23593–23606, 2022. Ke, J., Wang, Q., Wang, Y., Milanfar, P., and Yang, F. Musiq: Multi-scale image quality transformer. In ICCV , pp. 5148– 5157, 2021. Kim, J., Kim, B. S., and Ye, J. C. Flowdps : Flow-driven posterior sampling for inverse problems. In ICCV , pp. 12328–12337, October 2025a. Kim, J., Park, G. Y., Chung, H., and Ye, J. C. Regularization by texts for latent diffusion inverse solvers. In ICLR ,2025b. Kynk ¨a ¨anniemi, T., Aittala, M., Karras, T., Laine, S., Aila, T., and Lehtinen, J. Applying guidance in a limited interval improves sample and distribution quality in diffusion models. NeurIPS , 37:122458–122483, 2024. Lee, H., Mun, D. J., Lee, H., Lee, K. C., Hong, S., Kim, G., Lee, S. A., and Chun, S. Y. Fidelity-preserving zero-shot diffusion models for highly ill-posed inverse problems in lensless imaging. Image and Vision Computing , pp. 105786, 2025. Lipman, Y., Chen, R. T. Q., Ben-Hamu, H., Nickel, M., and Le, M. Flow matching for generative modeling. In ICLR ,2023. Liu, J., Liu, G., Liang, J., Li, Y., Liu, J., Wang, X., Wan, P., Zhang, D., and Ouyang, W. Flow-grpo: Training flow matching models via online rl. arXiv preprint arXiv:2505.05470 , 2025. Pandey, K., Yang, R., and Mandt, S. Fast samplers for inverse problems in iterative refinement models. NeurIPS ,37:26872–26914, 2024. Park, J. and Ye, J. C. Flowlps: Langevin-proximal sampling for flow-based inverse problem solvers. arXiv preprint arXiv:2512.07150 , 2025. Patel, M., Wen, S., Metaxas, D. N., and Yang, Y. Flowchef: Steering of rectified flow models for controlled genera-tions. In ICCV , pp. 15308–15318, 2025. Platen, E. and Kloeden, P. E. Numerical solution of stochas-tic differential equations. (No Title) , 1992. Pourya, M., Rawas, B. E., and Unser, M. Flower: A flow-matching solver for inverse problems. arXiv preprint arXiv:2509.26287 , 2025. Rombach, R., Blattmann, A., Lorenz, D., Esser, P., and Ommer, B. High-resolution image synthesis with latent diffusion models. In CVPR , pp. 10684–10695, 2022. Rout, L., Raoof, N., Daras, G., Caramanis, C., Dimakis, A., and Shakkottai, S. Solving linear inverse problems prov-ably via posterior sampling with latent diffusion models. 
+
+NeurIPS , 36:49960–49990, 2023. Rozet, F., Andry, G., Lanusse, F., and Louppe, G. Learning diffusion priors from observations by expectation maxi-mization. NeurIPS , 37:87647–87682, 2024. Rudin, L. I., Osher, S., and Fatemi, E. Nonlinear total variation based noise removal algorithms. Physica D: Nonlinear Phenomena , 60(1–4):259–268, 1992. Saharia, C., Chan, W., Saxena, S., Li, L., Whang, J., Denton, E., Ghasemipour, K., Gontijo Lopes, R., Karagol Ayan, 10 Triadic Dynamics Aware Diffusion Posterior Sampling for Inverse Problems 
+
+B., Salimans, T., et al. Photorealistic text-to-image dif-fusion models with deep language understanding. In 
+
+NeurIPS , volume 35, pp. 36479–36494, 2022. Shao, Z., Wang, P., Zhu, Q., Xu, R., Song, J., Bi, X., Zhang, H., Zhang, M., Li, Y., Wu, Y., et al. Deepseekmath: Push-ing the limits of mathematical reasoning in open language models. arXiv preprint arXiv:2402.03300 , 2024. Smith, L. N. Cyclical learning rates for training neural networks. In WACV , pp. 464–472. IEEE, 2017. Song, B., Kwon, S. M., Zhang, Z., Hu, X., Qu, Q., and Shen, L. Solving inverse problems with latent diffusion models via hard data consistency. In ICLR , 2024. Song, J., Vahdat, A., Mardani, M., and Kautz, J. Pseudoinverse-guided diffusion models for inverse prob-lems. In ICLR , 2023. Song, Y., Sohl-Dickstein, J., Kingma, D. P., Kumar, A., Er-mon, S., and Poole, B. Score-based generative modeling through stochastic differential equations. In ICLR , 2021. Wang, J., Chan, K. C., and Loy, C. C. Exploring clip for assessing the look and feel of images. In AAAI , volume 37, pp. 2555–2563, 2023a. Wang, X., Dufour, N., Andreou, N., Cani, M.-P., Abrevaya, V. F., Picard, D., and Kalogeiton, V. Analysis of classifier-free guidance weight schedulers. TMLR , 2024. Wang, Y., Yu, J., and Zhang, J. Zero-shot image restoration using denoising diffusion null-space model. In ICLR ,2023b. Wang, Z., Bovik, A. C., Sheikh, H. R., and Simoncelli, E. P. Image quality assessment: from error visibility to structural similarity. IEEE Transactions on Image Processing , 13(4):600–612, 2004. Wu, H., Zhang, Z., Zhang, W., Chen, C., Liao, L., Li, C., Gao, Y., Wang, A., Zhang, E., Sun, W., et al. Q-align: Teaching lmms for visual scoring via discrete text-defined levels. arXiv preprint arXiv:2312.17090 , 2023. Wu, R., Yang, T., Sun, L., Zhang, Z., Li, S., and Zhang, L. Seesr: Towards semantics-aware real-world image super-resolution. In CVPR , pp. 25456–25467, 2024. Xu, Y., Deng, M., Cheng, X., Tian, Y., Liu, Z., and Jaakkola, T. Restart sampling for improving generative processes. 
+
+NeurIPS , 36:76806–76838, 2023. Zhang, B., Chu, W., Berner, J., Meng, C., Anandkumar, A., and Song, Y. Improving diffusion inverse problem solving with decoupled noise annealing. In CVPR , pp. 20895–20905, 2025. Zhang, R., Isola, P., Efros, A. A., Shechtman, E., and Wang, O. The unreasonable effectiveness of deep features as a perceptual metric. In CVPR , pp. 586–595, 2018. Zhu, Y., Zhang, K., Liang, J., Cao, J., Wen, B., Timofte, R., and Van Gool, L. Denoising diffusion models for plug-and-play image restoration. In CVPR , pp. 1219–1229, 2023. 11 Triadic Dynamics Aware Diffusion Posterior Sampling for Inverse Problems 
+
+## A. Derivations and Proof 
+
+This appendix derives (i) the flow-based posterior-mean estimator ˆx0|t(xt) ≈ E[x0 | xt] used for likelihood/DC guidance, and (ii) the corresponding relation between the marginal score ∇xt log pt(xt) and the flow velocity field. The derivations follow the standard OT/linear conditional flow setting. 
+
+A.1. Setup: linear conditional flow 
+
+We consider the linear conditional flow (OT/rectified flow matching) that interpolates between clean data x0 ∼ p0 and a Gaussian endpoint x1 ∼ N (0 , I ):
+
+xt = (1 − t)x0 + tx 1, t ∈ [0 , 1] . (16) The (optimal) marginal velocity field is given by the conditional expectation 
+
+vt(x) ≜ E[x1 − x0 | xt = x], (17) which is approximated by the learned model velocity vθ (xt; ∅) (time dependence is implicit, consistent with the main text). 
+
+A.2. Flow-based Posterior Mean 
+
+From (16), we have xt − x0 = t(x1 − x0), hence 
+
+x0 = xt − t(x1 − x0). (18) Taking conditional expectation with respect to pt(x0, x 1 | xt) yields the flow-based analogue of Tweedie’s variable identity: 
+
+E[x0 | xt] = xt − t E[x1 − x0 | xt] = xt − t v t(xt). (19) Replacing vt with the learned velocity gives the estimator used in the main text: 
+
+ˆx0|t(xt) ≜ E[x0 | xt] ≈ xt − t v θ (xt; ∅). (20) Similarly, the conditional expectation of the Gaussian endpoint can be written as 
+
+E[x1 | xt] = xt + (1 − t) vt(xt). (21) 
+
+A.3. Score from Velocity 
+
+Under (16) with x1 ∼ N (0 , I ), the conditional distribution is 
+
+pt(xt | x0) = N  (1 − t)x0, t 2I, (22) and thus the conditional score is 
+
+∇xt log pt(xt | x0) = − 1
+
+t2
+
+ xt − (1 − t)x0
+
+. (23) Using ∇xt log pt(xt) = E[∇xt log pt(xt | x0) | xt] gives 
+
+∇xt log pt(xt) = − 1
+
+t2
+
+
+
+xt − (1 − t)E[x0 | xt]
+
+
+
+. (24) Substituting (19) yields: 
+
+∇xt log pt(xt) = − xt
+
+t − 1 − tt vt(xt) ≈ − xt
+
+t − 1 − tt vθ (xt; ∅). (25) Equivalently, solving (25) for vt gives 
+
+vt(xt) = − xt
+
+1 − t − t
+
+1 − t ∇xt log pt(xt), (26) which matches the form used in (Liu et al., 2025). 12 Triadic Dynamics Aware Diffusion Posterior Sampling for Inverse Problems 
+
+A.4. Proof of Proposition 1 
+
+Proof. In Proposition 1, we conduct a first-order derivative analysis. To analyze the derivative of the one-step expected residual norm R( ˆ x0|t) ≜ ∥y − A ˆx0|t∥22 reduction with respect to the CFG scale λ(t), we start from the Euler-Maruyama discretization in (Platen & Kloeden, 1992): 
+
+xt+∆ t = xt + ∆ t b prior (xt) + ∆ t b cfg (xt; c) + ∆ t b dc (xt; y) + bsto (t)√∆t ξ, (27) where ξ ∼ N (0 , I ) and ˜bcfg is the unit-scale CFG defined in (8) and bsto (t) is the stochastic drift coefficient corresponding to the stochasticity scale η(t) in Eq. (5). Using the second-order Taylor expansion around ˆx0|t, the residual norm at the next state ˆx0|t+∆ t is: 
+
+R( ˆ x0|t+∆ t)) = R( ˆ x0|t) + ∇R ( ˆ x0|t)⊤( ˆ x0|t+∆ t − ˆx0|t)+ 12 ( ˆ x0|t+∆ t − ˆx0|t)⊤∇2R( ˆ x0|t)( ˆ x0|t+∆ t − ˆx0|t) + o(| ˆx0|t+∆ t − ˆx0|t|2). (28) We now compute the conditional expectation E[R( ˆ x0|t+∆ t) | xt]. Substituting (27) into (28) and noting that E[ξ] = 0 and 
+
+E[ξξ ⊤] = I, we obtain: 
+
+E[R( ˆ x0|t+∆ t) | xt] = R( ˆ x0|t) + ∆ t∇R ( ˆ x0|t)⊤
+
+bprior + λ(t)˜bcfg (xt; c) + bdc (xt; y)
+
+
+
++ 12 bsto (t)2∆tTr  ∇2R( ˆ x0|t) + o(∆ t).
+
+(29) In this derivation, the quadratic terms involving bdet (xt) and λ(t)-dependence of bdc are of order O(∆ t2) and are absorbed into the o(∆ t) remainder neglecting higher-order curvature effect. Finally, to find the first-order derivative with respect to the CFG scale λ(t), we differentiate the expected measurement residual in (29): 
+
+∂∂λ (t) E[R( ˆ x0|t+∆ t | xt] = ∂∂λ (t)
+
+h
+
+∆t∇R ( ˆ x0|t)⊤
+
+λ(t)˜bcfg (xt; c)
+
+i 
+
++ o(∆ t)= ∆ t
+
+D
+
+∇R ( ˆ x0|t), ˜bcfg (xt; c)
+
+E
+
++ o(∆ t)= −∆t
+
+D˜bdc (xt; y), ˜bcfg (xt; c)
+
+E
+
++ o(∆ t),
+
+(30) where 
+
+D
+
+∇R ( ˆ x0|t), ˜bcfg (xt; c)
+
+E
+
+≈ − 
+
+D˜bdc (xt; y), ˜bcfg (xt; c)
+
+E
+
+by our experimental validation. Our experimental validation is set by cosine similarity ( Cos-Sim( −R ( ˆ x0|t), ˜bdc (xt; y))) between −R ( ˆ x0|t) and ˜bdc (xt; y). Empirically, in Fig. 6, we observe that the cosine similarity between −R ( ˆ x0|t) and ˜bdc (xt; y) remains near unity throughout the entire sampling trajectory, thereby substantiating the approximation in Eq. (30). Time 𝑡 
+
+> Cos -Sim (−𝑅 (ෝ𝒙 0|𝑡 ), ෨𝑏 ⅆ𝑐 (𝒙 𝑡 ; 𝒚 ))
+
+Figure 6. Cosine similarity between squared residual norm −R ( ˆ x0|t) and unit-scale DC guidance ˜bdc (xt; y).
+
+Conclusively, this results shows that the directional alignment (inner product) between the DC guidance and the CFG determines whether increasing the CFG scale λ(t) accelerates or hinders the minimization of the measurement residual. 13 Triadic Dynamics Aware Diffusion Posterior Sampling for Inverse Problems 
+
+## B. More Analysis on Triadic Coupling Dynamics 
+
+B.1. Sampling Process: Early-Stage Guidance Conflict 
+
+To empirically substantiate the theoretical analysis presented in Sec. 3.1, we visualize the evolution of the clean image prediction ˆx0|t defined in Eq. (3) throughout the reverse diffusion process. Fig. 7 provides a comparative visualization of the restoration trajectories under a lower CFG scale ( λ = 2 .0) and a high CFG scale ( λ = 7 .0). Step 1 
+
+(a) Sampling Process for  𝜆 (t)  = 2.0                       
+
+> Step 3 Step 5 Step 7 Step 10 Step 13
+> Step 16 Step 19 Step 22 Step 28 Ground Truth
+> Step 1 Step 3 Step 5 Step 7 Step 10 Step 13
+> Step 16 Step 19 Step 22 Step 28 Ground Truth
+> "a high quality photo of animal, bengal tiger, grass, lush, stand, stare, tiger, walk,clean "
+
+(b) Sampling Process for  𝜆 (t)  = 7.0      
+
+> "a high quality photo of animal, bengal tiger, grass, lush, stand, stare, tiger, walk,clean "
+> Step 25
+> Step 25
+
+Figure 7. Visual comparison of early-stage dynamics under different CFG scales at different sampling steps (NFE:28). This experiment demonstrates a super-resolution ×8 on the DIV2K validation set. (a): Low CFG ( λ(t) = 2 .0) scale facilitates a gradual transition from noise to clean data, respecting data consistency. (b): High CFG ( λ(t) = 7 .0) scale induces sudden shifts and intense color saturation in the early phase. This visualizes the guidance conflict , where the aggressive CFG steers the generation toward semantic hallucinations that violate the measurement constraints. 
+
+The visual results corroborate our theoretical claims. Consistent with the behavior of standard CFG scale reported in recent studies (Chung et al., 2025; Saharia et al., 2022), the high CFG scale (Fig. 7 (b)) exhibits rapid signal amplification and saturation during the early timesteps. As formalized in Eq. (10) , this is the phase where the CFG ˜bCFG (xt; c) and the DC guidance ˜bDC (xt; y) are most misaligned (COS-SIM 1(xt) < 0). Specifically, the high CFG scale (Fig. 7 (b)) forces the intermediate states to commit prematurely to a semantic mode, leading to hallucinations that are structurally inconsistent with the degraded measurements y. In contrast, the low CFG scale (Fig. 7 (a)) maintains a trajectory that allows the data consistency term to effectively guide the restoration process without conflicting with the prior. These observations confirm that the conflict is not merely theoretical but manifests as tangible degradation in the early-stage generation process. 14 Triadic Dynamics Aware Diffusion Posterior Sampling for Inverse Problems 
+
+B.2. Sampling Process: Stochasticity as a Regularizer for DC guidance and CFG 
+
+To further substantiate the observation in Sec. 3.2, we conduct a process-wise analysis to visualize how stochasticity mitigates the instability induced by strong DC guidance and CFG ( bdc (xt; y), b cfg (xt; c)). Following the setup in Fig. 2, we conduct this analysis scheduling the stochasticity scale η(t) = ζ(t)√1 − σt+∆ t. While Fig. 8 illustrates the final-state 
+
+t = t0, the intermediate sampling dynamics provide deeper insights into the ”regularization” role of stochasticity. As shown in Fig. 8, employing high DC, CFG scales β(t), λ (t) without sufficient stochasticity leads to a progressive accumulation of artifacts. High DC, CFG scales push the intermediate latent xt toward the data consistency constraint with such intensity that it overshoots the natural image manifold, resulting in the high-frequency ”saturated” artifacts observed in Fig. 8 (a). In contrast, as shown in the step-by-step evolution in Fig. 8 (b), the introduction of a proper scheduled stochasticity acts as a per-step manifold projection. By injecting controlled stochasticity and subsequently removing it via the reverse diffusion step, the sampler effectively repairs the accumulated error, pulling the trajectory back toward the high-density regions of the prior. This process-wise evidence confirms that the synergetic coupling of scales of DC guidance, CFG and stochasticity (β(t), λ (t), η(t)) is not merely hyperparameters balancing act, but a necessary mechanism to maintain sampling stability under strong guidance. Step 1 
+
+(a) Sampling Process for  ζ(t)  = 0.0                    
+
+> Step 3 Step 5 Step 7 Step 10 Step 13
+> Step 16 Step 19 Step 22 Step 28 Ground Truth
+> Step 1 Step 3 Step 5 Step 7 Step 10 Step 13
+> Step 16 Step 19 Step 22 Step 28 Ground Truth
+> "a high quality photo of face"
+
+(b) Sampling Process for  ζ(t)  = 1.25   
+
+> Step 25
+> Step 25
+> "a high quality photo of face"
+
+Figure 8. Visual comparison of the stabilization effect of stochasticity under different stochasticity scales at different sampling steps (NFE:28). The stochasticity scale is scheduled as η(t) = ζ(t)√1 − σt+∆ t for this analysis. This experiment demonstrates a super-resolution ×8 on the FFHQ validation set. (a): Without stochasticity ( η(t) = 0 ), the error accumulates over iterations, leading to significant manifold deviation and visual artifacts. (b): High stochasticity ( η(t) = 1 .25 ) scale stabilizes the data manifold trajectory, effectively suppressing artifact growth and maintaining perceptual fidelity throughout the restoration process. 
+
+B.3. Stochasticity as a Regularizer w.r.t Marginal Distribution 
+
+To rigorously quantify the marginal distribution discussed in Sec. 3.2, we employ the Kernel Inception Distance (KID) (Bi ´nkowski et al., 2018) as a metric for manifold alignment. Unlike the Fr ´echet Inception Distance (FID), KID is an unbiased estimator even for small sample sizes, making it particularly suitable for our evaluation on the DIV2K and FFHQ datasets 15 Triadic Dynamics Aware Diffusion Posterior Sampling for Inverse Problems 
+
+(100 samples each). KID measures the squared Maximum Mean Discrepancy (MMD) between the Inception-v3 feature representations of the generated samples ˆx0 and the ground-truth images xgt :KID (Pg , Pr) = Ex, x′ ∼ Pg , y, y′ ∼ Pr [k(x, x′) + k(y, y′) − 2k(x, y)] , (31) where k(·, ·) denotes the polynomial kernel. As shown in Fig. 9(a), we observe a distinct correlation between the DC,CFG scales ( λ, β ) and the KID score. When stochasticity is low ( η ≈ 0), increasing either the CFG scale λ or the DC guidance scale β results in an increase of the KID score. This empirical evidence supports our hypothesis that excessive DC guidance and CFG steer the sampling trajectory away from the natural image manifold, inducing a distribution shift. Conversely, as we inject more stochasticity (increasing η), the KID scores consistently decrease across all DC,CFG scales. This result validates the role of stochasticity as a distributional regularizer that mitigates the bias induced by the triadic coupling of DC guidance and CFG, ensuring that the generated samples remain anchored to the higher-probability regions of the data distribution. 𝜁 𝑡 = 0 𝜁 𝑡 = 1.25  Ground Truth 
+
+(b) Visual Comparison 
+
+𝛽 (DC scale) 
+
+> KID
+> KID
+
+𝜆 (CFG scale) 
+
+(a) KID vs. Guidance Scales across Stochasticity Levels       
+
+> Figure 9. Distributional analysis of the triadic coupling. (a) Kernel Inception Distance (KID) calculated between 100 generated samples and ground-truth images on the DIV2K dataset. Note that the stochasticity scale is scheduled as η(t) = ζ(t)√1−σt+∆ tfor this analysis. The plots demonstrate that high DC guidance,CFG scales ( λ, β ) without sufficient stochasticity ( η) lead to significant distributional shift away (higher KID). Increasing the stochasticity scale effectively regularizes, pulling the samples back toward the natural image manifold. This highlights the necessity of the triadic balance for maintaining both data consistency and perceptual fidelity.
+
+B.4. Study on CFG Scheduling Trend in Posterior Sampling 
+
+We present a qualitative comparison of different CFG scaling schedules λ(t) to validate the analysis in Sec. 3.1 regarding the guidance conflict. Specifically, we evaluate distinct schedules within the range [λmin , λ max ] = [1 , 6] : Fixed (constant at the mean), Linearly (increasing/decreasing), and non-monotonic Tent and V-shape function (Smith, 2017) curves (linearly increasing to decreasing / linearly decreasing to increasing) for the super-resolution ×12 . our observations confirm that a linearly decreasing schedule, which imposes high CFG scales during the early sampling phase, induces the directional misalignment between DC guidance and CFG, leading to severe semantic hallucinations and artifacts. In contrast, the linearly increasing schedule mitigates this early-stage conflict while preserving the capability for late-stage texture refinement, yielding reconstructions that are most faithful to the ground truth. It is worth noting, however, that while an increasing profile empirically favors fidelity in this regime, the optimal λ(t) remains a design choice governed by the trade-off between semantic adherence and data consistency. 16 Triadic Dynamics Aware Diffusion Posterior Sampling for Inverse Problems 𝜆 (t) : Fixed  𝜆 (t) :Tent function  𝜆 (t) :Linearly decreasing            
+
+> Ground Truth 𝜆 (t) :V-shape function 𝜆 (t) :Linearly increasing
+> Figure 10. Qualitative comparison of CFG scheduling designs on super-resolution ×12 . Using the prompt “ a photo of baby, bird, duck, duckling, goose, grass, grassy, green, lush, nest, sit, stand, clean ”, we compare reconstruction quality across different λ(t)designs. The linearly decreasing schedule induces semantic hallucinations due to the early-stage DC guidance-CFG conflict, whereas the linearly increasing schedule effectively aligns with the ground truth by delaying affects of CFG until the structural feature is established.
+
+## C. Details on TriPS Backbone Sampler 
+
+TriPS decomposes the guided reverse step into three core components: generative prior denoising modulated by the classifier-free guidance (CFG) scale λ(t), data consistency (DC) guidance refinement with strength β(t), and stochastic renoising controlled by η(t). To implement the DC guidance, we adopt the hybrid update scheme (Garber & Tirer, 2024) within the latent space of the VAE, which interpolates between Back-Projection (BP) and Least-Squares (LS) objectives. This is achieved by minimizing the following loss function: 
+
+L(AD ( ˆ z0|t), y) = (1 − ωt) A†(y) − A † AD ( ˆ z0|t) 
+
+> 2
+
++ ωt y − AD ( ˆ z0|t) 2, (32) where D(·) denotes the pre-trained VAE decoder, ˆx0|t := D( ˆ z0|t) (each denote the clean image prediction in pixel and latent space in Eq. (3) .) and A† is the pseudo-inverse of the measurement operator A. The interpolation weight ωt modulates the transition from BP to LS and is parameterized as ωt = (1 − σω (t)) ϕ with ϕ = 0 .8. In this formulation, we set σω (t) = σt
+
+(noise schedule σt) for flow matching models and σω (t) = 1 − ¯αt (noise variance schedule 1 − ¯αt) for diffusion models. The complete procedure is detailed in Algorithm 1, with further diffusion-specific sampling variants provided in Algorithm 2. 
+
+## D. TriPS in Diffusion Models 
+
+D.1. Datasets and Metrics 
+
+For the quantitative evaluation, we utilize 1,000 high-resolution images from the FFHQ dataset. To ensure an objective and consistent comparison with other generative frameworks, the evaluation protocol and performance metrics are identical to those established in Section 5.1. 
+
+D.2. Baselines 
+
+To evaluate the performance of TriPS in diffusion-based inverse problems, we employ Stable Diffusion 1.5 as the generative backbone with a fixed resolution of 512 × 512 . For all experiments, the number of function evaluations (NFE) is set to 50. We 17 Triadic Dynamics Aware Diffusion Posterior Sampling for Inverse Problems 
+
+Algorithm 1 Inference of TriPS (Flow Matching) 
+
+Require: Measurement y, linear operator A (and adjoint A⊤), pre-trained flow model vθ , VAE encoder/decoder (E, D),text embeddings (c∅, c ), noise schedule {σt}t∈[0 ,1] , Schedules of DC, CFG, Stochasticity scale β(t), λ (t), η (t) 
+
+> 1:
+
+z1 ∼ N (0 , I d) 
+
+> 2:
+
+for t : 1 → 0 do  
+
+> 3:
+
+vt(zt) ← vθ (zt, c ∅) + λ(t) vθ (zt, c ) − vθ (zt, c ∅) ▷ 1. CFG-induced velocity field  
+
+> 4:
+
+ˆz0|t ← zt − σtvt(zt) 
+
+> 5:
+
+ˆz1|t ← zt + (1 − σt)vt(zt) 
+
+> 6:
+
+˜z0|t(y) ← ˆz0|t − β(t)∇ˆz0|t L(AD ( ˆ z0|t), y)  Eq. (32)  ▷ 2. Data consistency (Sec. E.3)  
+
+> 7:
+
+ϵ ∼ N (0 , I d) 
+
+> 8:
+
+˜z1|t ← p1 − η2(t)z1|t + η(t)ϵ ▷ 3. Stochasticity  
+
+> 9:
+
+zt+∆ t ← (1 − σt+∆ t) ˜ z0|t(y) + σt+∆ t ˜z1|t ▷ 4. Euler update  
+
+> 10:
+
+end for Algorithm 2 Inference of TriPS (Diffusion) 
+
+Require: Measurement y, linear operator A (and adjoint A⊤), pre-trained flow model vθ , VAE encoder/decoder (E, D),text embeddings (c∅, c ), NFE T , noise variance schedule {1 − ¯αt}t∈[T, 1] , Schedules of DC, CFG, Stochasticity scale 
+
+β(t), λ (t), η (t) 
+
+> 1:
+
+z1 ∼ N (0 , I d) 
+
+> 2:
+
+for t from T to 1 do  
+
+> 3:
+
+ϵt(zt) ← ϵθ (zt, c ∅) + λ(t) ϵθ (zt, c ) − ϵθ (zt, c ∅) ▷ 1. CFG-scaled predicted noise  
+
+> 4:
+
+ˆz0|t ← 1√1− ¯αt
+
+ zt − √1 − ¯αtϵt(zt) 
+
+> 5:
+
+˜z0|t(y) ← ˆz0|t − β(t)∇ˆz0|t L(AD ( ˆ z0|t), y)  Eq. (32)  ▷ 2. Data consistency (Sec. E.3)  
+
+> 6:
+
+ϵ ∼ N (0 , I d) 
+
+> 7:
+
+˜ϵt(zt) ← p1 − η2(t)ϵt(zt) + η(t)ϵ ▷ 3. Stochasticity  
+
+> 8:
+
+zt−1 ← √¯αt−1 ˜z0|t(y) + √1 − ¯αt−1 ˜ϵt(zt) ▷ 4. Euler update  
+
+> 9:
+
+end for 
+
+compare TriPS against a representative set of diffusion-based baselines, including PSLD (Rout et al., 2023), DDPG (Garber & Tirer, 2024), P2L (Chung et al., 2024b), and TReg (Kim et al., 2025b). Detailed implementation specifications for the diffusion setup and baseline configurations are provided in Section E.3. 
+
+D.3. Problem Setting 
+
+For diffusion-based experiments, we include super-resolution 8 × and motion deblurring with a kernel size of 61 and intensity of 0.5. In all cases, Gaussian noise with a standard deviation of 0.03 (1.5% of the pixel range) is added. 
+
+D.4. Experimental Results for Diffusion Model 
+
+To evaluate the generalizability of TriPS beyond flow matching frameworks, we extend the proposed method to diffusion models by employing the sampling algorithm formulated in Algorithm 2. We benchmark TriPS on two representative inverse problems: super-resolution ×8 and motion deblurring. In both tasks, TriPS demonstrates superior performance compared to established diffusion-based baselines. As summarized in Table 3, the framework achieves a superior distortion-perception trade-off, which suggests that the optimized triadic schedules effectively leverage pre-trained generative priors for image restoration. These quantitative improvements are further supported by the qualitative comparisons in Fig. 11, where TriPS exhibits enhanced visual fidelity and structural consistency. Collectively, these findings validate the robustness and adaptability of the TriPS framework across distinct generative mechanisms. 18 Triadic Dynamics Aware Diffusion Posterior Sampling for Inverse Problems Measurement  PSLD  Ground Truth TriP ST (Ours)  TriP SG (Ours) DDPG  P2L  TReg        
+
+> Motion Deblurring
+> Measurement PSLD Ground Truth TriP ST(Ours) TriP SG(Ours) DDPG P2L TReg
+> X8 Super -Resolution
+
+Figure 11. Qualitative comparison for FFHQ dataset on linear inverse problems based on Diffusion Model (SD 1.5). 
+
+## E. Implementation Details 
+
+E.1. Implementation Details for Template-based Schedule Search Search space Each of the three schedule components (β(t), λ (t), η (t)) is independently assigned one template from the family T = {linear , exponential , logarithmic }, yielding a Cartesian product T 3 of 33 = 27 candidate triads τ =(τβ , τ λ, τ η ). Monotonicity is enforced by construction: the decreasing direction is used for β(t) and η(t), and the increasing direction for λ(t).
+
+Template functions Given endpoint values [smin , s max ] and time t ∈ [0 , 1] (decreasing from noise to clean), the three template functions are defined as: 
+
+slin (t) = smax − (smax − smin ) t, sexp (t) = smin + ( smax − smin ) e−γt − e−γ
+
+1 − e−γ , γ = 3 ,slog (t) = smax − (smax − smin ) ln(1 + γt )ln(1 + γ) , γ = 10 .
+
+Linear templates maintain a constant rate of change. Exponential templates change slowly at first then rapidly (capturing schedules that front-load the adjustment in the early/high-noise regime). Logarithmic templates change rapidly at first then slowly (suited for schedules that converge quickly and plateau in the late/low-noise regime). 19 Triadic Dynamics Aware Diffusion Posterior Sampling for Inverse Problems 
+
+Parameter ranges The endpoint values used in the grid search are: λ(t) ∈ [1 .0, 6.0] and η(t) ∈ [0 , 1] , fixed across all tasks; β(t) ∈ [βTmin , β Tmax ], which are task-dependent and listed in Tables 5 and 6. 
+
+Evaluation protocol All 27 candidate triads are evaluated on a calibration set Dcal of 100 images per task, sampled from indices disjoint from the held-out test set. For each candidate τ , the utility U(τ ; Dcal ) = α·PSNR norm +(1 −α)·(1 −LPIPS) 
+
+(with α = 0 .5) (Eq. (12) ) is computed, and the highest-scoring triad is chosen as τ ⋆. Here, PSNR norm denotes the min-max normalized PSNR computed across all candidates in the search, so that both terms share a common [0 , 1] scale. For the implementation of template-based schedule search (TriPS T), the specific hyperparameter configurations, including 
+
+βT 
+
+> min
+
+and βT 
+
+> max
+
+as defined in Section 4.1, are summarized in Table 5 for flow matching models and Table 6 for diffusion models. These tables further detail the optimized schedule templates identified for each task, providing the necessary parameters to ensure the reproducibility of our experimental results. 
+
+Table 5. The resulting templates of TriPS T and hyperparameters for DC guidance scale [βT
+
+> min
+
+, β T
+
+> max
+
+] for linear inverse problems based on the flow matching model.                                                    
+
+> Flow Matching Model (SD3.5-M)
+> Super-Resolution ×8Super-Resolution ×12 Motion Deblurring Gaussian Deblurring
+> β(t)↓λ(t)↑η(t)↓[βT
+> min , β T
+> max ]β(t)↓λ(t)↑η(t)↓[βT
+> min , β T
+> max ]β(t)↓λ(t)↑η(t)↓[βT
+> min , β T
+> max ]β(t)↓λ(t)↑η(t)↓[βT
+> min , β T
+> max ]
+> FFHQ (768 ×768)
+> linear logarithmic logarithmic [50,250] linear logarithmic logarithmic [40,250] linear logarithmic linear [150,350] logarithmic logarithmic logarithmic [100,200]
+> DIV2K (768 ×768)
+> linear logarithmic logarithmic [100,300] linear logarithmic logarithmic [90,250] linear exponential linear [150,350] linear logarithmic logarithmic [200,300]
+
+Table 6. The resulting templates of TriPS T and hyperparameters for DC guidance scale [βT
+
+> min
+
+, β T
+
+> max
+
+] for linear inverse problems based on the diffusion model.                       
+
+> Diffusion Model (SD1.5)
+> Super-Resolution ×8Motion Deblurring
+> β(t)↓λ(t)↑η(t)↓[βT
+> min , β T
+> max ]β(t)↓λ(t)↑η(t)↓[βT
+> min , β T
+> max ]
+> linear exponential logarithm [15,30] exponential exponential linear [30,60]
+
+E.2. Implementations Details for GRPO-based Schedule Optimization 
+
+We parameterize the schedules of DC guidance, CFG and stochasticity using the Bernstein-Beta policy, defining a search space bounded by λmin = 1 , λ max = 8 , βmin = 10 , β max = 400 , and ηmin = 0 , η max = 1 , which are specified as smin 
+
+and smax in Sec 4.2. We employ a learning rate of 10 −2, group and batch sizes of 4, and a KL divergence coefficient of 
+
+10 −3 for a maximum of 200 iterations during optimization. The task-dependent weights for the reward function, wdist and 
+
+wperc , are detailed in Table 7 for flow matching models and Table 8 for diffusion models. All experiments are conducted on a single NVIDIA A100 GPU using a calibration set of 100 images per task, sampled from indices disjoint from the test set to ensure zero-shot evaluation conditions. 
+
+Mathematical motivation for the Bernstein basis The Bernstein basis Bk,d (t) =  dk
+
+tk(1 − t)d−k is selected for two principled reasons. (i) Partition-of-unity: Pdk=0 Bk,d (t) = 1 for all t ∈ [0 , 1] , which ensures that the resulting curve 
+
+˜s(t) = Pdk=0 w(s) 
+
+> k
+
+Bk,d (t) is always a convex combination of the sampled coefficients {w(s) 
+
+> k
+
+}. (ii) Bounded range: since each w(s) 
+
+> k
+
+∼ Beta( a(s) 
+
+> k
+
+, b (s) 
+
+> k
+
+) is supported on (0 , 1) and the basis forms a partition of unity, ˜s(t) ∈ (0 , 1) is guaranteed for all t, regardless of the sampled coefficients. Together, these properties ensure that the affinely rescaled schedule 
+
+s(t) = smin + ( smax − smin )˜ s(t) remains within [smin , s max ] throughout GRPO exploration, preventing out-of-range values and stabilizing policy optimization. 
+
+Polynomial degree We use degree d = 25 for all experiments. This choice provides sufficient expressive capacity to represent the complex temporal curves identified in Sec. 5.4 (fine-grained local fluctuations and magnitude shifts) while keeping the parameter count tractable ( d+1 = 26 coefficients per schedule component, 3×26 = 78 total policy parameters). 20 Triadic Dynamics Aware Diffusion Posterior Sampling for Inverse Problems 
+
+Table 7. Task-dependent reward weights, wdist and wperc , utilized during GRPO-based optimization based on flow matching model.                               
+
+> Flow Matching Model (SD3.5-M)
+> Super-Resolution ×8Super-Resolution ×12 Motion Deblurring Gaussian Deblurring
+> wdist wperc wdist wperc wdist wperc wdist wperc
+> FFHQ (768 ×768)
+> 0.3 0.7 0.5 0.5 0.5 0.5 0.3 0.7
+> DIV2K (768 ×768)
+> 0.3 0.7 0.4 0.6 0.3 0.7 0.3 0.7
+
+Table 8. Task-dependent reward weights, wdist and wperc , utilized during GRPO-based optimization based on diffusion model.         
+
+> Diffusion Model (SD1.5)
+> Super-Resolution ×8Motion Deblurring
+> wdist wperc wdist wperc
+> 0.3 0.7 0.5 0.5
+
+E.3. Implementation Details for Baseline Hyperparameter Settings Flow matching model baselines For all flow matching evaluations, we utilize Stable Diffusion 3.5-Medium as the generative backbone with the time scheduler shift factor set to 4.0 and the number of function evaluations (NFE) fixed at 28. The specific configurations for each method are as follows: • Resample We adopt the resampling hyperparameter γ
+
+ 1− ¯αt−1
+
+> ¯αt
+
+  
+
+1 − ¯αt
+
+> ¯αt−1
+
+
+
+with γ = 40 as proposed in the original paper. To enforce hard data consistency, the skip step size is set to 1, accompanied by 20 steps of gradient descent with a step size (DC guidance scale) of 30. The CFG scale is fixed at 2.0. • FlowChef We employ 3 steps of gradient descent with a step size (DC guidance scale) of 1 for data consistency optimization. The CFG scale is fixed at 2.0. • FlowDPS We employ 3 steps of gradient descent with a step size (DC guidance scale) of 15 for data consistency optimization. The CFG scale is fixed at 2.0. • FLAIR We employ 15 steps of gradient descent for data consistency optimization. The learning rates are set to 2 for super-resolution 12 × and 0.1 for deblurring tasks, consistent with the original paper. For the SR ×8 task, which was not specified in the original work, we determined the optimal learning rate to be 6 via a grid search on the calibration set. The CFG scale is fixed at 2.0. • TriPS TriPS employs time-varying schedules for the DC guidance scale β(t), CFG scale λ(t), and stochasticity η(t),as derived from our triadic schedule optimization. For the data consistency update, we utilize N = 6 gradient descent steps. The inner DC step size βdc is defined as βdc = β(t) · (0 .25 + 0 .75 σ2 
+
+> t
+
+)/N , where σt represents the noise schedule. 
+
+Diffusion model baselines For all diffusion-based evaluations, we utilize Stable Diffusion 1.5 as the generative backbone with the NFE fixed at 50. To ensure a competitive comparison, hyperparameters for all baselines are determined via an extensive grid search on a calibration set. Specific configurations for each method are as follows: • PSLD We set the DC and gluing update step sizes to 1.0 for super-resolution (SR). For motion deblurring, the DC step size is adjusted to 10, while the gluing update step size remains 1.0. • DDPG We set hyperparameters for SR and motion deblurring set to {γ, ζ, ˜η} = {10 .0, 0.8, 0.3} and {5.0, 0.6, 0.6},respectively, with the guidance step size μt set to the theoretically safe value μ∗ 
+
+> t
+
+. Here, γ controls the guidance transition from back-projection to least-squares, ζ balances stochastic noise injection against reconstruction accuracy, and ˜η
+
+regularizes the back-projection operator to prevent noise amplification. 21 Triadic Dynamics Aware Diffusion Posterior Sampling for Inverse Problems 
+
+• P2L We employ K = 1 text embedding update per timestep with a learning rate of 10 −4 and a regularization weight 
+
+λ = 10 −6. The projection interval γ and DC guidance scale ρt are set to {20 , 0.05 } for SR and {10 , 0.05 } for motion deblurring, respectively. • TReg We employ a fixed CFG scale of 2.0. The CG update range is restricted to t ≤ 50 for every third timestep ( t
+
+(mod 3) = 0 ), without utilizing DPS updates. Other parameters follow the original paper. • TriPS TriPS employs time-varying schedules for the DC guidance scale β(t), CFG scale λ(t), and stochasticity η(t),as derived from our triadic schedule optimization. For the data consistency update, we utilize N = 6 gradient descent steps. The inner DC step size βdc is defined as βdc = β(t) · (0 .25 + 0 .75(1 − ¯αt)2)/N , where 1 − ¯αt represents the noise variance schedule. 
+
+## F. Additional Experiments 
+
+F.1. Additional Task: Inpainting Triadic scheduling trend on inpainting While our primary framework suggests a tapering DC guidance scale β(t) to prevent the amplification of measurement noise in the late sampling stages, we identify inpainting as a notable exception that necessitates a distinct scheduling behavior. Unlike blur or sub-sampling kernels that act globally, the inpainting operator 
+
+A provides exact, high-frequency likelihood supervision for the unmasked regions. In this context, the late-stage increase of 
+
+β(t) does not lead to noise injection but rather serves as a crucial anchoring mechanism. Our time-window ablation in Table 9 reveals that a monotonic increasing β(t) schedule outperforms the standard tapering strategy across both fidelity (PSNR, SSIM) and perceptual metrics (LPIPS, patch-based KID). Specifically, we evaluate on 100 FFHQ images within the range [βT
+
+> min
+
+, β T
+
+> max
+
+] = [80 , 240] : Fixed (constant at the mean), Linearly (increasing/decreasing), and non-monotonic Tent and V-shape function (Smith, 2017) curves (linearly increasing to decreasing / linearly decreasing to increasing) for inpainting task. This divergence stems from the spatial nature of the inpainting task: as the sampling process approaches the low-noise regime, maintaining or even intensifying the DC guidance ensures a seamless transition between the generated content and the ground-truth pixels at the mask boundaries. Without this late-stage reinforcement, the generative manifold may slightly drift away from the hard constraints of the known pixels, resulting in boundary artifacts. Consequently, for tasks with strong spatial-domain likelihood, we refine our triadic strategy to favor a late-stage boost in 
+
+β(t), which effectively keeps the high-frequency details into the measurement-consistent subspace.                            
+
+> Table 9. Time-window ablation on β(t)scheduling on inpainting task (FFHQ).
+> Scheduling Pattern PSNR ↑SSIM ↑KID ↓LPIPS ↓
+> Fixed ( →)22.93 0.835 0.008 0.094 Linearly decreasing ( ↘)22.92 0.830 0.009 0.101 Tent function ( ↗↘ )23.18 0.836 0.008 0.097 V-shape function ( ↘↗ )23.07 0.842 0.007 0.092 Linearly increasing ( ↗)23.23 0.847 0.006 0.089
+
+Experimental results for inpainting Beyond the four primary inverse problems discussed in Sec. 5.2 in the main text, we further evaluate the generalizability of our framework on the inpainting task. As summarized in Table 10 and visualized in Fig. 12, TriPS T consistently achieves state-of-the-art performance across box mask inpainting scenario. By leveraging the optimized triadic schedules, specifically the monotonic increasing β(t) tailored for spatial consistency, our method effectively resolves the boundary artifacts and blurry textures often observed in baseline posterior sampling methods. Notably, TriPS T maintains a superior balance in the perception-distortion trade-off, yielding the highest fidelity (PSNR, SSIM) while simultaneously minimizing perceptual distance (LPIPS, patch-based KID). 
+
+F.2. Applicability of Triadic Schedule Optimization across Different Backbone Solvers 
+
+To evaluate the versatility of the TriPS framework, we extend its application to flow matching-based solvers with distinct algorithmic foundations: FlowDPS (Kim et al., 2025a), which employs posterior sampling, and FLAIR (Erbach et al., 2025), which utilizes variational inference. Following the TriPS T described in Sec. 4.1, we derive task-specific schedules for DC, CFG, and stochasticity scales for an super-resolution ×8 on the FFHQ dataset. As illustrated in Fig. 13, TriPS T enhances 22 Triadic Dynamics Aware Diffusion Posterior Sampling for Inverse Problems 
+
+Table 10. Quantitative comparison on box-inpainting task based on flow matching model. Evalutation metrics are averaged over 1,000 samples from the FFHQ dataset and 800 samples from the DIV2K dataset each using 28 NFEs under additive Gaussian noise ( σn = 0 .03 ). For each metric, the best and second-best results are indicated in bold and underline, respectively. 
+
+Flow Matching Model (SD3.5-M) FFHQ (768 × 768) DIV2K (768 × 768) 
+
+Method PSNR ↑ SSIM ↑ FID ↓ LPIPS ↓ PSNR ↑ SSIM ↑ FID ↓ LPIPS ↓
+
+ReSample 17.45 0.761 63.20 0.208 19.93 0.729 31.65 0.159 FlowChef 17.96 0.714 50.85 0.239 19.50 0.577 51.21 0.265 FlowDPS 17.01 0.722 38.32 0.238 20.06 0.633 25.70 0.202 FLAIR 22.63 0.832 10.29 0.095 23.68 0.823 11.34 0.069 TriPS T (Ours) 23.30 0.845 12.85 0.090 24.27 0.835 9.03 0.068 Measurement  ReSample  FlowChef  FLAIR  Ground Truth FlowDPS  TriP ST (Ours) 
+
+FFHQ 
+
+DIV2K 
+
+Measurement  ReSample  FlowChef  FLAIR  Ground Truth FlowDPS  TriP ST (Ours) 
+
+Figure 12. Qualitative comparison for FFHQ and DIV2K datasets on box-inpainting task. 
+
+perceptual quality compared to default baselines by restoring high-frequency details while maintaining structural fidelity. Quantitative results in Table 11 further confirm that TriPS T consistently improves perceptual scores (KID, LPIPS) while 23 Triadic Dynamics Aware Diffusion Posterior Sampling for Inverse Problems Measurement  FLAIR  FLAIR + TriPS T Ground Truth 
+
+Measurement  FlowDPS  FlowDPS + TriPS T Ground Truth        
+
+> Figure 13. Applicability of triadic schedule optimization across distinct flow matching based algorithms. Qualitative results of FlowDPS (posterior sampling) and FLAIR (variational inference) on a Super-Resolution ×8using the FFHQ dataset. Triadic schedules obtained via TriPS Tenhance high-frequency textures and structural fidelity relative to default baselines.
+> Table 11. Quantitative comparison of triadic schedule optimization across diverse backbone solvers. We evaluate the performance on an super-resolution ×8using 100 images from the FFHQ dataset. The results compare the original FlowDPS (Kim et al., 2025a) and FLAIR (Erbach et al., 2025) baselines against their counterparts integrated with our proposed triadic schedule optimization framework.
+
+Method PSNR ↑ SSIM ↑ KID ↓ LPIPS ↓
+
+FlowDPS 28.09 0.779 0.012 0.105 FlowDPS + TriPS T 27.97 0.782 0.009 0.099 
+
+FLAIR 29.18 0.778 0.041 0.120 FLAIR + TriPS T 29.03 0.784 0.008 0.099 
+
+maintaining competitive performance in distortion metrics (PSNR, SSIM) relative to the original solvers. These findings demonstrate that our proposed triadic schedule optimization is compatible with diverse inverse problem solvers. 
+
+F.3. Additional Ablation: Triadic Schedule Optimization Strategies 
+
+We investigate the template-based schedule search and GRPO-based schedule optimization frameworks against a Zeroth-Order (ZO) baseline for a Gaussian deblurring task using a flow matching-based solver on the FFHQ dataset. The ZO baseline utilizes an ES-style Gaussian perturbation gradient estimator with Adam updates. In this setup, the ZO schedule adopts the same Beta-Bernstein parameterization described in Sec. 4.2 and is initialized using the schedule obtained from the template-based search. As illustrated in Fig. 14, the optimized schedule curve for ZO remains closely aligned with the initial template-based schedule, whereas the GRPO-derived curve exhibits a distinct departure from its initialization. These visual differences indicate that the ZO method suffers from poor convergence in the high-dimensional Beta-Bernstein parameter space, failing to effectively optimize the target objective compared to the GRPO-based approach. 24 Triadic Dynamics Aware Diffusion Posterior Sampling for Inverse Problems (a) DC scale Scheduling Curve     
+
+> 𝛽
+> Time 𝑡
+> 𝜆
+> (b) CFG scale Scheduling Curve
+> Time 𝑡
+> 𝜂
+> (c) Stochasticity Scheduling Curve
+> Time 𝑡
+> Figure 14. Visualization of optimized triadic schedule curves. Comparison of the schedules for DC, CFG, and Stochasticity scales obtained via template-based search, GRPO-based optimization, and the Zeroth-Order (ZO) baseline. The ZO-optimized curves remain closely aligned with the initial template-based schedules, suggesting suboptimal convergence in the parameter space, whereas the GRPO-based schedules demonstrate distinct trajectories specifically tailored to the restoration objective.
+
+F.4. Additional Ablation: More Results for Impact of Joint Triadic Schedule Optimization 
+
+To further examine the interplay among the triadic components during optimization, we extend the ablation study in Sec. 5.3 by evaluating configurations where only two of the three components are jointly optimized. In these settings, the non-optimized component is fixed to the midpoint of its predefined parameter range(See Sec. E.1), while the remaining two components are obtained via the TriPS T framework. As summarized in Table 12, the joint optimization of all three components yields superior performance across both distortion and perceptual metrics compared to any dual-component configuration. These findings underscore that the synergistic interaction of the triadic schedules is essential for effectively navigating the perception-distortion trade-off, thereby justifying the necessity of the proposed unified search space.                                  
+
+> Table 12. Additional ablation study for the impact of joint triadic schedule optimization of TriPS. Super-resolution ×8results evaluated on 100 FFHQ images.
+> DC CFG Stoch. PSNR ↑SSIM ↑KID ↓LPIPS ↓
+> !!%29.41 0.807 0.116 0.126
+> %!!29.53 0.804 0.120 0.133
+> !%!29.76 0.819 0.073 0.104
+> !!!29.77 0.820 0.072 0.101
+
+F.5. Additional Ablation: Optimized Schedule Curve Analysis 
+
+In this section, we provide an extended analysis of the reward-guided control mechanisms governing the perception–distortion trade-off, supplementing the results presented in Sec. 5.3. The optimized schedules in Fig. 5(c) reveal that perception-oriented posterior sampling favors high initial DC guidance followed by a rapid late-stage decay, whereas distortion-oriented posterior sampling maintains overall higher DC guidance characterized by an increasing-then-decreasing profile. Furthermore, perception-oriented sampling consistently employs larger CFG scales throughout the trajectory to leverage semantic guidance for high-frequency detail synthesis. This pattern aligns with established findings in text-to-image generation (Wang et al., 2024), where such CFG scheduling is shown to prioritize perceptual fidelity over pixel-wise reconstruction. Finally, the elevated stochasticity in the perception-oriented variant, relative to its distortion-oriented counterpart, indicates that the optimization actively exploits the regularizing effects identified in Sec. 3.2 to mitigate distributional mismatches with the ground truth. 
+
+F.6. Runtime Comparison 
+
+To evaluate the inference efficiency of TriPS, we compare its average runtime with various diffusion and flow-based baselines. Table 13 summarizes these results, reporting the average sampling time per image (s/image) averaged over 10 samples. 25 Triadic Dynamics Aware Diffusion Posterior Sampling for Inverse Problems 
+
+Table 13. Comparison of different methods in terms of runtime based on flow matching Model and diffusion model. We report the sampling runtime (seconds per image) averaged over 10 samples.                                                  
+
+> Flow Matching Model (SD3.5-M) Method Super-Resolution ×8Super-Resolution ×12 Motion Deblurring Gaussian Deblurring Runtime (s) ↓Runtime (s) ↓Runtime (s) ↓Runtime (s) ↓
+> ReSample 11.31 11.29 12.42 10.91 FlowChef 4.68 4.64 5.36 4.94 FlowDPS 4.71 4.67 5.42 4.97 FLAIR 11.48 11.46 12.90 11.99
+> TriPS (Ours) 6.58 6.48 9.87 7.45
+> Diffusion Model (SD1.5) Method Super-Resolution ×8Motion Deblurring Runtime (s) ↓Runtime (s) ↓
+> PSLD 6.09 6.73 DDPG 2.15 2.58 P2L 9.18 9.79 TReg 2.73 3.10
+> TriPS (Ours) 6.01 9.52
+
+## G. Additional Qualitative Results 
+
+We present additional qualitative results for motion deblurring, super-resolution ×12, and Gaussian deblurring. Across all tasks, TriPS T and TriPS G consistently achieve superior fidelity-perception trade-offs compared to existing baselines, producing more realistic and structurally faithful reconstructions. ReSample and FlowChef tend to produce over-smoothed reconstructions, losing fine-grained facial details such as hair strands, skin textures, and eye contours. FlowDPS and FLAIR recover sharper outputs in some cases, but occasionally at the cost of introducing reconstruction artifacts or hallucinated features that deviate from the ground truth. In contrast, both TriPS T and TriPS G faithfully recover high-frequency details while maintaining structural consistency with the original image. For the super-resolution ×12 setting, most baselines struggle to resolve fine structures from severely downsampled measurements, whereas TriPS T and TriPS G consistently produce plausible high-frequency details that closely match the ground truth. Similarly, in motion deblurring and Gaussian deblurring, our methods recover sharper edges and more natural textures compared to the baselines, particularly in regions with complex patterns. TriPS G further navigates the perception-distortion trade-off via GRPO-optimized triadic schedules, enabling flexible control over the balance between perceptual quality and measurement fidelity. These results corroborate the quantitative improvements reported in Tables 1 and 2, confirming that triadic schedule optimization translates to visible gains in reconstruction quality across diverse degradation settings. Additional comparisons on the DIV2K dataset further validate the generalization capability of our approach beyond face-centric images. 26 Triadic Dynamics Aware Diffusion Posterior Sampling for Inverse Problems Measurement ReSample FlowChef FLAIR Ground Truth  FlowDPS TriP ST (Ours) TriP SG (Ours) 
+
+Figure 15. Additional qualitative comparison for the motion deblurring on the FFHQ dataset. 
+
+27 Triadic Dynamics Aware Diffusion Posterior Sampling for Inverse Problems Measurement ReSample FlowChef FLAIR Ground Truth  FlowDPS TriP ST (Ours) TriP SG (Ours) 
+
+Figure 16. Additional qualitative comparison for the super-resolution ×12 on the FFHQ dataset. 
+
+28 Triadic Dynamics Aware Diffusion Posterior Sampling for Inverse Problems Measurement ReSample FlowChef FLAIR Ground Truth  FlowDPS TriP ST (Ours) TriP SG (Ours) 
+
+Figure 17. Additional qualitative comparison for the gaussian deblurring on the FFHQ dataset. 
+
+29 Triadic Dynamics Aware Diffusion Posterior Sampling for Inverse Problems Measurement ReSample FlowChef FLAIR Ground Truth  FlowDPS TriP ST (Ours) TriP SG (Ours) 
+
+Figure 18. Additional qualitative comparison for the motion deblurring on the DIV2K dataset. 
+
+30 Triadic Dynamics Aware Diffusion Posterior Sampling for Inverse Problems Measurement ReSample FlowChef FLAIR Ground Truth  FlowDPS TriP ST (Ours) TriP SG (Ours) 
+
+Figure 19. Additional qualitative comparison for the super-resolution ×12 on the DIV2K dataset. 
+
+31 Triadic Dynamics Aware Diffusion Posterior Sampling for Inverse Problems Measurement ReSample FlowChef FLAIR Ground Truth  FlowDPS TriP ST (Ours) TriP SG (Ours) 
+
+Figure 20. Additional qualitative comparison for the gaussian deblurring on the DIV2K dataset. 
+
+32
