@@ -1,0 +1,1195 @@
+Title: Sampling Data with Chains of Forward-Backward Diffusion Steps
+
+URL Source: https://arxiv.org/pdf/2605.27006v1
+
+Published Time: Wed, 27 May 2026 01:27:51 GMT
+
+Number of Pages: 22
+
+Markdown Content:
+# Sampling Data with Chains of Forward-Backward Diffusion Steps 
+
+Hyunmo Kang ∗
+
+Johns Hopkins University 
+
+Noam Itzhak Levi ∗
+
+EPFL 
+
+Corinna Elena Wegner ∗
+
+EPFL & University of Göttingen 
+
+Daniel J. Korchinski ∗
+
+EPFL 
+
+Matthieu Wyart 
+
+Johns Hopkins University & EPFL 
+
+Abstract 
+
+Sampling from learned high-dimensional distributions is a foundational computa-tional problem. We introduce U-turn chains : Markov chains obtained by iterating short forward–backward steps of a diffusion model, in which each step proposes a move that remains on the learned data manifold and, paired with a Metropolis– Hastings correction, samples from energy-modified targets. For synthetic lan-guages, we show that minimal U-turn dynamics undergoes an ergodicity-breaking phase transition driven by fragmentation of the data manifold; ergodicity is restored at larger U-turn magnitude. In the non-ergodic regime, low-level features relax faster than high-level ones, an ordering that inverts only at sufficiently large U-turn magnitude. We test these predictions on natural language and natural images. In both modalities, minimal U-turns relax slowly, especially for high-level features approximated by deep representations in CNNs or LLMs. The layer-ordering inver-sion appears only at large noise when mixing is efficient- signatures consistent with strongly constrained, weakly mixing local dynamics. We discuss the implications of these results for sampling with diffusion models. 
+
+1 Introduction 
+
+Sampling from a high-dimensional probability distribution is a foundational computational problem across the sciences, underlying Bayesian inference [ 1], statistical physics [ 2 , 3 ], and molecular simu-lation [ 4 , 5 ]. The difficulty is twofold. First, the volume of the state space grows exponentially with its dimension, so uniform exploration is hopeless without exploiting structure. Second, distributions of practical interest are typically multimodal: high-probability regions are separated by low-density barriers that trap local-move dynamics for times that grow rapidly with the barrier height and the dimension [ 6, 7 ]. Classical Markov chain Monte Carlo (MCMC) algorithms - Metropolis-Hastings [ 8, 9 ], Langevin dynamics [ 10 ], Hamiltonian Monte Carlo [ 11 ], and replica exchange [ 12 , 13 ]-partially mitigate this slowdown, but their efficiency degrades sharply when the target distribution is concentrated on an unknown low-dimensional manifold, as is the case for natural images and text. Diffusion models [ 14 –16 ] implicitly learn such a manifold from data, suggesting a complementary route to sampling: rather than designing proposals in the ambient space, one can use the diffusion model itself to propose moves that remain on the learned support. Combined with a Metropolis– Hastings correction, this yields a sampler from energy-modified distributions of the form PH (x) ∝
+
+P (x) e−H(x), where H(x) is a user-specified bias encoding desired attributes. Diffusion models are typically used to generate samples from pure noise, producing global moves that preclude local exploration around a specific region of interest - and, in particular, around the 
+
+> ∗Co-first authors. Contact: hkang56@jh.edu, mwyart1@jh.edu Preprint.
+> arXiv:2605.27006v1 [cs.LG] 26 May 2026
+
+Figure 1: Left: A single U-turn move first corrupts a sample by adding noise or masking part of the input, then reconstructs it using a trained diffusion model. The U-turn magnitude controls the size of the perturbation. Middle: Iterating U-turn moves defines a Markov chain on the learned data distribution, allowing us to study whether the chain is ergodic. Right: Schematic of the Random Hierarchy Model, where visible tokens are generated from a hierarchy of latent variables through recursive production rules. This synthetic model provides a controlled setting for analyzing ergodicity and layer-wise relaxation. minima of H(x). They can however also be used to perform forward–backward transformations, or U-turns [ 17 –20 ], in which a datum is stochastically perturbed by first adding a controllable amount of noise and then denoising it. In this work, we introduce U-turn chains , obtained by iterating such forward–backward transformations: starting from a sample x, a forward diffusion step produces a partially corrupted representation xt, and a reverse denoising step yields a new sample x′. Repeating this procedure defines a Markov chain on the learned data distribution. As a first step, this work focuses on the fundamental questions of ergodicity and relaxation in the absence of steering ( H = 0 ): under what conditions do U-turn chains explore the data manifold ergodically, and how fast do different levels of structure in the data relax along the chain? Many data domains - including language and images - exhibit hierarchical compositional structure that can be approximated by tree-like generative models [ 21 –23 ], a structure that has been argued to be central for learning generative models themselves [ 24 –31 ]. Such data admit multiple levels of description, from low-level features (pixels, edges) to high-level abstractions (captions, semantic content), raising the question of how mixing times depend on the level considered. To make these questions tractable theoretically, we work with the Random Hierarchy Model (RHM) [ 29 ], a simplified probabilistic context-free grammar [ 23 ] with fixed tree topology and random production rules. Despite its simplicity, the RHM has produced quantitatively predictive theories of neural scaling laws [ 30 –32 ] and of compositional generalization in diffusion models for both language and images [ 20 , 33 ]. In this model, we show that (i) U-turn chains undergo a phase transition at which ergodicity is broken, and (ii) in the non-ergodic regime low-level features relax faster than high-level ones—an ordering that inverts deep in the ergodic phase. We then test these predictions on natural language and on images: in both domains, mixing under minimal U-turns is slow, particularly for high-level latents, consistent with a non-ergodic or weakly ergodic local dynamics whose ergodicity is restored by increasing the U-turn magnitude. 
+
+1.1 Additional related works Characterizing data structure via diffusion models. [ 34 ] introduce a diffusion-inspired dual score-matching framework that enables the computation of normalized image densities, providing direct access to the energy landscape of natural images. Closer to our work, [ 33 , 20 ] show that a single U-turn can be used to reveal hierarchical structure in data. These works also demonstrate that the representation of CNNs at different depths can be used as a proxy of features or latent variables at different levels of abstraction- a view we confirm here and extend to LLM representations in the language domain. U-turn chains generalize this approach, allowing not only the study of such structure including connectedness and ergodicity, but also the steering of samples. 
+
+Monte Carlo approaches with diffusion models. A Metropolis–Hastings framework based on diffusion models is introduced in [ 35 ], where proposals are generated by denoising from pure Gaussian noise. Such global proposals are ill-suited for studying the local properties of the data 2distribution considered here, or for identifying local optima of a generic bias H(x), which requires local exploration. 
+
+2 General Formalism 
+
+2.1 U-turns or forward-backward process 
+
+Let x ∼ P (x) denote a data sample. Diffusion models define a corruption process mapping a clean sample x to a partially corrupted representation xt, where t denotes the noise level. The interpretation of t depends on the diffusion model. For discrete diffusion, t corresponds to the number of masked tokens. For continuous diffusion, t ∈ [0 , T ] corresponds to the time of the forward diffusion process. The forward process defines a conditional distribution q(xt | x), and the trained model approximates the reverse conditional pθ (x | xt). We define a U-turn move [ 17 –20 ] of size t as x → xt → x′, with 
+
+xt ∼ q(xt | x), x′ ∼ pθ (x | xt). This induces the transition kernel 
+
+Ut(x′, x ) = 
+
+Z
+
+q(xt | x) pθ (x′ | xt) dx t.
+
+The parameter t controls the scale of the move: small t produces local modifications, while larger 
+
+t allows more global changes. Crucially, regardless of step size, U-turn proposals remain on the data manifold learned by the diffusion model. The kernel Ut(x′, x ) naturally defines a Monte Carlo sequence obtained by iterating U-turn moves. Starting from an initial sample x(0) , we generate a 
+
+U-turn chain x(0) → x(1) → x(2) → · · · where each step is obtained by x(n+1) ∼ Ut(· | x(n)).
+
+2.2 Stationary distribution of the UTMC Proposition 1. Assume the diffusion model is exact, i.e. pθ (x | xt) = p(x | xt). Then the U-turn kernel satisfies detailed balance with respect to P (x): Ut(x′, x )P (x) = Ut(x, x ′)P (x′). If the resulting Markov chain is ergodic, its stationary distribution is P (x).
+
+Proof (sketch). Using Bayes’ rule p(x′|xt) = q(xt|x′)P (x′) 
+
+> p(xt)
+
+in the definition of Ut yields 
+
+Ut(x′, x )P (x) = 
+
+Z q(xt|x)q(xt|x′)
+
+p(xt) P (x)P (x′) dx t,
+
+which is symmetric in x and x′. □
+
+2.3 Energy-modified sampling 
+
+Although the main focus of this paper is the intrinsic dynamics of UTMC, the detailed-balance property also makes them useful as proposal kernels for sampling from energy-modified distributions. Suppose we wish to sample from the modified distribution PH (x) ∝ P (x)e−H(x), where H(x) is an additional energy. Using U-turn proposals within a Metropolis–Hastings scheme, a proposal 
+
+x′ ∼ Ut(·| x) is accepted with probability 
+
+A(x → x′) = min 
+
+
+
+1, PH (x′)Ut(x, x ′)
+
+PH (x)Ut(x′, x )
+
+
+
+= min 
+
+
+
+1, e −(H(x′)−H(x)) 
+
+.
+
+Under ergodicity, this Markov chain converges to PH (x). We study below under which conditions ergodicity may be reached. 
+
+3 Ergodicity and mixing in the Random Hierarchy Model 
+
+3.1 Synthetic hierarchical data: the Random Hierarchy Model 
+
+The Random Hierarchy Model (RHM) is a synthetic language, belonging to the class of probabilistic context-free grammars [ 36 , 29 ]. Data are produced on a rooted regular tree of depth L and branching factor s as shown in Fig. 1 Right. Levels are indexed from the visible layer upward: ℓ = 0 denotes the 3leaves and ℓ = L the root. At level ℓ there are sL−ℓ variables xiℓ, each taking values in a vocabulary of size v. The visible sequence is x0 = ( x10, . . . , x d
+
+> 0
+
+) with d := sL.Each parent symbol at level ℓ + 1 is associated to m production rules, each mapping the parent to an 
+
+s-tuple of child symbols at level ℓ. Rules are sampled uniformly without replacement and kept fixed for a given RHM instance. Generation starts from a uniformly sampled root symbol; each internal node then chooses one of its m rules uniformly to generate its children. We impose the unambiguity condition that no two distinct parent symbols generate the same child s-tuple, so every valid visible sentence has a unique latent tree. All valid sentences are therefore equiprobable. The rule density 
+
+f := vm vs = mvs−1
+
+is the fraction of possible child s-tuples used by the grammar. When f = 1 , all tuples are allowed and the hierarchy imposes no constraint on visible strings. Smaller f makes the grammar sparser and the data distribution more structured. Given a partially masked visible sequence, the posterior over both visible and latent variables can be computed exactly by Belief Propagation (BP) [ 37 , 20 ]. We use BP as a Bayes-optimal denoiser, so the RHM dynamics reflect perfectly the data distribution rather than the neural approximation error of a trained diffusion model. 
+
+3.2 Observables at different hierarchical levels 
+
+To track dynamics at different abstraction levels, we measure how the level-ℓ representation decorre-lates from the initial state after n U-turn steps. Across all modalities, we use 
+
+Cℓ(n) = cor ℓ
+
+
+
+x(0) , x (n)
+
+,
+
+where layer ℓ is counted from visible leaves, and cor ℓ is a modality-specific correlation measure defined in each section. For the RHM, the natural correlation is the normalized overlap between level-ℓ representations: 
+
+Cℓ(n) = 1
+
+sL−ℓsL−ℓ
+
+X
+
+> i=1
+
+δxiℓ(0) xiℓ(n).
+
+Since two independent samples can have nonzero overlap, we subtract the independent-sample baseline (formula in App. D.1), so that ˜Cℓ(n) indicates loss of memory up to the ergodic baseline. In simulations, plateaus and relaxation times are estimated at finite trajectory length nmax . We call 
+
+˜Cℓ(nmax ) the “late-time plateau,” and use the same cutoff when fitting relaxation times. We check robustness by comparing two choices of nmax in Fig. 2, with additional plateau heat maps (right of Fig. 3) in App. A. 10 0 10 1 10 2 10 3 10 4 10 5
+
+cumulative masks d n
+
+> 0.0
+> 0.2
+> 0.4
+> 0.6
+> 0.8
+> 1.0
+> leaf correlation  C0(n)
+
+fix = 1 
+
+> d
+
+, vary f             
+
+> f= 2/16
+> f= 4/16
+> f= 5/16
+> f= 6/16
+> f= 8/16
+> f= 10/16
+> f= 12/16
+> f= 14/16
+> f= 16/16
+> 10 02 × 10 03 × 10 04 × 10 06 × 10 0
+
+1/ f
+
+> 10 2
+> relaxation time
+
+1/ fper 
+
+relaxation time vs 1/ f  
+
+> nmax = 10 4
+> nmax = 10 5
+
+Figure 2: Dynamics of minimal UTMC for the RHM with L = 4 , s = 2 . Left: Leaf-layer relaxation 
+
+˜C0(n) versus the cumulative number of masks ρdn = n, which is simply n here. For large f , the correlation decays to the finite-time ergodic baseline, whereas for smaller f it saturates at a nonzero plateau. Right: Relaxation time extracted using finite-time plateaus estimated at two choices of nmax .The peak marks the critical slowing-down near the theoretically predicted percolation threshold fper .43.3 Minimal U-turns fragment the data distribution 
+
+We first consider minimal U-turn moves, where in each U-turn step one leaf token is masked and reconstructed, so masking fraction ρ := 1 /d . The chain then moves on the connectivity graph whose vertices are valid RHM sentences and whose edges connect sentences differing by one leaf token. Figure 2 shows the leaf correlation ˜C0(n) as the rule density f is varied. For dense grammars (large 
+
+f ), the correlation decays to the finite-time ergodic baseline. For sparse grammars, it instead saturates at a nonzero plateau, indicating that the chain retains memory of its initial condition. Strikingly, the relaxation time is non-monotonic: it grows as f is decreased from the dense regime, peaks near a critical value, and decreases again at smaller f .This behavior is the hallmark of a percolation transition [ 38 ] in the local-connectivity graph. For large f , single-token valid flips connect a macroscopic component of the data support. For small f ,the graph fragments and a trajectory remains trapped in the component containing its initial condition. The peak in relaxation time reflects critical slowing down near the onset of fragmentation. As the transition is approached from below, fragments become larger and longer to explore, so the chain reaches its component-specific plateau more slowly. Past the transition, the macroscopic component appears, composed of loosely connected fragments. These become smaller and smaller, and faster to explore, away from the transition as the macroscopic component becomes more homogeneous. 10 0 10 1 10 2 10 3 10 4 10 5
+
+cumulative masks ρd ⋅ n               
+
+> 0.0
+> 0.2
+> 0.4
+> 0.6
+> 0.8
+> 1.0
+> leaf correlation ̃ C0(n) fix f<fper , vary ρ
+> ρ= 1/16
+> ρ= 2/16
+> ρ= 3/16
+> ρ= 5/16
+> ρ= 7/16
+> ρ= 9/16
+> ρ= 11/16
+> ρ= 13/16
+> ρ= 15/16
+> 00.2 0.4
+
+f 
+
+> 0
+> 0.25
+> 0.5
+> 0.75
+> 1
+> ρ
+> Phase diagram
+> fper finv
+> natural language
+> non-ergodic
+> ergodic
+> higher → slower
+> ergodic
+> higher → faster
+> inversion
+> 10 1
+> 10 2
+> normalized plateau
+
+Figure 3: Left: Dynamics of the RHM with L = 4 , s = 2 , f = 0 .125 < f per . For these parameters, minimal UTMC is non-ergodic, but UTMC with larger U-turn steps progressively reduce the long-time plateau. Right: Phase diagram for s = 2 , L = 8 , showing the late-time plateau normalized by the standard deviation of the overlap between independent random pairs. Light pink regions are statistically indistinguishable from the ergodic baseline, while blue regions retain memory of the initial state. The black curve marks the inversion of layer-wise relaxation ordering. The values fper 
+
+and finv are theoretical predictions for minimal UTMC with ρ = 1 /d .
+
+3.4 Larger U-turns restore mixing and invert relaxation ordering 
+
+We next increase the masking fraction ρ of each U-turn step. For ρ > 1/d , a single U-turn can modify several leaf tokens, thereby adding longer-range moves to the local connectivity graph. As shown in the left of Fig. 3, increasing ρ reduces the late-time memory plateau and can restore effective ergodicity even in regimes where minimal U-turn dynamics is fragmented. The value of this late-time plateau is indicated in the (f, ρ ) phase diagram of Fig. 3, Right panel. Layer-wise relaxation reveals a second effect. Depending on (f, ρ ), higher-level latent variables can decorrelate either more slowly or more rapidly than lower-level latent variables. In Fig. 4, we observe three dynamical regimes: (i) a non-ergodic regime, in which all layers retain finite memory of the initial condition; (ii) an effectively ergodic regime with higher layers relaxing more slowly; and (iii) an effectively ergodic regime with higher layers relaxing faster. We quantify this effect by comparing the fitted relaxation times τℓ across levels and indicate in the phase diagram of Fig. 3 where the ordering inversion takes place. 50 2000 4000 6000 8000 10000                 
+
+> Cumulative masks dn
+> 0.0
+> 0.2
+> 0.4
+> 0.6
+> 0.8
+> 1.0
+> correlation  C (n)
+> Non-ergodic
+> 02000 4000 6000 8000 10000
+> Cumulative masks dn
+> Ergodic, higher slower
+> 02000 4000 6000 8000 10000
+> Cumulative masks dn
+> Ergodic, higher faster
+> = 0
+> = 1
+> = 2
+> = 3
+> = 4
+> = 5
+
+Figure 4: Layer-wise relaxation across dynamical regimes. s = 2 , L = 8 . Left: (f, ρ ) = (0 .28 , 0.004) . In the non-ergodic regime, all layers retain finite memory. Middle: (f, ρ ) = (0 .22 , 0.137) . In the effectively ergodic, higher-slower regime, all layers eventually decorrelate, but higher layers relax more slowly. Right: (f, ρ ) = (0 .50 , 0.004) . In the effectively ergodic, higher-faster regime, the ordering is inverted and higher layers decorrelate faster. 
+
+3.5 Theoretical estimates for the percolation and inversion thresholds Known results for the RHM: By definition of the RHM, changing a leaf symbol leaves an isolated string valid with probability f . There are thus on average f v leaf symbols that are compatible at a given location. The situation is different in the limit L → ∞ ; see App. D.2 for the finite-L case. The average number of symbols available at a given location was shown to be 1/(1 − f ) = 1 + f + f 2 + ... 
+
+[ 30 ]. In this expression, f ℓ indicates the probability that a leaf symbol and ℓ − 1 successive parent symbols change. 
+
+Percolation threshold: We argue that the percolation threshold fper can be computed by consider-ing the mean number of novel flips n(f ) that are opening due to a single acceptable flip - see [ 39 ] for a review of such arguments in physical systems. If n(f ) > 1, the number of possibilities explodes as more flips are triggered and the connected component is system-spanning. If n(f ) < 1, the number of available flips dies out and the system is non-ergodic. If i and j have a common parent at order ℓ, flipping i will open a move in j if: (i) i changes its parent latents at least to level ℓ − 1. Conditioned to i being able to flip, this occurs with probability 
+
+(f ℓ + f ℓ+1 + ... )/(f + f 2 + ... ) = f ℓ−1. (ii) Such changes allow for a successive change of j and all its parents to at least level ℓ − 1, which occurs with probability f ℓ + f ℓ+1 + f ℓ+2 + .. = f ℓ 
+
+> 1−f
+
+.Overall, the probability that a new flip is allowed in j is f 2ℓ−1 
+
+> 1−f
+
+.Summing over all possible positions for j, one gets: 
+
+n(f ) := 
+
+> L
+
+X
+
+> ℓ=1
+
+ sℓ − sℓ−1 f 2ℓ−1
+
+1 − f −−−−→
+
+> L→∞
+
+f (s − 1) (1 − sf 2)(1 − f )
+
+We obtain the percolation threshold by imposing that n(fper ) = 1 , leading to: 
+
+fper (s − 1) (1 − sf 2 
+
+> per
+
+)(1 − fper ) = 1 , fper ≃ 1
+
+s − 1
+
+s2 + O(s−3). (1) 
+
+Layer-ordering inversion threshold finv : To estimate the inversion threshold finv , we consider which fraction of latent variables is affected on average by flipping a fraction of their children nodes. There are two competing effects. (i) There are fewer parents than children: level ℓ + 1 contains a factor s fewer variables than level ℓ; so that s flips of the latter can affect the parent. This effect favors faster decorrelation of higher layers. (ii) A flip at any level triggers a flip of its parent with probability 
+
+f . We predict that the ordering changes when these two effects balance: 
+
+sf inv = 1 , finv = 1
+
+s . (2) Finite-L corrections to fper and finv are derived in App. D.2; these finite-size estimates are used in Fig. 2 and Fig. 3. 64 U-turn chain on natural language 
+
+We next test whether the theoretical predictions from Section 3 carry over to natural language. 
+
+Experimental setup. We use Dolma [ 40 ] as the natural-language dataset. We sample 256 text sequences and crop each sequence to token length d = 128 . UTMC are generated using the LLaDA 7B MoE base model [ 41 ] as the masked diffusion language model. As a proxy for how low and high-level features of text evolve along the chain, we consider the residual-stream activations of Mistral 7B [ 42 ]. In main text we show result for all layers, while in App. B.2 we show plot restricted to first 15 layers. This choice is motivated by prior work showing that LLMs often self-organize into an encoder-decoder design, where intermediate layers contain the most abstract representations [ 43 –45 ]. Unless otherwise stated, reported curves are averaged over 256 initial texts and 64 independent UTMC per text. Additional details of experiments are in App. B.4. In App. B.5, we report additional experiments using different masked diffusion language models, which qualitatively agree with the main-text results. Note that for the diffusion model considered, we found that long U-turn trajectories accumulate errors from the masked diffusion model. The generated text eventually becomes degraded or nonsensical, as indicated by the perplexity measurement shown in App. B.3. To avoid significant corruption we limit the U-turn trajectory lengths considered, up to about 300 cumulative masked tokens, where afterwards perplexity explodes. 0 50 100 150 200 250 300                    
+
+> Cumulative masks dn
+> 0.0
+> 0.2
+> 0.4
+> 0.6
+> 0.8
+> 1.0
+> correlation  C (n)
+> = 1/ d0.01
+> 050 100 150 200 250 300
+> Cumulative masks dn
+> 0.5
+> 050 100 150 200 250 300
+> Cumulative masks dn
+> 0.8
+> embedding
+> = 6
+> = 12
+> = 18
+> = 24
+> = 31
+
+Figure 5: Layer-wise latent correlation and ordering inversion in text. Left: For minimal U-turn steps, all layers relax slowly, with deeper layers in the early-to-intermediate range retaining memory of the initial text for longer. Middle: Increasing the masking fraction accelerates decorrelation across layers. Right: At large masking fraction, the layer ordering inverts: deeper representations decorrelate faster than earlier layers, consistent with the high-ρ regime predicted by the RHM. More choices of ρ are reported in App. B.1. 
+
+Observables. For each U-turn step n, we feed both initial text and the U-turned text into the probe LLM. At layer ℓ, we extract the residual-stream activation and mean-pool over token positions, obtaining vectors ⃗x ℓ(0) and ⃗x ℓ(n). We then subtract a layer-dependent baseline activation ⃗μ ℓ,computed by averaging activations over highly corrupted U-turn samples with masking fraction 
+
+ρ ≈ 1. This subtraction removes layer-specific common components and centers the representation relative to the highly mixed regime of the U-turn dynamics. The layer-wise correlation is defined as 
+
+Cℓ(n) = cos( ⃗x ℓ(0) −⃗μ ℓ,⃗x ℓ(n) −⃗μ ℓ) .
+
+This observable measures how much the representation at layer ℓ retains memory of the initial text after n U-turn steps. 
+
+Results. Our main results are remarkably consistent with theoretical predictions: (i) For minimal U-turn dynamics, mixing is poor and relaxation is very slow as shown in the Left of Fig. 5. (ii) Mixing improves considerably as the fraction of masking at each U-turn increases, as apparent in the Middle and Right of Fig. 5. (iii) Deeper layers relax more slowly than earlier layers, as shown in the Left and Middle of Fig. 5, except at larger masking where this trend inverts as shown on the Right of this figure. We use the masking level where this inversion takes place to locate Dolma approximately in the phase diagram of Fig. 3. 75 U-turn chain on images 
+
+In this section, we investigate whether the layer-wise dynamical signatures from Section 3 also emerge in natural images. 
+
+Experimental setup. All image experiments use ImageNet (ILSVRC2012) [ 46 ] and a pretrained 256 ×256 diffusion model implemented in the guided-diffusion codebase [ 18 ]. Unless stated otherwise, trajectories are initialized from ImageNet validation images rather than from noise. Images are represented as RGB tensors scaled to [−1, 1] . To probe visual representations along the chain, we use a ConvNeXt-Base classifier pretrained on ImageNet [47]. We iterate image U-turns at diffusion times t ∈ { 100 , 400 , 800 } under the standard T = 1000 
+
+noise schedule, corresponding to ρ = t/T ∈ { 0.1, 0.4, 0.8}. Each trajectory is initialized from an ImageNet validation image and run for N = 100 U-turn steps. Representative examples of trajectories are shown in Fig. 7. 0 20 40 60 80 100                          
+
+> U-turn step n
+> 0.0
+> 0.2
+> 0.4
+> 0.6
+> 0.8
+> 1.0
+> correlation  Cℓ(n)
+> ρ≈ 0.1
+> 020 40 60 80 100
+> U-turn step n
+> ρ≈ 0.4
+> 020 40 60 80 100
+> U-turn step n
+> ρ≈ 0.8
+> 25 50 75 100
+> 0.00
+> 0.05
+> 0.10 zoom
+> ℓ= 0
+> ℓ= 10
+> ℓ= 20
+> ℓ= 30
+> ℓ= 39
+
+Figure 6: Layer-wise latent correlation and ordering inversion in images. Cosine correlation 
+
+Cℓ(n) of ConvNeXt feature activations between the initial image and sequential U-turn states, averaged over the 20-image ImageNet validation images. Colors denote ConvNeXt feature depth, from early layers (red) to deep layers (purple); the classifier head is excluded. Left: At small U-turn magnitude, ρ ≃ 0.1, deeper visual representations retain memory of the initial image for longer than early layers. Middle: Near the transition, ρ ≃ 0.4, correlations decay more rapidly and the layer ordering narrows. Right: At high noise, ρ ≃ 0.8, the ordering inverts, with deep layers decorrelating faster than early layers; the inset zooms into 0 ≤ Cℓ(n) ≤ 0.1 to resolve this separation. 
+
+Figure 7: Representative sequential U-turn trajectories. Rows use the same initial ImageNet validation example and trajectory index from the latent-analysis dataset, with fixed noise fractions 
+
+ρ = 0 .1, 0.4, 0.8. Columns show the sequential U-turn index n. The qualitative drift accelerates as the per-step noise increases, matching the quantitative collapse of latent correlation. 
+
+Observables. At each step n, we probe the image x(n) with ConvNeXt-Base and record the activation ϕℓ(x(n)) at layer ℓ. Then we whiten each layer using fixed ImageNet statistics, ˜ϕℓ = ϕℓ−μℓ√σ2
+
+> ℓ
+
+,8with (μℓ, σ 2 
+
+> ℓ
+
+) estimated from 100 ImageNet images. Correlation is defined 
+
+Cℓ(n) = cos   ˜ϕℓ(x(n)), ˜ϕℓ(x(0) ).
+
+Results. Figure 6 shows results averaged over a 20-image dataset, first within each image and then across images. Again, agreement with theory is remarkable: (i) at small U-turn magnitude, early feature layers drift rapidly while deeper layers retain high correlation for much longer. (ii) Increasing 
+
+ρ accelerates decorrelation across all layers. (iii) At sufficiently large ρ, the ordering inverts: deep features decorrelate slightly faster than the early layers. Additional qualitative reconstructions, integrated persistence summaries, single-step diagnostics, and details are reported in App. C. 
+
+6 Conclusion 
+
+We introduced U-turn Markov chains (UTMC), obtained by iterating short forward–backward diffu-sion steps; for an exact diffusion model, the U-turn kernel satisfies detailed balance with respect to the data distribution. In the Random Hierarchy Model we identified two dynamical signatures of data geometry: (i) a connectivity transition under which minimal-step dynamics fragments the state space, with ergodicity restored by larger U-turns; and (ii) a layer-dependent relaxation in which higher-level variables relax more slowly than lower-level ones in the small-step regime, an ordering that inverts at sufficiently large U-turn magnitude. Both signatures appear in real data: deep LLM representations decorrelate much more slowly than early ones under minimal U-turns on natural language, and the layer-ordering inversion together with the dynamical-susceptibility peak occur only at large masking fraction; ConvNeXt features show an analogous depth-ordered relaxation on natural images. Mapped onto the RHM phase diagram, these signatures locate natural language in the non-ergodic region, where minimal U-turn dynamics is strongly constrained and confined to a restricted component of the learned data manifold. 
+
+Future directions. The phase diagram has a direct consequence for using UTMC as a Monte-Carlo tool. Ergodicity can be restored by choosing U-turn moves large enough to bridge the disconnected components of the local-connectivity graph, but the price is that such moves are coarse in data space: they are ill-suited to fine-tuning the optima of an auxiliary energy H(x), or to exploring the vicinity of a particular sample of interest. Small steps explore locally but cannot leave their initial component, while large steps mix globally but lack the resolution required for delicate optimization. Quantifying this trade-off empirically—for instance, by steering images toward attributes by taking H as the output of a classifier, or biasing text toward a target sentiment by taking H to be a sentiment score—is a natural next direction, and would turn the diagnostic dynamics studied here into a practical tool for controlled generation. A second direction concerns interpretability. UTMC offer a new lens on the internal representations of large language models: tracking how specific syntactic and semantic features—grammatical agreement, named entities, topic, sentiment—evolve along a U-turn chain, and relating their relaxation times to those of LLM hidden representations at different depths, would tie a generative dynamical probe to the standard layer-by-layer probing methodology [ 48 – 51 ]. This perspective could clarify which abstraction levels are stable under local diffusion-model perturbations and which are most plastic, and whether the depth at which a feature is encoded in an LLM correlates with its relaxation time under UTMC. 
+
+Limitations. Our theoretical analysis is carried out in the Random Hierarchy Model with an exact Bayes-optimal denoiser, whereas real diffusion models introduce approximation error that can accumulate along long U-turn trajectories. It would be interesting to study theoretically how errors accumulate in synthetic languages where the ground truth is known. Moreover, the RHM is a deliberately minimal proxy for hierarchical compositional data: its tree topology is regular (fixed depth L, branching s), the grammar is non-recursive and strictly context-free, and within each parent the allowed production rules are activated with equal probability rather than following the heavy-tailed (e.g. Zipf) distribution observed in natural language. Closing the gap with real data calls for (i) random or sample-dependent tree topologies as in [ 52 –55 ], (ii) recursive grammars [ 56 , 57 ], (iii) context-dependent rules, and (iv) Zipf-distributed rule probabilities [ 32 ]. We expect such extensions to shift the percolation and layer-inversion thresholds fper and finv while leaving the qualitative non-ergodic, hierarchically stratified picture intact. 9Acknowledgements We thank all members of PCSL, Marco Baroni, and Eric Vanden-Eijden for useful discussion. This work was supported by the Simons Foundation through the Simons Collabora-tion on the Physics of Learning and Neural Computation (Award ID: SFI-MPS-POL00012574-05), PIs Wyart. D. J. Korchinski acknowledges financial support from the Natural Sciences and Engineering Research Council of Canada (NSERC PDF - 587940 - 2024). 
+
+References 
+
+[1] Christian P. Robert and George Casella. Monte Carlo Statistical Methods . Springer Texts in Statistics. Springer, New York, 2 edition, 2004. [2] M. E. J. Newman and G. T. Barkema. Monte Carlo Methods in Statistical Physics . Oxford University Press, Oxford, 1999. [3] Daan Frenkel and Berend Smit. Understanding Molecular Simulation: From Algorithms to Applications . Academic Press, San Diego, 2 edition, 2002. [4] Rafael C. Bernardi, Marcelo C.R. Melo, and Klaus Schulten. Enhanced sampling tech-niques in molecular dynamics simulations of biological systems. Biochimica et Biophys-ica Acta (BBA) - General Subjects , 1850(5):872–877, 2015. ISSN 0304-4165. doi: https: //doi.org/10.1016/j.bbagen.2014.10.019. URL https://www.sciencedirect.com/science/article/ pii/S0304416514003559. Recent developments of molecular dynamics. [5] J.N. Onuchic, Z Luthey-Schulten, and P.G. Wolynes. Theory of protein folding: the energy landscape perspective. Annual review of physical chemistry, 48, 545–600 , 1997. doi: https: //doi.org/10.1146/annurev.physchem.48.1.545. [6] Marc Mézard, Giorgio Parisi, and Miguel A. Virasoro. Spin Glass Theory and Beyond: An Introduction to the Replica Method and Its Applications , volume 9 of World Scientific Lecture Notes in Physics . World Scientific, Singapore, 1987. [7] David A. Levin, Yuval Peres, and Elizabeth L. Wilmer. Markov Chains and Mixing Times .American Mathematical Society, Providence, RI, 2009. [8] Nicholas Metropolis, Arianna W. Rosenbluth, Marshall N. Rosenbluth, Augusta H. Teller, and Edward Teller. Equation of state calculations by fast computing machines. The Journal of Chemical Physics , 21(6):1087–1092, 1953. doi: 10.1063/1.1699114. [9] W. K. Hastings. Monte Carlo sampling methods using Markov chains and their applications. 
+
+Biometrika , 57(1):97–109, 1970. doi: 10.1093/biomet/57.1.97. [10] Max Welling and Yee Whye Teh. Bayesian learning via stochastic gradient Langevin dynamics. In Proceedings of the 28th International Conference on Machine Learning (ICML) , pages 681–688, 2011. [11] Radford M. Neal. MCMC using Hamiltonian dynamics. In Steve Brooks, Andrew Gelman, Galin L. Jones, and Xiao-Li Meng, editors, Handbook of Markov Chain Monte Carlo , pages 113–162. Chapman & Hall/CRC, Boca Raton, FL, 2011. [12] Robert H. Swendsen and Jian-Sheng Wang. Replica Monte Carlo simulation of spin-glasses. 
+
+Physical Review Letters , 57(21):2607–2609, 1986. doi: 10.1103/PhysRevLett.57.2607. [13] David J. Earl and Michael W. Deem. Parallel tempering: Theory, applications, and new perspectives. Physical Chemistry Chemical Physics , 7(23):3910–3916, 2005. doi: 10.1039/ B509983H. [14] Jascha Sohl-Dickstein, Eric A. Weiss, Niru Maheswaranathan, and Surya Ganguli. Deep unsupervised learning using nonequilibrium thermodynamics. In International Conference on Machine Learning , 2015. [15] Jonathan Ho, Ajay Jain, and Pieter Abbeel. Denoising diffusion probabilistic models. In 
+
+Advances in Neural Information Processing Systems , 2020. 10 [16] Yang Song, Jascha Sohl-Dickstein, Diederik P. Kingma, Abhishek Kumar, Stefano Ermon, and Ben Poole. Score-based generative modeling through stochastic differential equations. In 
+
+International Conference on Learning Representations (ICLR) , 2021. [17] Alexander Quinn Nichol and Prafulla Dhariwal. Improved denoising diffusion probabilistic models. In International Conference on Machine Learning , pages 8162–8171. PMLR, 2021. [18] Prafulla Dhariwal and Alexander Nichol. Diffusion models beat gans on image synthesis. In 
+
+Advances in Neural Information Processing Systems , 2021. [19] Hamidreza Behjoo and Michael Chertkov. U-turn diffusion. Entropy , 27(4), 2025. ISSN 1099-4300. doi: 10.3390/e27040343. URL https://www.mdpi.com/1099-4300/27/4/343. [20] Antonio Sclocchi, Alessandro Favero, and Matthieu Wyart. A phase transition in diffusion models reveals the hierarchical nature of data. Proceedings of the National Academy of Sciences ,122(1):e2408799121, 2025. [21] Noam Chomsky. Aspects of the Theory of Syntax . The MIT Press, 50 edition, 1965. ISBN 9780262527408. URL http://www.jstor.org/stable/j.ctt17kk81z. [22] Gerhard Jäger and James Rogers. Formal language theory: refining the chomsky hierarchy. 
+
+Philosophical Transactions of the Royal Society B: Biological Sciences , 367(1598):1956–1970, 2012. [23] Ulf Grenander. Elements of pattern theory . JHU Press, 1996. [24] Elchanan Mossel. Deep learning and hierarchal generative models, 2018. URL https://arxiv. org/abs/1612.09057. [25] Tomaso Poggio, Hrushikesh Mhaskar, Lorenzo Rosasco, Brando Miranda, and Qianli Liao. Why and when can deep-but not shallow-networks avoid the curse of dimensionality: a review. 
+
+International Journal of Automation and Computing , 14(5):503–519, 2017. [26] Eran Malach and Shai Shalev-Shwartz. A provably correct algorithm for deep learning that actually works, 2018. URL https://arxiv.org/abs/1803.09522. [27] Johannes Schmidt-Hieber. Nonparametric regression using deep neural networks with relu activation function. The Annals of Statistics , 48(4):1875–1897, 2020. [28] E. Malach and S. Shalev-Shwartz. The implications of local correlation on learning some deep functions. In Advances in Neural Information Processing Systems , volume 33, pages 1322–1332, 2020. URL https://proceedings.neurips.cc/paper_files/paper/2020/file/ 0e4ceef65add6cf21c0f3f9da53b71c0-Paper.pdf. [29] Francesco Cagnetta, Leonardo Petrini, Umberto M. Tomasini, Alessandro Favero, and Matthieu Wyart. How deep neural networks learn compositional data: The random hierarchy model. 
+
+Phys. Rev. X , 14:031001, Jul 2024. doi: 10.1103/PhysRevX.14.031001. URL https://link.aps. org/doi/10.1103/PhysRevX.14.031001. [30] Francesco Cagnetta and Matthieu Wyart. Towards a theory of how the structure of language is acquired by deep neural networks. Advances in Neural Information Processing Systems , 37: 83119–83163, 2024. [31] Francesco Cagnetta, Allan Raventós, Surya Ganguli, and Matthieu Wyart. Deriving neural scaling laws from the statistics of natural language. arXiv preprint arXiv:2602.07488 , 2026. [32] Francesco Cagnetta, Hyunmo Kang, and Matthieu Wyart. Learning curves theory for hi-erarchically compositional data with power-law distributed features. In Proceedings of the 42nd International Conference on Machine Learning , volume 267 of Proceedings of Machine Learning Research , pages 6149–6164. PMLR, 2025. URL https://proceedings.mlr.press/v267/ cagnetta25a.html. [33] Antonio Sclocchi, Alessandro Favero, Noam Itzhak Levi, and Matthieu Wyart. Probing the latent hierarchical structure of data via diffusion models. In The Thirteenth International Conference on Learning Representations , 2025. URL https://openreview.net/forum?id=0GzqVqCKns. 11 [34] Florentin Guth, Zahra Kadkhodaie, and Eero P. Simoncelli. Learning normalized image densities via dual score matching. In Advances in Neural Information Processing Systems , 2025. [35] N.T. Hunt-Smith, W. Melnitchouk, F. Ringer, N. Sato, A.W. Thomas, and M.J. White. Acceler-ating markov chain monte carlo sampling with diffusion models. Computer Physics Communi-cations , 296:109059, 2024. ISSN 0010-4655. doi: https://doi.org/10.1016/j.cpc.2023.109059. URL https://www.sciencedirect.com/science/article/pii/S0010465523004046. [36] Grzegorz Rozenberg and Arto Salomaa. Handbook of Formal Languages . Springer, January 1997. doi: 10.1007/978-3-642-59126-6. [37] Marc Mezard and Andrea Montanari. Information, physics, and computation . Oxford University Press, 2009. [38] Dietrich Stauffer and Ammon Aharony. Introduction to Percolation Theory . Taylor & Francis, London, 2 edition, 1994. [39] Markus Müller and Matthieu Wyart. Marginal stability in structural, spin, and electron glasses. 
+
+Annu. Rev. Condens. Matter Phys. , 6(1):177–200, 2015. [40] Luca Soldaini, Rodney Kinney, Akshita Bhagia, Dustin Schwenk, David Atkinson, Russell Authur, Ben Bogin, Khyathi Chandu, Jennifer Dumas, Yanai Elazar, Valentin Hofmann, Ananya Jha, Sachin Kumar, Li Lucy, Xinxi Lyu, Nathan Lambert, Ian Magnusson, Jacob Morrison, Niklas Muennighoff, Aakanksha Naik, Crystal Nam, Matthew Peters, Abhilasha Ravichander, Kyle Richardson, Zejiang Shen, Emma Strubell, Nishant Subramani, Oyvind Tafjord, Evan Walsh, Luke Zettlemoyer, Noah Smith, Hannaneh Hajishirzi, Iz Beltagy, Dirk Groeneveld, Jesse Dodge, and Kyle Lo. Dolma: an open corpus of three trillion tokens for language model pretraining research. In Lun-Wei Ku, Andre Martins, and Vivek Srikumar, editors, Proceedings of the 62nd Annual Meeting of the Association for Computational Linguistics (Volume 1: Long Papers) , pages 15725–15788, Bangkok, Thailand, August 2024. Association for Computational Linguistics. doi: 10.18653/v1/2024.acl-long.840. URL https://aclanthology.org/2024.acl-long. 840/. [41] Fengqi Zhu, Zebin You, Yipeng Xing, Zenan Huang, Lin Liu, Yihong Zhuang, Guoshan Lu, Kangyu Wang, Xudong Wang, Lanning Wei, Hongrui Guo, Jiaqi Hu, Wentao Ye, Tieyuan Chen, Chenchen Li, Chengfu Tang, Haibo Feng, Jun Hu, Jun Zhou, Xiaolu Zhang, Zhenzhong Lan, Junbo Zhao, Da Zheng, Chongxuan Li, Jianguo Li, and Ji-Rong Wen. Llada-moe: A sparse moe diffusion language model. arXiv preprint arXiv:2509.24389 , 2025. [42] Albert Q. Jiang, Alexandre Sablayrolles, Arthur Mensch, Chris Bamford, Devendra Singh Chaplot, Diego de las Casas, Florian Bressand, Gianna Lengyel, Guillaume Lample, Lucile Saulnier, Lélio Renard Lavaud, Marie-Anne Lachaux, Pierre Stock, Teven Le Scao, Thibaut Lavril, Thomas Wang, Timothée Lacroix, and William El Sayed. Mistral 7b, 2023. URL https://arxiv.org/abs/2310.06825. [43] Charlotte Caucheteux and Jean-Rémi King. Brains and algorithms partially converge in natural language processing. Communications Biology , 5(1):134, 2022. doi: 10.1038/ s42003-022-03036-1. [44] Charlotte Caucheteux, Alexandre Gramfort, and Jean-Rémi King. Deep language algorithms predict semantic comprehension from brain activity. Scientific Reports , 12(1):16327, 2022. doi: 10.1038/s41598-022-20460-9. [45] Emily Cheng, Diego Doimo, Corentin Kervadec, Iuri Macocco, Lei Yu, Alessandro Laio, and Marco Baroni. Emergence of a high-dimensional abstraction phase in language transformers. In The Thirteenth International Conference on Learning Representations , 2025. URL https: //openreview.net/forum?id=0fD3iIBhlV. [46] Jia Deng, Wei Dong, Richard Socher, Li-Jia Li, Kai Li, and Li Fei-Fei. Imagenet: A large-scale hierarchical image database. In Proceedings of the IEEE Conference on Computer Vision and Pattern Recognition (CVPR) , 2009. 12 [47] Zhuang Liu, Hanzi Mao, Chao-Yuan Wu, Christoph Feichtenhofer, Trevor Darrell, and Saining Xie. A convnet for the 2020s. In Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR) , 2022. [48] A. Conneau, G. Kruszewski, G. Lample, L. Barrault, and M. Baroni. What you can cram into a single $&!#* vector: Probing sentence embeddings for linguistic properties. In Iryna Gurevych and Yusuke Miyao, editors, Proceedings of the 56th Annual Meeting of the Association for Computational Linguistics (Volume 1: Long Papers) , pages 2126–2136, Melbourne, Australia, 2018. Association for Computational Linguistics. doi: 10.18653/v1/P18-1198. URL https: //aclanthology.org/P18-1198. [49] I. Tenney, D. Das, and E. Pavlick. BERT rediscovers the classical NLP pipeline. In Anna Korhonen, David Traum, and Lluís Màrquez, editors, Proceedings of the 57th An-nual Meeting of the Association for Computational Linguistics , pages 4593–4601, Florence, Italy, 2019. Association for Computational Linguistics. doi: 10.18653/v1/P19-1452. URL https://aclanthology.org/P19-1452. [50] C. D Manning, K. Clark, J. Hewitt, U. Khandelwal, and O. Levy. Emergent linguistic structure in artificial neural networks trained by self-supervision. Proceedings of the National Academy of Sciences , 117(48):30046–30054, 2020. [51] Artur Kulmizev and Joakim Nivre. Schrödinger’s tree—on syntax and neural language models. 
+
+Frontiers in Artificial Intelligence , 5:796788, 2022. [52] Jack T. Parley, Francesco Cagnetta, and Matthieu Wyart. Deep networks learn to parse uniform-depth context-free languages from local statistics, 2026. URL https://arxiv.org/abs/2602.06065. [53] Zeyuan Allen-Zhu and Yuanzhi Li. Physics of language models: Part 1, learning hier-archical language structures. Transactions on Machine Learning Research , 2025. URL https://openreview.net/forum?id=mPQKyzkA1K. [54] Haoyu Zhao, Abhishek Panigrahi, Rong Ge, and Sanjeev Arora. Do transformers parse while predicting the masked word? In Houda Bouamor, Juan Pino, and Kalika Bali, editors, 
+
+Proceedings of the 2023 Conference on Empirical Methods in Natural Language Processing ,pages 16513–16542, Singapore, December 2023. Association for Computational Linguistics. doi: 10.18653/v1/2023.emnlp-main.1029. URL https://aclanthology.org/2023.emnlp-main. 1029/. [55] Jerome Garnier-Brun, Marc Mézard, Emanuele Moscato, and Luca Saglietti. How transformers learn structured data: Insights from hierarchical filtering. In International Conference on Machine Learning (ICML) , 2025. arXiv:2408.15138. [56] E. DeGiuli. Random language model. Phys. Rev. Lett. , 122:128301, Mar 2019. doi: 10.1103/ PhysRevLett.122.128301. URL https://link.aps.org/doi/10.1103/PhysRevLett.122.128301. [57] Laura Ying Schulz, Daniel Mitropolsky, and Tomaso Poggio. Unraveling syntax: How lan-guage models learn context-free grammars, 2025. URL https://arxiv.org/abs/2510.02524. arXiv:2510.02524. [58] Jiacheng Ye, Zhihui Xie, Lin Zheng, Jiahui Gao, Zirui Wu, Xin Jiang, Zhenguo Li, and Lingpeng Kong. Dream 7b: Diffusion large language models. arXiv preprint arXiv:2508.15487 , 2025. 13 A Plateau heatmaps for different choices of nmax 0 0.2 0.4 
+
+f
+
+> 00.25 0.5 0.75 1
+> ρ
+
+ρd ⋅ nmax = 10 4   
+
+> fper finv
+> non-ergodic ergodic higher → slower ergodic higher → faster
+> inversion
+> 00.2 0.4
+
+f
+
+ρd ⋅ nmax = 10 5 
+
+> fper finv
+> non-ergodic ergodic higher → slower ergodic higher → faster
+> inversion
+> 10 1
+> 10 2
+> normalized plateau
+
+Figure 8: Plateau heatmaps for the RHM with s = 2 and L = 8 , computed using two trajectory lengths. Left: ρd · nmax = 10 4. Right: ρd · nmax = 10 5. The qualitative structure of the phase diagram is stable across these two choices, indicating that the observed non-ergodic and effectively ergodic regions are not artifacts of a single finite U-turn step cutoff. 
+
+B Additional language diffusion results 
+
+B.1 Correlation decay of UTMC at varying masking fraction ρ0.0                   
+
+> 0.2
+> 0.4
+> 0.6
+> 0.8
+> 1.0
+> Correlation  C (n)
+> = 0 = 2 7= 2 2= 2 1
+> 100 200 300
+> Cumulative masks dn
+> 0.0
+> 0.2
+> 0.4
+> 0.6
+> 0.8
+> 1.0
+> Correlation  C (n)
+> = 0.78
+> 100 200 300
+> Cumulative masks dn
+> = 0.84
+> 100 200 300
+> Cumulative masks dn
+> = 0.94
+> = 0
+> = 8
+> = 16
+> = 24
+> = 31
+> Mistral layer depth
+
+Figure 9: Decay of Mistral representation correlations along sequential language U-turn chains for several masking fractions ρ. Increasing ρ accelerates decorrelation across layers and eventually inverts layer ordering, consistent with the main-text observation. 
+
+B.2 Single-step analysis 
+
+Long U-turn trajectories can eventually degrade text quality, as shown in App. B.3. This makes it difficult to compare fitted relaxation times across masking fractions ρ over very long trajectories. As a complementary diagnostic, we therefore examine the effect of a single U-turn step as ρ is varied. This single-step analysis directly measures which layers are most sensitive to a U-turn perturbation at each masking level, and provides a cleaner way to locate the layer-ordering inversion. 14 0.0 0.2 0.4 0.6 0.8 1.0      
+
+> Masking fraction
+> 0.0
+> 0.2
+> 0.4
+> 0.6
+> 0.8
+> 1.0
+> C (n)
+> Single step, varying
+> embedding
+> = 7
+> = 15
+> = 23
+> = 31 0.0 0.2 0.4 0.6 0.8 1.0
+> Masking fraction
+> 0.0
+> 0.2
+> 0.4
+> 0.6
+> 0.8
+> 1.0
+> C (n)
+> Single step, varying
+> embedding
+> = 3
+> = 7
+> = 11
+> = 15
+
+Figure 10: Centered cosine similarity of Mistral representations after a single language U-turn step, as a function of masking fraction ρ. Left: all Mistral layers. Right: the first 15 layers only. In both views, the layer ordering inverts around ρ ≈ 0.8: at small ρ, deeper/intermediate representations are more stable, while at large ρ they decorrelate more rapidly. 
+
+B.3 Perplexity of U-turned text 
+
+We monitor the quality of generated text using Mistral 7B perplexity. This provides a practical diagnostic for when repeated U-turn denoising begins to produce degraded or nonsensical text. 0.2 0.4 0.6 0.8 1.0 
+
+Masking fraction 
+
+> 40
+> 60
+> 80
+> 100
+> 120
+> 140
+> 160
+> Mistral perplexity
+
+Single step, varying 10 0 10 1 10 2 10 3 10 4
+
+Cumulative Masks d n
+
+> 0
+> 200
+> 400
+> 600
+> 800
+> 1000
+> Mistral perplexity
+
+Sequential Uturn       
+
+> = 2 1
+> = 2 2
+> = 2 3
+> = 2 4
+> = 2 5
+> = 2 7
+
+Figure 11: Perplexity of text produced by language U-turns, measured using Mistral 7B. Left: 
+
+perplexity after a single U-turn step as the masking fraction ρ is varied. Right: perplexity along sequential U-turn trajectories, plotted against the cumulative number of masked tokens ρd · n.Perplexity begins to increase sharply around ρd · n ≈ 300 , indicating that very long sequential U-turn trajectories accumulate denoising errors. 
+
+B.4 Implementation details 
+
+All language U-turn experiments use the LLaDA-MoE-7B-A1B-Base masked diffusion language model on Dolma text. We sample 256 example paragraphs from allenai/dolma with configuration 
+
+v1_6-sample , normalize whitespace, and keep clean 128-token prefixes under the LLaDA tokenizer. When constructing the starting set, we exclude examples containing newlines, code-like symbols, CJK characters, or other non-prose artifacts. For a U-turn with masking fraction ρ, the forward step masks round( ρd ) token positions in the current sequence, where d = 128 . The backward step applies the standard LLaDA iterative masked-token denoising procedure, initialized from the partially masked sequence. Unless otherwise stated, sampling uses temperature 1.0 and random unmasking. To probe representations, saved LLaDA token sequences are decoded to text and passed through 
+
+mistralai/Mistral-7B-v0.1 . At each Mistral layer ℓ, residual-stream activations are mean-pooled over token positions and centered by a layer-wise baseline μℓ, computed from highly corrupted U-turn samples with ρ ≈ 1. The language correlation is defined as 
+
+Cℓ(n) = cos 
+
+¯hℓ(x(0) ) − μℓ, ¯hℓ(x(n)) − μℓ
+
+
+
+.
+
+15 Curves are averaged over initial texts and independent U-turn trajectories. 
+
+B.5 Robustness of the natural language results 
+
+To test whether the natural-language layer-ordering inversion is specific to LLaDA, we repeat the single-step analysis using a different masked diffusion language model, Dream 7B v0 Base [ 58 ]. Starting from the same dataset, we observe a qualitatively similar inversion of representation decay across Mistral layers, consistent with the behavior shown in App. B.2. 0.0 0.2 0.4 0.6 0.8 1.0                  
+
+> Masking fraction ρ
+> 0.0
+> 0.2
+> 0.4
+> 0.6
+> 0.8
+> 1.0
+> Cℓ(n)
+> Single step, varying ρ
+> embedding
+> ℓ= 7
+> ℓ= 15
+> ℓ= 23
+> ℓ= 31 0.0 0.2 0.4 0.6 0.8 1.0
+> Masking fraction ρ
+> 0.0
+> 0.2
+> 0.4
+> 0.6
+> 0.8
+> 1.0
+> Cℓ(n)
+> Single step, varying ρ
+> embedding
+> ℓ= 3
+> ℓ= 7
+> ℓ= 11
+> ℓ= 15
+
+Figure 12: Centered cosine similarity of Mistral representations after a single language U-turn step using Dream 7B v0 Base as the masked diffusion model, as a function of masking fraction ρ. Left: 
+
+all Mistral layers. Right: the first 15 layers only. As in the LLaDA experiments, intermediate and deeper layers become less stable relative to earlier layers at large masking fraction, indicating a similar layer-ordering inversion. Dolma is included in the training mixture of Dream 7B v0 Base, which makes this experiment a useful robustness check: the inversion persists even when the diffusion model is evaluated on data drawn from a distribution it was trained on. In contrast, the training data for LLaDA 7B are not publicly specified. 
+
+C Additional Image Diffusion Results 
+
+This appendix collects additional image experiments supporting Section 5. Unless stated otherwise, the U-turn map is the same as in the main text: starting from an image x, we sample xt ∼ q(xt | x)
+
+at diffusion time t, then run the ancestral reverse sampler for t steps to obtain a reconstructed image. We report the noise fraction as ρ = t/T with T = 1000 .
+
+C.1 Layer-wise persistence across noise levels 
+
+For the quantitative image experiments, we evaluate 20 ImageNet validation images and noise steps 
+
+t ∈ { 0, 100 , 200 , 400 , 600 , 800 , 999 }. For nonzero noise, trajectories have length N = 100 ; the 
+
+t = 100 , . . . , 999 levels use 20 trajectories per image. ConvNeXt activations are whitened layer-wise using fixed empirical statistics, flattened, and compared to the initial image by cosine similarity. Curves are first averaged within each image and then across images. As in the main image figure, we exclude the classifier head and order layers by ConvNeXt feature depth. Figure 13 shows the full noise sweep using the same colorbar convention as the main text. Small 
+
+ρ produces separated relaxation curves, with later visual layers preserving memory longer. As ρ
+
+increases, all layers decorrelate more rapidly and the layer ordering narrows. The insets zoom into 
+
+0 ≤ Cℓ(n) ≤ 0.1 for the large-noise panels, where the curves are close together but still show the ordering change. 
+
+C.2 Integrated persistence and single-step response 
+
+To summarize the full relaxation curves, we compute the area under each cosine-survival curve on the normalized U-turn axis s = n/N ∈ [0 , 1] . Let z(i,r ) 
+
+> ℓ
+
+(n; ρ) denote the whitened ConvNeXt feature vector at feature depth ℓ after n U-turns for image i, trajectory r, and noise fraction ρ. The per-image, 16 0.0                                          
+
+> 0.5
+> 1.0
+> correlation  Cℓ(n)
+> ρ= 0, Nimg = 20 ρ= 0.1, Nimg = 20 ρ= 0.2, Nimg = 20 ρ= 0.4, Nimg = 20
+> 050 100
+> U-turn step n
+> 0.0
+> 0.5
+> 1.0
+> correlation  Cℓ(n)
+> ρ= 0.6, Nimg = 20
+> 50 100
+> 0.0
+> 0.1
+> 050 100
+> U-turn step n
+> ρ= 0.8, Nimg = 20
+> 50 100
+> 0.0
+> 0.1
+> 050 100
+> U-turn step n
+> ρ= 0.999, Nimg = 20
+> 50 100
+> 0.0
+> 0.1
+> ℓ= 0
+> ℓ= 10
+> ℓ= 20
+> ℓ= 30
+> ℓ= 39
+> ConvNeXt feature depth
+
+Figure 13: Full layer-wise latent persistence sweep. Cosine correlation between ConvNeXt feature activations at U-turn step n and at initialization, averaged over the 20-image ImageNet validation set with the classifier head excluded. Panels show different noise fractions ρ = t/T ; insets zoom into the low-correlation regime for large ρ. The sweep shows the gradual collapse of long-lived high-level memory as the U-turn magnitude increases. per-layer correlation curve is 
+
+C(i) 
+
+> ℓ
+
+(n; ρ) = 1
+
+Ri,ρ Ri,ρ 
+
+X
+
+> r=1
+
+D
+
+z(i,r ) 
+
+> ℓ
+
+(n; ρ), z (i) 
+
+> ℓ
+
+(0) 
+
+E
+
+z(i,r ) 
+
+> ℓ
+
+(n; ρ) z(i) 
+
+> ℓ
+
+(0) 
+
+,
+
+where Ri,ρ is the number of trajectories for that image and noise level. We include the initial condition as C(i) 
+
+> ℓ
+
+(0; ρ) = 1 and define the layer AUC by 
+
+A(i) 
+
+> ℓ
+
+(ρ) = 
+
+Z 10
+
+C(i) 
+
+> ℓ
+
+(sN ; ρ) ds, 
+
+implemented by linear interpolation of the measured curve to a common grid in s followed by trapezoidal integration. We sort ConvNeXt outputs by feature depth and exclude the classifier head for the main AUC summary, leaving L = 40 feature layers indexed ℓ = 0 , . . . , L − 1. The early group is the first three features, 
+
+Gearly = {0, 1, 2},
+
+and the late group is the last three features, 
+
+Glate = {L − 3, L − 2, L − 1} = {37 , 38 , 39 }.
+
+For a group G we average the layer AUCs, 
+
+A(i) 
+
+> G
+
+(ρ) = 1
+
+|G| 
+
+X
+
+> ℓ∈G
+
+A(i) 
+
+> ℓ
+
+(ρ),
+
+then report the mean and SEM of A(i) 
+
+> G
+
+(ρ) across the 20 images. The ordering diagnostic in the right panel is 
+
+∆AUC (ρ) = 
+
+D
+
+A(i) 
+
+> Glate
+
+(ρ) − A(i) 
+
+> Gearly
+
+(ρ)
+
+E
+
+> i
+
+.
+
+Thus ∆AUC > 0 means late, higher-level features retain memory longer than early features, while 
+
+∆AUC < 0 indicates the inverted ordering. The dotted vertical line marks the linearly interpolated zero crossing of this gap. This phenomenology is clearly observed in Figure 14. 17 0.0 0.2 0.4 0.6 0.8 1.0          
+
+> Noise fraction ρ
+> 0.0
+> 0.2
+> 0.4
+> 0.6
+> 0.8
+> 1.0
+> AUC of  Cℓ(n)
+> Integrated persistence
+> early features
+> late features
+> 0.0 0.2 0.4 0.6 0.8 1.0
+> Noise fraction ρ
+> 0.00
+> 0.05
+> 0.10
+> 0.15
+> 0.20
+> 0.25
+> late AUC minus early AUC
+> ρ∗≈ 0.54
+> Ordering gap
+
+Figure 14: AUC summary of image latent persistence. Left: Mean area under the cosine-survival curve for early and late ConvNeXt feature groups as a function of noise fraction. Shaded bands denote SEM across the 20 images. Right: Difference between late-feature and early-feature AUC. The dotted line marks the interpolated ordering transition for this integrated diagnostic. Figure 15 gives a complementary single-step diagnostic by extracting Cℓ(1) from the first step of the same sequential U-turn trajectories used above. This view makes clear that increasing ρ first perturbs early layers while leaving deeper representations relatively stable, and then eventually affects all recorded feature layers. The dashed line marks the zero crossing of the late-minus-early single-step gap. 0.0 0.2 0.4 0.6 0.8 1.0         
+
+> Noise fraction ρ
+> 0.0
+> 0.2
+> 0.4
+> 0.6
+> 0.8
+> 1.0
+> single-step correlation  Cℓ(1)  single-step transition
+> ρ∗≈ 0.68
+> Single U-turn from the sequential trajectories
+> ℓ= 0
+> ℓ= 10
+> ℓ= 20
+> ℓ= 30
+> ℓ= 39
+> ConvNeXt feature depth
+
+Figure 15: Single-U-turn latent response as a function of noise. Cosine similarity after the first U-turn, Cℓ(1) , plotted for each recorded ConvNeXt feature layer using the sequential trajectory dataset. The classifier head is excluded. The dashed line marks the single-step layer-ordering transition. 
+
+C.3 Classifier-head and averaging checks 
+
+The main image persistence figure excludes the classifier head so that the ordering is measured only within the ConvNeXt feature hierarchy. As a check, Figure 16 compares ordering summaries with and without the classifier head and with two equivalent averaging conventions. The qualitative transition is unchanged: high-level memory dominates at small ρ, while the ordering weakens and can invert at larger ρ.
+
+C.4 Implementation details 
+
+All image U-turn experiments use the guided-diffusion ImageNet model at 256 × 256 resolution. Input images are resized to the diffusion resolution and scaled to [−1, 1] . For a U-turn at noise step t,the forward step uses the model’s standard Gaussian noising process q(xt | x0); the backward step uses the same ancestral denoising kernel as unconditional sampling, initialized at the forward-noised state rather than at pure Gaussian noise. 18 0.0 0.2 0.4 0.6 0.8 1.0              
+
+> Noise fraction ρ
+> 0.00
+> 0.05
+> 0.10
+> 0.15
+> 0.20
+> 0.25
+> 0.30
+> High AUC minus low AUC
+> A. Integrate image-averaged curves
+> with classifier
+> without classifier
+> 0.0 0.2 0.4 0.6 0.8 1.0
+> Noise fraction ρ
+> 0.00
+> 0.05
+> 0.10
+> 0.15
+> 0.20
+> 0.25
+> 0.30
+> 0.35
+> Mean per-image AUC gap
+> B. Average per-image AUCs
+> with classifier
+> without classifier
+> 0.0 0.2 0.4 0.6 0.8 1.0
+> Noise fraction ρ
+> 0.0
+> 0.1
+> 0.2
+> 0.3
+> 0.4
+> 0.5
+> High  τ0.5  minus low  τ0.5
+> C. Half-life ordering
+> with classifier
+> without classifier
+
+Figure 16: Robustness of the image layer-ordering diagnostic. Ordering summaries are shown both when the classifier head is treated as the deepest output and when it is excluded. The sign and scale of the AUC and half-life gaps show that the observed transition is not an artifact of a single averaging convention or of the classifier head alone. For sequential trajectories, the output image of one U-turn becomes the input image to the next U-turn. We save activations at every U-turn step and include the initial state as Cℓ(0) = 1 . The zero-noise point in the sweep is treated analytically as the identity map. AUCs are computed after linear interpolation of each curve onto a common normalized time grid, and SEMs are computed across images after per-image averaging. 
+
+D Theory for minimal U-turns in the RHM 
+
+D.1 Ergodic baseline of correlation plateau 
+
+We denote the latent variables at layer ℓ by a vector ⃗x ℓ ∈ RsL−ℓ
+
+. Initially, each component satisfies 
+
+xiℓ(t=0) ∈ { 1, . . . , v } for i ∈ { 1, . . . , s L−ℓ}. The leaf layer is ⃗x 0 ∈ RsL
+
+. Subscripts denote layers and superscripts denote positions within a layer. Our main observable is the two-point correlation 
+
+Cℓ(n) = 1
+
+sL−ℓ
+
+X
+
+i
+
+D
+
+δxiℓ(0) , x iℓ(n)
+
+E
+
+,
+
+where δ is the Kronecker delta. Here ⟨·⟩ denotes an average over trajectories for a fixed rule, while 
+
+(·) denotes an average over rules. In the ergodic limit, the plateau equals the mean overlap between two independently drawn configu-rations admissible under a fixed rule. While one might expect 1/v , hierarchical constraints induce correlations that increase this value. The correction is controlled by f = m/v s−1, with smaller f
+
+yielding larger overlap. The ergodic mean overlap is 
+
+μℓ = 1
+
+v
+
+ r
+
+1 − a +
+
+
+
+1 − r
+
+1 − a
+
+
+
+aL−ℓ
+
+
+
++
+
+
+
+1 − 1
+
+v
+
+ r
+
+1 − a (1 − aL−ℓ)
+
+where r := vs−1 − 1
+
+vs − 1 , a := 1
+
+m (1 − r).
+
+We define 
+
+˜Cℓ(n) := Cℓ(n) − μℓ
+
+1 − μℓ
+
+.
+
+D.2 Finite-size threshold for minimal U-turn 
+
+Here we give the finite-v, finite-L version of the branching estimate used to draw the theoretical thresholds in Fig. 2 and Fig. 3. The logic is the same as in Sec. 3.5: starting from one accepted leaf flip, we estimate how many additional leaf flips it opens. The finite-size calculation keeps two 19 ingredients explicit that are combined into powers of f in the main text: the number of admissible non-original reconstructions, and the probability that such a reconstruction cascades upward through the hierarchy. 
+
+Finite-size admissible values and cascade probabilities. Consider a minimal U-turn step, in which a single leaf token is masked and reconstructed. For each layer ℓ, let Nℓ denote the average number of admissible values of a given layer-ℓ variable, including its original value, conditioned on fixing all other variables at the same layer ℓ to their values in the original sample. The root has no same-layer constraints, so NL = v. Moving downward from a parent layer to its children gives the recursion derived in Ref. [30]: 
+
+NL = v, Nℓ−1 = 1 + ( v − 1) mN ℓ − 1
+
+vs − 1 , ℓ = 1 , . . . , L. (3) Thus, at the visible layer, a masked leaf has on average N0 −1 non-original admissible reconstructions, conditioned on all other visible tokens being fixed. These admissible-value counts also determine the probability that a change cascades upward. If a variable at layer ℓ − 1 changes, its parent at layer ℓ remains unchanged only when the new configuration is still compatible with the original parent value. Averaging over admissible parent values, this happens with probability 1/N ℓ. Therefore the probability that the change propagates from layer ℓ − 1 to layer ℓ is 
+
+pcascade  
+
+> ℓ−1→ℓ
+
+= 1 − 1
+
+Nℓ
+
+. (4) The probability that an admissible leaf flip propagates up to level ℓ is then 
+
+pcascade 0→ℓ =
+
+> ℓ
+
+Y
+
+> r=1
+
+
+
+1 − 1
+
+Nr
+
+
+
+. (5) 
+
+Relation to the main text, Sec. 3.5. We now spell out how these finite-size quantities correspond to the factors used in Sec. 3.5. As in the main text, the first flip is already conditioned on being admissible. Under this conditioning, the probability that it propagates to at least level ℓ − 1 is 
+
+f ℓ + f ℓ+1 + · · · 
+
+f + f 2 + · · · = f ℓ−1. (6) In the finite-size expression, the corresponding conditional probability is pcascade 0→ℓ−1 .In the main text, the second-flip factor 
+
+f ℓ + f ℓ+1 + · · · = f ℓ
+
+1 − f (7) combines two pieces: the number of non-original admissible reconstructions and the probability that such a reconstruction propagates to at least level ℓ − 1. In the finite-size expression, we keep these two pieces separate as  N0 − 1 pcascade 0→ℓ−1 . (8) 
+
+Mean number of novel flips in Finite-size. Fix an accepted leaf flip at position i, and consider another leaf j whose lowest common ancestor with i is at layer ℓ. For fixed i, the number of such leaves is sℓ − sℓ−1.For the flip at i to open a move at j, the first flip must affect the child of the common ancestor that lies on the path from i. Equivalently, its cascade must reach level ℓ − 1. This gives the finite-size version of the first main-text factor: 
+
+pcascade 0→ℓ−1 . (9) 20 After the first flip, stationarity implies that leaf j has on average N0 − 1 non-original admissible alternatives. However, only those alternatives whose cascade also reaches level ℓ − 1 can couple to the change created by the first flip. This gives the finite-size version of the second main-text factor: 
+
+ N0 − 1 pcascade 0→ℓ−1 . (10) Together, the two cascade requirements contribute 
+
+ N0 − 1   pcascade 0→ℓ−1
+
+2 . (11) There is one additional finite-size correction. Even when both cascades reach level ℓ − 1, the candidate value at that level may already have been admissible regardless of the first flip. To count only newly opened moves, we approximate the admissible alternative set at layer ℓ − 1 as a uniformly random subset of size Nℓ−1 − 1 among the v − 1 non-original values. Under this approximation, the probability that the candidate value was already admissible is 
+
+Nℓ−1 − 1
+
+v − 1 , (12) so the probability that it is newly enabled by the first flip is 
+
+1 − Nℓ−1 − 1
+
+v − 1 . (13) Summing over all possible positions j, we obtain the finite-v, finite-L mean number of newly opened flips: 
+
+nv,L (f ) := 
+
+> L
+
+X
+
+> ℓ=1
+
+ sℓ − sℓ−1   N0 − 1   pcascade 0→ℓ−1
+
+2
+
+
+
+1 − Nℓ−1 − 1
+
+v − 1
+
+
+
+. (14) 
+
+Percolation threshold. As in the main text, the percolation threshold is estimated by the condition that one accepted flip opens, on average, one additional admissible flip: 
+
+nv,L 
+
+
+
+f (v,L )per 
+
+
+
+= 1 . (15) For Fig. 2 and Fig. 3, we use equation 14: we first compute the Nℓ recursively from equation 3, then evaluate the cascade probabilities using equation 5, and finally solve equation 15. 
+
+Layer-ordering inversion threshold. The inversion estimate uses the same finite-size cascade probability. The ordering between adjacent layers is controlled by two competing effects. First, layer 
+
+ℓ contains a factor s fewer variables than layer ℓ − 1, which favors faster decorrelation at higher layers. Second, a change at layer ℓ − 1 reaches layer ℓ only with probability pcascade  
+
+> ℓ−1→ℓ
+
+, which favors slower decorrelation at higher layers. Balancing these two effects gives 
+
+s p cascade  
+
+> ℓ−1→ℓ
+
+= 1 , pcascade  
+
+> ℓ−1→ℓ
+
+= 1 − 1
+
+Nℓ
+
+. (16) In Fig. 3, we compare the visible layer and the first latent layer, so we use 
+
+s p cascade 0→1 = s
+
+
+
+1 − 1
+
+N1
+
+
+
+= 1 (17) to compute the finite-v, finite-L threshold f (v,L )inv .
+
+Asymptotic limit. We now take the limit v → ∞ and L → ∞ at fixed rule density f = m/v s−1.In this limit, 
+
+Nℓ −→ 11 − f , (18) so that the one-step cascade probability becomes 
+
+pcascade  
+
+> ℓ−1→ℓ
+
+= 1 − 1
+
+Nℓ
+
+−→ f. (19) 21 Consequently, 
+
+pcascade 0→ℓ =
+
+> ℓ
+
+Y
+
+> r=1
+
+
+
+1 − 1
+
+Nr
+
+
+
+−→ f ℓ. (20) Applying these limits to equation 14 gives 
+
+nv,L (f ) −→ 
+
+> ∞
+
+X
+
+> ℓ=1
+
+ sℓ − sℓ−1 f
+
+1 − f
+
+ f ℓ−12 = f (s − 1) (1 − sf 2)(1 − f ) . (21) The percolation condition then reduces to the main-text estimate 
+
+fper = 1
+
+s − 1
+
+s2 + O
+
+ 1
+
+s3
+
+
+
+, (22) while the inversion condition reduces to the main-text estimate 
+
+sf inv = 1 , finv = 1
+
+s . (23) 22

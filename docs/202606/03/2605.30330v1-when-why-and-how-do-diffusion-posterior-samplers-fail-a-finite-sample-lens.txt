@@ -1,0 +1,3298 @@
+Title: When, why, and how do diffusion posterior samplers fail? A finite-sample lens
+
+URL Source: https://arxiv.org/pdf/2605.30330v1
+
+Published Time: Fri, 29 May 2026 01:54:16 GMT
+
+Number of Pages: 55
+
+Markdown Content:
+# When, why, and how do diffusion posterior samplers fail? A finite-sample lens 
+
+Benjamin A. Burns 
+
+Georgia Institute of Technology 
+
+bburns46@gatech.edu 
+
+Sara Fridovich-Keil 
+
+Georgia Institute of Technology 
+
+sfk@gatech.edu 
+
+## Abstract 
+
+Diffusion models have excellent capacity to model complex distributions of natural data, which has made them a popular and effective choice for posterior sampling in imaging inverse problems. Existing methods can incorporate any measurement model at inference time but must use an inexact approximation for the likelihood at intermediate timesteps for computational tractability. Although these approxi-mations can often work well empirically, their downstream effect on the sampled posterior is poorly understood and can result in unexplained failures. To under-stand when, why, and how these likelihood approximations propagate to erroneous posterior distributions, we introduce a finite-sample perspective on posterior sam-pling that approximates the posterior to arbitrary precision as training set size tends towards infinity, for any forward model and prior distribution. Using this finite-sample lens, we observe that popular posterior sampling approximations tend to under- or over-estimate the spread of the posterior at intermediate timesteps, causing downstream consequences including sensitivity to early stopping time, inaccurate relative weighting of posterior modes, and hallucination, both of prior modes that are not in the posterior and likelihood modes that are not supported by the prior. Moreover, we find that the cause of these posterior errors requires neither a nonlinear measurement model nor a multimodal posterior, but can arise solely due to a multimodal prior and inaccurate posterior spread at intermediate sampling times. Our finite-sample posterior sampling approach is agnostic to the type of likelihood approximation and the type of (linear or nonlinear) forward model, and can thus serve as a drop-in diagnostic to evaluate the accuracy and failure modes of existing and future posterior samplers. All code for experiments is available at: 
+
+https://github.com/voilalab/diagnosing-posterior-sampling .
+
+## 1 Introduction 
+
+Computational imaging has become a staple of modern science, medicine, security, and industry, allowing us to computationally visualize inside solid objects and at scales invisible to the human eye. Computational imaging works by first collecting indirect measurements through a known physical 
+
+forward model , and then computationally inverting that forward model to recover an interpretable image of the target object. In cases where the forward model is linear, and we have prior knowledge that constrains the target image to lie in a convex set, the rich theory of compressive sensing guarantees that the true image can be recovered exactly from a minimal number of measurements [1]. However, in many computational imaging problems of modern interest, the forward model may be nonlinear, our prior knowledge may be nonconvex or statistical rather than structural, and we may have measurements that are too few or too noisy to uniquely determine the true image. In this context, the posterior distribution is the primary object of interest, as it allows us to (i) produce candidate reconstructions via sampling and (ii) quantify confidence of candidate reconstructions via density evaluation, both of which have downstream applications in uncertainty quantification [ 2, 3], active 
+
+> Preprint.
+> arXiv:2605.30330v1 [cs.LG] 28 May 2026
+
+measurement acquisition [ 4–6 ], and risk-aware decision-making [ 7 , 8]. A key challenge in posterior sampling is to accurately capture events or posterior modes which have low probability but high impact, such as observing a tumor in medical imaging or a small dog or child in autonomous driving. Diffusion models [ 9 – 11 ] have become an increasingly popular technique for learning a complex distribution from a dataset of samples, and thus an increasingly popular statistical prior for com-putational imaging [ 12 ]. In particular, score-based methods are an appealing option for posterior sampling because the posterior score, the object required for sampling, decomposes exactly as a sum of a prior score plus a likelihood score. The prior score is learnable from clean image examples, while the likelihood can be written in marginal form given the prior, noise schedule, and forward model. However, these so-called plug-and-play [ 13 ] or zero-shot methods [ 14 ] cannot directly use this marginal for posterior sampling as evaluating the integral for each sample at each denoising step is computationally tractable. Moment-matching methods replace the true marginal with a tractable surrogate, specifically by selecting a surrogate for the denoising process of the diffusion model. Although the denoiser is unknown, its moments are accessible through the noise schedule and learned prior score via Tweedie’s formula [ 15 ]. However, satisfying both conditions is restrictive. Dirac approximations such as Diffusion Posterior Sampling (DPS) [ 16 ] analytically simplify for all measurement models, but capture no spread information about the data nor denoising schedule. Gaussian approximations [ 17 , 18 ] capture additional information, yet only analytically simplify for linear inverse problems with Gaussian measurement noise. The posterior samples generated under these approximations are often high quality, but can fail dramatically in relatively common imaging contexts such as quantized sensing [ 19 ]. The root causes of both (i) the unexpectedly strong general performance and (ii) sporadic failure of these approximations are poorly understood. Thus, despite the increasing prevalence of diffusion posterior samplers, relatively little is known about when such methods will fail, why these approximations only fail in isolated examples, and what the characteristic nature of their failure is. 
+
+Contributions: To study when, why, and how these existing approaches fail, we introduce a finite-sample perspective on posterior sampling that approximates the posterior to arbitrary precision as training set size tends towards infinity, for any forward model and prior. We provide algorithmic analysis and finite-sample rates which inform when the finite-sample perspective gives rise to a tractable posterior sampling method, and leverage this perspective as a lens into the nature of the approximations proposed in prior work and their downstream consequences. Through this finite-sample lens, we observe that Gaussian approximations [ 17 , 18 ] tend to commit to prior modes too early in the sampling process, which can lead them to place inaccurate relative weight on different posterior modes as well as hallucinate samples from prior modes that are not in the posterior. For Dirac approximations (DPS) [ 16 ], our finite-sample lens reveals that the choice of parameter ζ causes DPS to over- or under-weight the likelihood relative to the prior at intermediate timesteps during posterior sampling, which can cause erroneous posterior variance at intermediate timesteps, hallucination of prior modes that are inconsistent with the measurement, and/or measurement-consistent modes that are inconsistent with the prior. These effects can arise even under linear measurement models, Gaussian measurement noise, and unimodal posteriors, as long as the prior distribution is multimodal. 
+
+## 2 Related work 
+
+We briefly discuss key related work here, but defer extended discussion to Appendices A.1 to A.3. 
+
+Generative posterior samplers. Our goal is to analyze the effect of popular moment-matching likelihood (and hence likelihood score) approximations [ 16 –18 ] on posterior sampling. Alternative methods which employ either learning-based likelihood or posterior scores [ 5] or exact likelihood sampling (e.g. via variable splitting) [ 19 ] exist. However, we focus on moment-matching methods [ 16 –18 ] due to two of their key benefits: (i) they can reuse pre-trained prior scores, which are often pre-trained with significantly more resources than are available to train individually for each measurement model, and (ii) the forward model A can change at inference time, without requiring any additional training. For example, in inpainting, changing the size or location of the mask entirely changes the likelihood and posterior scores, which is a straightforward and efficient adjustment for moment-matching methods but necessitates retraining for methods that learn the likelihood or posterior score. 2Benchmarking vs. understanding. Many existing works benchmark various diffusion posterior samplers against each other by studying the quality of the resulting posterior samples at terminal time [ 13 , 20 , 21 ], and provide hypotheses on when and why certain methods perform better than others or struggle in particular contexts [ 13 , 22 ]. However, little is known about how the various methods function at intermediate times, which we demonstrate is key to understanding how and why errors at terminal time arise, and for predicting when the sampler will fail in the future. 
+
+Exact diffusion. While the finite-sample regime has been used in developing unconditional [ 23 ]and conditional [ 24 , 25 ] sampling algorithms, and for understanding unconditional diffusion [ 26 ], we present the first (to our knowledge) finite-sample perspective for understanding posterior sampling. 
+
+## 3 Preliminaries 
+
+We begin with a review of Bayesian inverse problems in which posterior sampling is used, diffusion-based generative models that are used to model the prior distribution in these problems, and existing popular approximations to the likelihood score used in posterior sampling with diffusion models. 
+
+Notation: We adopt the convention of using boldface lowercase characters x, y for (finite-dimensional) vectors, boldface uppercase letters A, C for matrices, and lowercase non-bold characters 
+
+t, α for scalars. The typesetting of a function typically denotes the “type” of its argument. For exam-ple, the noise schedule ¯α(t) : R → R and weight function wi(x, t ) : Rn × R → R are scalar-valued functions as α, w are lowercase non-bold, the denoiser mean m0|t(xt) : Rn → Rn is vector-valued, and the denoiser covariance C0|t(xt) : Rn → Rn×n is matrix-valued. The main exceptions are that we utilize non-bold calligraphic A : Rn → Rm to stress situations where the (generally vector-valued) measurement operator is either nonlinear or possibly nonlinear, and that we use typical notation for standard probability objects (normal distribution N , expectation E, etc.) irrespective of their output types. We let ∇xf (x) and ∇2
+
+> x
+
+f (x) denote the gradient and Hessian, respectively, of scalar-valued function f : Rn → R evaluated at point x, and let Jf (x) denote the Jacobian of vector-valued function f : Rn → Rm evaluated at point x.
+
+3.1 Bayesian inverse problems 
+
+A prototypical computational imaging problem can be described by a forward model of the form in Equation (1), where x ∈ X ⊆ Rn is the true image or signal and y ∈ Rm is our measurements taken according to a known measurement operator A, with measurement noise η:
+
+y = A(x) + η, η ∼ N (0, Σy). (1) We assume that the measurement operator A is known and deterministic, but may be linear or nonlinear. For example, in magnetic resonance imaging (MRI), A is a (subsampled) Fourier transform [ 27 ], while in computed tomography (CT) A involves an exponential nonlinearity due to Beer– Lambert attenuation [ 28 , 29 ]. The measurement noise η may take various distributions in different imaging problems (for example, in low-dose CT η is typically Poisson), but for simplicity of analysis is often assumed to be zero-mean Gaussian [28, 12], as in Equation (1). Even in this setting where A and the distribution of η are assumed known, solving Equation (1) for the image x remains challenging because (i) the measurement operator A may be nonlinear, under-determined, non-invertible, or ill-conditioned, and (ii) the measurement noise η is stochastic and may obscure relevant signal in the measurements y. To assist with these challenges, it is common to assume that the signal x follows known structure or statistics; the former is standard in compressive sensing [1] and the latter forms the basis of posterior sampling, which is the focus of this work. Specifically, we work in the context of Bayesian inverse problems, in which we assume data follow a prior distribution ppr (x) and formulate the posterior distribution p(x | y) via Bayes’ rule: 
+
+p(x | y) = p(y | x)ppr (x)/Z (y). (2) Crucially, we are interested in recovering the full posterior distribution, to obtain not only the most likely samples but also an accurate representation of uncertainty over the range of possible reconstructions that are consistent with both the prior and the measurements. The likelihood p(y | x)
+
+in Equation (2) is induced directly by the forward model in Equation (1), and accounts for the 3measurement operator A and measurement noise η. Thus, what remains is to characterize the prior distribution ppr and the normalization constant Z(y), as we describe next. 
+
+3.2 Diffusion-based generative models 
+
+To characterize the prior distribution ppr , we turn to generative models, which have shown strong capacity to capture the rich multimodal structure of natural data distributions. In particular, score-based diffusion models are rather natural for solving Bayesian inference problems, because the score of the posterior distribution has no dependence on the normalization constant Z(y).Following prior work [ 16 – 18 ], we consider the variance-preserving (VP) stochastic differential equation (SDE) formulation [ 11 ], which progressively noises samples x0 ∼ ppr via the (rescaled) Ornstein-Uhlenbeck process [30] : 
+
+dxt = − 12 β(t)xt
+
+| {z }
+
+> drift
+
+dt + pβ(t)
+
+| {z } 
+
+> diffusion
+
+dwt, x0 ∼ ppr , (3) where β : [0 , ∞) → R>0 is a positive function, wt is a standard Wiener process, and xt denotes the evolution of sample x0 subject to Equation (3) for t time. Importantly, Equation (3) is linear in the state xt, which allows us to analytically compute the forward transition to any positive time t:
+
+pt|0(xt | x0) = N
+
+
+
+xt; p¯α(t)x0,  1 − ¯α(t)In
+
+
+
+, where ¯α(t) := exp 
+
+
+
+−
+
+Z t
+
+> 0
+
+β(τ )d τ
+
+
+
+. (4) Observe that when t = 0 , the integral in Equation (4) is zero, hence ¯α(0) = 1 . Additionally, assuming that β(t) is chosen such that the integral in Equation (4) becomes arbitrarily large for large t, we have ¯α(t) → 0 as t → ∞ . Thus, the forward transition kernel pt|0(xt | x0) converges to a standard normal N (xt; 0, In) as t → ∞ , for all x0. Furthermore, by Anderson [31] the reverse diffusion process is analytically computable: 
+
+dxt = − 12 β(t)xt − β(t)∇xt log pt(xt) dt + pβ(t) d ¯ wt, (5) where ¯wt is a standard reverse-time Wiener process. The reverse process maps the unit Gaussian (at t → ∞ ) to ppr (at t = 0 ), thus given access to the score function ∇xt log pt(xt) we can (i) draw Gaussian noise i.i.d. to initialize xT at a large time T , and (ii) numerically simulate the reverse process to time t = 0 (for example, via the Euler-Maruyama scheme) to produce samples from ppr .Importantly, while diffusion models let us draw samples from complex distributions, they do not give us access to the distribution (density) itself. This distinguishes diffusion models from normalizing flows [ 32 ], which employ (restrictive) reversible and differentiable flow architectures that provide density access via change of variables. However, the utility of diffusion models is that score-based methods avoid computation of normalization constants by learning the score function via score matching [33, 34]. 
+
+3.3 Diffusion posterior sampling via moment matching 
+
+The most direct approach for applying a diffusion model to sample from the posterior distribution 
+
+p(x | y) introduced in Equation (2) would be to drive the reverse process in Equation (5) using the posterior score ∇xt log pt|y(xt | y) instead of the prior score ∇xt log pt(xt):
+
+dxt = − 12 β(t)xt − β(t)∇xt log pt|y(xt | y) dt + pβ(t) d ¯ wt. (6) A key merit of this approach is that, by our Bayes’ rule categorization of the posterior in Equation (2), evaluating the posterior score requires knowledge of only the likelihood score and prior score, but not of the normalization constant Z(y):
+
+∇xt log pt|y(xt | y) = ∇xt log py|t(y | xt) + ∇xt log pt(xt) − ∇ xt log Z(y)
+
+| {z }
+
+> 0
+
+. (7) A pre-trained prior score ∇xt log pt(xt) in Equation (7) is often available from a diffusion model trained to generate samples from ppr , for example high-resolution natural images. The unknown denoising likelihood py|t(y | xt) can be written in marginal form 
+
+py|t(y | xt) = 
+
+Z
+
+> X
+
+py|0,t (y | x0, xt)
+
+| {z }
+
+> Markov property
+
+p0|t(x0 | xt)d x0 =
+
+Z
+
+> X
+
+py|0(y | x0) p0|t(x0 | xt)d x0, (8) 4but cannot be evaluated analytically in general as (i) the denoiser p0|t(x0 | xt) is not typically known, and (ii) the integral does not typically analytically simplify, even given knowledge of p0|t.Furthermore, estimating the latter integral in Equation (8) via Monte Carlo integration is prohibitively expensive in high dimensions because it requires drawing many samples from the denoiser, each of which requires running the reverse diffusion process from time t to time 0.Moment-matching methods [ 16 – 18 ] approximate the marginal integral by approximating the denoiser 
+
+p0|t(x0 | xt) in a way that (i) allows the integral to simplify analytically, (ii) approximates the denoiser well, and (iii) is accessible given only knowledge of the unconditional marginal score 
+
+∇xt log pt(xt) and noise schedule ¯α(t). The core differences between moment-matching methods is what specific denoiser approximation is chosen, and what assumptions are made about the forward model such that the approximated marginal analytically simplifies. The name “moment-matching” stems from the technique of picking a simple distribution (e.g., a single Dirac delta or a unimodal Gaussian) whose first and/or second moments are equal to the moments of the denoiser. Moment-matching techniques are tractable because the denoiser’s moments are computable using the (unconditional) marginal score and noise schedule via Tweedie’s formula [15] since the forward transition pt|0 is an exponential family, requiring no additional knowledge or assumptions on the prior or denoiser’s distribution class. 
+
+Proposition 1 (due to [ 18 ]) . Let m0|t(xt) and C0|t(xt) denote the mean and covariance of the denoiser p0|t(· | xt). Given knowledge of marginal score ∇xt log pt(xt) and noise schedule ¯α(t),the mean and covariance are computable as 
+
+m0|t(xt) := E[x0 | xt] = 1
+
+p¯α(t)
+
+
+
+xt +  1 − ¯α(t)∇xt log pt(xt)
+
+
+
+, (9) 
+
+C0|t(xt) := Cov( x0 | xt) = 1− ¯α(t)¯α(t) (In + (1 − ¯α(t)) ∇2 
+
+> xt
+
+log pt(xt)) = 1− ¯α(t)
+
+√¯α(t) Jm0|t (xt). (10) 
+
+Proof. See Appendix A.1 of Boys et al. [18]. 
+
+Remark 2. We adopt the m0|t and C0|t notation from Boys et al. [18] for ease of comparison. However, we emphasize the dependence of m0|t(xt) and C0|t(xt) on xt by including the state as an argument of the estimate. 
+
+Dirac approximations Chung et al. [16] (DPS) apply a first-moment denoiser approximation, replacing the true denoiser p0|t(x0 | xt) with a Dirac distribution at the denoiser mean m0|t(xt):
+
+Z
+
+> X
+
+py|0(y | x0) p0|t(x0 | xt)d x0 ≈
+
+Z
+
+> X
+
+py|0(y | x0) δ(x0 − m0|t(xt))d x0. (11) Although the integral in Equation (11) simplifies for all measurement operators and noise models (so long as py|0(y | · ) is measurable and finite), the resulting likelihood adopts the distribution class of the measurement noise. For example, when the measurement noise η ∼ N (0, Σy) is additive Gaussian, Equation (11) is a unimodal Gaussian 
+
+Z
+
+> X
+
+py|0(y | x0) δ(x0 − m0|t(xt))d x0 =
+
+Z
+
+> X
+
+N  y; A(x0), Σy
+
+ δ(x0 − m0|t(xt))d x0 (12) 
+
+= N  y; A(m0|t(xt)) , Σy
+
+ (13) whose score is computable via the chain rule and Equation (10): 
+
+∇xt log N  y; A(m0|t(xt)) , Σy
+
+ = −∇ xt y − A (m0|t(xt)) 2
+
+> Σ−1
+> y
+
+(14) 
+
+= Jm0|t (xt)⊤JA(m0|t(xt)) ⊤Σ−1 
+
+> y
+
+(y − A (m0|t(xt))) (15) 
+
+=
+
+√¯α(t)1− ¯α(t) C0|t(xt)JA(m0|t(xt)) ⊤Σ−1 
+
+> y
+
+(y − A (m0|t(xt))) .
+
+(16) 5Gaussian approximations Gaussian denoiser approximations [ 17 , 18 ] improve on the first-moment approximation by additionally allowing for denoiser covariance approximation: 
+
+Z
+
+> X
+
+py|0(y | x0)p0|t(x0 | xt)d x0 ≈
+
+Z
+
+> X
+
+py|0(y | x0) N  x0; m0|t(xt), Σt(xt)dx0, (17) where Σt(xt) denotes some user-chosen, time- and/or state-dependent covariance estimate. While Gaussian approximations can encode strictly more information than first-moment Dirac approxi-mations, their applicability is more limited. The resulting marginal integral in Equation (17) only simplifies when the measurement likelihood py|0 is Gaussian affine, i.e. when the measurement operator A(x0) = Ax 0 + b is affine and the measurement noise η ∼ N (0, Σy) is additive Gaussian: 
+
+Z
+
+> X
+
+py|0(y | x0) N  x0; m0|t(xt), Σt(xt)dx0 = N  y; Am 0|t(xt)+ b, Σy+AΣ t(xt)A⊤. (18) Similar to Equation (16), the resulting likelihood score can be computed via chain rule and Equa-tion (10) as: 
+
+∇xt log py|t(y | xt) = Jm0|t (xt)⊤JA(m0|t(xt)) ⊤(Σy + AΣ t(xt)A⊤)−1(y − Am 0|t − b).
+
+(19) 
+
+=
+
+√¯α(t)1− ¯α(t) C0|t(xt)A⊤(Σy + AΣ t(xt)A⊤)−1(y − Am 0|t − b). (20) Song et al. [17] inflate the covariance of the denoiser approximation by a time-dependent scalar factor 
+
+Σt(xt) = r2 
+
+> t
+
+In, which is chosen offline using known information about likely prior data x0 and the noise schedule ¯α(t) [see 17, Appendix A.3 for discussion on choosing rt]: 
+
+py|t(y | xt) = N  y; Am 0|t(xt) + b, Σy + r2 
+
+> t
+
+AA ⊤. (21) 
+
+Remark 3. Song et al. [17] extend their algorithm to nonlinear A when the measurement process is noiseless (i.e., η ≡ 0) by finding a generalized inverse A† to the measurement operator satisfying 
+
+(A ◦ A † ◦ A )( x) = A(x). However, because we consider noisy inverse problems, our analysis of Song et al. [17] is restricted to the case of affine measurement operators. 
+
+Boys et al. [18] select the Gaussian approximation closest to the denoiser in KL divergence, which is given by setting Σt equal to the denoiser’s true covariance C0|t [see 18 , Proposition 2], which can again be computed via Tweedie’s formula [see 18, Appendix A.1]: 
+
+py|t(y | xt) = N  y; Am 0|t(xt) + b, Σy + AC 0|t(xt)A⊤. (22) In the case where the prior ppr is Gaussian, the denoiser p0|t is truly Gaussian, and so Equation (22) is exact. If we compare Equation (22) to the approximation of Chung et al. [16] in Equation (13), we see that the latter approach is missing the additive, time-dependent AC 0|t(xt)A⊤ covariance factor, and instead adopts the measurement noise covariance Σy across all denoiser times (and hence noise levels). Again, while the Gaussian approximations encode strictly more information about the denoising process compared to the first-moment approximation of Chung et al. [16] (Equation (11)), their usage is restricted to measurement models (Equation (1)) with affine measurement operator A(x) = 
+
+Ax + b and additive Gaussian measurement noise η ∼ N (0, Σy) with isotropic covariance Σy =
+
+σ2
+
+> y
+
+Im. Although the Dirac approximation [ 16 ] can be used when the measurement noise η is non-Gaussian and/or data-dependent, we limit our analysis to the additive Gaussian noise case for sake of comparison. There may be additional impacts of the first-moment approximation when the noise is non-Gaussian and/or data-dependent, the analysis of which we leave for future work. 
+
+3.4 Practical diffusion posterior sampling 
+
+Although the Dirac and Gaussian denoiser approximations lead to closed form likelihoods and likeli-hood scores, additional approximations are often introduced in practice to either reduce computational cost or improve reconstruction quality. For example, Chung et al. [16] modify the score derived from their Dirac approximation 
+
+∇xt log N  y; A(m0|t(xt)) , Σy
+
+ = − 1
+
+σ2
+
+> y
+
+∇xt ∥y − A (m0|t(xt)) ∥22, (23) 6by replacing the constant, data-independent measurement noise prefactor 1/σ 2 
+
+> y
+
+with a data-dependent step size ρ(xt), most commonly a scalar ζ divided by the measurement residual [see 16 , page 6, footnote 5]: 
+
+∇xt log N  y; A(m0|t(xt)) , Σy
+
+ ≈ − ρ(xt)∇xt ∥y − A (m0|t(xt)) ∥22, (24) 
+
+= − ζ
+
+∥y − A (m0|t(xt)) ∥2
+
+∇xt ∥y − A (m0|t(xt)) ∥22. (25) This is equivalent to, in addition to the Dirac approximation of the denoiser, approximating the Gaussian measurement likelihood py|0(y | x0) = N (y; A(x0), σ 2
+
+> y
+
+Im) with a Laplace distribution 
+
+py|0(y | x0) ∝ exp  −2ζ∥y − A (x0)∥2
+
+. The authors state that the scalar ζ is a problem-dependent hyperparameter which must be tuned, with different ζ values producing different reconstructions [see 16 , Figure 8, Appendix C.2, and Appendix D.1]. Additional works have studied the effect that the choice of ζ has on reconstructed image quality [ 18 ]. The details of our ζ tuning can be found in Appendix E. Song et al. [17] primarily demonstrate their method for noiseless inverse problems. Among noisy inverse problems, Song et al. [17] solely consider measurement operators admitting matrix repre-sentations A ∈ Rm×n with orthonormal rows AA ⊤ = Im, and hence are precisely the class of measurement operators where the matrix inversion necessary for evaluating the likelihood score in Equation (20) reduces to scalar division: 
+
+(Σy + AΣ t(xt)A⊤)−1 = ( σ2
+
+> y
+
+Im + r2 
+
+> t
+
+AA ⊤
+
+| {z } 
+
+> Im
+
+)−1 = ( σ2 
+
+> y
+
++ r2 
+
+> t
+
+)−1. (26) Song et al. [17] do not describe the computational cost of their method for high-dimensional, noisy inverse problems where AA ⊤̸ = Im, or how this inverse is tractably computed or approximated. Boys et al. [18] in general aim to use the full AC 0|t(xt)A⊤ despite the prohibitive cost of (i) repeatedly assembling this term for each xt and (ii) inverting the full likelihood covariance to compute the likelihood score. One option presented by Boys et al. [18] employs the conjugate gradient (CG) method previously applied by Rozet et al. [35] for non-sparse A, for example accelerated MRI [ 18 , Appendix E.1]. Alternatively, the covariance can be heuristically approximated to decrease computational cost, namely by decreasing the necessary number of Jacobian–vector products per iteration. For example, the full denoiser covariance may be replaced by its diagonal C0|t(xt) ≈
+
+diag  C0|t(xt), in effect assuming that the dimensions of the denoiser p0|t are independent. For specific imaging problems A such as inpainting, the diagonal may be replaced by the Jacobian’s row sum [see 18, Section 3.4]. Despite their approximations, these moment-matching have been widely and effectively used across a wide range of inverse problems, both in imaging [ 12 ] and in physical sciences [ 36 , 37 ]. However, they have been shown to suffer unexpected failures in certain imaging problems [ 19 ], and the effects of their approximations remain understudied, such that these failures are difficult to predict. Chung et al. [16] provide an error bound on the approximated likelihood density , but (i) do not identify when this error bound is small, and (ii) do not bound the error in the likelihood score , which is what drives posterior sampling. Moreover, even given understanding of approximation error in the likelihood score, it is unclear how this error propagates to the posterior samples, which are iteratively influenced by both the likelihood score and the prior score. To understand the impact of these popular approximations on the posterior samples, we need a way to compute the exact posterior p0|y(x0 | y). To understand how and why particular errors manifest and arise, we also need a way to compute the intermediate-timestep posterior pt|y(xt | y). We show that both of these quantities are computable in the finite-sample regime, which we describe next. 
+
+## 4 Finite-sample diffusion posterior sampling 
+
+In the finite-sample regime , we assume that the prior distribution ppr is a discrete measure comprised of N i.i.d. samples, rather than a continuous distribution learned from these samples. Studying posterior sampling in this regime has two key advantages: (i) as we show next, it allows us to compute the posterior analytically at any timestep t, and (ii) it allows us to study the approximation errors induced by the likelihood approximations of [16–18]. 7Let ppr denote the prior distribution from which we are provided i.i.d. samples {x(i)}Ni=1 ∼ ppr ,whose empirical distribution we denote as 
+
+pN
+
+> pr
+
+(xt) := 1
+
+N
+
+> N
+
+X
+
+> i=1
+
+δ(xt − x(i)). (27) The utility of studying the empirical distribution is that it gives us a closed form approximation for the prior distribution pN 
+
+> pr
+
+≈ ppr whose positive-time marginals pNt (xt) are computable by linearity of the VP-SDE dynamics (Equation (3)). By Bayes’ rule, this allows us to analytically compute the denoiser pN
+
+> 0|t
+
+(x0 | xt), which is inaccessible in the density setting, as stated in Proposition 4. 
+
+Proposition 4 (finite-sample diffusion) . The marginal distribution pNt at time t ≥ 0 of the variance-preserving SDE defined in Equation (3) acting on empirical distribution pN 
+
+> pr
+
+is a Gaussian mixture 
+
+pNt (xt) = 1
+
+N
+
+> N
+
+X
+
+> i=1
+
+N
+
+
+
+xt; p¯α(t)x(i),  1 − ¯α(t)In
+
+
+
+.
+
+Furthermore, the denoising distribution pN 
+
+> 0|t
+
+is a discrete measure 
+
+pN
+
+> 0|t
+
+(x0 | xt) = 
+
+> N
+
+X
+
+> i=1
+
+wi(xt, t )δ(x0 −x(i)), wi(xt, t ) := 
+
+N
+
+
+
+xt; p¯α(t)x(i),  1 − ¯α(t)In
+
+PNj=1 N
+
+
+
+xt; p¯α(t)x(j),  1 − ¯α(t)In
+
+ .
+
+Proof. See Appendix C.1. First, recall that ¯α(t) ↘ 0 as t → ∞ , thus the mixture weights wi(x, t ) converge to uniform for all 
+
+x ∈ Rn for sufficiently large t. Second, observe that the denoiser pN
+
+> 0|t
+
+(x0 | xt) assigns probability zero to all x0 outside our dataset, and therefore does not generalize without additional modifications, such as by smoothing [ 23 ]. However, the discrete structure of the denoiser is what makes the finite-sample regime useful for analyzing posterior sampling. 
+
+4.1 Posterior sampling in the finite-sample regime 
+
+In the standard diffusion posterior sampling setting (Equation (8)), we were unable to evaluate the marginal 
+
+py|t(y | xt) = 
+
+Z
+
+> X
+
+N (y; A(x0), Σy) p0|t(x0 | xt)d x0 (28) due to lack of knowledge about the denoiser p0|t(x0 | xt), motivating either (i) first-order Dirac approximations [ 16 ] which fail to capture higher moments or (ii) Gaussian approximations [ 17 , 18 ]which only apply when A is affine. However, in the finite-sample regime the denoiser is a known discrete measure by Proposition 4, giving us a closed-form observation likelihood even when A is nonlinear, as described in Proposition 5. 
+
+Proposition 5 (finite-sample likelihood) . Given noised sample xt at time t produced by the variance-preserving SDE defined in Equation (3) acting on empirical distribution pN
+
+> pr
+
+, the likelihood pN 
+
+> y|t
+
+of observational data y is a Gaussian mixture 
+
+pN
+
+> y|t
+
+(y | xt) = 
+
+> N
+
+X
+
+> i=1
+
+wi(xt, t ) N
+
+
+
+y; A x(i), Σy
+
+
+
+.
+
+Proof. See Appendix C.2. To understand the action of this likelihood, observe that the weight function wi(x, t ) solely disincen-tivizes xt from denoising to training data whose expected position p¯α(t)x(i) at time t is far away, having nothing to do with the measurement y. In contrast, the Gaussian density N (y; A(x(i)), Σy)
+
+disincentivizes xt from denoising to training data which are unlikely to produce y under the forward process, having nothing to do with xt’s current position. Thus, the multiplicative interaction between 8the two terms incentivizes the diffusion model to denoise state xt towards training data points x(i)
+
+which both (i) have high probability of noising to xt under the (unconditional) forward process (Equation (3)) and (ii) produce measurements consistent with the provided measurement y.Finally, because the denoising likelihood pN 
+
+> y|t
+
+and marginal pNt are both accessible, and because the measurement likelihood py|0 can be tractability marginalized with respect to the prior pN 
+
+> pr
+
+, the posterior density can be tractably computed at arbitrary points. 
+
+Proposition 6. Given measurement y, the posterior pNt|y of noised samples xt at time t produced by the variance-preserving SDE defined in Equation (3) acting on empirical distribution pN 
+
+> pr
+
+is a Gaussian mixture 
+
+pNt|y(xt | y) = 
+
+> N
+
+X
+
+> i=1
+
+N (y; A(x(i)), Σy)
+
+PNj=1 N (y; A(x(j)), Σy) N (xt; p¯α(t)x(i), (1 − ¯α(t)) In). (29) 
+
+Proof. See Appendix C.3. Proposition 6 gives us the ability to analytically approximate the posterior score in the finite-sample regime. More importantly, it gives approximate posterior density access. One consequence of this is the ability to directly draw samples from the approximate posterior at arbitrary positive time t > 0
+
+without iterative (e.g. Euler-Maruyama) denoising, which is significantly cheaper numerically. We view the finite-sample objects as Monte Carlo approximations using the finitely-many i.i.d. samples from the unknown prior ppr , and thus expect to need on the order of N −1/2 samples for our finite-sample method to be accurate. However, the constant factor depends heavily on time t, so while we need a relatively small dataset to accurately evaluate the posterior at intermediate times, we require a significantly larger dataset of prior samples as t approaches zero, increasing both memory usage and computational cost. Furthermore, like the unconditional denoiser, the posterior devolves to a discrete measure at the original data at time zero, meaning that we must additionally modify our algorithm if our goal were to generalize outside of the original dataset. Rather than attempting to use the finite-sample regime to produce new posterior samples xt ∼ pt|y
+
+for small time t ≈ 0, where our method is relatively inaccurate even for large dataset size N , we use the finite-sample regime as a proxy for the ground truth posterior at intermediate timesteps, which allows us to explore the behavior of existing samplers on (i) priors where the denoiser is inaccessible and (ii) measurement models where the likelihood marginal does not simplify analytically. 
+
+## 5 Experiments 
+
+Each of our experiments is defined by selecting (i) a prior distribution ppr , (ii) a measurement operator 
+
+A, and (iii) a noise covariance matrix Σy. When the measurement operator A(x) = Ax is linear, we demonstrate the performance of four moment-matching methods against the finite-sample regime: 1. σ-DPS [16], defined in Equation (16) with unmodified prefactor σ−2 
+
+> y
+
+,2. ζ-DPS [16], defined in Equation (25) with modified prefactor ζ/ ∥y − A (m0|t(xt)) ∥2,3. ΠGDM [17], defined in Equation (21), and 4. TMPD [18], defined in Equation (22). When A is nonlinear, we only study the two DPS methods against the finite-sample regime. To assess the accuracy of our finite-sample posterior sampler, we begin with settings where the true posterior distribution pt|y(xt | y) is known analytically. We first consider two classes of test problems with multimodal priors: discrete priors with arbitrary measurement operators, and Gaussian mixture (or simply Gaussian) priors with affine measurement operators: 
+
+ppr = X
+
+> i
+
+piδx(i) , A(x) general , (Discrete) 
+
+ppr = N (mpr , Cpr ), A(x) = Ax + b, (Gaussian) 916 64 256 1024 4096                 
+
+> 10 −2
+> 10 −1
+> 10 0
+> TV error
+> t= 0 .05
+> 16 64 256 1024 4096
+> 10 −2
+> 10 −1
+> 10 0
+> t= 0 .3
+> 16 64 256 1024 4096
+> 10 −3
+> 10 −2
+> t= 0 .8
+> Discrete Gaussian GMM N−1/2
+> Dataset size N
+
+Figure 1: Each panel shows the median error of the finite-sample posterior sampler p(xt | y) in total variation (TV) for three example priors at a fixed diffusion time t. As expected, we see that error decreases in dataset size N at the expected Monte Carlo rate for each fixed t, and that more data are needed to accurately capture the posterior at smaller times. 
+
+ppr = X
+
+> i
+
+piN (mpr ,i , Cpr ,i ), A(x) = Ax + b. (GMM) For these three settings, we demonstrate in Appendices D.1.1, D.1.2, and D.1.3 respectively that the (unconditional) marginal score ∇xt log pt(xt), the likelihood and likelihood score, and the posterior and posterior score are all analytically available. Once the accuracy of our approach is established, we use the finite-sample regime as a ground truth surrogate for settings where the true likelihood and posterior are not tractably computable, specifically Gaussian and GMM priors with nonlinear measurement operator A(x).For each experiment, we construct heatmaps (such as those in Figure 2) for the ground truth by evaluating the analytically known density. For the finite-sample regime (FSR), we similarly evaluate the finite-sample posterior pNt|y (Proposition 6) on the same grid, where the dataset size N is chosen empirically. For the four target baselines, we draw K samples from the unit Gaussian at time 1
+
+and denoise using the analytically known unconditional marginal score for both the prior score contribution and for the approximated likelihood score via Tweedie’s formula. For ζ-DPS, the hyperparameter ζ is hand-chosen via grid search, as shown in Appendix E. First, we observe that the finite-sample posterior converges to the true posterior at the expected Monte Carlo rate for each fixed t, as shown in Figure 1. Importantly, we see that the number of samples needed for accurate posterior access increases as we sample closer to time zero. Second, we qualitatively compare the true and finite-sample posteriors at all intermediate timesteps in Figure 2, and observe that the two are characteristically identical. In each of the three examples in Figure 1 and Figure 2, the prior distribution is multimodal, but the linear measurement operator and small noise scale results in an informative-enough measurement that the posterior is unimodal. However, we empirically observe that both second-moment approximations [17 , 18 ] sample from multimodal posteriors by producing denoised points which are probable under the prior but which are inconsistent with the provided measurement. While in the context of learned scores one might attribute this behavior to prior score mismatch, we observe this behavior when using the true unconditional marginal score. We attribute these tail samples to an overestimation of the posterior covariance, which drives the tail samples xt far from the image of prior data p¯α(t)x0
+
+which are consistent with the measurement (i.e. the corresponding weight wi(xt, t ) is small). In this region of the reverse process, the prior score dominates sampling, effectively behaving like unconditional generation. Even when the sample recovers, as in the first ΠGDM example, we see that the resulting posterior has an overestimated tail, corresponding to significant oversampling of unlikely events. We observe that the Dirac approximation explores regions of low prior and posterior probability at intermediate timesteps, which may prove problematic in cases where the prior score is learned by score matching and therefore uncontrolled directly in the low probability region. Finally, we demonstrate that the performance of the finite-sample regime is accurate at intermediate times for reasonable N . Figure 3 shows that total variation error of the three baselines at all intermediate timesteps of the (discretized) reverse process is significantly greater than that of the 10 True posterior FSR (ours) σ-DPS [16] ζ-DPS [16] ΠGDM [17] TMPD [18]                   
+
+> 00.5100.5100.5100.5100.5100.51
+> Time t
+> Position  x
+
+Figure 2: The reverse processes of the three moment-matching methods are shown against the ground truth and finite-sample posteriors on three test problems. We observe that the ground truth and finite-sample posteriors are qualitatively identical for sufficiently large t. The DPS Dirac approximation captures means accurately for small time, but has incorrect mean at intermediate time steps and incorrect variance for all time. Finally, the Gaussian approximations sample from prior modes which are inconsistent with the provided measurement.             
+
+> 0100 200 300
+> 10 −5
+> 10 −3
+> 10 −1
+> TV error
+> 2 Mode Mixture
+> 0100 200 300
+> 10 −8
+> 10 −4
+> 10 0
+> Balanced Discrete
+> 0100 200 300
+> 10 −19
+> 10 −9
+> 10 1
+> Unbalanced Discrete
+> FSR (ours) σ-DPS [16] ΠGDM [17] TMPD [18]
+> Forward timestep
+
+Figure 3: The total variation error of the finite-sample regime (FSR, N = 4096 ) and three moment-matching approaches are computed for the three examples shown in Figure 2. The FSR’s accuracy deteriorates for fixed N as t ↘ 0, but remains accurate for moderately large t.finite-sample regime, but that FSR’s quality degrades near time zero when the true prior admits a density (as the total variation distance between a discrete measure and a density is always 1). Figure 4 shows experiments with nonlinear forward models, for which we can only compare our finite-sample approach (FSR) against the Dirac approximation of Chung et al. [16] . The first two rows involve discrete prior distributions for which the true posterior can be computed analytically; the remaining rows involve Gaussian or Gaussian-mixture priors for which the true posterior is intractable but our finite-sample approach provides an accurate proxy for the ground truth posterior across positive timesteps. We observe that σ-DPS regularly samples from prior modes that are not present in the true posterior (rows 2, 5, and 6) and/or fails to sample from modes present in the true posterior (rows 1, 3, and 4). Even in cases where σ-DPS captures the true modes of the posterior, it often weights them incorrectly. Tuning the hyperparameter ζ in ζ-DPS for each setting can improve the relative weighting of posterior modes (row 4) and reduce hallucination of likelihood-consistent modes that are not consistent with 11 True posterior FSR (ours) σ-DPS [16] ζ-DPS [16]             
+
+> Intractable
+> Intractable
+> Intractable
+> Intractable
+> 00.5100.5100.5100.51
+> Time t
+> Position  x
+
+Figure 4: For nonlinear measurement operators, the Dirac approximation generally demonstrates suboptimal posterior sampling, often failing to capture posterior modes and/or sampling from prior modes inconsistent with the provided measurement. For example, the true posterior in the second row collapses to a Dirac, but both DPS methods sample from prior models not present in the posterior, and underweight the lone posterior atom. Finally, we observe cases where minority modes are oversampled, such as with the middle mode in the first line. However, we see that proper tuning of ζ
+
+can result in improved performance over the σ-DPS baseline, such as by (partially) correcting the weighting between modes (first and fourth rows), by promoting sampling from modes which σ-DPS misses entirely (third row), or by discouraging sampling from modes which are consistent with the provided measurement but inconsitent with the prior (last two rows). the prior (rows 5 and 6). However, tuning ζ cannot always avoid hallucinating prior-consistent modes that are not consistent with the measurement (row 2) nor avoid hallucinating measurement-consistent modes that are not plausible under the prior (row 4). In general, by grid search over ζ (see Appendix E) in our finite-sample lens we replicate the known behavior that higher values of ζ increase the weight of the measurement likelihood relative to the prior while smaller values of ζ increase the weight of the prior relative to the likelihood. Our finite-sample lens also reveals that in some cases mode collapse can arise from selecting ζ to be too large, in some cases even sampling from a single mode that is hallucinatory rather than consistent with the true posterior. 12 6 Discussion 
+
+We introduce a finite-sample lens on posterior diffusion sampling, providing approximate access to the posterior distribution at all intermediate timesteps, for any prior and measurement model, and use this perspective to study how errors committed by existing methods arise during sampling. Although the common belief is that these moment-matching methods struggle with nonlinear measure-ment operators and/or multimodal posteriors, we show failure in cases where both the measurement operator is linear and the posterior is unimodal. We observe that the existing second-moment Gaussian approximations tend to overinflate the posterior covariance when the prior is multimodal, leading to hallucinations even when the true prior score is used. These inconsistent samples pose significant risk in real-world applications such as MRI: a model may reconstruct a tumor-free image from Fourier measurements of a tumor, but this failure may be difficult for a human to detect because the Fourier measurements are not (easily) visually interpretable. Conversely, in the nonlinear measurement operator case we observe that the first-moment Dirac approximation can entirely miss modes in the posterior, or get the relative weighting entirely wrong between posterior modes (Figure 4). Even when the posterior samples at time zero are of high quality (e.g. in contexts where existing benchmarking studies would deem a method to be accurate), the distribution at intermediate timesteps is often inaccurate. When intermediate distributions explore regions to which the (unconditional) marginal pt(xt) assigns low probability, the score matching objective (trained in expectation with respect to the marginal) is unlikely to have explicitly controlled the learned network in this re-gion, leading to unpredictable behavior. Furthermore, this impacts downstream tasks which utilize intermediate states, such as out-of-distribution detection [38]. A limitation of our method is that, without explicit computation of constant factors (as a function of 
+
+¯α(t), t, the prior, and N ), it is difficult to reason about how large of a dataset is required to capture the posterior pointwise at time t to sufficient accuracy. Studying the impact of prior learning on sample quality is the most obvious extension of our work, including cases where (i) the prior under- or over-emphasizes minority modes (due to sensitivity of under- or over-representation of rare events in the training set), and (ii) the posterior sampler enters regions of low unconditional marginal probability. We conjecture that issues arising from particles traveling away from measurement-consistent regions and into prior-consistent regions of the reverse process will amplify when the prior is learned. 
+
+## Acknowledgments and Disclosure of Funding 
+
+BAB is supported by the National Science Foundation Graduate Research Fellowship Program under Grant No. DGE-2039655. Any opinions, findings, and conclusions or recommendations expressed in this material are those of the author(s) and do not necessarily reflect the views of the National Science Foundation. BAB would like to knowledge Sebastián Gutiérrez Hernández for helpful discussions. 
+
+## References              
+
+> [1] Ben Adcock and Anders C Hansen. Compressive Imaging: Structure, Sampling, Learning . Cambridge University Press, 2021. [2] T.J. Sullivan. Introduction to Uncertainty Quantification , volume 63 of Texts in Applied Mathematics .Springer International Publishing, Cham, 2015. ISBN 978-3-319-23394-9 978-3-319-23395-6. doi: 10.1007/978-3-319-23395-6. [3] Roger Ghanem, David Higdon, and Houman Owhadi, editors. Handbook of Uncertainty Quantification .Springer, Cham, 2017. ISBN 978-3-319-12384-4. doi: 10.1007/978-3-319-12385-1. [4] Jingsong Lin, Amirkoushyar Ziabari, Singanallur V Venkatakrishnan, Obaidullah Rahman, Gregery T Buzzard, and Charles A Bouman. Tomographic sparse view selection using the view covariance loss. IEEE Transactions on Pattern Analysis and Machine Intelligence , 2025. [5] Noam Elata, Tomer Michaeli, and Michael Elad. PSC: Posterior sampling-based compression. Transactions on Machine Learning Research , 2025.
+
+13 [6] Lily Goli, Cody Reading, Silvia Sellán, Alec Jacobson, and Andrea Tagliasacchi. Bayes’ Rays: Uncertainty quantification in neural radiance fields. IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR) , 2024. [7] R. Tyrrell Rockafellar and Stanislav Uryasev. Optimization of conditional value-at-risk. Journal of Risk , 2 (3):21–41, 2000. doi: 10.21314/JOR.2000.038. [8] Anirudha Majumdar and Marco Pavone. How should a robot assess risk? Towards an axiomatic theory of risk in robotics. In International Symposium on Robotics Research (ISRR) , Puerto Varas, Chile, 2017. [9] Jascha Sohl-Dickstein, Eric Weiss, Niru Maheswaranathan, and Surya Ganguli. Deep unsupervised learning using nonequilibrium thermodynamics. In Francis Bach and David Blei, editors, Proceedings of the 32nd International Conference on Machine Learning , volume 37 of Proceedings of Machine Learning Research ,pages 2256–2265, Lille, France, July 2015. PMLR. [10] Jonathan Ho, Ajay Jain, and Pieter Abbeel. Denoising diffusion probabilistic models. In H. Larochelle, M. Ranzato, R. Hadsell, M.F. Balcan, and H. Lin, editors, Advances in Neural Information Processing Systems , volume 33, pages 6840–6851. Curran Associates, Inc., 2020. [11] Yang Song, Jascha Sohl-Dickstein, Diederik P. Kingma, Abhishek Kumar, Stefano Ermon, and Ben Poole. Score-Based Generative Modeling through Stochastic Differential Equations. In International Conference on Learning Representations , October 2020. [12] Reinhard Heckel. Deep Learning for Computational Imaging . Oxford University Press, 2025. [13] Hongkai Zheng, Wenda Chu, Bingliang Zhang, Zihui Wu, Austin Wang, Berthy Feng, Caifeng Zou, Yu Sun, Nikola Borislavov Kovachki, Zachary E Ross, Katherine Bouman, and Yisong Yue. InverseBench: Benchmarking plug-and-play diffusion priors for inverse problems in physical sciences. In The Thirteenth International Conference on Learning Representations , 2025. [14] Agnimitra Dasgupta, Alexsander Marciano Da Cunha, Ali Fardisi, Mehrnegar Aminy, Brianna Binder, Bryan Shaddy, and Assad A. Oberai. Unifying and extending diffusion models through PDEs for solving inverse problems. Computer Methods in Applied Mechanics and Engineering , 448:118431, January 2026. doi: 10.1016/j.cma.2025.118431. [15] Herbert Robbins. An empirical Bayes approach to statistics. In Proceedings of the Third Berkeley Symposium on Mathematical Statistics and Probability, 1954–1955, Volume I , pages 157–163, Berkeley and Los Angeles, 1956. University of California Press. [16] Hyungjin Chung, Jeongsol Kim, Michael Thompson Mccann, Marc Louis Klasky, and Jong Chul Ye. Diffusion posterior sampling for general noisy inverse problems. In The Eleventh International Conference on Learning Representations , 2023. [17] Jiaming Song, Arash Vahdat, Morteza Mardani, and Jan Kautz. Pseudoinverse-guided diffusion models for inverse problems. In International Conference on Learning Representations , 2023. [18] Benjamin Boys, Mark Girolami, Jakiw Pidstrigach, Sebastian Reich, Alan Mosca, and Omer Deniz Akyildiz. Tweedie Moment Projected Diffusions for Inverse Problems. Transactions on Machine Learning Research , July 2024. [19] Xingyu Xu and Yuejie Chi. Provably Robust Score-Based Diffusion Posterior Sampling for Plug-and-Play Image Reconstruction. In The Thirty-eighth Annual Conference on Neural Information Processing Systems ,November 2024. [20] Evan Scope Crafts and Umberto Villa. Benchmarking Diffusion Annealing-Based Bayesian Inverse Problem Solvers. IEEE Open Journal of Signal Processing , 6:975–991, 2025. doi: 10.1109/OJSP.2025. 3597867. [21] Bingliang Zhang, Wenda Chu, Julius Berner, Chenlin Meng, Anima Anandkumar, and Yang Song. Improving diffusion inverse problem solving with decoupled noise annealing. In Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR) , pages 20895–20905, June 2025. [22] Tongda Xu, Xiyan Cai, Xinjie Zhang, Xingtong Ge, Dailan He, Ming Sun, Jingjing Liu, Ya-Qin Zhang, Jian Li, and Yan Wang. Rethinking diffusion posterior sampling: From conditional score estimator to maximizing a posterior. In The Thirteenth International Conference on Learning Representations , 2025. [23] Christopher Scarvelis, Haitz Sáez de Ocáriz Borde, and Justin Solomon. Closed-form diffusion models. 
+
+Transactions on Machine Learning Research , 2025. 
+
+14 [24] Zezhong Zhang, Caroline Tatsuoka, Dongbin Xiu, and Guannan Zhang. Exact Conditional Score-Guided Generative Modeling for Amortized Inference in Uncertainty Quantification, June 2025. [25] Zezhong Zhang, Feng Bao, and Guannan Zhang. IEnSF: Iterative Ensemble Score Filter for Reducing Error in Posterior Score Estimation in Nonlinear Data Assimilation, October 2025. [26] Nikiforos Mimikos-Stamatopoulos, Benjamin Zhang, and Markos Katsoulakis. Score-based generative models are provably robust: An uncertainty quantification perspective. In The Thirty-Eighth Annual Conference on Neural Information Processing Systems , 2024. [27] Dwight G. Nishimura. Principles of magnetic resonance imaging . Stanford University, 2010. [28] Xiangyang Tang. Spectral Multi-detector Computed Tomography (sMDCT): Data Acquisition, Image Formation, Quality Assessment and Contrast Enhancement . CRC Press, 2023. [29] Sara Fridovich-Keil, Fabrizio Valdivia, Gordon Wetzstein, Benjamin Recht, and Mahdi Soltanolkotabi. Gradient descent provably solves nonlinear tomographic reconstruction. IEEE Transactions on Information Theory , 2026. [30] G. E. Uhlenbeck and L. S. Ornstein. On the Theory of the Brownian Motion. Physical Review , 36(5): 823–841, September 1930. doi: 10.1103/PhysRev.36.823. [31] Brian D. O. Anderson. Reverse-time diffusion equation models. Stochastic Processes and their Applications ,12(3):313–326, May 1982. doi: 10.1016/0304-4149(82)90051-5. [32] Danilo Rezende and Shakir Mohamed. Variational inference with normalizing flows. In Francis Bach and David Blei, editors, Proceedings of the 32nd International Conference on Machine Learning , volume 37 of 
+
+Proceedings of Machine Learning Research , pages 1530–1538, Lille, France, July 2015. PMLR. [33] Aapo Hyvärinen. Estimation of non-normalized statistical models by score matching. Journal of Machine Learning Research , 6(24):695–709, 2005. [34] Pascal Vincent. A connection between score matching and denoising autoencoders. Neural Computation ,23(7):1661–1674, July 2011. doi: 10.1162/NECO_a_00142. [35] François Rozet, Gérôme Andry, Francois Lanusse, and Gilles Louppe. Learning diffusion priors from observations by expectation maximization. In The Thirty-Eighth Annual Conference on Neural Information Processing Systems , 2024. [36] Jiachen Yao, Abbas Mammadov, Julius Berner, Gavin Kerrigan, Jong Chul Ye, Kamyar Azizzadenesheli, and Anima Anandkumar. Guided diffusion sampling on function spaces with applications to PDEs. In The Thirty-Ninth Annual Conference on Neural Information Processing Systems , 2026. [37] Sifan Wang, Zehao Dou, Siming Shan, Tong-Rui Liu, and Lu Lu. FunDiff: Diffusion models over function spaces for physics-informed generative modeling. Nature Communications , April 2026. doi: 10.1038/s41467-026-72292-0. [38] Alireza Kheirandish, Jihoon Hong, and Sara Fridovich-Keil. KLIP: Localized distribution shift detection via KL-divergence with diffusion priors in inverse problems. In IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR) , 2026. [39] Georgios Batzolis, Jan Stanczuk, Carola-Bibiane Schönlieb, and Christian Etmann. Conditional Image Generation with Score-Based Diffusion Models, November 2021. [40] Prafulla Dhariwal and Alexander Quinn Nichol. Diffusion models beat GANs on image synthesis. In A. Beygelzimer, Y. Dauphin, P. Liang, and J. Wortman Vaughan, editors, Advances in Neural Information Processing Systems , 2021. [41] Tero Karras, Miika Aittala, Samuli Laine, and Timo Aila. Elucidating the design space of diffusion-based generative models. In Proceedings of the 36th International Conference on Neural Information Processing Systems , Nips ’22, Red Hook, NY, USA, 2022. Curran Associates Inc. ISBN 978-1-7138-7108-8. [42] Alexander Denker, Francisco Vargas, Shreyas Padhy, Kieran Didi, Simon V Mathis, Riccardo Barbano, Vincent Dutordoir, Emile Mathieu, Urszula Julia Komorowska, and Pietro Lio. DEFT: Efficient fine-tuning of diffusion models by learning the generalised $h$-transform. In The Thirty-Eighth Annual Conference on Neural Information Processing Systems , 2024. [43] Zihui Wu, Yu Sun, Yifan Chen, Bingliang Zhang, Yisong Yue, and Katherine Bouman. Principled probabilistic imaging using diffusion models as plug-and-play priors. In The Thirty-Eighth Annual Conference on Neural Information Processing Systems , 2024. 
+
+15 [44] Michael Albergo, Nicholas M. Boffi, and Eric Vanden-Eijnden. Stochastic interpolants: A unifying framework for flows and diffusions. Journal of Machine Learning Research , 26(209):1–80, 2025. [45] Michael S. Albergo, Mark Goldstein, Nicholas M. Boffi, Rajesh Ranganath, and Eric Vanden-Eijnden. Stochastic interpolants with data-dependent couplings, September 2024. [46] Yaron Lipman, Ricky T. Q. Chen, Heli Ben-Hamu, Maximilian Nickel, and Matthew Le. Flow matching for generative modeling. In The Eleventh International Conference on Learning Representations , 2023. [47] Jeongsol Kim, Bryan Sangwoo Kim, and Jong Chul Ye. FlowDPS : Flow-driven posterior sampling for inverse problems. In Proceedings of the IEEE/CVF International Conference on Computer Vision (ICCV) ,pages 12328–12337, October 2025. [48] Zezhong Zhang, Caroline Tatsuoka, Dongbin Xiu, and Guannan Zhang. Exact Conditional Score-Guided Generative Modeling for Amortized Inference in Uncertainty Quantification, June 2025. [49] Pengjun Wang, Zezhong Zhang, Minglei Yang, Feng Bao, Yanzhao Cao, and Guannan Zhang. Error estimates of a training-free diffusion model for high-dimensional sampling, January 2026. 
+
+16 Contents 
+
+A Related work 17 
+
+A.1 Generative posterior samplers . . . . . . . . . . . . . . . . . . . . . . . . . . . . 17 A.2 Benchmarking vs. understanding . . . . . . . . . . . . . . . . . . . . . . . . . . . 17 A.3 Exact diffusion . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 18 
+
+B Useful lemmas 18 
+
+B.1 Linear updates of discrete measures . . . . . . . . . . . . . . . . . . . . . . . . . 18 B.2 Linear updates of Gaussians . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 19 B.3 Linear updates of Gaussian Mixtures . . . . . . . . . . . . . . . . . . . . . . . . . 21 B.4 Gradients and scores . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 23 
+
+C Finite sample regime proofs 26 
+
+C.1 Proof of Proposition 4 . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 26 C.2 Proof of Proposition 5 . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 26 C.3 Proof of Proposition 6 . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 26 
+
+D Experimental details 27 
+
+D.1 Target objects . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 27 D.2 Experimental framework . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 31 D.3 Per-prior posterior reconstructions . . . . . . . . . . . . . . . . . . . . . . . . . . 32 
+
+E ζ-DPS tuning 46 
+
+## A Related work 
+
+A.1 Generative posterior samplers 
+
+The goal of our study is to analyze likelihood (and likelihood score) approximations which assume access to a pretrained prior score, but no access to the forward model at training time. Because the forward model is assumed to be inaccessible offline, methods which employ additional learning of the likelihood or posterior scores after the forward model has been fixed [ 5, 39 –42 ]are beyond our scope. We additionally do not consider variable splitting methods [ 19 , 43 ], which often perform exact likelihood sampling (e.g., via Langevin dynamics or MALA). However, because moment-matching approximations can be (and are) used as initializers for more expensive and accurate methods [ 19 ], studies of these moment-matching methods inform us of the diversity and accuracy of initializations that downstream algorithms can expect to build on. There are alternative, flow-driven generative solutions to posterior sampling, such as through use of stochastic interpolants [ 44 , 45 ] and flow-matching [ 46 , 47 ]. Due to the significant differences in how each class of method performs sampling, we do not seek a general framework categorizing when, how, and why all generative posterior samplers fail. Although the zero-shot framework has been investigated in the flow matching context [47], we limit our study to diffusion models. 
+
+A.2 Benchmarking vs. understanding 
+
+We emphasize the difference between benchmarking studies and our goal of understanding . Bench-marking studies typically draw posterior samples p(x0 | y) using a variety of algorithms, compare the quality of either individual samples (e.g. MAP quality) or the quality of the ensemble (e.g. posterior 17 coverage), and identify which algorithms struggle in which contexts. However, benchmarking the end distribution alone is insufficient for concretely explaining why the observed behavior arises. For example, it is known [ 13 , 21 ] that moment-matching methods, in particular the first-moment Dirac method [ 16 ], struggle when the true posterior is multimodal, such as when the posterior support is non-convex [ 13 ]. However, it is not clear (i) when in sampling this issue arises (e.g., at what diffusion time the moment-matching methods diverge from the desired behavior), or (ii) how this can be corrected. Zheng et al. [13] note that this multimodal behavior is not extensively discussed in the literature. Building on observational knowledge from prior work in benchmarking that identifies which algo-rithms struggle in which contexts, our goal is to study how and why this error arises in specific examples, and draw general conclusions that inform practitioners on which algorithms can be used in which settings beyond existing benchmarks. 
+
+A.3 Exact diffusion 
+
+The finite-sample regime for diffusion models has been previously studied in the context of uncon-ditional sampling. For example, Scarvelis et al. [23] employ the finite-sample regime to develop a sampling method, and describe how to smooth the finite-sample method to promote generalization. Mimikos-Stamatopoulos et al. [26] study various sources of error in diffusion sampling, including error arising from operating with finite samples. Zhang et al. [48] employ the finite-sample regime to perform posterior sampling by assuming the prior is a Gaussian mixture with one component per training datum, but only study the case of linear forward models. Wang et al. [49] analyze the error of the resulting method. Zhang et al. [25] employ the Gaussian mixture diffusion model for the analysis step in data assimilation. Although the method supports nonlinear measurement operators, the measurement operator is linearized in practice. Most importantly, all three works use the finite-sample perspective to develop posterior samplers, not to study existing samplers (as is our goal). 
+
+## B Useful lemmas 
+
+For the remainder of this section, we denote vectors x ∈ X ⊆ Rn and y ∈ Y ⊆ Rm, matrix 
+
+A ∈ Rm×n, (possibly nonlinear) map A : X → Y , and symmetric positive definite matrices 
+
+Cpr ∈ Rn×n and Σy ∈ Rm×m.
+
+B.1 Linear updates of discrete measures Lemma 7 (Gaussian-discrete marginal) . Given Gaussian likelihood and discrete measure prior 
+
+p(y | x) = N (y; Ax , Σy), μ =
+
+> N
+
+X
+
+> i=1
+
+wiδx(i) ,
+
+with weights wi ≥ 0 and P wi = 1 , the marginal distribution p(y) is a Gaussian mixture 
+
+p(y) = 
+
+> N
+
+X
+
+> i=1
+
+wi N (y; Ax (i), Σy).
+
+Proof. First, write the marginal of interest p(y) in integral form. 
+
+p(y) = 
+
+Z
+
+> X
+
+p(y | x)μ(d x), (30) 
+
+=
+
+Z
+
+> X
+
+N (y; Ax , Σy)μ(d x). (31) Because μ is a discrete measure, we have for any measurable g : X → R and measurable set A
+
+Z
+
+> A
+
+g(x)μ(d x) = 
+
+> N
+
+X
+
+> i=1
+
+wig(x(i))χA(x(i)). (32) 18 Applying Equation (32) to Equation (31) with A = Rn gives the desired result. 
+
+p(y) = 
+
+> N
+
+X
+
+> i=1
+
+wi N (y; Ax (i), Σy). (33) 
+
+Lemma 8 (Gaussian-discrete posterior) . Given Gaussian likelihood and discrete measure prior 
+
+p(y | x) = N (y; Ax , Σy), μ =
+
+> N
+
+X
+
+> i=1
+
+wiδx(i)
+
+where wi ≥ 0 and P wi = 1 , the posterior measure μy is a discrete measure with distribution and weights 
+
+μy =
+
+> N
+
+X
+
+> i=1
+
+˜wi(y)δx(i) , ˜wi(y) := wi N (y; Ax (i), Σy)
+
+PNj=1 wj N (y; Ax (j), Σy) .
+
+Proof. By Bayes’ rule, the definition of p(y | x) by proposition, and p(y) by Lemma 7, 
+
+dμ y
+
+dμ (x) = p(y | x)
+
+p(y) = N (y; Ax , Σy)
+
+p(y) = N (y; Ax , Σy)
+
+PNj=1 wj N (y; Ax (j), Σy) . (34) Applying Radon-Nikodym theorem for measurable set A, substituting Equation (34) and applying Equation (32), the probability assigned to A by μy is given by 
+
+μy (A) = 
+
+Z
+
+> A
+
+dμ y
+
+dμ (x)μ(d x), (35) 
+
+=
+
+Z
+
+> A
+
+N (y; Ax , Σy)
+
+PNj=1 wj N (y; Ax (j), Σy) μ(d x), (36) 
+
+=
+
+> N
+
+X
+
+> i=1
+
+wiN (y; Ax (i), Σy)
+
+PNj=1 wj N (y; Ax (j), Σy) χA(x(i)). (37) Thus, as measures the posterior is a reweighting of the prior 
+
+μy =
+
+> N
+
+X
+
+> i=1
+
+˜wi(y)δx(i) , ˜wi(y) := wi N (y; Ax (i), Σy)
+
+PNj=1 wj N (y; Ax (j), Σy) , (38) whose weights are nonnegative and sum to 1, 
+
+> N
+
+X
+
+> i=1
+
+˜wi(y) = 
+
+PNi=1 wi N (y; Ax (i), Σy)
+
+PNj=1 wj N (y; Ax (j), Σy) = 1 . (39) 
+
+B.2 Linear updates of Gaussians Lemma 9 (Gaussian-Gaussian marginal) . Given Gaussian likelihood and Gaussian prior 
+
+p(y | x) = N (y; Ax , Σy), p(x) = N (x; mpr , Cpr )
+
+the marginal distribution p(y) is a Gaussian with distribution 
+
+p(y) = N (y; Am pr , Σy + AC pr A⊤).
+
+Proof. By reparametrization, we can express the likelihood p(y | x) as 
+
+y = Ax + η, η ∼ N (0, Σy), (40) 19 where η is drawn independently of x. Observe that Ax is a linear transformation of a Gaussian, which is a Gaussian with distribution 
+
+Ax ∼ N (Am pr , AC pr A⊤). (41) Thus, Ax + η is a sum of independent Gaussians, which hence has distribution 
+
+y = Ax + η ∼ N (y; Am pr , Σy + AC pr A⊤). (42) 
+
+Lemma 10 (Gaussian-Gaussian conjugacy) . Given Gaussian likelihood and Gaussian prior 
+
+p(y | x) = N (y; Ax , Σy), p(x) = N (x; mpr , Cpr ),
+
+the posterior distribution p(x | y) is also Gaussian N (x; mpost , Cpost ) with covariance and mean 
+
+Cpost := ( A⊤Σ−1 
+
+> y
+
+A + C−1pr )−1,
+
+mpost := Cpost (A⊤Σ−1 
+
+> y
+
+y + C−1pr mpr ).
+
+Proof. We use const. to denote a collection of terms which are constants or are constants with respect to the input x, such as normalization constants that are functions of y. By Bayes’ rule, the posterior is given by 
+
+p(x | y) = p(y | x)p(x)
+
+p(y) . (43) Taking logarithms, 
+
+log p(x | y) = log p(y | x) + log p(x) − log p(y), (44) we can expand the log-likelihood and log-prior as 
+
+log p(y | x) = − 12 (y − Ax )⊤Σ−1 
+
+> y
+
+(y − Ax ) − 12 log((2 π)m det( Σy)) , (45) 
+
+log p(x) = − 12 (x − mpr )⊤C−1pr (x − mpr ) − 12 log((2 π)n det( Cpr )) . (46) Observe that log p(y) and the log-determinant terms in Equation (45) and Equation (46) are constant w.r.t. x, thus we can re-express the log-posterior as 
+
+−2 log p(x | y) = ( y − Ax )⊤Σ−1 
+
+> y
+
+(y − Ax ) + ( x − mpr )⊤C−1pr (x − mpr ) + const. (47) Expanding the quadratic forms, combining like terms, and collapsing terms constant with respect to 
+
+x,
+
+−2 log p(x | y) = ( y − Ax )⊤Σ−1 
+
+> y
+
+(y − Ax ) + ( x − mpr )⊤C−1pr (x − mpr ) + const. , (48) 
+
+= y⊤Σ−1 
+
+> y
+
+y
+
+| {z } 
+
+> const. w.r.t. x
+
+−2x⊤A⊤Σ−1 
+
+> y
+
+y + x⊤A⊤Σ−1 
+
+> y
+
+Ax (49) 
+
++ x⊤C−1pr x − 2x⊤C−1pr mpr + m⊤
+
+> pr
+
+C−1pr mpr 
+
+| {z } 
+
+> const. w.r.t. x
+
++ const. 
+
+= −2x⊤A⊤Σ−1 
+
+> y
+
+y + x⊤A⊤Σ−1 
+
+> y
+
+Ax + x⊤C−1pr x − 2x⊤C−1pr mpr + const. (50) 
+
+= x⊤(A⊤Σ−1 
+
+> y
+
+A + C−1pr )x − 2x⊤(A⊤Σ−1 
+
+> y
+
+y + C−1pr mpr ) + const. (51) 
+
+= x⊤C−1post x − 2x⊤b + const. (52) where 
+
+Cpost := ( A⊤Σ−1 
+
+> y
+
+A + C−1pr )−1, b := A⊤Σ−1 
+
+> y
+
+y + C−1pr mpr . (53) For vectors u, v and symmetric matrix M, we have the quadratic form identity, 
+
+(u − v)⊤M(u − v) = u⊤Mu − 2u⊤Mv + v⊤Mv , (54) where the third term is notably constant with respect to u. Thus, if we define mpost such that 
+
+C−1post mpost = b =⇒ mpost :=  A⊤Σ−1 
+
+> y
+
+A + C−1pr 
+
+−1 (A⊤Σ−1 
+
+> y
+
+y + C−1pr mpr ), (55) 20 which is again constant w.r.t. x, Equation (52) can be re-expressed by completing the square as 
+
+−2 log p(x | y) = x⊤C−1post x − 2x⊤b + const. , (56) 
+
+= x⊤C−1post x − 2x⊤C−1post mpost + const. , (57) 
+
+= x⊤C−1post x − 2x⊤C−1post mpost + m⊤
+
+> post
+
+C−1post mpost (58) 
+
+− m⊤
+
+> post
+
+C−1post mpost + const. ,
+
+= ( x − mpost )⊤C−1post (x − mpost ) − m⊤
+
+> post
+
+C−1post mpost + const. , (59) 
+
+= ( x − mpost )⊤C−1post (x − mpost ) + const. (60) 
+
+=⇒ log p(x | y) = − 12 (x − mpost )⊤C−1post (x − mpost ) + const. (61) Observe that the right-hand side is the logarithm of a Gaussian density (with suitable normalization constant), thus the posterior is a Gaussian with mean and covariance 
+
+mpost :=  A⊤Σ−1 
+
+> y
+
+A + C−1pr 
+
+−1
+
+| {z }
+
+> Cpost
+
+(A⊤Σ−1 
+
+> y
+
+y+C−1pr mpr ), Cpost = ( A⊤Σ−1 
+
+> y
+
+A+C−1pr )−1. (62) 
+
+B.3 Linear updates of Gaussian Mixtures Lemma 11 (Gaussian-GMM marginal) . Given Gaussian likelihood and Gaussian mixture prior 
+
+p(y | x) = N (y; Ax , Σy), p(x) = 
+
+> N
+
+X
+
+> i=1
+
+wi N (x; mpr ,i , Cpr ,i ),
+
+with weights wi ≥ 0 and P wi = 1 , the marginal p(y) is a Gaussian mixture 
+
+p(y) = 
+
+> N
+
+X
+
+> i=1
+
+wi N (y; Am pr ,i , Σy + AC pr ,i A⊤).
+
+Proof. First, write the marginal of interest p(y) in integral form. 
+
+p(y) = 
+
+Z
+
+> X
+
+p(y | x)p(x)d x. (63) Substituting the definitions for the likelihood and prior, distributing, and interchanging the integral and the finite sum, we obtain 
+
+p(y) = 
+
+Z
+
+> X
+
+p(y | x)p(x)d x,
+
+=
+
+Z
+
+> X
+
+N (y; Ax , Σy)
+
+> N
+
+X
+
+> i=1
+
+wi N (x; mpr ,i , Cpr ,i )d x, (64) 
+
+=
+
+Z
+
+> X
+> N
+
+X
+
+> i=1
+
+wi N (y; Ax , Σy) N (x; mpr ,i , Cpr ,i )d x, (65) 
+
+=
+
+> N
+
+X
+
+> i=1
+
+wi
+
+Z
+
+> X
+
+N (y; Ax , Σy) N (x; mpr ,i , Cpr ,i )d x. (66) Observe the integral is a marginal distribution with a linear-Gaussian likelihood and Gaussian prior, and so by Lemma 9 can be re-written as 
+
+Z
+
+> X
+
+N (y; Ax , Σy) N (x; mpr ,i , Cpr ,i )d x = N (y; Am pr ,i , Σy + AC pr ,i A⊤). (67) Substituting Equation (67) into Equation (66) gives us the desired result. 
+
+p(y) = 
+
+> N
+
+X
+
+> i=1
+
+wi N (y; Am pr ,i , Σy + AC pr ,i A⊤). (68) 21 Lemma 12 (Gaussian-GMM conjugacy) . Given a Gaussian likelihood and a Gaussian mixture prior 
+
+p(y | x) = N (y; Ax , Σy), p(x) = 
+
+> N
+
+X
+
+> i=1
+
+wi N (x; mpr ,i , Cpr ,i ),
+
+with weights wi ≥ 0 and P wi = 1 , the posterior distribution p(x | y) is a Gaussian mixture 
+
+p(x | y) = 
+
+> N
+
+X
+
+> i=1
+
+˜wi(y)N (x; mpost ,i , Cpost ,i ) ,
+
+with component covariances, means, and weights 
+
+Cpost ,i :=  A⊤Σ−1 
+
+> y
+
+A + C−1pr ,i 
+
+−1 ,
+
+mpost ,i := Cpost ,i 
+
+ A⊤Σ−1 
+
+> y
+
+y + C−1pr ,i mpr ,i 
+
+ ,
+
+˜wi(y) := wi N  y; Am pr ,i , Σy + AC pr ,i A⊤PNj=1 wj N (y; Am pr ,j , Σy + AC pr ,j A⊤) .
+
+Proof. By Bayes’ rule, the posterior can be written as 
+
+p(x | y) = p(y | x)p(x)
+
+p(y) . (69) For the denominator, observe that p(y) is a marginal with linear-Gaussian likelihood and Gaussian mixture prior, hence by Lemma 11 is 
+
+p(y) = 
+
+> N
+
+X
+
+> j=1
+
+wj N  y; Am pr ,j , Σy + AC pr ,j A⊤ (70) For the numerator, we first substitute the known forms for the likelihood and prior to obtain 
+
+p(y | x)p(x) = N (y; Ax , Σy)
+
+> N
+
+X
+
+> i=1
+
+wi N (x; mpr ,i , Cpr ,i ) (71) 
+
+=
+
+> N
+
+X
+
+> i=1
+
+wi N (y; Ax , Σy) N (x; mpr ,i , Cpr ,i ). (72) We can re-write the (unweighted) summand via Bayes’ rule as 
+
+pi(x | y) = N (y; Ax , Σy) N (x; mpr ,i , Cpr ,i )
+
+pi(y) . (73) where pi(y) and pi(x | y) are the marginal and posterior of the ith component. Observe that the posterior of the ith component is exactly the Gaussian-Gaussian conjugate form of Lemma 10, thus the corresponding posterior update of component i is Gaussian with distribution 
+
+pi(x | y) = N (x; mpost ,i , Cpost ,i ) , (74) with covariance and mean 
+
+Cpost ,i =  A⊤Σ−1 
+
+> y
+
+A + C−1pr ,i 
+
+−1 , (75) 
+
+mpost ,i = Cpost ,i 
+
+ A⊤Σ−1 
+
+> y
+
+y + C−1pr ,i mpr ,i 
+
+ . (76) Similarly, the marginal of the ith component pi(y) is exactly the Gaussian-Gaussian marginal form of Lemma 9, thus is a Gaussian with distribution 
+
+pi(y) = N  y; Am pr ,i , Σy + AC pr ,i A⊤ , (77) Rearranging Equation (73) and substituting Equation (74) and Equation (77), 
+
+N (y; Ax , Σy) N (x; mpr ,i , Cpr ,i ) = pi(y)pi(x | y), (78) 22 = N  y; Am pr ,i , Σy + AC pr ,i A⊤N (x; mpost ,i , Cpost ,i ) ,
+
+(79) we can rewrite the numerator summand Equation (72) as 
+
+p(y | x)p(x) = 
+
+> N
+
+X
+
+> i=1
+
+wi N  y; Am pr ,i , Σy + AC pr ,i A⊤ N (x; mpost ,i , Cpost ,i ) . (80) Thus, substituting the computed numerator and denominator terms Equation (80) and Equation (70) into the original Bayes’ rule expression, we have that the posterior is a Gaussian mixture with distribution 
+
+p(x | y) = 
+
+> N
+
+X
+
+> i=1
+
+wi N  y; Am pr ,i , Σy + AC pr ,i A⊤PNj=1 wj N (y; Am pr ,j , Σy + AC pr ,j A⊤) N (x; mpost ,i , Cpost ,i ) , (81) 
+
+=
+
+> N
+
+X
+
+> i=1
+
+˜wi(y) N (x; mpost ,i , Cpost ,i ) . (82) whose ith component has covariance, mean, and weight 
+
+Cpost ,i =  A⊤Σ−1 
+
+> y
+
+A + C−1pr ,i 
+
+−1 , (83) 
+
+mpost ,i = Cpost ,i 
+
+ A⊤Σ−1 
+
+> y
+
+y + C−1pr ,i mpr ,i 
+
+ , (84) 
+
+˜wi(y) = wi N  y; Am pr ,i , Σy + AC pr ,i A⊤PNj=1 wj N (y; Am pr ,j , Σy + AC pr ,j A⊤) . (85) 
+
+B.4 Gradients and scores Lemma 13 (Gaussian mixture score) . The score function of a Gaussian mixture with distribution 
+
+p(x) = 
+
+> N
+
+X
+
+> i=1
+
+wi N (x; mi, Ci)
+
+is given by 
+
+∇x log p(x) = −
+
+> N
+
+X
+
+> i=1
+
+˜wi(x)C−1 
+
+> i
+
+(x − mi)
+
+with updated weights 
+
+˜wi(x) = wi N (x; mi, Ci)
+
+PNj=1 wj N (x; mj , Cj ) .
+
+Proof. First, by chain rule, 
+
+∇x log p(x) = ∇xp(x)
+
+p(x) . (86) The denominator is a known Gaussian mixture by proposition, thus what remains is to compute the numerator. Applying linearity of the gradient and the gradient of the Gaussian density, we obtain 
+
+∇xp(x) = ∇x
+
+> N
+
+X
+
+> i=1
+
+wi N (x; mi, Ci) (87) 
+
+=
+
+> N
+
+X
+
+> i=1
+
+wi ∇xN (x; mi, Ci) (88) 
+
+= −
+
+> N
+
+X
+
+> i=1
+
+wi N (x; mi, Ci) C−1 
+
+> i
+
+(x − mi). (89) 23 Substituting into the numerator of our chain rule expression, the score of the Gaussian mixture is given by 
+
+∇x log p(x) = −
+
+> N
+
+X
+
+> i=1
+
+˜wi(x)C−1 
+
+> i
+
+(x − mi) (90) with weights 
+
+˜wi(x) = wi N (x; mi, Ci)
+
+PNj=1 wj N (x; mj , Cj ) . (91) 
+
+Lemma 14 (canonical weight gradient) . The gradient of the weight function wi(xt, t ) defined in Proposition 4 is given by 
+
+∇xt wi(xt, t ) = 
+
+p¯α(t)1 − ¯α(t) wi(xt, t ) x(i) − m0|t(xt)
+
+Proof. We start by recalling the definition of wi for convenience: 
+
+wi(xt, t ) := 
+
+N
+
+
+
+xt; p¯α(t)x(i),  1 − ¯α(t)In
+
+PNj=1 N
+
+
+
+xt; p¯α(t)x(j),  1 − ¯α(t)In
+
+ (92) For bookkeeping, define shorthand notation for the numerator and denominator of the weight function 
+
+Ni(xt) := N
+
+
+
+xt; p¯α(t)x(i),  1 − ¯α(t)In
+
+
+
+(93) 
+
+D(xt) := 
+
+> N
+
+X
+
+> j=1
+
+N
+
+
+
+xt; p¯α(t)x(j),  1 − ¯α(t)In
+
+
+
+(94) 
+
+=
+
+> N
+
+X
+
+> j=1
+
+Nj (xt) (95) To compute the gradient ∇xt wi(xt, t ), we proceed via quotient rule 
+
+∇xt wi(xt, t ) = D(xt)∇xt Ni(xt) − Ni(xt)∇xt D(xt)(D(xt)) 2 (96) The gradient of the numerator term (for any i) can be computed via chain rule 
+
+∇xt log Ni(xt) = ∇xt Ni(xt)
+
+Ni(xt) , (97) 
+
+∇xt Ni(xt) = Ni(xt)∇xt log Ni(xt), (98) 
+
+= Ni(xt)∇xt
+
+
+
+− 12
+
+ 1 − ¯α(t)−1 xt − p¯α(t)x(i)⊤ xt − p¯α(t)x(i) + const. 
+
+
+
+,
+
+(99) 
+
+= −Ni(xt) 1 − ¯α(t)−1 xt − p¯α(t)x(i), (100) which can then be used to compute the gradient of the denominator term via linearity 
+
+∇xt D(xt) = 
+
+> N
+
+X
+
+> j=1
+
+∇xt Nj (xt), (101) 
+
+=
+
+> N
+
+X
+
+> j=1
+
+−Nj (xt) 1 − ¯α(t)−1 xt − p¯α(t)x(j), (102) 
+
+= − 11 − ¯α(t)
+
+> N
+
+X
+
+> j=1
+
+Nj (xt) xt − p¯α(t)x(j) (103) 24 Next, the components of numerator term in the gradient of the weight function wi are computable as 
+
+D(xt)∇xt Ni(xt) = 
+
+
+
+> N
+
+X
+
+> j=1
+
+Nj (xt)
+
+ ·
+
+
+
+−Ni(xt) 1 − ¯α(t)−1 xt − p¯α(t)x(i)
+
+(104) 
+
+= − Ni(xt) xt − p¯α(t)x(i)
+
+1 − ¯α(t)
+
+> N
+
+X
+
+> j=1
+
+Nj (xt), (105) 
+
+Ni(xt)∇xt D(xt) = − Ni(xt)1 − ¯α(t)
+
+> N
+
+X
+
+> j=1
+
+Nj (xt) xt − p¯α(t)x(j). (106) Taking the difference, the entire numerator simplifies as 
+
+D(xt)∇xt Ni(xt) − Ni(xt)∇xt D(xt) (107) 
+
+= − Ni(xt) xt − p¯α(t)x(i)
+
+1 − ¯α(t)
+
+> N
+
+X
+
+> j=1
+
+Nj (xt) + Ni(xt)1 − ¯α(t)
+
+> N
+
+X
+
+> j=1
+
+Nj (xt) xt − p¯α(t)x(j) (108) 
+
+= − Ni(xt)1 − ¯α(t)
+
+> N
+
+X
+
+> j=1
+
+Nj (xt) xt − p¯α(t)x(i) + Ni(xt)1 − ¯α(t)
+
+> N
+
+X
+
+> j=1
+
+Nj (xt) xt − p¯α(t)x(j) (109) 
+
+= Ni(xt)1 − ¯α(t)
+
+> N
+
+X
+
+> j=1
+
+Nj (xt)
+
+h xt − p¯α(t)x(j) −  xt − p¯α(t)x(i)i
+
+(110) 
+
+=
+
+p¯α(t)Ni(xt)1 − ¯α(t)
+
+> N
+
+X
+
+> j=1
+
+Nj (xt)( x(i) − x(j)). (111) Substituting the numerator into the quotient rule expression, and simply by recalling that wi(xt, t ) = 
+
+Ni(xt)/D (xt),
+
+∇xt wi(xt, t ) = D(xt)∇xt Ni(xt) − Ni(xt)∇xt D(xt)(D(xt)) 2 (112) 
+
+= 1(D(xt)) 2
+
+p¯α(t)Ni(xt)1 − ¯α(t)
+
+> N
+
+X
+
+> j=1
+
+Nj (xt)( x(i) − x(j))
+
+ (113) 
+
+=
+
+p¯α(t)Ni(xt)/D (xt)1 − ¯α(t)
+
+> N
+
+X
+
+> j=1
+
+Nj (xt)
+
+D(xt) (x(i) − x(j)) (114) 
+
+=
+
+p¯α(t)1 − ¯α(t) wi(xt, t )
+
+> N
+
+X
+
+> j=1
+
+wj (xt, t )( x(i) − x(j)). (115) Rearranging, recalling that P wi = 1 , and applying the definition of m0|t gives the desired result. 
+
+∇xt wi(xt, t ) = 
+
+p¯α(t)1 − ¯α(t) wi(xt, t )
+
+> N
+
+X
+
+> j=1
+
+wj (xt, t )x(i) − wj (xt, t )x(j) (116) 
+
+=
+
+p¯α(t)1 − ¯α(t) wi(xt, t ) x(i)
+
+> N
+
+X
+
+> j=1
+
+wj (xt, t )
+
+| {z }
+
+> 1
+
+−
+
+> N
+
+X
+
+> j=1
+
+wj (xt, t )x(j)
+
+| {z }
+
+> m0|t
+
+!
+
+(117) 
+
+=
+
+p¯α(t)1 − ¯α(t) wi(xt, t ) x(i) − m0|t
+
+ (118) 25 C Finite sample regime proofs 
+
+C.1 Proof of Proposition 4 
+
+Proof. By the diffusion forward transition, the probability of state xt at time t given initial condition 
+
+x0 is given by 
+
+pt(xt | x0) = N
+
+
+
+xt; p¯α(t)x0,  1 − ¯α(t)In
+
+
+
+. (119) Applying Lemma 7 with likelihood Equation (119) and prior pN 
+
+> pr
+
+gives the desired marginal. 
+
+pt(xt) = 1
+
+N
+
+> N
+
+X
+
+> i=1
+
+N
+
+
+
+xt; p¯α(t)x(i),  1 − ¯α(t)In
+
+
+
+. (120) Similarly, applying Lemma 8 with likelihood Equation (119) and prior pN 
+
+> pr
+
+gives the desired posterior. 
+
+C.2 Proof of Proposition 5 
+
+Proof. We start by writing the likelihood py|t(y | xt) in marginal form 
+
+py|t(y | xt) = 
+
+Z
+
+py|0,t (y | x0, xt)p0|t(x0 | xt)d x0. (121) The likelihood kernel p(y | x0, xt) can be rewritten via Markov property and the definition of the forward model. 
+
+p(y | x0, xt) = py|0(y | x0) = N (y; A(x0), Σy). (122) By Proposition 4, the diffusion process posterior p0|t(x0 | xt) is a discrete measure 
+
+p0|t(x0 | xt) = 
+
+> N
+
+X
+
+> i=1
+
+wi(xt, t )δ(x0 − x(i)) (123) with weights wi(xt, t ) as defined in Proposition 4. Substituting these two facts into the integral form of the likelihood, we obtain a Gaussian mixture whose means are constant w.r.t. y and xt (i.e., of identical form to the case when A is linear). 
+
+py|t(y | xt) = 
+
+Z
+
+N (y; A(x0), Σy)
+
+> N
+
+X
+
+> i=1
+
+wi(xt, t )δ(x0 − x(i))d x0 (124) 
+
+=
+
+> N
+
+X
+
+> i=1
+
+wi(xt, t )
+
+Z
+
+N (y; A(x0), Σy)δ(x0 − x(i))d x0 (125) 
+
+=
+
+> N
+
+X
+
+> i=1
+
+wi(xt, t ) N
+
+
+
+y; A x(i), Σy
+
+
+
+(126) 
+
+C.3 Proof of Proposition 6 
+
+Proof. We start by writing the posterior pNt|y(xt | y) via Bayes’s rule 
+
+pNt|y(xt | y) = pN
+
+> y|t
+
+(y | xt)pNt (xt)
+
+R 
+
+> X
+
+py|0(y | x0)pN
+
+> pr
+
+(x0)d x0
+
+(127) The terms in the numerator are known from Proposition 5 and Proposition 4 respectively, and the denominator terms are given by the measurement model and the finite-sample regime respectively. Performing direct substitution and rearranging, 
+
+pNt|y(xt | y) = 
+
+PNi=1 wi(xt, t ) N
+
+
+
+y; A(x(i)), Σy
+
+  1
+
+> N
+
+PNi=1 N
+
+
+
+xt; p¯α(t)x(i), (1 − ¯α(t)) In
+
+ 
+
+> 1
+> N
+
+PNj=1 N
+
+
+
+y; A(x(j)), Σy
+
+
+
+(128) 26 =
+
+> 1
+> N
+
+PNi=1 N
+
+
+
+y; A(x(i)), Σy
+
+
+
+N
+
+
+
+xt; p¯α(t)x(i), (1 − ¯α(t)) In
+
+
+
+> 1
+> N
+
+PNj=1 N
+
+
+
+y; A(x(j)), Σy
+
+ (129) 
+
+=
+
+> N
+
+X
+
+> i=1
+
+N
+
+
+
+y; A(x(i)), Σy
+
+PNj=1 N
+
+
+
+y; A(x(j)), Σy
+
+ N
+
+
+
+xt; p¯α(t)x(i), (1 − ¯α(t)) In
+
+
+
+. (130) 
+
+## D Experimental details 
+
+D.1 Target objects 
+
+In this section, we derive closed-form unconditional and conditional diffusion distributions and score functions for a variety of priors and measurement operators. For every prior we report five 
+
+unconditional objects : the marginal pt, marginal score ∇xt log pt(xt), denoiser p0|t, denoiser mean 
+
+m0|t(xt), and denoiser covariance C0|t(xt). Unconditional objects are known analytically in all three cases independent of the forward model. Next, we additionally report four conditional objects :the likelihood py|t, likelihood score ∇xt log py|t, posterior pt|y, and posterior score ∇xt log pt|y
+
+only in contexts where they are accessible. For all settings, we assume VP-SDE forward transition 
+
+pt|0(xt | x0) = N (xt; p¯α(t)x0, (1 − ¯α(t)) In), (131) and additive Gaussian measurement noise 
+
+py|0(y | x0) = N (y; A(x0), Σy). (132) 
+
+D.1.1 Discrete prior 
+
+Let ppr (x0) denote a discrete measure assigning positive probability pi > 0 to finitely-many atoms 
+
+x(i):
+
+ppr (x0) = 
+
+> N
+
+X
+
+> i=1
+
+pi δ(x0 − x(i)) (133) 
+
+Unconditional objects. The marginal pt(xt) at diffusion time t can be derived by direct substitution, exchanging the integral and the finite sum, and integrating the mean of the Gaussian density against the Dirac measure δ.
+
+pt(xt) = 
+
+Z
+
+> X
+
+pt|0(xt | x0) ppr (x0) d x0 (134) 
+
+=
+
+Z
+
+> X
+
+N  xt; p¯α(t)x0, (1 − ¯α(t)) In
+
+ NX
+
+> i=1
+
+piδ(x0 − x(i)) d x0 (135) 
+
+=
+
+> N
+
+X
+
+> i=1
+
+pi
+
+Z
+
+> X
+
+N  xt; p¯α(t)x0, (1 − ¯α(t)) In
+
+ δ(x0 − x(i)) d x0 (136) 
+
+=
+
+> N
+
+X
+
+> i=1
+
+pi N  xt; p¯α(t)x(i), (1 − ¯α(t)) In
+
+. (137) Because the marginal is a Gaussian mixture, the Gaussian mixture score identity (Lemma 13) yields 
+
+∇xt log pt(xt) = −
+
+> N
+
+X
+
+> i=1
+
+˜pi(xt, t ) xt − p¯α(t)x(i)
+
+1 − ¯α(t) (138) 
+
+˜pi(xt, t ) = pi N  xt; p¯α(t)x(i), (1 − ¯α(t)) In
+
+PNj=1 pj N  xt; p¯α(t)x(j), (1 − ¯α(t)) In
+
+ . (139) 27 Once the marginal pt is known, the denoiser p0|t follows from Bayes’s rule, direct substitution, and rearrangement: 
+
+p0|t(x0 | xt) = pt|0(xt | x0) ppr (x0)
+
+pt(xt) (140) 
+
+= N (xt; p¯α(t)x0, (1 − ¯α(t)) In) PNi=1 pi δ(x0 − x(i))
+
+PNj=1 pj N  xt; p¯α(t)x(j), (1 − ¯α(t)) In
+
+ (141) 
+
+=
+
+> N
+
+X
+
+> i=1
+
+piN (xt; p¯α(t)x0, (1 − ¯α(t)) In)
+
+PNj=1 pj N  xt; p¯α(t)x(j), (1 − ¯α(t)) In
+
+ δ(x0 − x(i)) (142) 
+
+=
+
+> N
+
+X
+
+> i=1
+
+˜pi(xt, t ) δ(x0 − x(i)). (143) Because the denoiser is a discrete measure, its mean is simply a weighted average of the atoms: 
+
+m0|t(xt) = 
+
+> N
+
+X
+
+> i=1
+
+˜pi(xt, t ) x(i). (144) Furthermore, its covariance is a weighted spread over pairs of atoms, 
+
+C0|t(xt) = 
+
+> N
+
+X
+
+> i=1
+
+˜pi(xt, t )( x(i) − m0|t(xt))( x(i) − m0|t(xt)) ⊤ (145) 
+
+=
+
+> N
+
+X
+
+> i=1
+
+˜pi(xt, t )
+
+h
+
+x(i)x(i)⊤ − x(i)m0|t(xt)⊤ − m0|t(xt)x(i)⊤ + m0|t(xt)m0|t(xt)⊤i
+
+(146) 
+
+=
+
+> N
+
+X
+
+> i=1
+
+˜pi(xt, t ) x(i)x(i)⊤ −
+
+> N
+
+X
+
+> i=1
+
+˜pi(xt, t )x(i)
+
+!
+
+m0|t(xt)⊤ (147) 
+
+− m0|t(xt)
+
+> N
+
+X
+
+> i=1
+
+˜pi(xt, t )x(i)
+
+!⊤
+
++
+
+> N
+
+X
+
+> i=1
+
+˜pi(xt, t )
+
+!
+
+m0|t(xt)m0|t(xt)⊤ (148) 
+
+=
+
+> N
+
+X
+
+> i=1
+
+˜pi(xt, t ) x(i)x(i)⊤ − m0|t(xt)m0|t(xt)⊤ − m0|t(xt)m0|t(xt)⊤ + m0|t(xt)m0|t(xt)⊤
+
+(149) 
+
+=
+
+> N
+
+X
+
+> i=1
+
+˜pi(xt, t ) x(i)x(i)⊤ − m0|t(xt)m0|t(xt)⊤ (150) 
+
+=
+
+> N
+
+X
+
+> i=1
+
+˜pi(xt, t ) x(i)x(i)⊤ −
+
+> N
+
+X
+
+> i,j =1
+
+˜pi(xt, t )˜ pj (xt, t ) x(i)x(j)⊤ (151) 
+
+= 12
+
+> N
+
+X
+
+> i,j =1
+
+˜pi(xt, t )˜ pj (xt, t )
+
+
+
+x(i)x(i)⊤ + x(j)x(j)⊤ − x(i)x(j)⊤ − x(j)x(i)⊤
+
+(152) 
+
+= 12
+
+> N
+
+X
+
+> i,j =1
+
+˜pi(xt, t ) ˜ pj (xt, t )  x(i) − x(j)  x(i) − x(j)⊤ (153) 
+
+Conditional objects. Because the denoiser is a discrete measure, the marginal integral collapses to a finite sum. 
+
+py|t(y | xt) = 
+
+Z
+
+> X
+
+py|0(y | x0) p0|t(x0 | xt) d x0 (154) 
+
+=
+
+Z
+
+> X
+
+N (y; A(x0), Σy)
+
+> N
+
+X
+
+> i=1
+
+˜pi(xt, t ) δ(x0 − x(i)) d x0 (155) 28 =
+
+> N
+
+X
+
+> i=1
+
+˜pi(xt, t )
+
+Z
+
+> X
+
+N (y; A(x0), Σy) δ(x0 − x(i)) d x0 (156) 
+
+=
+
+> N
+
+X
+
+> i=1
+
+˜pi(xt, t ) N  y; A(x(i)), Σy
+
+. (157) Differentiating, and observing only the weights ˜pi(xt, t ) depend on xt,
+
+∇xt log py|t(y | xt) = −
+
+> N
+
+X
+
+> i=1
+
+˜pi(xt, t ) N  y; A(x(i)), Σy
+
+PNj=1 ˜pj (xt, t ) N  y; A(x(j)), Σy
+
+ xt − p¯α(t)x(i)
+
+1 − ¯α(t)+
+
+> N
+
+X
+
+> i=1
+
+˜pi(xt, t ) xt − p¯α(t)x(i)
+
+1 − ¯α(t)
+
+| {z }  
+
+> −∇ xtlog pt(xt)
+
+. (158) By Bayes’s rule and rearrangement, the posterior is the Gaussian mixture: 
+
+pt|y(xt | y) = py|t(y | xt)pt(xt)
+
+R 
+
+> X
+
+py|0(y | x0)ppr (x0) d x0
+
+(159) 
+
+=
+
+> N
+
+X
+
+> i=1
+
+pi N  y; A(x(i)), Σy
+
+PNj=1 pj N  y; A(x(j)), Σy
+
+ N  xt; p¯α(t)x(i), (1 − ¯α(t)) In
+
+, (160) and the posterior score collapses to 
+
+∇xt log pt|y(xt | y) = −
+
+> N
+
+X
+
+> i=1
+
+˜pi(xt, t ) N  y; A(x(i)), Σy
+
+PNj=1 ˜pj (xt, t ) N  y; A(x(j)), Σy
+
+ xt − p¯α(t)x(i)
+
+1 − ¯α(t) . (161) 
+
+D.1.2 Gaussian prior 
+
+Let ppr (x0) denote a (unimodal) Gaussian with mean vector mpr and (positive definite) covariance matrix Cpr :
+
+ppr (x0) = N  x0; mpr , Cpr 
+
+ (162) 
+
+Unconditional objects. The marginal pt is Gaussian by Lemma 9: 
+
+pt(xt) = 
+
+Z
+
+> X
+
+N  xt; p¯α(t)x0, (1 − ¯α(t)) In
+
+ N  x0; mpr , Cpr 
+
+ dx0 (163) 
+
+= N  xt; p¯α(t)mpr , ¯α(t)Cpr + (1 − ¯α(t)) In
+
+, (164) hence 
+
+∇xt log pt(xt) = − ¯α(t)Cpr + (1 − ¯α(t)) In
+
+−1 xt − p¯α(t) mpr 
+
+. (165) By Lemma 10, the denoiser is Gaussian, 
+
+p0|t(x0 | xt) = N  x0; m0|t(xt), C0|t
+
+, (166) 
+
+C0|t =
+
+
+
+C−1pr + ¯α(t)1− ¯α(t) In
+
+−1
+
+, (167) 
+
+m0|t(xt) = C0|t
+
+
+
+C−1pr mpr +
+
+√¯α(t)1− ¯α(t) xt
+
+
+
+. (168) The denoiser covariance is independent of xt, reflecting the linear-Gaussian structure of the prior. 
+
+Conditional objects. The likelihood is 
+
+py|t(y | xt) = 
+
+Z
+
+> X
+
+N  y; A(x0), Σy
+
+ N  x0; m0|t, C0|t
+
+ dx0, (169) 29 which has no closed form for general A. For affine A(x0) = Ax 0 + b, Lemma 9 gives 
+
+py|t(y | xt) = N  y; Am 0|t + b, Σy + AC 0|tA⊤. (170) The likelihood score follows from chain rule on m0|t(xt):
+
+∇xt log py|t(y | xt) = 
+
+√¯α(t)1− ¯α(t) C0|t A⊤ Σy + AC 0|tA⊤−1 y − Am 0|t − b. (171) For the posterior we work with the joint (xt, y). Since xt = p¯α(t)x0 + η1 and y = Ax 0 + b + η2
+
+with independent Gaussian noise η1 ∼ N (0, (1 − ¯α(t)) In) and η2 ∼ N (0, Σy), the joint is Gaussian with 
+
+p(xt, y) = N
+
+ xt
+
+y
+
+
+
+;
+
+p ¯α(t) mpr 
+
+Am pr + b
+
+
+
+, Λ
+
+
+
+, (172) 
+
+Λ =
+
+¯α(t)Cpr + (1 − ¯α(t)) In
+
+p¯α(t) Cpr A⊤
+
+p¯α(t) AC pr AC pr A⊤ + Σy
+
+
+
+. (173) Conditioning on y yields a Gaussian posterior pt|y(xt | y) = N  xt; mpost (y), Cpost 
+
+ with 
+
+mpost (y) = p¯α(t) mpr + p¯α(t) Cpr A⊤ AC pr A⊤ + Σy
+
+−1(y − Am pr − b), (174) 
+
+Cpost = ¯ α(t)Cpr + (1 − ¯α(t)) In − ¯α(t)Cpr A⊤ AC pr A⊤ + Σy
+
+−1AC pr . (175) The posterior score is linear in xt,
+
+∇xt log pt|y(xt | y) = −C−1post 
+
+ xt − mpost (y). (176) 
+
+D.1.3 Gaussian mixture prior 
+
+Let ppr (x0) denote a Gaussian mixture where the ith component has weight pi, mean vector mpr ,i 
+
+and (positive definite) covariance matrix Cpr ,i :
+
+ppr (x0) = 
+
+> N
+
+X
+
+> i=1
+
+pi N  x0; mpr ,i , Cpr ,i 
+
+ (177) 
+
+Unconditional objects. The marginal is the Gaussian mixture 
+
+pt(xt) = 
+
+> N
+
+X
+
+> i=1
+
+pi
+
+Z
+
+> X
+
+N  xt; p¯α(t)x0, (1 − ¯α(t)) In
+
+ N  x0; mpr ,i , Cpr ,i 
+
+ dx0 (178) 
+
+=
+
+> N
+
+X
+
+> i=1
+
+pi N  xt; p¯α(t) mpr ,i , ¯α(t)Cpr ,i + (1 − ¯α(t)) In
+
+. (179) By Lemma 13, 
+
+∇xt log pt(xt) = −
+
+> N
+
+X
+
+> i=1
+
+˜pi(xt, t )  ¯α(t)Cpr ,i + (1 − ¯α(t)) In
+
+−1 xt − p¯α(t)mpr ,i 
+
+, (180) 
+
+˜pi(xt, t ) = pi N  xt; p¯α(t)mpr ,i , ¯α(t)Cpr ,i + (1 − ¯α(t)) In
+
+PNj=1 pj N  xt; p¯α(t)mpr ,j , ¯α(t)Cpr ,j + (1 − ¯α(t)) In
+
+ . (181) By Bayes’s rule, the denoiser is a Gaussian mixture with the same weights as the marginal, 
+
+p0|t(x0 | xt) = 
+
+> N
+
+X
+
+> i=1
+
+˜pi(xt, t ) N  x0; m0|t,i (xt), C0|t,i 
+
+, (182) 
+
+C0|t,i =
+
+
+
+C−1pr ,i + ¯α(t)1− ¯α(t) In
+
+−1
+
+, (183) 
+
+m0|t,i (xt) = C0|t,i 
+
+
+
+C−1pr ,i mpr ,i +
+
+√¯α(t)1− ¯α(t) xt
+
+
+
+. (184) 30 By the laws of total expectation and total covariance over the component label, 
+
+m0|t(xt) = 
+
+> N
+
+X
+
+> i=1
+
+˜pi(xt, t ) m0|t,i (xt), (185) 
+
+C0|t(xt) = 
+
+> N
+
+X
+
+> i=1
+
+˜pi(xt, t ) C0|t,i + 12
+
+> N
+
+X
+
+> i,j =1
+
+˜pi ˜pj
+
+ m0|t,i − m0|t,j 
+
+  m0|t,i − m0|t,j 
+
+⊤. (186) As in the discrete case, the second-moment decomposition makes the structure of C0|t transparent without reference to the aggregate mean: the first sum is the within-component covariance, the second sum is the pairwise outer-product spread over component means. 
+
+Conditional objects. The likelihood reduces to a mixture of integrals, 
+
+py|t(y | xt) = 
+
+> N
+
+X
+
+> i=1
+
+˜pi(xt, t )
+
+Z
+
+> X
+
+N  y; A(x0), Σy
+
+ N  x0; m0|t,i , C0|t,i 
+
+dx0, (187) each of which is intractable for general A. For affine A(x0) = Ax 0 + b, each component integrates via Lemma 9, 
+
+py|t(y | xt) = 
+
+> N
+
+X
+
+> i=1
+
+˜pi(xt, t ) N  y; Am 0|t,i + b, Σy + AC 0|t,i A⊤. (188) For the posterior we again work with the joint (xt, y). By Lemma 11 applied componentwise, 
+
+p(xt, y) = 
+
+> N
+
+X
+
+> i=1
+
+pi N
+
+ xt
+
+y
+
+
+
+;
+
+p ¯α(t) mpr ,i 
+
+Am pr ,i + b
+
+
+
+, Λi
+
+
+
+, (189) 
+
+Λi =
+
+¯α(t)Cpr ,i + (1 − ¯α(t)) In
+
+p¯α(t) Cpr ,i A⊤
+
+p¯α(t) AC pr ,i AC pr ,i A⊤ + Σy
+
+
+
+. (190) Conditioning each component on y and reweighting by its y-marginal likelihood (Lemma 12) yields a Gaussian mixture posterior 
+
+pt|y(xt | y) = 
+
+> N
+
+X
+
+> i=1
+
+πi(y) N  xt; mpost ,i (y), Cpost ,i 
+
+, (191) 
+
+πi(y) = pi N  y; Am pr ,i + b, AC pr ,i A⊤ + Σy
+
+PNj=1 pj N  y; Am pr ,j + b, AC pr ,j A⊤ + Σy
+
+ , (192) 
+
+mpost ,i (y) = p¯α(t) mpr ,i + p¯α(t) Cpr ,i A⊤ AC pr ,i A⊤ + Σy
+
+−1(y − Am pr ,i − b), (193) 
+
+Cpost ,i = ¯ α(t)Cpr ,i + (1 − ¯α(t)) In − ¯α(t)Cpr ,i A⊤ AC pr ,i A⊤ + Σy
+
+−1AC pr ,i . (194) By Lemma 13 applied to this posterior mixture, 
+
+∇xt log pt|y(xt | y) = −
+
+> N
+
+X
+
+> i=1
+
+π′
+
+> i
+
+(xt, y) C−1post ,i 
+
+ xt − mpost ,i (y), (195) 
+
+π′
+
+> i
+
+(xt, y) = πi(y) N  xt; mpost ,i (y), Cpost ,i 
+
+PNj=1 πj (y) N  xt; mpost ,j (y), Cpost ,j 
+
+ . (196) The likelihood score follows by subtracting the prior score from the posterior score. 
+
+D.2 Experimental framework 
+
+All experiments use the variance-preserving SDE (VP-SDE) of Equation (3) with the default linear 
+
+β-schedule. Forward marginals, scores, and posteriors are evaluated on a uniform time grid of 
+
+Nt = 400 points spanning t ∈ [10 −3, 1] , and on a uniform spatial grid of Nx = 600 points whose extent is set per-prior to bracket its support. All computations are carried out in double precision (torch.float64 ) on CPU. For all problems, the observation model is one-dimensional with additive Gaussian noise: 
+
+y = A(x0) + η, η ∼ N (0 , σ 2
+
+> y
+
+). (197) 31 Methods. For every (t, x ) grid we report up to six posterior distributions p(xt | y):1. the true posterior (where available), derived in Appendix D.1, 2. FSR: the finite-sample regime introduced in Section 4, 3. σ-DPS [16], defined in Equation (16) with unmodified prefactor σ−2 
+
+> y
+
+,4. ζ-DPS [16], defined in Equation (25) with modified prefactor ζ/ ∥y − A (m0|t(xt)) ∥2,5. ΠGDM [17], defined in Equation (21), and 6. TMPD [18], defined in Equation (22). The FSR and DPS methods are present for all problems, while ΠGDM and TMPD are only applicable when the measurement model is affine. Heatmaps use power-law normalization with exponent γ = 0 .55 . The color ceiling is set per row to the 99 th percentile of that row’s analytic field with flipping at the 99 .9th percentile to prevent Dirac distributions from dominating the colormap. 
+
+D.3 Per-prior posterior reconstructions 
+
+This subsection presents posterior-score reconstructions for every (prior , A, y) target in the testbed. Each prior is introduced with its mathematical definition and then exercised across its three forward operators and three measurements. Per target we report all six methods of Section D.2; on non-affine 
+
+A the Song and Boys cells are marked intractable per the linear-only restriction. The ζ-DPS column displays the per-target ζ⋆ chosen by visual inspection from the ζ ∈ { 0.01 , 0.03 , . . . , 0.49 } tuning sweep. 32 D.3.1 Discrete prior tri_equal 
+
+Symmetric three-atom prior, equal weights. 
+
+ppr (x0) = 13 δ(x0 + 1 .8) + 13 δ(x0 − 0.2) + 13 δ(x0 − 2.2) 
+
+A(x) = x, σ = 0 .3, y = −1.8000 
+
+Analytic FSR (ours) σ-DPS [16] ζ-DPS [16] Song [17] Boys [18] 
+
+A(x) = x, σ = 0 .3, y = +0 .2000 
+
+Analytic FSR (ours) σ-DPS [16] ζ-DPS [16] Song [17] Boys [18] 
+
+A(x) = x, σ = 0 .3, y = +2 .2000 
+
+Analytic FSR (ours) σ-DPS [16] ζ-DPS [16] Song [17] Boys [18] 
+
+A(x) = x2, σ = 0 .3, y = +0 .0400 
+
+Analytic FSR (ours) σ-DPS [16] ζ-DPS [16] 
+
+intractable 
+
+Song [17] 
+
+intractable 
+
+Boys [18] 
+
+A(x) = x2, σ = 0 .3, y = +3 .2400 
+
+Analytic FSR (ours) σ-DPS [16] ζ-DPS [16] 
+
+intractable 
+
+Song [17] 
+
+intractable 
+
+Boys [18] 
+
+33 A(x) = x2, σ = 0 .3, y = +4 .0400 
+
+Analytic FSR (ours) σ-DPS [16] ζ-DPS [16] 
+
+intractable 
+
+Song [17] 
+
+intractable 
+
+Boys [18] 
+
+A(x) = x3, σ = 0 .3, y = −5.8300 
+
+Analytic FSR (ours) σ-DPS [16] ζ-DPS [16] 
+
+intractable 
+
+Song [17] 
+
+intractable 
+
+Boys [18] 
+
+A(x) = x3, σ = 0 .3, y = +0 .0080 
+
+Analytic FSR (ours) σ-DPS [16] ζ-DPS [16] 
+
+intractable 
+
+Song [17] 
+
+intractable 
+
+Boys [18] 
+
+A(x) = x3, σ = 0 .3, y = +10 .6500 
+
+Analytic FSR (ours) σ-DPS [16] ζ-DPS [16] 
+
+intractable 
+
+Song [17] 
+
+intractable 
+
+Boys [18] 
+
+34 D.3.2 Discrete prior pent_asym 
+
+Five-atom prior with mildly asymmetric tails. 
+
+ppr (x0) = 0 .10 δ(x0 +2 .7)+0 .25 δ(x0 +0 .7)+0 .30 δ(x0 −0.3)+0 .25 δ(x0 −1.3)+0 .10 δ(x0 −3.3) 
+
+A(x) = x, σ = 0 .3, y = −2.7000 
+
+Analytic FSR (ours) σ-DPS [16] ζ-DPS [16] Song [17] Boys [18] 
+
+A(x) = x, σ = 0 .3, y = +0 .3000 
+
+Analytic FSR (ours) σ-DPS [16] ζ-DPS [16] Song [17] Boys [18] 
+
+A(x) = x, σ = 0 .3, y = +3 .3000 
+
+Analytic FSR (ours) σ-DPS [16] ζ-DPS [16] Song [17] Boys [18] 
+
+A(x) = x2, σ = 0 .3, y = +0 .0900 
+
+Analytic FSR (ours) σ-DPS [16] ζ-DPS [16] 
+
+intractable 
+
+Song [17] 
+
+intractable 
+
+Boys [18] 
+
+A(x) = x2, σ = 0 .3, y = +1 .0900 
+
+Analytic FSR (ours) σ-DPS [16] ζ-DPS [16] 
+
+intractable 
+
+Song [17] 
+
+intractable 
+
+Boys [18] 
+
+35 A(x) = x2, σ = 0 .3, y = +9 .0900 
+
+Analytic FSR (ours) σ-DPS [16] ζ-DPS [16] 
+
+intractable 
+
+Song [17] 
+
+intractable 
+
+Boys [18] 
+
+A(x) = x3, σ = 0 .3, y = −19 .7000 
+
+Analytic FSR (ours) σ-DPS [16] ζ-DPS [16] 
+
+intractable 
+
+Song [17] 
+
+intractable 
+
+Boys [18] 
+
+A(x) = x3, σ = 0 .3, y = +0 .0270 
+
+Analytic FSR (ours) σ-DPS [16] ζ-DPS [16] 
+
+intractable 
+
+Song [17] 
+
+intractable 
+
+Boys [18] 
+
+A(x) = x3, σ = 0 .3, y = +35 .9000 
+
+Analytic FSR (ours) σ-DPS [16] ζ-DPS [16] 
+
+intractable 
+
+Song [17] 
+
+intractable 
+
+Boys [18] 
+
+36 D.3.3 Discrete prior wild 
+
+Five-atom prior concentrating 80% of mass on a tight negative cluster. 
+
+ppr (x0) = 0 .05 δ(x0 +4 .0)+0 .50 δ(x0 +1 .2)+0 .30 δ(x0 +0 .8)+0 .10 δ(x0 −2.5)+0 .05 δ(x0 −5.5) 
+
+A(x) = x, σ = 0 .3, y = −4.0000 
+
+Analytic FSR (ours) σ-DPS [16] ζ-DPS [16] Song [17] Boys [18] 
+
+A(x) = x, σ = 0 .3, y = −1.0000 
+
+Analytic FSR (ours) σ-DPS [16] ζ-DPS [16] Song [17] Boys [18] 
+
+A(x) = x, σ = 0 .3, y = +5 .5000 
+
+Analytic FSR (ours) σ-DPS [16] ζ-DPS [16] Song [17] Boys [18] 
+
+A(x) = x2, σ = 0 .3, y = +1 .0000 
+
+Analytic FSR (ours) σ-DPS [16] ζ-DPS [16] 
+
+intractable 
+
+Song [17] 
+
+intractable 
+
+Boys [18] 
+
+A(x) = x2, σ = 0 .3, y = +6 .2500 
+
+Analytic FSR (ours) σ-DPS [16] ζ-DPS [16] 
+
+intractable 
+
+Song [17] 
+
+intractable 
+
+Boys [18] 
+
+37 A(x) = x2, σ = 0 .3, y = +16 .0000 
+
+Analytic FSR (ours) σ-DPS [16] ζ-DPS [16] 
+
+intractable 
+
+Song [17] 
+
+intractable 
+
+Boys [18] 
+
+A(x) = x3, σ = 0 .3, y = −64 .0000 
+
+Analytic FSR (ours) σ-DPS [16] ζ-DPS [16] 
+
+intractable 
+
+Song [17] 
+
+intractable 
+
+Boys [18] 
+
+A(x) = x3, σ = 0 .3, y = −1.0000 
+
+Analytic FSR (ours) σ-DPS [16] ζ-DPS [16] 
+
+intractable 
+
+Song [17] 
+
+intractable 
+
+Boys [18] 
+
+A(x) = x3, σ = 0 .3, y = +15 .6000 
+
+Analytic FSR (ours) σ-DPS [16] ζ-DPS [16] 
+
+intractable 
+
+Song [17] 
+
+intractable 
+
+Boys [18] 
+
+38 D.3.4 Gaussian prior narrow 
+
+Unimodal Gaussian with small variance, displaced from zero so the forward marginal drifts visibly toward the unit Gaussian as t → 1.
+
+ppr (x0) = N (0 .6, 0.5) 
+
+A(x) = x, σ = 0 .3, y = −2.0000      
+
+> Analytic FSR (ours) σ-DPS [16] ζ-DPS [16] Song [17] Boys [18]
+
+A(x) = x, σ = 0 .3, y = +0 .5000      
+
+> Analytic FSR (ours) σ-DPS [16] ζ-DPS [16] Song [17] Boys [18]
+
+A(x) = x, σ = 0 .3, y = +1 .5000      
+
+> Analytic FSR (ours) σ-DPS [16] ζ-DPS [16] Song [17] Boys [18]
+
+A(x) = 0 .7 x − 0.4, σ = 0 .3, y = −2.0000      
+
+> Analytic FSR (ours) σ-DPS [16] ζ-DPS [16] Song [17] Boys [18]
+
+A(x) = 0 .7 x − 0.4, σ = 0 .3, y = +0 .5000 
+
+39 Analytic FSR (ours) σ-DPS [16] ζ-DPS [16] Song [17] Boys [18] 
+
+A(x) = 0 .7 x − 0.4, σ = 0 .3, y = +1 .5000 
+
+Analytic FSR (ours) σ-DPS [16] ζ-DPS [16] Song [17] Boys [18] 
+
+40 D.3.5 Gaussian prior wide 
+
+Unimodal Gaussian with large variance, displaced from zero. 
+
+ppr (x0) = N (1 .5, 2.0) 
+
+A(x) = x, σ = 0 .3, y = −2.0000 
+
+Analytic FSR (ours) σ-DPS [16] ζ-DPS [16] Song [17] Boys [18] 
+
+A(x) = x, σ = 0 .3, y = +0 .5000 
+
+Analytic FSR (ours) σ-DPS [16] ζ-DPS [16] Song [17] Boys [18] 
+
+A(x) = x, σ = 0 .3, y = +1 .5000 
+
+Analytic FSR (ours) σ-DPS [16] ζ-DPS [16] Song [17] Boys [18] 
+
+A(x) = 0 .7 x − 0.4, σ = 0 .3, y = −2.0000 
+
+Analytic FSR (ours) σ-DPS [16] ζ-DPS [16] Song [17] Boys [18] 
+
+A(x) = 0 .7 x − 0.4, σ = 0 .3, y = +0 .5000 
+
+Analytic FSR (ours) σ-DPS [16] ζ-DPS [16] Song [17] Boys [18] 
+
+41 A(x) = 0 .7 x − 0.4, σ = 0 .3, y = +1 .5000 
+
+Analytic FSR (ours) σ-DPS [16] ζ-DPS [16] Song [17] Boys [18] 
+
+42 D.3.6 Gaussian-mixture prior tri_equal 
+
+Symmetric three-component Gaussian mixture, equal weights and equal isotropic variances. 
+
+ppr (x0) = 13 N (−2.6, 0.25) + 13 N (0 .4, 0.25) + 13 N (3 .4, 0.25) 
+
+A(x) = x, σ = 0 .2, y = −2.6000 
+
+Analytic FSR (ours) σ-DPS [16] ζ-DPS [16] Song [17] Boys [18] 
+
+A(x) = x, σ = 0 .2, y = +0 .4000 
+
+Analytic FSR (ours) σ-DPS [16] ζ-DPS [16] Song [17] Boys [18] 
+
+A(x) = x, σ = 0 .2, y = +3 .4000 
+
+Analytic FSR (ours) σ-DPS [16] ζ-DPS [16] Song [17] Boys [18] 
+
+A(x) = 0 .6 x, σ = 1 .5, y = +0 .2400 
+
+Analytic FSR (ours) σ-DPS [16] ζ-DPS [16] Song [17] Boys [18] 
+
+A(x) = 0 .6 x, σ = 1 .5, y = +1 .0000 
+
+Analytic FSR (ours) σ-DPS [16] ζ-DPS [16] Song [17] Boys [18] 
+
+43 A(x) = 0 .6 x, σ = 1 .5, y = +1 .7000 
+
+Analytic FSR (ours) σ-DPS [16] ζ-DPS [16] Song [17] Boys [18] 
+
+44 D.3.7 Gaussian-mixture prior bi_asym 
+
+Bimodal Gaussian mixture with asymmetric weights and component variances. 
+
+ppr (x0) = 0 .30 N (−1.7, 0.16) + 0 .70 N (2 .3, 0.36) 
+
+A(x) = x, σ = 0 .2, y = −1.7000 
+
+Analytic FSR (ours) σ-DPS [16] ζ-DPS [16] Song [17] Boys [18] 
+
+A(x) = x, σ = 0 .2, y = +0 .3000 
+
+Analytic FSR (ours) σ-DPS [16] ζ-DPS [16] Song [17] Boys [18] 
+
+A(x) = x, σ = 0 .2, y = +2 .3000 
+
+Analytic FSR (ours) σ-DPS [16] ζ-DPS [16] Song [17] Boys [18] 
+
+A(x) = 0 .6 x, σ = 1 .5, y = −1.3000 
+
+Analytic FSR (ours) σ-DPS [16] ζ-DPS [16] Song [17] Boys [18] 
+
+A(x) = 0 .6 x, σ = 1 .5, y = +0 .1800 
+
+Analytic FSR (ours) σ-DPS [16] ζ-DPS [16] Song [17] Boys [18] 
+
+45 A(x) = 0 .6 x, σ = 1 .5, y = +1 .0000      
+
+> Analytic FSR (ours) σ-DPS [16] ζ-DPS [16] Song [17] Boys [18]
+
+## E ζ-DPS tuning 
+
+To tune the constant factor ζ used in the modified ζ-DPS algorithm defined in Equation (25), we perform grid search over candidate values ζ on all target problems presented in Figure 2 and Figure 4. 46 Unconditional marginal True posterior FSR (ours) σ-DPS [16] 
+
+Figure 5: Taking a bimodal prior with “tail-event” measurement produces a unimodal posterior. The unmodified σ-DPS algorithm correctly captures the posterior mean, but with incorrect covariance. For prior distribution 
+
+ppr (x0) = 0 .3 N (−1.7, 0.16) + 0 .7 N (2 .3, 0.36) 
+
+with identity forward model 
+
+y = x + 0 .2z, z ∼ N (0 , Im),
+
+and observed measurement y = 0 .3, observe that the measurement is unlikely under both prior mixture components (and thus unlikely in a prior sense). Thus, although the prior and marginals for small ( t < 0.3) diffusion time are multimodal, the posterior distribution is unimodal for all diffusion time. The unmodified DPS method correctly produces a unimodal posterior centered at the measurement, but underestimates the posterior variance. 
+
+Figure 6: We increase ζ from 0.01 (top left) to 0.49 (bottom right) in increments of 0.02 . For ζ = 0 .01 ,we see that the likelihood score correctly guides states towards the observed measurement at positive time 0.2 < t < 0.5, but that the resulting estimated posterior at time zero is not distinguishable from the prior. As ζ increases to ζ ∈ (0 .09 , 0.11) , we see that the resulting posterior better resembles the finite-sample posterior, but that the greater weighting of the positive-mean mixture component leads to an erroneous skew in the posterior. Finally, for sufficiently large ζ > 0.2, the posterior mode is correctly placed, but the covariance of the mode is underestimated. 47 Unconditional marginal True posterior FSR (ours) σ-DPS [16] 
+
+Figure 7: For symmetric discrete prior with 5 atoms and informative measurement, we see that both the true and σ-DPS posteriors collapse to Diracs. For prior distribution 
+
+ppr (x0) = 0 .10 δ(x0 +2 .7)+0 .25 δ(x0 +0 .7)+0 .30 δ(x0 −0.3)+0 .25 δ(x0 −1.3)+0 .10 δ(x0 −3.3) 
+
+with identity forward model 
+
+y = x + 0 .3z, z ∼ N (0 , Im),
+
+and observed measurement y = +0 .30 , the true posterior is just the center Dirac. Observe that the unmodified DPS algorithm correctly captures the true posterior at time zero, but incorrectly captures the covariance at positive times t > 0.05 , instead using the (constant) measurement model covariance. 
+
+Figure 8: We increase ζ from 0.01 (top left) to 0.29 (bottom right) in increments of 0.02 . For all 
+
+ζ < 0.2, we see that the modified DPS sampler incorrectly samples from prior atoms inconsistent with the measurement y, but that the weight assigned by the posterior to these atoms decreases as ζ
+
+increases. There are no ζ for which the covariance is accurately captured at intermediate times, as the covariance is time-dependent (through the noise schedule ¯α(t)) but ζ is a fixed constant for all time. 48 Unconditional marginal True posterior FSR (ours) σ-DPS [16] 
+
+Figure 9: Asymmetric discrete prior with identity measurement operator and informative measurement 
+
+y collapses the true posterior to a Dirac. For asymmetric discrete prior 
+
+ppr (x0) = 0 .05 δ(x0 +4 .0)+0 .50 δ(x0 +1 .2)+0 .30 δ(x0 +0 .8)+0 .10 δ(x0 −2.5)+0 .05 δ(x0 −5.5) 
+
+with identity forward model 
+
+y = x + 0 .3z, z ∼ N (0 , Im),
+
+and observed measurement y = −4.00 , observe that the measurement is again informative enough to collapse the true posterior to a Dirac. The unmodified DPS algorithm produces the correct posterior, but has incorrect covariance and mean for positive time 0.3 < t < 0.5.
+
+Figure 10: We increase ζ from 0.01 (top left) to 0.49 (bottom right) in increments of 0.02 . For all 
+
+ζ < 0.2, we see that the modified DPS sampler incorrectly samples from prior atoms inconsistent with the measurement y, but that the weight assigned by the posterior to these atoms decreases as ζ
+
+increases. Observe that there is no ζ for which only the posterior Dirac is sampled and the posterior mean is accurate at intermediate timesteps. 49 Unconditional marginal True posterior FSR (ours) σ-DPS [16] 
+
+Figure 11: Symmetric prior distribution with insufficient measurement produces an asymmetric posterior with two majority modes and one minority mode. For symmetric discrete prior distribution 
+
+ppr (x0) = 0 .10 δ(x0 +2 .7)+0 .25 δ(x0 +0 .7)+0 .30 δ(x0 −0.3)+0 .25 δ(x0 −1.3)+0 .10 δ(x0 −3.3) 
+
+with nonlinear forward model 
+
+y = x2 + 0 .3z, z ∼ N (0 , Im),
+
+and observed measurement y = +1 .09 , the true posterior has three modes, with two majority modes and one minority mode. The unmodified DPS algorithm only captures a single majority mode due to bias from incorrect estimation of the posterior mean at intermediate timesteps. 
+
+Figure 12: We increase ζ from 0.01 (top left) to 0.49 (bottom right) in increments of 0.02 . For 
+
+ζ < 0.04 , atoms inconsistent with the observed measurement are erroneously sampled. For all ζ,the minority mode at x = 0 .3 is oversampled. As ζ increases, the weight of the majority mode at 
+
+x = −0.7 strictly decreases, and is at no point comparible to the true weight or that of the other majority mode. The modified algorithm underperforms the unmodified algorithm for all ζ.50 Unconditional marginal True posterior FSR (ours) σ-DPS [16] 
+
+Figure 13: For asymmetric discrete prior, the true posterior is unimodal but completely missed by the unmodified DPS algorithm. For asymmetric discrete prior distribution 
+
+ppr (x0) = 0 .05 δ(x0 +4 .0)+0 .50 δ(x0 +1 .2)+0 .30 δ(x0 +0 .8)+0 .10 δ(x0 −2.5)+0 .05 δ(x0 −5.5) 
+
+with nonlinear forward model 
+
+y = x2 + 0 .3z, z ∼ N (0 , Im),
+
+and observed measurement y = +6 .25 , the resulting posterior is effectively a Dirac. However, the unmodified DPS algorithm both hallucinates prior modes, and treats the true posterior atom as a rare event. 
+
+Figure 14: We increase ζ from 0.01 (top left) to 0.49 (bottom right) in increments of 0.02 . For all ζ,we observe hallucination of prior modes inconsistent with the provided measurement. Furthermore, for reasonably large ζ > 0.13 , the true posterior atom is not sampled from at all. 51 Unconditional marginal   
+
+> intractable
+> True posterior FSR (ours) σ-DPS [16]
+
+Figure 15: For symmetric, trimodal Gaussian mixture and cubic forward model, we have an asym-metric, bimodal posterior. The unmodified DPS algorithm fails to capture the minority mode. For symmetric trimodal Gaussian mixture prior distribution 
+
+ppr (x0) = 13 δ(x0 + 1 .8) + 13 δ(x0 − 0.2) + 13 δ(x0 − 2.2) 
+
+with cubic forward model 
+
+y = x3 − 3x + 0 .3z, z ∼ N (0 , Im),
+
+and observed measurement y = −1.14 , the true posterior is asymmetric and bimodal, where only the majority mode is captured by the unmodified DPS algorithm. 
+
+Figure 16: We increase ζ from 0.01 (top left) to 0.49 (bottom right) in increments of 0.02 . For reasonably small 0.11 < ζ < 0.21 , the modified DPS algorithm accurately captures both modes. As 
+
+ζ increases, the minority mode is weighted less and less, effectively disappearing for sufficiently large ζ, resulting in posterior-consistent reconstructions but poor mode coverage. 52 Unconditional marginal   
+
+> intractable
+> True posterior FSR (ours) σ-DPS [16]
+
+Figure 17: For unimodal Gaussian prior with cubic observation operator, the true posterior is trimodal with two majority modes and one minority mode. The unmodified DPS algorithm fails to capture the minority mode, and overweights the more probable majority mode. For unimodal Gaussian prior distribution 
+
+ppr (x0) = N (1 .5, 2.0) 
+
+with cubic forward model 
+
+y = x3 − 3x + 0 .3z, z ∼ N (0 , Im),
+
+and observed measurement y = −1.12 , the true posterior is trimodal with two majority modes (of uniequal weight) and one minority mode. The unmodified DPS algorithm fails to capture the minority mode entirely, and overrepresents the majority posterior mode with higher weight. 
+
+Figure 18: We increase ζ from 0.01 (top left) to 0.49 (bottom right) in increments of 0.02 . There exists no ζ for which the modified DPS algorithm both (i) captures the minority mode and (ii) does not hallucinate prior samples between the two majority modes. Furthermore, as ζ increases, the relative weight between the majority modes becomes increasingly inaccurate, resulting in an effectively unimodal estimated posterior for sufficiently large ζ.53 Unconditional marginal   
+
+> intractable
+> True posterior FSR (ours) σ-DPS [16]
+
+Figure 19: The nonlinear sine forward model with zero-valued measurement results in equispaced modes of varying weights. The unmodified DPS algorithm overweights tail modes, attending too strongly to the likelihood relative to the prior. For unimodal Gaussian prior distribution 
+
+ppr (x0) = N (1 .5, 2.0) 
+
+with high-frequency sine forward model 
+
+y = sin(2 πx) + 0 .3z, z ∼ N (0 , Im),
+
+and (centered) observed measurement y = +0 .00 , the resulting posterior is multimodal with equis-paced maxima. 
+
+Figure 20: We increase ζ from 0.01 (top left) to 0.49 (bottom right) in increments of 0.02 . As 
+
+ζ increases, we see a steady increase in the number of modes present in the posterior due to overweighting the likelihood, where too few modes are present for small ζ < 0.07 and too many modes are present for ζ > 0.11 .54 Unconditional marginal   
+
+> intractable
+> True posterior FSR (ours) σ-DPS [16]
+
+Figure 21: The nonlinear sine forward model with positive measurement results in multiple pairs of adjacent peaks. The unmodified DPS algorithm overweights tail modes, attending too strongly to the likelihood. For unimodal Gaussian prior distribution 
+
+ppr (x0) = N (1 .5, 2.0) 
+
+with high-frequency sine forward model 
+
+y = sin(2 πx) + 0 .3z, z ∼ N (0 , Im),
+
+and positive observed measurement y = +0 .25 , the resulting posterior is a multimodal distribution with repeated sets of “twin modes”. 
+
+Figure 22: We increase ζ from 0.01 (top left) to 0.49 (bottom right) in increments of 0.02 . As ζ
+
+increases, we see a steady increase in the number of modes present in the likelihood, where too few modes are prsent for small ζ < 0.07 and too many modes are present for ζ > 0.11 .55

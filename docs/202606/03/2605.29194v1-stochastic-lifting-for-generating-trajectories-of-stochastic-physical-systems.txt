@@ -1,0 +1,1282 @@
+Title: Stochastic Lifting for Generating Trajectories of Stochastic Physical Systems
+
+URL Source: https://arxiv.org/pdf/2605.29194v1
+
+Published Time: Fri, 29 May 2026 00:23:31 GMT
+
+Number of Pages: 26
+
+Markdown Content:
+# Stochastic Lifting for Generating Trajectories of Stochastic Physical Systems 
+
+Jules Berman 1 Tobias Blickhan 1 Benjamin Peherstorfer 1
+
+# Abstract 
+
+Many stochastic physical systems evolve smoothly over time in the sense that the distribu-tion of states changes regularly across time steps. The transition from current state to the next state can often be modeled as the combination of a smooth map and an explicit source of random-ness. Stochastic Lifting exploits this structure by attaching an independent, high-dimensional random label to each state transition in the training data and fitting a transition map from the current state and label to the next state using a standard regression loss. The labels act as auxiliary coordinates that let the model represent multiple plausible next states from similar current states, avoiding collapse to a mean prediction in the finite-sample size regime. At inference, fresh labels are sampled at each time step and the learned map is rolled forward autoregressively, generating diverse trajectories with a single network evaluation per time step. 
+
+# 1. Overview 
+
+Many problems in computational physics require draw-ing large numbers of trajectories from stochastic time-dependent systems. A common abstraction is that dynamics induce a transition law Xt+1 ∼ ρ(·| Xt = xt) conditional on the previous state xt. The learning problem that we study is therefore not point prediction but sampling plausible next states given a current state xt.A fundamental difficulty is that fitting a map to training data 
+
+(xt, xt+1 ) with standard mean-squared-error regression col-lapses to the conditional expectation E[Xt+1 |Xt = xt] and therefore suppresses the intrinsic variability of the stochastic trajectories. At the other extreme, general-purpose genera-tive models such as diffusion- and flow-based approaches 
+
+> 1
+
+Courant Institute of Mathematical Sciences, New York Uni-versity, New York, NY 10012, USA. Correspondence to: Jules Berman <jmb1174@nyu.edu >.
+
+Proceedings of the 43 rd International Conference on Machine Learning , Seoul, South Korea. PMLR 306, 2026. Copyright 2026 by the author(s). 
+
+can represent distributions, but they typically require multi-step sampling at inference: roughly speaking, generating 
+
+T time steps with an s-step sampler requires T × s neural-network evaluations (Chen et al., 2024; Kohl et al., 2026). Recent work on one-step samplers aims to reduce this cost by distilling multi-step generation into a single evaluation, but such methods are often more difficult to train reliably and have primarily been demonstrated in stationary settings that differ from the trajectory generation setting that we are interested in (Song et al., 2023; Zhou et al., 2025; Geng et al., 2025a; Boffi et al., 2025). We defer a detailed discus-sion to the literature review in the next section. 
+
+A smoothness premise specific to time-dependent sys-tems and trajectory data Our approach is based on a premise that is natural for physical systems; and more broadly for many time-dependent dynamical systems: for sufficiently small time steps, the conditional transition law 
+
+ρ(·| xt) varies regularly with the state xt, and next states can be interpreted as small perturbations of the current state. This regularity suggests that the transition can be (at least approximately) represented by a smooth map that takes the current state together with an explicit source of randomness and outputs a next state. The key point is the smoothness of the map. We therefore use smoothness as a guiding heuris-tic: when a learned transition map interpolates the training data and is smooth, then evaluating it with fresh randomness is expected to generate plausible next-state samples that are close to the desired conditional law. 
+
+Stochastic Lifting Stochastic Lifting augments the training-data pairs (xt, xt+1 ) with an independently drawn auxiliary stochastic label ξt. It then trains a map F :(xt, ξt) 7 → xt+1 by minimizing a standard empirical re-gression loss over the labeled pairs. The label acts as an auxiliary coordinate that parametrizes stochasticity: by as-signing a distinct random label to each realized transition in the training data, the map F can fit multiple possible next states associated with similar or identical current states, rather than being driven by the regression loss to collapse toward the average. Moreover, the dimension of the label provides a handle on regularity to some extent: increasing the label dimension improves the separability of labeled training-data pairs and, as we show, can reduce the minimal Lipschitz constant among interpolants of the training data. In this way, stochastic labeling supports learning maps that 1
+
+> arXiv:2605.29194v1 [cs.LG] 28 May 2026 Stochastic Lifting
+
+interpolate the training data and remain smooth, aligning the learned maps with the smoothness premise outlined above. At inference time, we take the current state, draw a fresh la-bel from the label distribution and then evaluate the learned map to obtain a next-state sample. Repeating this proce-dure with fresh labels yields multiple plausible next-state samples. Furthermore, auto-regressively rolling out the map with a fresh label at each time step leads to a trajectory, requiring only one neural-network evaluation per time step. 
+
+Regime and scope An important nuance is that Stochastic Lifting is not aiming to yield a meaningful population-limit solution. Indeed, even with the randomly labeled data, the population minimizer collapses to the conditional expec-tation and ignores the labels. Stochastic Lifting is instead intended for the finite-sample regime, where the labeled data can be fit closely, often up to interpolation. Accordingly, instead of convergence in the classical population limit, we are interested in how close the samples that are generated with Stochastic Lifting are compared to actual samples. Our theory is intended as qualitative finite-sample guidance for this regime, highlighting the role of Lipschitz regularity and label dimension rather than guaranteeing convergence or giving tight generalization bounds. Empirically, we demonstrate state-of-the-art accuracy for generating trajectories of stochastic time-dependent phys-ical systems compared to, e.g., auto-regressive diffusion models and one-step samplers. At the same time, we stress that our method is not designed for unconditional sample generation from noise (e.g., images from noise), where the corresponding map is often globally complex and gener-ally falls outside the regularity regime we rely on. The transition-learning setting, by contrast, provides the struc-tural regularity that makes Stochastic Lifting effective. 
+
+Summary of contributions (1) Introduce Stochastic Lift-ing, which assigns stochastic labels to transitions to learn a next-step generator; sampling fresh labels at inference time enables trajectory generation with a single network evaluation per time step. 
+
+(2) Provide finite-sample Wasserstein bounds showing how interpolation together with Lipschitz regularity can control sampling error, and show that higher-dimensional labels can improve the finite-sample geometry that makes low-Lipschitz interpolation possible. 
+
+(3) Demonstrate state-of-the-art trajectory generation for stochastic, time-dependent physical systems. 
+
+# 2. Setup and Problem Formulation 
+
+2.1. Setup 
+
+Consider a stochastic process {Xt}t ⊂ X = [0 , 1] n with initial condition X0 ∼ ρ0. We denote a state (realization) of 
+
+Xt as xt and often refer to it as state. The samples evolve via a conditional distribution 
+
+Xt+1 |Xt = xt ∼ ρ( · | xt) . (1) To ease exposition, we focus on transitions that condition on the previous state Xt = xt only, but all of the following extends to transitions that condition on a history of more than one previous state. By the law of total probability, we define the time marginals as ρt+1 = R 
+
+> X
+
+ρ(·| xt)ρt(xt) d xt
+
+with the assumption that we can directly sample from ρ0.Notice that the time marginals ρt can change with time while the conditional distribution ρ(·| xt) is independent of time and only depends on the previous state xt. The coupling between xt, xt+1 is described by the density πt
+
+over Rn × Rn as πt(xt, xt+1 ) = ρ(xt+1 |xt)ρt(xt).Our data consists of pairs of states 
+
+D = [Mi=1 
+
+[T −1
+
+> t=0
+
+(xit, xit+1 ) (2) with (xit, xit+1 ) ∼ πt for all i = 1 , . . . , M . In this sense, we assume that we have available paired data. The goal is to learn a map F that mimics the transition (1) . Once we have such a map, we can roll it out autoregressively to rapidly predict new trajectories. 
+
+2.2. Challenges of learning one-step transition functions of stochastic processes Stochastic dynamics lead to one-to-many maps There cannot exist a function f : X → X , xt 7 → xt+1 that de-scribes the transition (1) of the stochastic process {Xt}t
+
+over more than one time step. The reason is that, when 
+
+ρ(·| xt) does not collapse to a single point, the transition from xt to Xt+1 |Xt = xt can be interpreted as a one-to-many map, see Figure 1a. There are arbitrarily many differ-ent realizations xjt+1 , j = 1 , 2, 3, . . . of Xt+1 |Xt = xt at time t + 1 and a function f can map from xt to only one of them. Even if we consider two different but very close 
+
+xt and x′
+
+> t
+
+, a similar issue can arise when the corresponding 
+
+xt+1 and x′ 
+
+> t+1
+
+are far apart. One can interpret this as a poorly conditioned regression problem, which requires a regression function (and a parametrization that can repre-sent it) that is far from smooth. In particular, the Lipschitz constant of f grows to infeasible values in this setting. One interpretation of the one-to-many map perspective is that the transition from xt to a realization of Xt+1 | Xt =
+
+xt depends on additional information that is not present in xt. For example, let us consider a transition (1) stem-ming from a discretized stochastic differential equation 
+
+Xt+1 = Xt + d t b (Xt) + √dt σ Wt. The transition from 
+
+Xt to Xt+1 depends on the realization of Xt but addition-ally on the realization of the noise Wt, which is typically independent of Xt. Thus, xt alone is insufficient to describe 
+
+Xt+1 |Xt = xt.2Stochastic Lifting            
+
+> (a) one-to-many issue ξ(b) poorly conditioned ξ(c) Stochastic Lifting
+> Figure 1. (a) For data from a stochastic process, (almost) identical states can have different next states, which prevents learning a transition map from just trajectories. (b) Labeling data points separates them but low-dimensional labels can still lead to poorly conditioned regression problems. (c) Stochastic Lifting uses high-dimensional labels, which enables fitting a smooth regression function.
+
+Fitting a function to stochastic dynamics collapses to the mean dynamics Simply fitting a function f : X → X , xt 7 → xt+1 to data (2) from a stochastic process can capture only mean-like behavior. In fact, training f on data (2) with the mean-squared error loss collapses to the conditional expectation xt 7 → E[Xt+1 |Xt = xt] in the limit M → ∞ .If the stochasticity in the data (2) is due to noise and pertur-bations, then often the goal is recovering the mean behavior, in which case fitting time integrators with the mean-squared loss is reasonable; as in operator learning (Li et al., 2021; Lu et al., 2021; Kovachki et al., 2021). However, our goal is generating new sample trajectories where the random-ness is not only injected at the initial condition sampled from ρ0 but also during the roll out, as described by the transition (1) and reflected in the data (2) (recall the exam-ple with the stochastic differential equation in the previous paragraph). Thus, capturing mean-like behavior only by applying operator learning and other deterministic transition modeling methods and relying on input randomness alone is insufficient. In particular, we will also consider stochastic processes that always start with the same initial condition 
+
+ρ0 = δx0 (see wave and multi-phase flow in Section 5). 
+
+2.3. Literature review 
+
+Multi- and single-step generative models There is a range of multi-step methods for generative modeling, which build on diffusion- and flow-based modeling (Sohl-Dickstein et al., 2015; Ho et al., 2020; Hyv ¨arinen, 2005; Song et al., 2019; Song & Ermon, 2019; Song et al., 2021; Albergo & Vanden-Eijnden, 2023; Albergo et al., 2025; Lipman et al., 2023; Liu et al., 2023). In contrast, the focus of our work lies on a one-step method, for which a single neural-network function evaluation per next state is sufficient. Early one-step methods are difficult to train (Goodfellow et al., 2014; Arjovsky et al., 2017) or easily collapse (Kingma & Welling, 2014). There are distillation approaches for constructing one-step models out of multi-step models but these require having readily available a multi-step model (Yin et al., 2024; Sauer et al., 2024; Zhou et al., 2024; Song et al., 2023; Geng et al., 2025b; Frans et al., 2024). More recently, there are methods that aim to circumvent having to train a multi-step model first (Song et al., 2023; Zhou et al., 2025; Geng et al., 2025a; Boffi et al., 2025) but they focus on static generation tasks such as noise to image and do not explicitly leverage the regularity induced by conditioning on previous states in time-dependent problems that we rely on for generating trajectory data. Note that neural processes and latent state-space models introduce latent variables to model conditional or sequen-tial uncertainty and infer the latents from data (Krishnan et al., 2017; Garnelo et al., 2018). In contrast, Stochastic Lifting does not infer latents or hidden states but assigns independent random labels to transition pairs of states. 
+
+Autoregressive generative models for trajectory data gen-eration There is a range of works on autoregressive diffu-sion models (ARDMs) (Hoogeboom et al., 2022; Albergo et al., 2025; Price et al., 2025) and also flow-based models (Davtyan et al., 2023; Chen et al., 2024) that can generate trajectory data; however, these require multiple steps per next state, which can be expensive. There are also time-space approaches (Ho et al., 2022) with the drawback of having to handle a large time-space tensor. We also men-tion marginal trajectory matching (Neklyudov et al., 2023; Berman et al., 2024; Blickhan et al., 2025) which also per-forms only a single neural-network function evaluation per time step but the corresponding models can be challenging to scale to high dimensions. Another line of work imposes constraints on the diffusion trajectories to better align them (R ¨uhling Cachay et al., 2023; Ruhe et al., 2024); these again require multiple steps per next state. 
+
+Lifting A key aspect of our approach is lifting data into higher dimensions, which is prevalent in machine learning (Cortes & Vapnik, 1995; Rahimi & Recht, 2007) but also in computational science in general (McCormick, 1976; Gu, 2011; Kramer & Willcox, 2019; Qian et al., 2020; McQuar-3Stochastic Lifting 
+
+rie et al., 2021). We mention neural ordinary differential equations (Dupont et al., 2019; Kidger, 2022) that augment the state space to extend the expressivity of neural ordinary differential equations. With lifting we pursue an analogous goal of making a problem better behaved, namely smoother. 
+
+# 3. Stochastic Lifting 
+
+3.1. Labeling data points to avoid one-to-many issue 
+
+We randomly draw labels ξit ∈ Rd from a distribution ν for all xit in the data set D, which leads to the augmented data set 
+
+Dξ = [Mi=1 
+
+[T −1
+
+> t=0
+
+  xit, xit+1 , ξit
+
+ . (3) In all of the following, the label distribution ν will be 
+
+N (0 , Id), the standard normal distribution of dimension d,which implies that the labels are unique almost surely. We assume that ν is independent of t, but we still denote ξt ∼ ν
+
+to emphasize that, for a given trajectory xi
+
+> 0
+
+, . . . , xiT −1, the label of the state at time t need not be the same as the label of the state at time t + 1 .Uniquely labeling the data points overcomes the one-to-many issue: Even if there are xit = xjt for i̸ = j, the cor-responding labeled points (xit, ξit) and (xjt , ξjt ) are unique; see Figure 1b. Thus, circling back to the challenges de-scribed in Section 2.2, because of the unique label for each data point, there now exists a function F : X × Rd → X 
+
+that can interpolate (memorize) the data in the sense 
+
+F (xit, ξit) = xit+1 , (4) for i = 1 , . . . , M and t = 0 , . . . , T − 1. Recalling the example from Section 2.2 about the stochastic differential equation, we can interpret ξit as a surrogate of the realization of noise Wt that enters the dynamics. 
+
+3.2. Wasserstein-2 bound for smooth interpolator 
+
+We now show that if the map F is smooth (regular) in terms of its Lipschitz constant and interpolates the data as in (4) ,then samples generated with F are close to ρt+1 in the Wasserstein-2 metric. Note that smooth refers to Lipschitz regularity of the discrete-time transition map F at a fixed time step on the lifted input space, not to differentiability of sample paths of a continuous-time stochastic process that is possibly underlying the transition law of interest. 
+
+Proposition 3.1. Let F interpolate the training data Dξ
+
+as in (4) . At any time t, consider ˜M test samples Dtest  
+
+> ξ
+
+=
+
+{( ˜ xit, ˜xit+1 , ˜ξit)} ˜Mi=1 sampled from πt ⊗ ν. Evaluate now the map F to obtain the generated samples ˆxit+1 = F ( ˜ xit, ˜ξit)
+
+for i = 1 , . . . , ˜M . Then, 
+
+EDξ ,Dtest 
+
+> ξ
+
+W2(ˆ ρt+1 , ˜ρt+1 )2
+
+≤ C(1 + L2 
+
+> F
+
+) min( M, ˜M )−2/α , (5) 
+
+where ˆρt+1 and ˜ρt+1 are the empirical measures corre-sponding to the generated samples { ˆxit+1 } ˜Mi=1 and the test samples { ˜xit+1 } ˜Mi=1 . The constant LF is a deterministic uniform Lipschitz bound on F (see Appendix A.2), α > 0
+
+controls the empirical Wasserstein convergence rates of the paired input data (xt, ξt) and of the next-state data xt+1 ,and C > 0 is an explicit constant depending only on α and the corresponding empirical Wasserstein constants. 
+
+A proof can be found in Appendix A.2. The bound (5) critically depends on the smoothness of F in terms of the Lipschitz constant LF . While simply interpolating indepen-dently drawn samples from two distributions can lead to regression functions with high Lipschitz constants in low dimensions (see Figure 1b), we will discuss in the following that labels of high dimension can help to reduce LF .Furthermore, strong conditioning induced by the previous state can be helpful in regimes where the finite-step transi-tion can be written as the current state plus a regular update. More precisely, at a fixed time discretization we may have 
+
+F (x, ξ) = x + ∆ dt(x, ξ) with ∆dt Lipschitz on the rele-vant data domain. In drift-dominated settings this update may scale like dt; for Brownian or diffusion-dominated in-crements it may instead scale like √dt. The results here do not require pathwise differentiability of continuous-time trajectories and do not analyze the limit dt → 0. The follow-ing corollary isolates the special case ∆dt = d tR , where the time-step scaling enters in front of the Lipschitz constant and helps alleviate non-smoothness. 
+
+Corollary 3.2. If F (x, ξ) = x + d tR (x, ξ), then (5) can be written as 
+
+EDξ ,Dtest 
+
+> ξ
+
+W2(ˆ ρt+1 , ˜ρt+1 )2
+
+≤ C(1 + d t2L2
+
+> R
+
+) min( M, ˜M )−2/α , (6) 
+
+where C and α are as in Proposition 3.1 and LR is the Lipschitz constant of R.
+
+Similar bounds can be derived when assuming more struc-ture on F ; see Appendix A.2. For SDE-driven data, our statements apply to the one-step map at the fixed time step used in the data, not to the continuous-time Brownian path or to the limit dt → 0.For example, a discretized transition may have the form 
+
+F (x, ξ) = x + d t b (x) + √dt σ ξ (see the SDE example in Section 2.2). This finite-step map is within our scope when it is Lipschitz on the data domain, but the relevant Lipschitz constants can depend on dt. In particular, the stochastic term scales like √dt rather than dt, so Brownian-dominated dynamics do not benefit from the same short-step scaling as drift-dominated dynamics. Stochastic Lifting is therefore expected to work best when xt and xt+1 remain strongly coupled; if the conditional law is nearly independent of xt,4Stochastic Lifting 
+
+or if pure Brownian noise dominates at the observed time step, then the method falls outside the favorable regime. This coupling requirement is tested directly by the shuf-fling experiment in Figure 2 and the direct-initial-to-final experiment in Figure 4. 
+
+3.3. Lifting for smoothness 
+
+The key in the previous results was the smoothness of F
+
+given by the Lipschitz constant, which we can control to some extent by using high-dimensional labels. The minimal Lipschitz constant of a function F that interpolates the data as in (4) is 
+
+L(Dξ ) = max 
+
+> (i,t )̸=( j,s )
+
+∥xit+1 − xjs+1 ∥2
+
+q
+
+∥xit − xjs∥22 + ∥ξit − ξjs ∥22
+
+, (7) for i, j = 1 , . . . , M and t, s = 0 , . . . , T − 1. Note that a function interpolating the data (4) with Lipschitz constant (7) on the data can be extended to X × Rd without increasing the Lipschitz constant (Federer, 1996)[Theorem 2.10.43]. In practice, we rely on standard deep learning regularization techniques (weight decay, normalization layers) to learn a regular interpolant of the data. 
+
+High-dimensional labels decrease the minimal Lipschitz constant We draw our labels from a standard normal of di-mension d. For the sake of the theoretical argument we con-sider normalized labels with unit norm ∥ξit∥2 = ∥ξis∥2 = 1 ,which means that 12 ∥ξit − ξjs ∥22 = 1 − ξit · ξjs . That is, the distance between labels is controlled by their inner product. Because the normalized labels are uniformly distributed on the unit sphere Sd−1, ξit · ξjs is of order 1/√d with high probability (Vershynin, 2018)[Section 3.3.3 and Theorem 3.3.9]. Hence increasing d widens the separation between labels and reduces the minimal Lipschitz constant of any interpolant as the following proposition shows (see also Figure 1c). 
+
+Proposition 3.3. For normalized data and normalized la-bels, if M ≥ 2 and d ≥ max {c2 
+
+> δ
+
+ln(( T + 1) M ), 2}, then 
+
+L(Dξ ) ≤√n
+
+√2 1 + cδ
+
+r ln(( T + 1) M )
+
+d
+
+!
+
+,
+
+holds with probability at least 1 − δ, δ ∈ (0 , 1) , and with constant cδ > 0 independent of T, M, d .
+
+See Appendix A.1 for a proof. This result is deliber-ately stated for unit-scale labels: the mechanism is near-orthogonal separation at fixed label norm, not an artificial reduction of the ratio by inflating the label diameter. Thus, we have some control over the minimal Lipschitz constant that any interpolant must have via the label dimension d.Note that the regularity of F is further improved by the closeness between xt and xt+1 (Corollary 3.2). We do not normalize our labels in practice because we expect the com-ponents of the label ξit to be of order one, which is true when 
+
+ξit ∼ N (0 , Id). The argument that the minimal L(Dξ ) can be improved via a high dimension d remains unchanged. 
+
+Orthogonal labels avoid inducing structure Tradition-ally, one would aim to arrange (couple) labels ξit and targets (next state) xit+1 . We do not rearrange because of costs, and thus we need to ensure that no spurious structure is induced between labels and next states. Choosing the labels close to orthogonal achieves this. 
+
+3.4. Fitting maps to stochastically lifted data and one-step inference Training on lifted data and one-step inference We now formulate a regression problem using the labeled data Dξ .Let us parametrize F as a neural-network function Fθ with weights θ ∈ Rp.We then propose to fit Fθ to the labeled data Dξ using a regression-based loss function, 
+
+L(θ, Dξ ) = 1
+
+M T 
+
+> M
+
+X 
+
+> i=1
+> T−1
+
+X
+
+> t=0
+
+∥Fθ (xit, ξit) − xit+1 ∥22 . (8) Other regression loss functions can be used. In the physics based experiments we use a L2 error. In the experiments involving natural video we use an LPIPS loss (Zhang et al., 2018); see Appendix F. To generate a new state at time t + 1 for a given xt, we draw a new label ξt ∼ ν and evaluate the Fθ (xt, ξt) = xt+1 
+
+to obtain xt+1 . This is one-step inference because only a single function evaluation is necessary to generate a new sample. 
+
+Lifting avoids collapse onto conditional expectation (mean behavior) of empirical-risk minimizer Critically, when taking the infinite data limit M → ∞, then the minimizer of (8) collapses to the conditional expectation 
+
+E [Xt+1 |Xt = xt], since the labels ξit are drawn indepen-dently from xit. This stresses that the map F that we learn with Stochastic Lifting does not converge in a distributional sense to the conditional law ρ(·| xt) in the conventional limit of taking the number of data points to infinity, M → ∞ .However, this collapse is avoidable at finite sample size. We argue that if the label dimension d is allowed to scale with the number of data points T × M , and if the network 
+
+Fθ is sufficiently expressive, then the minimizer of the em-pirical mean-squared error loss can interpolate the train-ing data as in (4) and does not collapse to the conditional expectation. In particular, for finitely many training data 5Stochastic Lifting      
+
+> 0.0 0.2 0.4 0.6 0.8 1.0
+
+shuffle percent     
+
+> 1
+> 2
+> 3
+> W2
+> 416 64 256 1024
+
+label dimension     
+
+> 10 −1
+> 10 −2
+> 10 −3
+> final loss
+> 416 64 256 1024
+
+label dimension     
+
+> 1e-02
+> 2e-04
+> |∇ ξ F |
+> Figure 2. Shuffling training pairs (xt,xt+1 )breaks the conditional transition structure and degrades Stochastic Lifting’s performance, in agreement with the smoothness premise outlined in the Introduction ( left ). Increasing the label dimension helps to push the training into the interpolation regime ( middle ) and induces smoother dependence on the label ( right ), consistent with our discussion.
+
+points M < ∞, we can achieve zero training error (inter-polation/memorization) by ensuring that Fθ is expressive enough while at the same time choosing the label dimension 
+
+d so high that the minimal Lipschitz constant (7) is con-trolled, in which case a smooth Fθ can be found. In practice, Adam with weight decay, normalization layers, and stan-dard architecture choices often biases optimization towards learning globally smooth interpolants; see Appendix F. In this regime, we expect Fθ to behave as discussed in Propo-sition 3.1, implying that evaluating Fθ at fresh labels yields outputs that approximately follow the conditional distribu-tion ρ(·| xt).As a side remark, we note that in the case of linear least-squares regression, it has been shown that when the ratio 
+
+d/ (M (T + 1)) between dimension d and number of data points M (T + 1) remains fixed in the limit d, M → ∞ ,then collapse is avoided (Hastie et al., 2022). 
+
+# 4. Demonstration on an SDE Example 
+
+We demonstrate Stochastic Lifting on a duffing oscillator with random forcing, which is described by an SDE with two-dimensional states; see Appendix D.1. We generate training data, augment each pair (xt, xt+1 ) with a label, and then train Fθ represented as a multi-layer perceptron (MLP) with the loss (8) . At inference time, we roll out the learned Fθ as described above from a new sample of our initial distribution and fresh labels in each time step. 
+
+Stochastic Lifting crucially relies on the smoothness premise In Figure 2 (left), we plot W2 error on test data against the percentage of training pairs (xt, xt+1 ) that are shuffled prior to training. Concretely, we choose a speci-fied percentage of all training trajectories and, at each time step, independently permute the corresponding xt+1 val-ues, thereby breaking the pairing between xt and xt+1 . As this shuffle percentage increases, we progressively move away from the true transition coupling toward a product cou-pling between the time marginals ρt, in which xt and xt+1 
+
+are nearly independent for the shuffled pairs. We observe that increasing the shuffling percentage leads to a larger 
+
+W2 error, indicating that Stochastic Lifting indeed critically depends on the smoothness premise in the sense that the conditional transition law ρ(·| xt) varies smoothly with xt
+
+and next states can be interpreted as small perturbations of the current state. This experiment directly probes the coupling condition discussed after Corollary 3.2. When the training pairs come from a finite-step transition, the update is typically 
+
+xt+1 = xt + ∆ dt(xt, ξ), with ∆dt regular on the relevant data domain and, in favorable regimes, small in the time step. Shuffling destroys this structure so that the next state is increasingly drawn as if it were an independent sample from the marginal distribution rather than a sample from the conditional law. The degradation in W2 under shuffling is therefore consistent with the prediction that Stochastic Lift-ing is most effective in the strongly coupled regime. This also highlights that for SDE-driven data, refining the time step does not make the problem easier indefinitely, because drift increments scale like dt whereas Brownian increments scale like √dt, so at sufficiently small dt the stochastic component can dominate the regular deterministic update. 
+
+Higher label dimension enables interpolation and pro-motes smoothness In Figure 2 (middle), we plot the final training loss versus label dimension. As the label dimen-sion increases, the loss drops to near zero, indicating that higher-dimensional labels enable the network to interpolate the training data. In Figure 2 (right), we plot the norm of the network gradient against the label dimension. The gradi-ent norm decreases as the label dimension increases, which indicates that the network becomes smoother in the label, supporting our discussion that higher-dimensional labels can promote smoothness. 
+
+# 5. Numerical Experiments 
+
+Setup For all of the following experiments we parametrize our map Fθ via UNet architectures (Ronneberger et al., 2015) but our method works with other standard diffusion backbone (Peebles & Xie, 2023; Bao et al., 2023; Hooge-boom et al., 2023). We repurpose the diffusion-time input 6Stochastic Lifting s=2 s=5 s=10 s=20 s=40 s=1 (ours) True 
+
+> .00
+> .03
+> .06
+> .09
+> .12
+
+10.1
+
+> 0.3
+> 0.5
+> 0.7
+> 0.9
+
+1       
+
+> 28
+> 0
+> 5
+> 10 ours-1
+> 28
+> ARDM-40
+> 00.7
+> 0
+> 5
+> 10
+> ours-1
+> 00.7
+> ARDM-40
+> crossing time (QoI)
+> Figure 3. Left : Stochastic Lifting generates diverse plausible trajectories in just one step per next state (time step), where ARDMs only begin to generate plausible trajectories when using 20 diffusion steps. Right : We compute the crossing time for each trajectory (see appendix D.5) and plot the distribution across 512 generated trajectories vs the ground truth. Stochastic Lifting accurately approximates the ground truth data in distribution, even outperforming ARDM using 40 diffusion steps.
+
+to condition on our label ξt; see Appendix E for details. For all datasets we provide uncurated samples from our model in Appendix G. We stress that we can use Stochastic Lifting directly on the state space (e.g., pixels of frames) and so avoid hav-ing to rely on a latent embedding via pre-trained encoder and decoder networks as many other generative modeling methods (Rombach et al., 2022). By avoiding the latent em-bedding we ease the significant engineering complexity and hyper-parameter tuning that comes with latent embeddings. 
+
+With just one step per next state, Stochastic Lifting achieves comparable accuracy to multi-step models on physics problems We consider two physics problems: first, a traveling wave through a spatially varying random medium, which is motivated by seismic wave propagation (Sato et al., 2012); see Appendix D.2. Second, an incom-pressible two-phase flow in random porous media, which is motivated by petroleum engineering (oil/water) and models of groundwater flow; see Appendix D.3. Importantly, for both wave and flow problems, the initial condition is deter-ministic and fixed, thus deterministic approaches such as neural operators cannot capture the stochasticity induced by the random media and permeability fields during the autoregressive roll out; see Section 2.2. We compare our Stochastic Lifting to an autoregressive diffusion model (ARDM) trained on the same dataset. We use the implementation given in (Kohl et al., 2026), also built around a UNet backbone and comparable parameter count as we use for Stochastic Lifting. We vary the number of diffusion steps s and compare the accuracy to Stochastic Lifting that uses only a single step ( s = 1 ). For the wave and flow problems, ARDM requires 40 steps to generate accurate samples; see Figure 3 (left). In con-trast, Stochastic Lifting generates accurate samples in one step. Figure 7–8 in the appendix show nearest-neighbor trajectories and generated states and so provide evidence that Stochastic Lifting is indeed generating new samples instead of simply retrieving memorized ones. To quantitatively compare the generated samples, we con-sider the crossing time as a physical quantity of interest, which is the time at which the wave hits the boundary and the saturation reaches the right-bottom corner of the do-main, respectively; see Appendix D.5. We plot the distri-bution of the crossing time of 512 generated trajectories. Stochastic Lifting accurately matches the ground truth data in distribution; see Figure 3 (right). Notice that Stochastic Lifting approximates well the non-Gaussian behavior of the crossing time in the wave example (heavy tail), whereas ARDM fails to capture it even with s = 40 steps. Table 1 shows the Wasserstein-2 distance between the distribution of the crossing time (WCT) obtained with Stochastic Lift-ing and ARDM over various steps. Table 1 also plots the Wasserstein-2 distance (WIM) for another physics quantity of interest, the integrated mass; see Appendix D.5. 
+
+Stochastic Lifting is robust to label dimension, once suf-ficiently high to allow interpolation In Figure 4 (left) we plot the final L2 training loss achieved after optimiza-tion. For low label dimensions, the neural network cannot 7Stochastic Lifting      
+
+> 2832 128 512 2048
+
+label dimension      
+
+> 1e-03
+> 1e-02
+> train loss  Wave
+> Flow
+> 2832 128 512 2048
+
+label dimension 
+
+> .00
+> .02
+> .04
+> WCT
+> Wave
+> Flow
+> conditioning current state (top row)
+
+# 11                                            
+
+> direct map from initial condition alone (bottom row)
+> Figure 4. Left : Choosing a higher label dimension dallows the neural network to interpolate the data, resulting in one order-of-magnitude lower L2 final training loss. Middle : Stochastic Lifting is robust to the choice of the label dimension as long as it is sufficiently high for interpolation. Right : Stochastic Lifting critically depends on the conditioning on the current state to generate a high-quality next state. If we attempt to jump to the last state directly, the method breaks down.
+> Table 1. Wasserstein distance between the distribution of 512 samples from the true model vs. the generative model measured on various quantities of interest; see Appendix D.5.
+> Wave Flow WCT ↓WIM ↓WCT ↓WIM ↓
+> ARDM s=2 2.49 e−29.11 e−51.18 e−13.46 e−2
+> ARDM s=5 2.13 e−21.04 e−43.39 e−24.58 e−2
+> ARDM s=10 1.04 e−26.00 e−59.13 e−21.29 e−1
+> ARDM s=20 7.28 e−31.06 e−43.25 e−21.27 e−3
+> ARDM s=40 1.11 e−29.85 e−51.86 e−36.00 e−4
+> SL (ours) s=1 4.53 e−32.06 e−59.47 e−46.08 e−4
+
+interpolate the data, resulting in high training loss. Figure 4 (middle) shows that for a sufficiently high label dimension (in particular once interpolation is achieved), the model pro-duces an accurate approximation in the WCT metric (see Table 1). These results align well with Proposition 3.1. At the same time, the approach is fairly robust to the label di-mension once it is sufficiently high because architectures such as UNet and the corresponding modulation (see Ap-pendix E) can compress the labels if necessary. 
+
+Stochastic Lifting critically depends on conditioning of current state In Figure 4 (right, top) we show the final state of the rollout from our model, which is accurate. In the bottom row, we show what happens when we train a Stochastic Lifting model which maps directly from the ini-tial condition x0 to the final state xT −1 (i.e. without se-quential rollout). In this case, Stochastic Lifting breaks, producing near noise in the wave problem and non-physical, disconnected flows in the flow problem. This study provides further evidence that Stochastic Lifting crucially depends on the “closeness” between the distributions corresponding to the current and next state, which aligns well with Corollary 3.2.  
+
+> Table 2. Stochastic Lifting outperforms all other one-step methods on the BAIR video-generation dataset.
+
+One-step methods ( s = 1 )
+
+SV2P — (Babaeizadeh et al., 2018) 262.5 SAVP — (Lee et al., 2018) 109.8 DVD-GAN — (Clark et al., 2019) 109.8 TrIVD-GAN-FP — (Luc et al., 2020) 103.3 FitVid — (Babaeizadeh et al., 2021) 93.6 NUWA — (Wu et al., 2022) 86.9 
+
+Stochastic Lifting (ours) 69.0 Multi-step methods 
+
+RIVER — (Davtyan et al., 2023) s=100 106.1 MCVD — (Voleti et al., 2022) s=1000 98.8 RaMViD — (H¨ oppe et al., 2022) s=750 84.2 Video Diffusion — (Ho et al., 2022) s=16 66.9 Rolling Diffusion — (Ruhe et al., 2024) s=32 59.6 
+
+Stochastic Lifting scales to long-time rollouts (CLEVRER) The CLEVRER dataset (Yi et al., 2020) is a synthetic dataset designed specifically for video prediction and reasoning tasks. The videos capture diverse objects moving at high speeds from off-screen and colliding with each other. There is inherent stochasticity in when and what objects enter the frame. The training videos are 16 frames long. For testing, we evaluate our model starting with unseen initial frames and then roll out for 500 frames (states), well over one order of magnitude longer than the training videos (compare to 14 frames in (Chen et al., 2024), 120 frames in (Davtyan et al., 2023), 64 frames in (Mei & Patel, 2023)). The long rollout results in objects continuing to enter from off-screen and accumulating in clusters as they collide. Importantly, Stochastic Lifting is able to stably generate the interactions and accumulation of objects, even though such accumulations do not occur in the training set. 
+
+Stochastic Lifting outperforms other one-step methods on BAIR We apply Stochastic Lifting to the Berkeley AI 8Stochastic Lifting 1 50 100 150 200 250 300 350 400 450 500         
+
+> Figure 5. We generate 500 frames of a 128 ×128 color video in 0.28 seconds on an H100 GPU. The rollout is stable despite being trained on video with only 16 frames. In each trajectory, many more objects are in frame than ever occur during training. 110 100 1000
+
+function eval per time step 
+
+60 
+
+80 
+
+100 
+
+120 
+
+> FVD
+> SAVP
+> DVD-GAN
+> TriVD-GAN-FP
+> Video Transformer
+> MCVD
+> NUWA
+> RIVER
+> FitVid
+
+Stochastic 
+
+Lifting Video Diffusion 
+
+> Rolling Diffusion
+> RaMViD
+
+1 step N step    
+
+> Figure 6. On the BAIR video generation benchmark, Stochastic Lifting is state-of-the-art among one-step methods and competitive with diffusion-based methods that use over 10 ×more compute.
+
+Research (BAIR) robot pushing dataset, which is a stan-dard benchmark (Ebert et al., 2017). It contains roughly 
+
+44000 videos at 64 × 64 resolution. The standard prediction task is to generate 15 frames conditioned on one starting frame. We calculate FVD (using the I3D network (Carreira & Zisserman, 2017)) via the standard procedure on BAIR by generating 100 new videos starting from 256 initial frames taken from the test set. FVD is then computed between the generated and test videos. Table 2 shows that Stochastic Lifting achieves the lowest (best) FVD (Unterthiner et al., 2018) over current state-of-the-art one-step generation ap-proaches, and starts closing the gap to multi-step methods (Ruhe et al., 2024). 
+
+# 6. Conclusions and Limitations 
+
+Conclusions We provide evidence with our Stochastic Lift-ing approach that one can obtain a generative model using a standard empirical regression loss on the data augmented with stochastic labels. The theory provides finite-sample insights by showing that interpolation plus Lipschitz reg-ularity can control Wasserstein sampling error. The pro-vided theoretical results serve three specific roles: First, they identify smoothness as the key property that makes one-step sampling from an interpolating map accurate (Propo-sition 3.1), which is critical because interpolation alone could produce arbitrarily poor samples. Second, it pro-vides actionable guidance such as increasing the label di-mension improves separability and reduces the minimal Lipschitz constant (Proposition 3.3), telling practitioners that increasing the dimension d can help. Third, it explains why the transition-learning setting is favorable, namely that the small-perturbation structure of consecutive states fur-ther reduces the effective Lipschitz constant (Corollary 3.2), clarifying why the method works for trajectory data but not for noise-to-image generation (Figure 4). Empirically, Stochastic Lifting generates stochastic physics trajectories and videos with one network evaluation per time step while matching distributional properties of the data. 
+
+Limitations (a) We critically build on the strong coupling given by the pair of current and next state in the training data, which means that Stochastic Lifting fails when aim-ing to generate images from noise. (b) Increasing the label dimension eventually guarantees the existence of a linear interpolant. However, doing so may require proportionally more data; beyond a point, the regression function cannot be trained accurately. (c) Ultimately, the quality of samples cre-ated by Stochastic Lifting relies heavily on the fact that the trained network builds a meaningful embedding of the data such that new labels lead to samples within the data mani-fold. Additional research and theoretical insights are needed to understand when this is the case and when it fails. (d) The current finite-sample theory applies to time marginals only and not to conditional transition laws. Furthermore, tt remains an open question to understand a meaningful population limit of Stochastic Lifting. 
+
+# Acknowledgments 
+
+The authors have been funded in part by the Air Force Office of Scientific Research (AFOSR), USA, award FA9550-24-1-9Stochastic Lifting 
+
+0327, and the Defense Advanced Research Projects Agency (DARPA) under Agreement No. HR00112590114, as part of DARPA’s Disruptioneering / The Right Space (TRS) effort. 
+
+# Impact Statement 
+
+This paper presents work whose goal is to advance the field of Machine Learning. There are many potential societal consequences of our work, none which we feel must be specifically highlighted here. 
+
+# References 
+
+Aarnes, J. E., Gimse, T., and Lie, K.-A. An Introduction to the Numerics of Flow in Porous Media using Matlab , pp. 265–306. Springer Berlin Heidelberg, Berlin, Heidelberg, 2007. Albergo, M., Boffi, N. M., and Vanden-Eijnden, E. Stochas-tic interpolants: A unifying framework for flows and diffu-sions. Journal of Machine Learning Research , 26(209):1– 80, 2025. URL http://jmlr.org/papers/v26/ 23-1605.html .Albergo, M. S. and Vanden-Eijnden, E. Building normaliz-ing flows with stochastic interpolants. In The Eleventh International Conference on Learning Representations ,2023. URL https://openreview.net/forum? id=li7qeBbCR1t .Arjovsky, M., Chintala, S., and Bottou, L. Wasserstein gen-erative adversarial networks. In International conference on machine learning , pp. 214–223. PMLR, 2017. Babaeizadeh, M., Finn, C., Erhan, D., Campbell, R. H., and Levine, S. Stochastic variational video prediction. In 
+
+International Conference on Learning Representations ,2018. URL https://openreview.net/forum? id=rk49Mg-CW .Babaeizadeh, M., Saffar, M. T., Nair, S., Levine, S., Finn, C., and Erhan, D. Fitvid: Overfitting in pixel-level video prediction. arXiv preprint arXiv:2106.13195 , 2021. Bao, F., Nie, S., Xue, K., Cao, Y., Li, C., Su, H., and Zhu, J. All are worth words: A vit backbone for diffusion models. In Proceedings of the IEEE/CVF conference on computer vision and pattern recognition , pp. 22669–22679, 2023. Berman, J., Blickhan, T., and Peherstorfer, B. Parametric model reduction of mean-field and stochastic systems via higher-order action matching. Advances in neural information processing systems , 2024. Blickhan, T., Berman, J., Stuart, A., and Peherstorfer, B. DICE: Discrete inverse continuity equation for learning population dynamics. arXiv , 2507.05107, 2025. URL 
+
+https://arxiv.org/abs/2507.05107 .Boffi, N. M., Albergo, M. S., and Vanden-Eijnden, E. How to build a consistency model: Learning flow maps via self-distillation. In The Thirty-ninth Annual Conference on Neural Information Processing Systems ,2025. URL https://openreview.net/forum? id=Di5apl8HSH .Carreira, J. and Zisserman, A. Quo vadis, action recogni-tion? a new model and the kinetics dataset. In proceed-ings of the IEEE Conference on Computer Vision and Pattern Recognition , pp. 6299–6308, 2017. Chen, Y., Goldstein, M., Hua, M., Albergo, M. S., Boffi, N. M., and Vanden-Eijnden, E. Probabilistic forecast-ing with stochastic interpolants and F ¨ollmer processes. In Salakhutdinov, R., Kolter, Z., Heller, K., Weller, A., Oliver, N., Scarlett, J., and Berkenkamp, F. (eds.), Pro-ceedings of the 41st International Conference on Machine Learning , volume 235 of Proceedings of Machine Learn-ing Research , pp. 6728–6756. PMLR, 21–27 Jul 2024. Clark, A., Donahue, J., and Simonyan, K. Adversarial video generation on complex datasets. arXiv preprint arXiv:1907.06571 , 2019. Cortes, C. and Vapnik, V. Support-vector networks. Ma-chine Learning , 20(3):273–297, Sep 1995. ISSN 1573-0565. doi: 10.1007/BF00994018. URL https://doi. org/10.1007/BF00994018 .Davtyan, A., Sameni, S., and Favaro, P. Efficient video prediction via sparsely conditioned flow matching. In 
+
+Proceedings of the IEEE/CVF International Conference on Computer Vision , pp. 23263–23274, 2023. Dupont, E., Doucet, A., and Teh, Y. W. Augmented neural odes. Advances in neural information processing systems ,32, 2019. Ebert, F., Finn, C., Lee, A. X., and Levine, S. Self-supervised visual planning with temporal skip connec-tions. In Levine, S., Vanhoucke, V., and Goldberg, K. (eds.), Proceedings of the 1st Annual Conference on Robot Learning , volume 78 of Proceedings of Machine Learning Research , pp. 344–356. PMLR, 13–15 Nov 2017. URL https://proceedings.mlr.press/ v78/frederik-ebert17a.html .Federer, H. Geometric Measure Theory . Springer, 1996. Frans, K., Hafner, D., Levine, S., and Abbeel, P. One step diffusion via shortcut models. arXiv preprint arXiv:2410.12557 , 2024. Garnelo, M., Rosenbaum, D., Maddison, C., Ramalho, T., Saxton, D., Shanahan, M., Teh, Y. W., Rezende, 10 Stochastic Lifting 
+
+D., and Eslami, S. M. A. Conditional neural pro-cesses. In Dy, J. and Krause, A. (eds.), Proceed-ings of the 35th International Conference on Machine Learning , volume 80 of Proceedings of Machine Learn-ing Research , pp. 1704–1713. PMLR, 10–15 Jul 2018. URL https://proceedings.mlr.press/v80/ garnelo18a.html .Geng, Z., Deng, M., Bai, X., Kolter, J. Z., and He, K. Mean flows for one-step generative modeling. In The Thirty-ninth Annual Conference on Neural Information Process-ing Systems , 2025a. URL https://openreview. net/forum?id=uWj4s7rMnR .Geng, Z., Pokle, A., Luo, W., Lin, J., and Kolter, J. Z. Consistency models made easy. In The Thirteenth In-ternational Conference on Learning Representations ,2025b. URL https://openreview.net/forum? id=xQVxo9dSID .Goodfellow, I. J., Pouget-Abadie, J., Mirza, M., Xu, B., Warde-Farley, D., Ozair, S., Courville, A., and Bengio, Y. Generative adversarial nets. In Ghahra-mani, Z., Welling, M., Cortes, C., Lawrence, N., and Weinberger, K. (eds.), Advances in Neural Information Processing Systems , volume 27. Curran Associates, Inc., 2014. URL https://proceedings.neurips. cc/paper_files/paper/2014/file/ f033ed80deb0234979a61f95710dbe25-Paper. pdf .Gu, C. QLMOR: A projection-based nonlinear model order reduction approach using quadratic-linear representation of nonlinear systems. IEEE Transactions on Computer-Aided Design of Integrated Circuits and Systems , 30(9): 1307–1320, 2011. Hastie, T., Montanari, A., Rosset, S., and Tibshirani, R. J. Surprises in high-dimensional ridgeless least squares in-terpolation. The Annals of Statistics , 50(2):949 – 986, 2022. doi: 10.1214/21-AOS2133. URL https://doi. org/10.1214/21-AOS2133 .Ho, J., Jain, A., and Abbeel, P. Denoising diffusion probabilistic models. In Larochelle, H., Ranzato, M., Hadsell, R., Balcan, M., and Lin, H. (eds.), 
+
+Advances in Neural Information Processing Systems ,volume 33, pp. 6840–6851. Curran Associates, Inc., 2020. URL https://proceedings.neurips. cc/paper_files/paper/2020/file/ 4c5bcfec8584af0d967f1ab10179ca4b-Paper. pdf .Ho, J., Salimans, T., Gritsenko, A., Chan, W., Norouzi, M., and Fleet, D. J. Video diffusion models. Advances in Neural Information Processing Systems , 35:8633–8646, 2022. Hoogeboom, E., Gritsenko, A. A., Bastings, J., Poole, B., van den Berg, R., and Salimans, T. Autoregressive dif-fusion models. In International Conference on Learning Representations , 2022. URL https://openreview. net/forum?id=Lm8T39vLDTE .Hoogeboom, E., Heek, J., and Salimans, T. Simple diffu-sion: End-to-end diffusion for high resolution images. In International Conference on Machine Learning , pp. 13213–13232. PMLR, 2023. H ¨oppe, T., Mehrjou, A., Bauer, S., Nielsen, D., and Dittadi, A. Diffusion models for video prediction and infilling. Transactions on Machine Learning Re-search , 2022. ISSN 2835-8856. URL https:// openreview.net/forum?id=lf0lr4AYM6 .Hyv ¨arinen, A. Estimation of non-normalized statistical models by score matching. Journal of Machine Learning Research , 6(24):695–709, 2005. URL http://jmlr. org/papers/v6/hyvarinen05a.html .Kidger, P. On neural differential equations. arXiv preprint arXiv:2202.02435 , 2022. Kingma, D. P. and Welling, M. Auto-Encoding Variational Bayes. In 2nd International Conference on Learning Representations, ICLR 2014, Banff, AB, Canada, April 14-16, 2014, Conference Track Proceedings , 2014. Kohl, G., Chen, L.-W., and Thuerey, N. Benchmarking autoregressive conditional diffusion models for turbulent flow simulation. Neural Networks , 199:108641, 2026. Kovachki, N., Lanthaler, S., and Mishra, S. On universal approximation and error bounds for Fourier neural opera-tors. Journal of Machine Learning Research , 22(290):1– 76, 2021. URL http://jmlr.org/papers/v22/ 21-0806.html .Kramer, B. and Willcox, K. Nonlinear model order reduc-tion via lifting transformations and proper orthogonal decomposition. AIAA Journal , 57(6):2297–2307, 2019. Krishnan, R. G., Shalit, U., and Sontag, D. Structured in-ference networks for nonlinear state space models. In 
+
+Proceedings of the Thirty-First AAAI Conference on Ar-tificial Intelligence , AAAI’17, pp. 2101–2109. AAAI Press, 2017. Lee, A. X., Zhang, R., Ebert, F., Abbeel, P., Finn, C., and Levine, S. Stochastic adversarial video prediction. arXiv preprint arXiv:1804.01523 , 2018. Li, Z., Kovachki, N. B., Azizzadenesheli, K., Liu, B., Bhat-tacharya, K., Stuart, A. M., and Anandkumar, A. Fourier 11 Stochastic Lifting 
+
+neural operator for parametric partial differential equa-tions. In 9th International Conference on Learning Rep-resentations, ICLR 2021, Virtual Event, Austria, May 3-7, 2021 . OpenReview.net, 2021. Lipman, Y., Chen, R. T. Q., Ben-Hamu, H., Nickel, M., and Le, M. Flow matching for generative modeling. In The Eleventh International Conference on Learning Represen-tations , 2023. URL https://openreview.net/ forum?id=PqvMRDCJT9t .Liu, X., Gong, C., and Liu, Q. Flow straight and fast: Learning to generate and transfer data with rectified flow. In International Conference on Learning Representations ,2023. URL https://openreview.net/forum? id=XVjTT1nw5z .Lu, L., Jin, P., Pang, G., Zhang, Z., and Karni-adakis, G. E. Learning nonlinear operators via deep-onet based on the universal approximation theorem of operators. Nature Machine Intelligence , 3(3):218– 229, Mar 2021. ISSN 2522-5839. doi: 10.1038/ s42256-021-00302-5. URL https://doi.org/10. 1038/s42256-021-00302-5 .Luc, P., Clark, A., Dieleman, S., Casas, D. d. L., Doron, Y., Cassirer, A., and Simonyan, K. Transformation-based adversarial video prediction on large-scale data. arXiv preprint arXiv:2003.04035 , 2020. McCormick, G. P. Computability of global solutions to factorable nonconvex programs: Part i–convex underes-timating problems. Mathematical Programming , 10(1): 147–175, 1976. McQuarrie, S., Huang, C., and Willcox, K. Data-driven reduced-order models via regularised operator inference for a single-injector combustion process. Journal of the Royal Society of New Zealand , 51(2):194–211, 2021. Mei, K. and Patel, V. VIDM: Video implicit diffusion models. Proceedings of the AAAI Conference on Artificial Intelligence , 37(8):9117–9125, Jun. 2023. Neklyudov, K., Brekelmans, R., Severo, D., and Makhzani, A. Action matching: Learning stochastic dynamics from samples. In International conference on machine learn-ing , pp. 25858–25889. PMLR, 2023. Peebles, W. and Xie, S. Scalable diffusion models with transformers. In Proceedings of the IEEE/CVF interna-tional conference on computer vision , pp. 4195–4205, 2023. Perez, E., Strub, F., De Vries, H., Dumoulin, V., and Courville, A. Film: Visual reasoning with a general con-ditioning layer. In Proceedings of the AAAI conference on artificial intelligence , volume 32, 2018. Price, I., Sanchez-Gonzalez, A., Alet, F., Andersson, T. R., El-Kadi, A., Masters, D., Ewalds, T., Stott, J., Mo-hamed, S., Battaglia, P., Lam, R., and Willson, M. Probabilistic weather forecasting with machine learn-ing. Nature , 637(8044):84–90, 2025. doi: 10.1038/ s41586-024-08252-9. URL https://www.nature. com/articles/s41586-024-08252-9 .Qian, E., Kramer, B., Peherstorfer, B., and Willcox, K. Lift & learn: Physics-informed machine learning for large-scale nonlinear dynamical systems. Physica D: Nonlinear Phenomena , 406:132401, 2020. Rahimi, A. and Recht, B. Random features for large-scale kernel machines. In Platt, J., Koller, D., Singer, Y., and Roweis, S. (eds.), Advances in Neural Information Processing Systems , volume 20. Curran Associates, Inc., 2007. URL https://proceedings.neurips. cc/paper_files/paper/2007/file/ 013a006f03dbc5392effeb8f18fda755-Paper. pdf .Rombach, R., Blattmann, A., Lorenz, D., Esser, P., and Ommer, B. High-resolution image synthesis with la-tent diffusion models. In Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR) , pp. 10674–10685, 2022. Ronneberger, O., Fischer, P., and Brox, T. U-net: Convolu-tional networks for biomedical image segmentation. In Navab, N., Hornegger, J., Wells, W. M., and Frangi, A. F. (eds.), Medical Image Computing and Computer-Assisted Intervention – MICCAI 2015 , pp. 234–241, Cham, 2015. Springer International Publishing. ISBN 978-3-319-24574-4. Ruhe, D., Heek, J., Salimans, T., and Hoogeboom, E. Rolling diffusion models. In Salakhutdinov, R., Kolter, Z., Heller, K., Weller, A., Oliver, N., Scar-lett, J., and Berkenkamp, F. (eds.), Proceedings of the 41st International Conference on Machine Learn-ing , volume 235 of Proceedings of Machine Learn-ing Research , pp. 42818–42835. PMLR, 21–27 Jul 2024. URL https://proceedings.mlr.press/ v235/ruhe24a.html .R ¨uhling Cachay, S., Zhao, B., Joren, H., and Yu, R. Dyf-fusion: A dynamics-informed diffusion model for spa-tiotemporal forecasting. Advances in neural information processing systems , 36:45259–45287, 2023. Sato, H., Fehler, M. C., and Maeda, T. Seismic Wave Propagation and Scattering in the Heterogeneous Earth .Springer, Berlin, Heidelberg, 2nd edition, 2012. ISBN 978-3-642-23028-8. doi: 10.1007/978-3-642-23029-5. 12 Stochastic Lifting 
+
+Sauer, A., Lorenz, D., Blattmann, A., and Rombach, R. Adversarial diffusion distillation. In Computer Vi-sion – ECCV 2024: 18th European Conference, Mi-lan, Italy, September 29–October 4, 2024, Proceed-ings, Part LXXXVI , pp. 87–103, Berlin, Heidelberg, 2024. Springer-Verlag. ISBN 978-3-031-73015-3. doi: 10.1007/978-3-031-73016-0 6. URL https://doi. org/10.1007/978-3-031-73016-0_6 .Sohl-Dickstein, J., Weiss, E., Maheswaranathan, N., and Ganguli, S. Deep unsupervised learning using nonequi-librium thermodynamics. In Bach, F. and Blei, D. (eds.), 
+
+Proceedings of the 32nd International Conference on Ma-chine Learning , volume 37 of Proceedings of Machine Learning Research , pp. 2256–2265, Lille, France, 07– 09 Jul 2015. PMLR. URL https://proceedings. mlr.press/v37/sohl-dickstein15.html .Song, Y. and Ermon, S. Generative modeling by estimating gradients of the data distribution. In Wallach, H., Larochelle, H., Beygelzimer, A., d'Alch ´e-Buc, F., Fox, E., and Garnett, R. (eds.), Advances in Neural Information Processing Systems , volume 32. Curran Associates, Inc., 2019. URL https://proceedings.neurips. cc/paper_files/paper/2019/file/ 3001ef257407d5a371a96dcd947c7d93-Paper. pdf .Song, Y., Garg, S., Shi, J., and Ermon, S. Sliced score matching: A scalable approach to density and score estimation. In Proceedings of the Thirty-Fifth Conference on Uncertainty in Artificial Intelligence, UAI 2019, Tel Aviv, Israel, July 22-25, 2019 , pp. 204, 2019. URL http://auai.org/uai2019/ proceedings/papers/204.pdf .Song, Y., Sohl-Dickstein, J., Kingma, D. P., Kumar, A., Ermon, S., and Poole, B. Score-based generative mod-eling through stochastic differential equations. In In-ternational Conference on Learning Representations ,2021. URL https://openreview.net/forum? id=PxTIG12RRHS .Song, Y., Dhariwal, P., Chen, M., and Sutskever, I. Con-sistency models. International conference on machine learning , 2023. Unterthiner, T., Van Steenkiste, S., Kurach, K., Marinier, R., Michalski, M., and Gelly, S. Towards accurate generative models of video: A new metric & challenges. arXiv preprint arXiv:1812.01717 , 2018. Vershynin, R. High-Dimensional Probability: An Intro-duction with Applications in Data Science . Cambridge University Press, 2018. Voleti, V., Jolicoeur-Martineau, A., and Pal, C. Mcvd-masked conditional video diffusion for prediction, gener-ation, and interpolation. Advances in neural information processing systems , 35:23371–23385, 2022. Weed, J. and Bach, F. Sharp asymptotic and finite-sample rates of convergence of empirical measures in Wasserstein distance. Bernoulli , 25(4A), November 2019. ISSN 1350-7265. doi: 10.3150/18-BEJ1065. Wu, C., Liang, J., Ji, L., Yang, F., Fang, Y., Jiang, D., and Duan, N. N ¨uwa: Visual synthesis pre-training for neural visual world creation. In European conference on computer vision , pp. 720–736. Springer, 2022. Yi, K., Gan, C., Li, Y., Kohli, P., Wu, J., Torralba, A., and Tenenbaum, J. B. Clevrer: Collision events for video representation and reasoning. In International Conference on Learning Representations , 2020. URL https:// openreview.net/forum?id=HkxYzANYDB .Yin, T., Gharbi, M., Zhang, R., Shechtman, E., Durand, F., Freeman, W. T., and Park, T. One-step diffusion with distribution matching distillation. In CVPR , 2024. Zhang, R., Isola, P., Efros, A. A., Shechtman, E., and Wang, O. The unreasonable effectiveness of deep features as a perceptual metric. In Proceedings of the IEEE conference on computer vision and pattern recognition , pp. 586–595, 2018. Zhou, L., Ermon, S., and Song, J. Inductive moment match-ing. In Forty-second International Conference on Ma-chine Learning , 2025. URL https://openreview. net/forum?id=pwNSUo7yUb .Zhou, M., Zheng, H., Wang, Z., Yin, M., and Huang, H. Score identity distillation: Exponentially fast distillation of pretrained diffusion models for one-step generation. In ICML , 2024. URL https://openreview.net/ forum?id=QhqQJqe0Wq .13 Stochastic Lifting 
+
+# A. Proofs 
+
+A.1. Proof of discrete Lipschitz constant bound Proposition A.1. Assume that all xit are normalized so that xit ∈ [0 , 1] n. Assume further that the labels ξit are sampled independently and uniformly from the unit sphere Sd−1, which corresponds to sampling standard normals and normalizing them afterwards. Let I = {(i, t ) | i = 1 , . . . , M, t = 0 , . . . , T − 1} to define the discrete Lipschitz constant as 
+
+L(Dξ ) = max 
+
+> (i,t ),(j,s )∈I
+> (i,t )̸=( j,s )
+
+∥xit+1 − xjs+1 ∥2
+
+q
+
+∥xit − xjs∥22 + ∥ξit − ξjs ∥22
+
+.
+
+With 
+
+cδ = 2 
+
+√2
+
+√c +
+
+s
+
+ln(2 /δ )
+
+c ln(2) 
+
+!
+
+, (9) 
+
+where c > 0 is a constant independent of M, d, T , if M ≥ 2 and 
+
+d ≥ max {c2 
+
+> δ
+
+ln(( T + 1) M ), 2}, (10) 
+
+then with probability at least 1 − δ,
+
+L(Dξ ) ≤√n
+
+√2 1 + cδ
+
+r ln(( T + 1) M )
+
+d
+
+!
+
+. (11) 
+
+Proof. First, notice that 
+
+∆max = max 
+
+> (i,t )̸=( j,s )
+> t,s =0 ,...,T
+
+∥xit − xjs∥2 ≤ √n
+
+because of the normalization xit ∈ [0 , 1] n. Therefore, for every distinct pair (i, t )̸ = ( j, s ), let us consider 
+
+∥xit+1 − xjs+1 ∥2
+
+q
+
+∥xit − xjs∥22 + ∥ξit − ξjs ∥22
+
+≤√n
+
+∥ξit − ξjs ∥2
+
+,
+
+because ∥xit − xjs∥2 ≥ 0 and ∆max ≤ √n. Thus, it suffices to lower bound min (i,t )̸=( j,s ) ∥ξit − ξjs ∥2.Because the labels ξit are independently and uniformly sampled from the unit sphere Sd−1, for the inner product, we have the following concentration inequality that follows from (Vershynin, 2018, Exercise 5.1.12) 
+
+P[|⟨ ξit, ξjs ⟩| ≥ ϵ] ≤ 2 exp  −cdϵ 2 , ϵ ∈ [0 , 1] (12) for a universal constant c > 0. (To see (12) : Set fu : Sd−1 → R, z 7 → ⟨ z, u⟩ for a fixed u ∈ Sd−1. For any y, z ∈ Sd−1
+
+obtain that ∥fu(y) − fu(z)∥2 = ∥⟨ y − z, u⟩∥ 2 ≤ ∥ y − z∥2∥u∥2 = ∥y − z∥2 because ∥u∥2 = 1 by definition. Thus the Lipschitz constant of fu is one. Now notice that E[fu(z)] = 0 because E[z] = 0 for z uniformly on Sd−1. Therefore with (Vershynin, 2018, Exercise 5.1.12) obtain that P[|fu(z)| ≥ ϵ] ≤ 2 exp( −cd ϵ 2) for ϵ ∈ (0 , 1] . Taking two independent 
+
+ξit, ξjs uniformly on Sd−1, we obtain P[|⟨ ξit, ξjs ⟩| ≥ ϵ] = Eξjs [P[|⟨ ξit, ξjs ⟩| ≥ ϵ|ξjs ] ≤ Eξjs [2 exp( −cd ϵ 2)] = 2 exp( −cd ϵ 2)
+
+because the right-hand side of the bound for fu is independent of ξjs .) Thus, we obtain 
+
+P
+
+q 
+
+2(1 − |⟨ ξit, ξjs ⟩| ≤ p2(1 − ϵ)
+
+
+
+≤ 2 exp  −cdϵ 2 , ϵ ∈ [0 , 1] ,
+
+holds. This is useful because ∥ξit − ξjs ∥22 = 2 − 2⟨ξit, ξjs ⟩ and thus ∥ξit − ξjs ∥2 ≥
+
+q
+
+2(1 − |⟨ ξit, ξjs ⟩| ). Selecting a δ ∈ (0 , 1) 
+
+and using a union bound, we obtain 
+
+P
+
+
+
+min  
+
+> (i,t )̸=( j,s )
+
+∥ξit − ξjs ∥2 ≥ p2(1 − ϵδ )
+
+
+
+≥ 1 − δ , 
+
+14 Stochastic Lifting 
+
+for 
+
+ϵδ =
+
+s
+
+1
+
+cd 
+
+
+
+ln 
+
+ |I| 
+
+2
+
+ 
+
++ ln(2 /δ )
+
+
+
+.
+
+Note that |I| = M T ≤ (T + 1) M and thus  |I| 
+
+> 2
+
+ ≤ (( T + 1) M )2 and 
+
+ln 
+
+ |I| 
+
+2
+
+ 
+
++ ln(2 /δ ) ≤ 2 ln(( T + 1) M ) + ln(2 /δ ) .
+
+Using √a + b ≤ √a + √b and (T + 1) M ≥ 2, we obtain 
+
+ϵδ ≤√2
+
+√c
+
+r ln(( T + 1) M )
+
+d +
+
+s
+
+ln(2 /δ )
+
+c ln(2) 
+
+r ln(( T + 1) M )
+
+d .
+
+Now set cδ to (9) and define 
+
+λ = cδ
+
+r ln(( T + 1) M )
+
+d . (13) Assumption (10) implies λ ≤ 1 and with previous estimates we obtain 
+
+ϵδ ≤ λ
+
+2 ≤ 12 .
+
+Furthermore, 1 − ϵδ ≥ 1 − λ/ 2. Because 0 ≤ λ ≤ 1, we have 
+
+1 − λ
+
+2 ≥ 1(1 + λ)2 .
+
+Therefore, p2(1 − ϵδ ) ≥√21 + λ .
+
+Consequently, with probability at least 1 − δ,
+
+L(Dξ ) ≤√n
+
+p2(1 − ϵδ ) ≤√n
+
+√2 (1 + λ) .
+
+Substituting (13) for λ yields (11). 
+
+A.2. Interpolation of training data + smoothness = bound on test data 
+
+We recall the following lemma for the sake of self-containedness: 
+
+Lemma A.2. For F : Rn → Rm Lipschitz continuous with constant LF and μ, ν ∈ P 2(Rn) (i.e. with finite second moments), 
+
+W2(F♯μ, F ♯ν) ≤ LF W2(μ, ν ) (14) 
+
+Proof. Assume γ∗ ∈ Γ( μ, ν ) is the optimal coupling between μ and ν, hence 
+
+γ∗(·, Rn) = μ, γ ∗(Rn, ·) = ν, and 
+
+Z
+
+> Rn×Rn
+
+|x − y|2 dγ∗(x, y ) = W2(μ, ν )2. (15) Consider the coupling γF := ( F × F )♯γ∗. Take B ⊂ Rm measurable. Then, 
+
+γF (B × Rm) = (( F × F )♯γ∗)( B × Rm) = γ∗(( F × F )−1(B × Rm)) = γ∗(F −1(B) × F −1(Rm)) = γ∗(F −1(B) × Rn) = μ(F −1(B)) = ( F♯μ)( B). (16) 15 Stochastic Lifting 
+
+Analogously, γF (Rm × B) = ( F♯ν)( B). Hence γF is a valid competitor for the optimal transport problem from F♯μ to 
+
+F♯ν:
+
+W2(F♯μ, F ♯ν)2 = inf 
+
+> γ∈Γ( F♯μ,F ♯ν)
+
+Z
+
+> Rm×Rm
+
+|x − y|2 dγ(x, y) ≤
+
+Z
+
+> Rm×Rm
+
+|x − y|2 dγF (x, y)=
+
+Z
+
+> Rn×Rn
+
+|F (x) − F (y)|2 dγ∗(x, y) ≤ L2
+
+> F
+
+Z
+
+> Rn×Rn
+
+|x − y|2 dγ∗(x, y) = L2 
+
+> F
+
+W2(μ, ν )2 (17) Taking the square root gives the claimed result. 
+
+Proposition (3.1) . Fix a time t. Assume: 
+
+(A1) The training pairs ( ˆ xit, ˆxit+1 ) ∼ πt are i.i.d., and independently the training labels ˆξit ∼ ν are i.i.d. for i = 1 , . . . , M .The test data ( ˜ xit, ˜xit+1 , ˜ξit) ˜Mi=1 is sampled in the same way and is independent of the training data. 
+
+(A2) All laws involved have finite second moments. 
+
+(A3) The map F : X × Rd → X interpolates the training data, F ( ˆ xit, ˆξit) = ˆ xit+1 for i = 1 , . . . , M , and admits a deterministic uniform Lipschitz bound Lip( F ) ≤ LF over all training datasets under consideration. 
+
+(A4) Denote by ηt the joint law of a paired sample (xt, ξt) with xt ∼ ρt and ξt ∼ ν drawn independently. There exist constants Cin , C out > 0 and exponents αin , α out > 0 such that the empirical Wasserstein convergence rates 
+
+E W2(ηt, ˆηNt )2 ≤ Cin N −2/α in , E W2(ρt+1 , ˆρNt+1 )2 ≤ Cout N −2/α out 
+
+hold, where ˆηNt := 1
+
+> N
+
+PNi=1 δ(xit,ξit) denotes the empirical measure of N i.i.d. paired samples from ηt, and ˆρNt+1 
+
+denotes the empirical measure of N i.i.d. samples from ρt+1 .Let ˆxit+1 = F ( ˜ xit, ˜ξit) for i = 1 , . . . , ˜M be the generated test samples. Then, 
+
+EDξ ,Dtest 
+
+> ξ
+
+W2(ˆ ρt+1 , ˜ρt+1 )2 ≤ C(1 + L2 
+
+> F
+
+)min( M, ˜M )−2/α , (18) where ˆρt+1 and ˜ρt+1 are the empirical measures of the generated samples { ˆxit+1 } ˜Mi=1 and the test samples { ˜xit+1 } ˜Mi=1 ,respectively; α := max( αin , α out ) and C := 8 max( Cin , C out ). When F (x, ξ) = x + d tR (x, ξ) with R Lipschitz on the lifted domain with constant LR, the bound can be refined to 
+
+EDξ ,Dtest 
+
+> ξ
+
+W2(ˆ ρt+1 , ˜ρt+1 )2 ≤ C(1 + d t2L2
+
+> R
+
+)min( M, ˜M )−2/α . (19) If instead F (x, ξ) = x + d t b (x) + εσ (ξ) with b, σ Lipschitz with constants Lb, L σ , then 
+
+EDξ ,Dtest 
+
+> ξ
+
+W2(ˆ ρt+1 , ˜ρt+1 )2 ≤ C(1 + d t2L2 
+
+> b
+
++ ε2L2 
+
+> σ
+
+)min( M, ˜M )−2/α . (20) 
+
+Remark A.3 . The bound controls the one-step marginal of the generated next-state samples at time t + 1 , drawn under the law ρt of the current state. It does not by itself establish conditional accuracy at each fixed current state xt.
+
+Remark A.4 . Under the compactness (or sub-Gaussian tail) assumptions required for the empirical Wasserstein concentration results of (Weed & Bach, 2019), the empirical-measure terms appearing in the proof also admit high-probability analogues by a union bound; we state the result in expectation for simplicity. 
+
+Proof. Denote by ˆηt := 1
+
+> M
+
+PMi=1 δ( ˆ xit, ˆξit) the paired empirical of the training inputs and by ˜ηt := 1˜M
+
+P ˜Mi=1 δ( ˜ xit, ˜ξit) the analogous test paired empirical. By assumption (A3) , F interpolates the training data, so the pushforward of the paired training empirical coincides with the training empirical of the next state, 
+
+F♯ ˆηt = 1
+
+M
+
+> M
+
+X
+
+> i=1
+
+δF ( ˆ xit, ˆξit) = 1
+
+M
+
+> M
+
+X
+
+> i=1
+
+δˆxit+1 =: ˆ ρtrain  
+
+> t+1
+
+. (21) 16 Stochastic Lifting 
+
+The generated empirical from the test inputs satisfies ˆρt+1 = F♯ ˜ηt. By the triangle inequality, 
+
+W2(ˆ ρt+1 , ˜ρt+1 ) ≤ W2(F♯ ˜ηt, F ♯ ˆηt)
+
+| {z }
+
+> =: ( i)
+
++ W2(ˆ ρtrain  
+
+> t+1
+
+, ˜ρt+1 )
+
+| {z }
+
+> =: ( ii )
+
+, (22) where we used F♯ ˆηt = ˆ ρtrain  
+
+> t+1
+
+in (ii ). Squaring and using (a + b)2 ≤ 2a2 + 2 b2,
+
+W2(ˆ ρt+1 , ˜ρt+1 )2 ≤ 2 W2(F♯ ˜ηt, F ♯ ˆηt)2 + 2 W2(ˆ ρtrain  
+
+> t+1
+
+, ˜ρt+1 )2 . (23) 
+
+Bound on (i). By Lemma A.2 and assumption (A3) ,
+
+W2(F♯ ˜ηt, F ♯ ˆηt)2 ≤ L2 
+
+> F
+
+W2(˜ ηt, ˆηt)2 . (24) Since ˆηt and ˜ηt are i.i.d. paired empirical measures of ηt with M and ˜M samples respectively, the triangle inequality and assumption (A4) give 
+
+E W2(˜ ηt, ˆηt)2 ≤ 2 E W2(˜ ηt, η t)2 + 2 E W2(ηt, ˆηt)2 ≤ 2Cin 
+
+ M −2/α in + ˜M −2/α in  . (25) 
+
+Bound on (ii ). By assumption (A1) , ˆρtrain  
+
+> t+1
+
+and ˜ρt+1 are independent empirical measures of ρt+1 with M and ˜M samples respectively, so by the same argument and assumption (A4) ,
+
+E W2(ˆ ρtrain  
+
+> t+1
+
+, ˜ρt+1 )2 ≤ 2Cout 
+
+ M −2/α out + ˜M −2/α out  . (26) Taking expectation in (23) and combining the two bounds, 
+
+E W2(ˆ ρt+1 , ˜ρt+1 )2 ≤ 4L2 
+
+> F
+
+Cin 
+
+ M −2/α in + ˜M −2/α in  + 4 Cout 
+
+ M −2/α out + ˜M −2/α out  . (27) Setting α := max( αin , α out ) and C := 8 max( Cin , C out ), and using M −2/α in + ˜M −2/α in ≤ 2 min( M, ˜M )−2/α (and similarly for αout ), 
+
+E W2(ˆ ρt+1 , ˜ρt+1 )2 ≤ C (1 + L2 
+
+> F
+
+) min( M, ˜M )−2/α , (28) which is the claim of Proposition 3.1. 
+
+Proof of the corollary. Now suppose F (x, ξ) = x + d t R (x, ξ) with R Lipschitz with constant LR. Let γ∗ denote the optimal coupling between ˆηt and ˜ηt on (X × Rd)2. Then, by Lemma A.2’s construction, 
+
+W2(F♯ ˜ηt, F ♯ ˆηt)2 ≤
+
+Z
+
+|F ( ˜ x, ˜ξ) − F ( ˆ x, ˆξ)|2 dγ∗ ( ˆ x, ˆξ), ( ˜ x, ˜ξ) . (29) Using F (x, ξ) = x + d t R (x, ξ) and the inequality |a + d t b |2 ≤ 2|a|2 + 2d t2|b|2,
+
+|F ( ˜ x, ˜ξ) − F ( ˆ x, ˆξ)|2 = | ˜x − ˆx + d t(R( ˜ x, ˜ξ) − R( ˆ x, ˆξ)) |2 (30) 
+
+≤ 2 | ˜x − ˆx|2 + 2d t2 L2 
+
+> R
+
+|( ˜ x, ˜ξ) − ( ˆ x, ˆξ)|2 . (31) We now integrate against γ∗ and use that the marginal of |( ˜ x, ˜ξ) − ( ˆ x, ˆξ)|2 is bounded by W2(˜ ηt, ˆηt)2. The marginal of 
+
+| ˜x − ˆx|2 is bounded by the same quantity, since the X -projection of γ∗ couples the x-marginals of ˜ηt and ˆηt. We arrive at 
+
+W2(F♯ ˜ηt, F ♯ ˆηt)2 ≤
+
+Z
+
+|F ( ˜ x, ˜ξ) − F ( ˆ x, ˆξ)|2 dγ∗ ( ˆ x, ˆξ), ( ˜ x, ˜ξ) ≤ 2 (1 + d t2L2
+
+> R
+
+) W2(˜ ηt, ˆηt)2 . (32) Substituting this into (23) in place of the Lipschitz bound and proceeding as before yields 
+
+E W2(ˆ ρt+1 , ˜ρt+1 )2 ≤ C (1 + d t2L2
+
+> R
+
+) min( M, ˜M )−2/α . (33) 
+
+SDE form. For F (x, ξ) = x + d t b (x) + ε σ (ξ) with b and σ Lipschitz with constants Lb, L σ , we use the three-term inequality |a + d t b + ε c |2 ≤ 3 ( |a|2 + d t2|b|2 + ε2|c|2) and bound, under γ∗,
+
+|F ( ˜ x, ˜ξ) − F ( ˆ x, ˆξ)|2 ≤ 3 | ˜x − ˆx|2 + 3d t2L2 
+
+> b
+
+| ˜x − ˆx|2 + 3 ε2L2 
+
+> σ
+
+| ˜ξ − ˆξ|2 . (34) Proceeding as in the corollary, 
+
+E W2(ˆ ρt+1 , ˜ρt+1 )2 ≤ C (1 + d t2L2 
+
+> b
+
++ ε2L2 
+
+> σ
+
+) min( M, ˜M )−2/α . (35) 17 Stochastic Lifting 
+
+# B. Explicit construction of an interpolating map 
+
+Assume ξt is distributed uniformly on the unit sphere Sd−1 and d ≥ M . Consider the following general form for F :
+
+F (xt, ξt) = b(xt) + 
+
+> M
+
+X
+
+> i,k =1
+
+( ˆ xit+1 − b(xt)) ˆG−1 
+
+> ik
+
+ˆξkt · ξt, (36) where b : X → X captures the mean behavior, i.e. b(xt) = E [Xt+1 |Xt = xt], ( ˆ xit+1 , ˆξit), i = 1 , . . . , M are the training points, and ˆGik = ˆξit · ξkt . Note that ˆG is almost surely invertible when d ≥ M .This function interpolates the training data: 
+
+F ( ˆ xjt , ˆξjt ) = b(xt) + 
+
+> M
+
+X
+
+> i,k =1
+
+( ˆ xit+1 − b(xt)) ˆG−1 
+
+> ik
+
+ˆξkt · ξjt (37) 
+
+= b(xt) + 
+
+> M
+
+X
+
+> i=1
+
+( ˆ xit+1 − b(xt)) δij = ˆ xjt+1 ∀j = 1 , . . . , M (38) At the same time, it is an affine function in ξt and as regular in xt as b is, and the latter is smooth in physical systems and natural videos. We can improve the regularity of F by improving the conditioning of ˆG. As discussed, ˆG approaches the identity matrix for large d and fixed M .Furthermore, note that for any v ∈ Sd−1, √dv · ξt → η ∼ N (0 , 1) in distribution as d → ∞ (Vershynin, 2018)[Theorem 3.3.9]. For fixed xt, the distribution of F (xt, ξt) is thus similar to 
+
+b(xt) + 1
+
+√d
+
+> M
+
+X
+
+> i=1
+
+( ˆ xit+1 − b(xt)) ηi where ηi ∼ N (0 , 1) ∀i , (39) namely a Gaussian perturbation of the expected value of Xt+1 |Xt = xt in the directions of other training points. We note that this explicit affine construction is illustrative only and is not the model optimized in our experiments. A general Fθ does not need to be affine in ξ and can transform Gaussian into non-Gaussian conditional outputs as our experiments show. Thus, (39) should not be interpreted as a restriction of Stochastic Lifting to Gaussian conditional marginals. 
+
+# C. Nearest Neighbor analysis 
+
+We conduct a nearest neighbor analysis to ensure that our model generates novel samples rather than memorizing training data. Specifically, for each example: the top row shows a randomly selected generated sample, the middle row displays the closest matching sample from the training set, and the bottom row shows the closest training-set neighbor to the middle row itself. The visual variation between the generated sample (top row) and its nearest training-set neighbor (middle row) is similar in scale to the variation observed between the two training-set samples (middle and bottom rows). This demonstrates that our model generalizes effectively without simply replicating training examples. 
+
+# D. Numerical experiments 
+
+D.1. Duffing SDE 
+
+The physical trajectories xt ∈ R2 follow the SDE with 
+
+ddt
+
+x1
+
+x2
+
+
+
+(t) = 
+
+ x2
+
+−0.4x2 + x1 − 0.2( x1)3
+
+
+
+(t) + 
+
+01
+
+
+
+ξ(t) . (40) The initial configuration is a Gaussian centered at m0 = [0 , 10] with diagonal variance of strength 0.5. The dynamics are integrated over 0 ≤ t ≤ 14 for N = 5000 samples. 18 Stochastic Lifting pred 
+
+train n.n. 
+
+n.n. to train n.n. 0.00 
+
+> 0.05
+> 0.10
+
+pred 
+
+train n.n. 
+
+n.n. to train n.n. 0.00 
+
+> 0.05
+> 0.10
+
+pred 
+
+train n.n. 
+
+n.n. to train n.n. 0.00 
+
+> 0.05
+> 0.10
+
+Figure 7. Wave nearest neighbor analysis . Of each image: top row randomly chosen generated sample, middle row nearest neighbor in the training set, bottom row nearest neighbor in the training set to the middle row. The variation between the top and middle row should be roughly similar to the variation between the middle and bottom row, indicating generalization without memorization. 
+
+19 Stochastic Lifting pred 
+
+train n.n. 
+
+n.n. to train n.n. 
+
+> 0.0
+> 0.2
+> 0.4
+> 0.6
+> 0.8
+> 1.0
+
+pred 
+
+train n.n. 
+
+n.n. to train n.n. 
+
+> 0.0
+> 0.2
+> 0.4
+> 0.6
+> 0.8
+> 1.0
+
+pred 
+
+train n.n. 
+
+n.n. to train n.n. 
+
+> 0.0
+> 0.2
+> 0.4
+> 0.6
+> 0.8
+> 1.0
+
+Figure 8. Flow nearest neighbor analysis . Of each image: top row randomly chosen generated sample, middle row nearest neighbor in the training set, bottom row nearest neighbor in the training set to the middle row. The variation between the top and middle row should be roughly similar to the variation between the middle and bottom row, indicating generalization without memorization. 
+
+20 Stochastic Lifting 
+
+D.2. Traveling wave through random media (Wave) 
+
+The initial condition is a Gaussian bump at the center of the domain. As the wave evolves, the random medium leads to different wave speeds that lead to a deformation of the wave front, which leads to a distribution of diverse solution fields; see Appendix G.1 for visualizations. Importantly, for both wave and flow problem, the initial condition is deterministic and fixed, thus deterministic approaches such as neural operators cannot capture the stochasticity induced by the random media and permeability fields during the autoregressive roll out; see Section 2.2. Problem setup: 
+
+∂tt u(t, x) = c2(x)∆ u(t, x), t ∈ (0 , 8] , x ∈ Ω,u(0 , x) = exp 
+
+
+
+−30 ∥x − [π, π ]∥2
+
+
+
+, x ∈ Ω,∂tu(0 , x) = 0 , x ∈ Ω.
+
+Ω = [0 , 2π] × [0 , 2π], T = 8 .0 We look at the 2D wave equation with periodic boundary conditions. The wave speed c(x) varies in space; it is generated by choosing random Fourier modes from a log-normal dis-tribution which peaks at some wave number k = 1 which controls the regularity of the random field. We have M = 1024 trajectories, discretized at T = 64 time points and 64 × 64 points in space. 
+
+D.3. Two-phase flow in random porous media (Flow) 
+
+We consider an incompressible and immiscible two-phase flow system of water and oil phases (Aarnes et al., 2007). One phase of the flow moves through the domain as it interacts with a random permeability field which deforms the flow into a high variance distribution of complex shapes; see appendix G.2. The governing equations are 
+
+−∇ · (Kλ (s)∇p) = q , ϕ ∂∂t s + ∇ · (f (s)v) = qω
+
+ρω
+
+,
+
+where s is the saturation field, K represents the permeability tensor, λ(s) is the total fluid mobility (the sum of water and oil mobilities), and q is the source term. In the second equation, ϕ denotes the porosity, f (s) the fractional flow of water, and v
+
+is the Darcy velocity. The randomness enters via the permeability field K which is given by the exponential K(x) = exp( ϵZ (x) + ¯Z + Y (x)) ,where Z and Y are independent Gaussian random fields, each generated with a Mat ´ern covariance function (marginal standard deviation σ = 3 .0, correlation length λ = 10 , smoothness parameter ν = 1 , noisiness parameter ϵ = 0 .01 ). The equations are discretized with an explicit upwind finite-volume discretization method. We use 100 × 100 cells, end time 0.7, and time-step size 0.007 . The initial condition is zero saturation with a localized source on the upper left corner of the spatial domain. 
+
+D.4. Video data sets 
+
+We measure inference runtime by using the largest batch size that fits into the memory of our H100 GPUs and then divide the total runtime by that batch to get the per-video generation runtime. 
+
+D.5. Metrics 
+
+For our physics-based examples, we regard the realizations of our stochastic process as time-dependent solution fields. That is, the j-th component of a sample xt corresponds to the evaluation of u : T × [0 , L ]2 → R at the j-th grid point in [0 , L ]2
+
+and at time t.To ease comparisons, we normalize T to [0 , 1] and L to 1 when computing all metrics. For the sake of comparison and visualization, we require low-dimensional metrics. We construct them as follows: Take a map f : xt 7 → f (xt) ∈ R. The push-forward of the empirical distribution of xt under f defines a distribution on R.21 Stochastic Lifting 
+
+Given samples from the ground truth xt ∼ ˆρt and generated samples ˜xt ∼ ˜ρt, the mismatch can be described by 
+
+W2(f♯ ˆρt, f ♯ ˜ρt), which is easy to compute as these are one-dimensional distributions. The mismatch in this case is defined as a function of time t. It is also possible to consider a map g that takes {xt}t an entire trajectory and returns a one-dimensional quantity of interest. 
+
+Wasserstein of integrated mass We look at Wasserstein of integrated mass (WIM). In this case, the function f corresponds to an l1 norm, denoted m:
+
+m(xt) = 1
+
+n ∥xt∥1 ≈
+
+Z
+
+> [0 ,L ]2
+
+|u(t, x )| dx, WIM = 1
+
+T
+
+> T
+
+X
+
+> t=1
+
+W2(m♯ ˆρt, m ♯ ˜ρt).
+
+Wasserstein crossing time Given some subset B ⊂ [0 , L ]2 the earliest arrival time τ for some threshold value c ∈ R is given by 
+
+τ (u) = min {t ∈ T : u(t, x ) > c for some x ∈ B}.
+
+For a trajectory {xt}t, this corresponds to a threshold value being crossed for a subset of entries of xt. Denote by ϱ the path measure corresponding to trajectories {xt}t. The Wasserstein crossing time is defined as WCT = W2(τ♯ ˆϱ, τ ♯ ˜ϱ).
+
+# E. Architecture details 
+
+UNet backbone Our network follows the canonical encoder–decoder UNet with skip–connections, implemented in Flax .All architecture decisions are standard. We use GroupNorm, no dropout, stride-2 3×3 convolution. At each spatial scale for our residual blocks the channel depths are, 
+
+medium feature depths = [128 , 256 , 512] ,
+
+large feature depths = [128 , 256 , 512 , 1024] .
+
+The only architectural modification is the conditioning on the label ξt. Many diffusion backbones condition on the “diffusion time” via some modulation scheme: The only difference is we skip the initial sinusoidal embedding which maps the diffusion-time scalar to a vector. Instead we directly embed ξ with a two-layer MLP with width 512 . The MLP output then modulates the residual feature maps via a standard FiLM modulation scheme (Perez et al., 2018). As stated in the main text, apart from re-purposing the timestep embedding to encode the conditioning label ξ, all components adhere to established UNet practice, enabling a like-for-like comparison with standard diffusion backbones. 
+
+# F. Training details 
+
+For the physics-based problems (wave, flow), we use the L2 loss defined in equation 8. For the video datasets, we replace the L2 metric ( ∥x − y∥22) with a perceptual-based LPIPS loss (Zhang et al., 2018) which we find improves FVD scores. This normalization prevents the network’s predictions from diverging during rollout, making it particularly suitable for video data, which naturally lies within [0 , 1] .22 Stochastic Lifting 
+
+Table 3. Hyper-parameters used for each dataset. Wave Flow BAIR CLEVRER 
+
+Batch Size 64 64 128 32 
+
+Label Dim 64 64 512 256 
+
+Iterations 350 000 350 000 500 000 500 000 
+
+Optimizer AdamW AdamW AdamW AdamW 
+
+Learning Rate 1e−4 1e−4 1e−4 1e−4
+
+Schedule cosine cosine cosine cosine 
+
+Network Size Medium Medium Medium Medium 
+
+Loss L2 L2 LPIPS LPIPS 
+
+Trajectories ( M ) 1024 1000 43 000 10 000 
+
+Time Points ( T ) 64 50 16 16 
+
+State Dim ( n) 64 2 96 2 64 2 ×3 128 2 ×3
+
+Markov Window ( m) 3 3 1 3
+
+23 Stochastic Lifting 
+
+# G. Uncurated Samples 
+
+G.1. Wave 0.00 0.63 1.40 2.16 2.79 3.56 4.32 5.08 5.71 6.48 7.24 8.00 
+
+## 10.00 0.63 1.40 2.16 2.79 3.56 4.32 5.08 5.71 6.48 7.24 8.00 
+
+## 1
+
+Figure 9. Wave samples (uncurated) . Top : true samples. Bottom : generated from Stochastic Lifting. 
+
+24 Stochastic Lifting 
+
+G.2. Flow 0.00 0.06 0.13 0.18 0.25 0.31 0.38 0.43 0.50 0.56 0.63 0.70 0.00 0.06 0.13 0.18 0.25 0.31 0.38 0.43 0.50 0.56 0.63 0.70 
+
+Figure 10. Flow samples (uncurated) . Top : true samples. Bottom : generated from Stochastic Lifting. 
+
+25 Stochastic Lifting 
+
+G.3. CLEVRER 0 45 90 136 181 226 272 317 362 408 453 499 
+
+Figure 11. CLEVRER samples (uncurated) . Generated from Stochastic Lifting. Long rollout. 
+
+26

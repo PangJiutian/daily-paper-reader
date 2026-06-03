@@ -1,0 +1,2429 @@
+Title: Sparse POD Mode Selection and Manifold Dimensionality Reduction with Neural Networks
+
+URL Source: https://arxiv.org/pdf/2605.27756v1
+
+Published Time: Thu, 28 May 2026 00:27:53 GMT
+
+Number of Pages: 45
+
+Markdown Content:
+SPARSE POD MODE SELECTION AND MANIFOLD DIMENSIONALITY REDUCTION WITH NEURAL NETWORKS ∗
+
+TOMOKI KOIKE † , PRAKASH MOHAN ‡ , MARC T. HENRY DE FRAHAN ‡ , ELIZABETH QIAN † , AND JULIE BESSAC ‡
+
+Abstract. High-performance computing enables simulation of high-dimensional physical sys-tems, but downstream analyses such as inverse problems and control remain computationally ex-pensive, motivating model order reduction (MOR) to construct efficient low-dimensional surrogates. Proper Orthogonal Decomposition (POD), a widely adopted data-driven MOR method, projects dynamics onto linear subspaces spanned by the most energetic modes. However, POD struggles for problems with slowly decaying Kolmogorov n-widths, such as advection-dominated and turbu-lent flows, requiring many modes for accurate reconstruction. Moreover, energy-based selection can discard crucial low-energy modes needed to capture small-scale features. Recent nonlinear mani-fold methods using polynomial mappings with alternating or greedy mode selection achieve better reconstruction with fewer modes. However, these methods fix the nonlinear mapping form a pri-ori, limiting expressivity. Conversely, neural network (NN) manifolds offer greater expressivity but employ energy-based selection. We present SparseModesNet, a dimensionality reduction framework that employs linear encoding via POD modes and nonlinear NN decoding. The decoder leverages LassoNet, a method enforcing hierarchical sparsity through residual connections with linear skip layers, to simultaneously select informative POD modes and learn a nonlinear mapping that mini-mizes reconstruction error. On benchmark advection-dominated and chaotic flows, SparseModesNet matches or exceeds state-of-the-art performance. For turbulent channel flow at friction Reynolds number Re τ = 5200, we reduce reconstruction error by 51–78% compared to existing polynomial manifold methods while maintaining interpretability through physically meaningful mode selection. 
+
+Key words. Model order reduction, proper orthogonal decomposition, neural network, autoen-coder, sparsity-inducing regression 
+
+MSC codes. 15A18, 57Z20, 65F55, 65Z05, 68T07, 76F99 
+
+1. Introduction. Many computational tasks in science and engineering require solving high-dimensional partial differential equations (PDEs), which remains com-putationally expensive despite advances in high-performance computing. Model or-der reduction (MOR) methods address this by creating low-dimensional surrogate models that accurately reconstruct high-dimensional dynamics at significantly re-duced cost, enabling downstream analyses such as inverse problems, control, and optimization [7, 51, 40, 2]. Among these, Proper Orthogonal Decomposition (POD) has emerged as a widely used approach that identifies high-energy modes in data and constructs efficient reduced-order models (ROMs) by projecting dynamics onto a low-dimensional subspace spanned by these modes [33, 56, 8]. However, POD’s limitation to linear subspaces causes it to underperform for transport-dominated, advection-dominated, or turbulent systems. In such cases, slow spectral decay, known as the Kolmogorov n-width barrier, requires retaining prohibi-tively many modes for accuracy, undermining the primary goal of MOR [18]. Recent work has proposed addressing this barrier by moving beyond linear subspaces to non-linear manifolds that allow nonlinear combinations of POD modes [1, 48]. 
+
+> ∗
+
+Submitted to the editors May 28, 2026. 
+
+Funding: The authors were supported by the Department of Energy Office of Science Advanced Scientific Computing Research, DOE Award DE-SC0024721. 
+
+> †
+
+School of Aerospace Engineering, Georgia Institute of Technology, Atlanta, GA ({tkoike, eqian }@gatech.edu) 
+
+> ‡
+
+Computational Science Center, National Laboratory of the Rockies (NLR), Golden, CO ({julie.bessac }@nlr.gov) 1
+
+> arXiv:2605.27756v1 [physics.flu-dyn] 26 May 2026
+
+2 T. KOIKE, P. MOHAN, M. T. H. FRAHAN, E. QIAN, J. BESSAC 
+
+Some researchers have explored nonlinear manifold representations that augment linear POD subspaces with quadratic [50, 69, 35, 57] or higher-order polynomial mappings [26]. These approaches have successfully constructed ROMs for advection-dominated problems via manifold projection [5] and nonintrusive inference (i.e., with-out access to underlying code) [28], demonstrating potential to overcome the Kol-mogorov barrier with fewer modes. However, many rely on heuristic energy-based mode selection, where modes are ordered by energy retention and then truncated at fixed thresholds. This selection can be suboptimal since low-energy modes may be critical to capture dynamics such as energy dissipation in turbulent flows [4, 12]. Recent works have proposed other mode selection strategies. In [26, 27], the authors define a polynomial mapping that decodes a reduced POD representation and optimize both the linear basis and polynomial coefficients through an alternating minimization scheme, while [60] proposes a greedy algorithm that iteratively selects modes based on their contribution to reducing state reconstruction error, later ex-tended to sparse data in [58]. While advancing beyond energy-based truncation, these methods face two limitations. First, to capture increasingly complex dynamics with higher accuracy requires higher-degree polynomials; including all cross-terms among the reduced variables then incurs combinatorial growth in the number of coefficients, creating a tradeoff between expressivity and computational tractability. Second, mode selection is performed separately from the mapping optimization rather than jointly, which may yield suboptimal mode-mapping combinations. Importantly, while the polynomial coefficients are optimized, the functional form of the mapping (e.g., qua-dratic) is prescribed a priori rather than learned from data, which limits expressivity. Neural networks (NNs) offer an alternative approach to overcoming the Kol-mogorov n-width barrier by learning nonlinear manifold representations directly from data. A prevalent architecture is the autoencoder (AE), which consists of an encoder that compresses high-dimensional states into a low-dimensional latent representation and a decoder that reconstructs the original state from this representation. Unlike polynomial mappings with predetermined functional forms, AEs learn both the com-pression and reconstruction mappings from data, enabling greater flexibility in cap-turing complex nonlinear structure. The work [42] first applied deep convolutional AEs to construct trial manifolds for MOR, demonstrating improved reconstruction over linear methods for advection-dominated problems. Subsequent developments have extended this framework in several directions: [55] incorporates hyper-reduction techniques to lower online computational costs, [66] generalizes convolutional archi-tectures to unstructured meshes common in finite element discretizations, and [14] introduces adaptive decoder filters that evolve with the latent state. Despite these advances, AE-based methods encode information into latent variables that lack direct physical meaning, defying interpretability of the learned representations. In the context of MOR, interpretability can be considered the ability to under-stand which physical features or modes the reduced model captures and how they con-tribute to the reconstruction [15]. Several works have pursued this goal by imposing structure on the learned latent space according to physical considerations: [36] employs self-supervised learning to produce embeddings distinguishable according to physical parameters, [63] uses β-variational AEs to learn disentangled, near-orthogonal latent variables, and [70] encodes frequency information to yield latents corresponding to distinct temporal scales. While these methods endow the latent space with meaning-ful structure, the resulting representations remain dense—all latent coordinates con-tribute to every reconstruction, making it difficult to isolate which modes are essential for a given state. A complementary principle from interpretable machine learning is SPARSE MODE SELECTING NEURAL NET 3that sparsity , the use of fewer active features, enhances interpretability by enabling direct examination of individual contributions [65]. In the MOR setting, sparse rep-resentations that activate only a subset of modes would allow practitioners to identify precisely which physical structures are necessary for accurate reconstruction. This work bridges interpretable nonlinear manifolds with sparse mode selection and expressive NN decoders. We adapt LassoNet [43], a framework enforcing hierar-chical feature sparsity where features participate in NNs only if corresponding linear skip weights are active, to transform the combinatorial mode selection problem into a continuous regularization path promoting sparsity during NN training. While Las-soNet remains underexplored in scientific computing beyond limited applications such as physics-informed neural networks for inverse problems [44], we demonstrate its effi-cacy for mode selection with a NN decoder, enabling automated, scalable selection of minimal sets of physically interpretable POD modes while leveraging NN expressivity. The contributions of this work are: 
+
+• We propose SparseModesNet, a novel framework that combines the inter-pretability of POD modes with NN expressivity, enabling sparse mode selec-tion during NN training and accurate reconstruction of dynamical systems with slowly decaying Kolmogorov n-widths. 
+
+• We demonstrate SparseModesNet’s effectiveness on benchmark problems and turbulent channel flow, showcasing its ability to select minimal mode sets while maintaining high state and mode reconstruction accuracy. 
+
+• We analyze the interpretability of our NN decoder by computing modes of the reconstructed data and provide physical insights into selected modes based on their order and characteristics. Several recent works have also combined NN expressivity with physically meaning-ful POD bases for interpretable nonlinear decoders. For example, [20, 6] employ small linear POD bases augmented with NN correction terms, preserving interpretability while harnessing nonlinear expressivity. The authors of [64] extend this approach by applying NN corrections to both encoder and decoder, each weighted with trainable coefficients for improved fitting. Alternatively, some works augment linear reduction with nonlinear manifolds derived from probabilistic embeddings [29], user-defined re-producing kernel Hilbert spaces [21], or Gaussian processes [3]. Although these hybrid approaches maintain physical interpretability and sparsity by selecting few modes, they rely on energy-based heuristics rather than simultaneously identifying essential modes from a candidate set and learning the nonlinear manifold. Another related work [19] recently introduced Decomposed Sparse Modal Opti-mization (DESMO), which leverages the Sparse Identification of Nonlinear Dynamics (SINDy) framework [11, 13, 25] to discover interpretable governing equations by pro-moting sparsity in candidate function libraries. DESMO applies SINDy to POD or AE-learned bases by constructing a nonlinear candidate library from modes using predefined basis functions and employing ℓ1-regularization to select the fewest ac-tive terms. While DESMO promotes sparsity in functional representations of a given modal basis, our approach identifies which modes themselves should be retained and simultaneously learns an expressive NN manifold tailored to those selected modes. The remainder of this paper is organized as follows. Section 2 reviews background on encoder-decoder concepts for dynamical systems. Section 3 presents the Sparse-ModesNet framework, detailing LassoNet integration for mode selection and the NN architecture for nonlinear mapping. Section 4 demonstrates SparseModesNet’s per-formance on benchmark problems and turbulent channel flow. Finally, Section 5 summarizes our findings and discusses future directions. 4 T. KOIKE, P. MOHAN, M. T. H. FRAHAN, E. QIAN, J. BESSAC 
+
+2. Background. This section covers the necessary background for this work. In Subsection 2.1, we explain the concepts of encoder-decoder pairs in the context of dynamical systems. In Subsection 2.2, we introduce LassoNet, a NN framework for sparse feature selection, which we adapt for mode selection in this work. 
+
+2.1. State Encoder and Decoder on Manifolds. 2.1.1. Encoder-Decoder for Dimensionality Reduction. Let a state vector 
+
+x ∈ Rd represent the dynamical system’s state at time t. The state x is typically high-dimensional and evolves over time according to the initial value problem: (2.1) ˙x(t) = f (x(t)) , x(t0) = x0,
+
+where f : Rd → Rd governs the dynamics and x0 ∈ Rd is the initial state. We solve (2.1) at discrete time instances t1, t 2, . . . , t n to collect snapshot data of the system’s evolution. A snapshot matrix X = [ x1, x2, . . . , xn] ∈ Rd×n with xi = x(ti)is then formed from these data. Dimensionality reduction seeks a lower-dimensional representation of the state vector by mapping it to reduced coordinates in a latent space Rr , where r ≪ d.This mapping is realized by an encoder E : Rd → Rr that compresses x to a latent variable z = E(x) ∈ Rr , together with a decoder D : Rr → Rd that reconstructs an approximation of the original state: x ≈ (D◦E )( x). The quality of this approximation is measured by the reconstruction error :(2.2) RE (x; E, D) = 1
+
+n
+
+> n
+
+X
+
+> i=1
+
+∥xi − (D ◦ E )( xi)∥22,
+
+which quantifies the discrepancy between the snapshots and their reconstructions. The simplest encoder-decoder pair is linear. Let X ≈ UsΣsV⊤ 
+
+> s
+
+be the rank-s
+
+Singular Value Decomposition (SVD) of the snapshot matrix, where s ≤ min {d, n },the matrices Us ∈ Rd×s and Vs ∈ Rn×s contain the left and right singular vectors, and Σs ∈ Rs×s is the diagonal matrix of singular values σ1 ≥ · · · ≥ σs > 0. The columns of Us are the POD modes, which form an orthonormal basis capturing the most energetic features of the data [8, 33]. A linear encoder-decoder pair selects a subset of r < s modes, indexed by Ir ⊆ [s] = {1, . . . , s } with cardinality |I r | = r, and defines E(x) = U⊤ 
+
+> r
+
+x and D(z) = Ur z, where Ur ∈ Rd×r contains the selected modes. A common selection strategy is the energy heuristic , which retains the leading r
+
+modes corresponding to the largest singular values. By the Eckart-Young theorem [23, 45], this choice minimizes the reconstruction error among all rank-r approximations: (2.3) RE (x; Ur ) = 1
+
+n
+
+> n
+
+X
+
+> i=1
+
+∥xi − Ur zi∥22 = 1
+
+n
+
+> min {d,n }
+
+X
+
+> i=r+1
+
+σ2 
+
+> i
+
+.
+
+The limitation of linear encoder-decoder pairs is that reducing reconstruction er-ror requires increasing r, which becomes prohibitively expensive for systems exhibit-ing transport-dominated or turbulent dynamics with slowly decaying Kolmogorov 
+
+n-widths [48]. This motivates the linear encoder and nonlinear decoder pair, which we introduce in the next section. 
+
+2.1.2. Linear Encoder with Nonlinear Decoder. Linear encoder-decoder pairs struggle for problems with slowly decaying Kolmogorov n-widths, where re-ducing reconstruction error requires retaining prohibitively many modes. To address SPARSE MODE SELECTING NEURAL NET 5this limitation, practitioners have proposed retaining the linear POD encoder while augmenting the decoder with a nonlinear correction term: 
+
+z = E(x) = U⊤ 
+
+> r
+
+x, D(z) = Ur z + h(z),
+
+where h : Rr → Rd is a nonlinear function. Here, the r modes forming Ur need not be the leading modes; they can be any subset of the candidate modes Us. Since the nonlinear correction term h should remain low-dimensional for efficient evaluation, a natural choice for its input is the reduced representation z. This decoder struc-ture with polynomial nonlinear mappings was introduced by [50] and has since been adopted in various model reduction contexts [69, 35, 57, 22, 28, 60]. As shown in [28, eq. 14], the optimal nonlinear correction term h (in the linear least-squares sense) maps the reduced representation z to the orthogonal complement of the subspace spanned by Ur . That is, h captures dynamics not represented by the selected modes Ur alone, thereby enhancing expressivity beyond what the linear term provides. However, an arbitrary h may not satisfy this orthogonality condition, introducing redundancy with the linear term and potentially degrading reconstruction accuracy. Yet designing h to satisfy orthogonality a priori is nontrivial. To enforce orthogonality explicitly, many existing works [35, 57, 22, 5, 28, 26, 27, 60] define the decoder as (2.4) D(z) = Ur z + Wh(z),
+
+where h : Rr → Rp and W ∈ Rd×p satisfies U⊤ 
+
+> r
+
+W = 0 for a mapping dimension p.This formulation augments the linear reconstruction with information in its orthogo-nal complement through the composition of the nonlinearity h and rotation W.A possible choice is W = Uq , where Uq ∈ Rd×q consists of q modes from Us that are orthogonal to Ur , i.e., Uq ⊆ { Uj : j ∈ [s] \ I r }. This formulation, adopted in [6, 26, 27, 21], provides a natural interpretation, where h maps the reduced coordinates z
+
+to coefficients of modes orthogonal to those used in the linear reconstruction. However, this restricts the correction term to the span of modes from the predefined candidate set Us, which may be insufficient in number. Rather, we will learn W from data. 
+
+Remark 2.1. A more general representation allows each column of W to be a linear combination of orthogonal modes: W(: , i ) = P 
+
+> j / ∈I r
+
+cij Us(: , j ), where cij are combination coefficients. The single-mode-per-column approach is a special case of this formulation. 
+
+2.1.3. Linear Encoder with Neural Network Decoder. A key limitation of the nonlinear decoder in (2.4) is that the functional form of h is typically fixed a priori (e.g., quadratic polynomials), which restricts expressivity. To overcome this, we parameterize the nonlinear correction term as a NN, following [6, 64]: (2.5) z = E(x) = U⊤ 
+
+> r
+
+x, D(z) = Ur z + WhNN (z),
+
+where hNN : Rr → Rp is the NN and W ∈ Rd×p satisfies U⊤ 
+
+> r
+
+W = 0 but is not restricted to columns from Us. The NN learns the nonlinear mapping and weight W
+
+from data, while the linear term projects onto selected POD modes. This formulation requires determining both (i) which modes to include in Ur and (ii) how to train hNN and W for the nonlinear correction—while ensuring orthogo-nality between the two terms. Rather than treating mode selection and NN training as separate problems, we seek a unified framework that jointly optimizes mode selec-tion and the nonlinear mapping to minimize reconstruction error. In the following 6 T. KOIKE, P. MOHAN, M. T. H. FRAHAN, E. QIAN, J. BESSAC 
+
+section, we introduce a feature selection method that enables this joint optimization for NN-based decoders. 
+
+2.2. LassoNet for Feature Selection. LassoNet [43] is a NN framework for global feature selection that extends feature sparsity from linear models (e.g., Lasso regression) to deep NNs. While traditional Lasso employs an ℓ1-penalty to enforce sparsity on linear weights, LassoNet integrates feature selection into a NN via a linear skip (or residual) connection inspired by ResNets (Residual NNs) [32]. 
+
+Network Architecture. Consider an input feature vector ˆ z ∈ Rs. Denote a feed-forward NN gNN (ˆ z; W, β) : Rs → Rs with weight parameters W = {W (1) , . . . , W(L)}
+
+and bias parameters β = {β(1) , . . . , β(L)} for L layers, which can be expressed as a composition of layer-wise transformations: gNN (ˆ z; W, β) = g(L) ◦ · · · ◦ g(1) (ˆ z), where 
+
+g(k)(·) = σk(W(k) · +β(k)) represents the k-th layer with weight matrix W(k), bias vector β(k), and activation function σk(·) applied element-wise. The LassoNet archi-tecture augments this feed-forward NN with a direct linear skip connection: (2.6) LassoNet (ˆ z; ω, W, β) = ω ⊙ ˆz + gNN (ˆ z; W, β),
+
+where ω ∈ Rs are skip-layer weights, ⊙ denotes element-wise product, and each input feature ˆ zj connects to the corresponding output via skip weight ωj . We denote by 
+
+W(1)  
+
+> j
+
+∈ Rp1 the j-th column of the first layer weight matrix W(1) ∈ Rp1×s, representing all connections from input feature j to the p1 units in the first hidden layer. 
+
+Objective Function with Hierarchical Constraint. The novelty of LassoNet lies in its training objective that enforces structured sparsity through (2.7) min  
+
+> ω,W,β
+
+L(ω, W, β) + λ∥ω∥1, subject to ∥W (1)  
+
+> j
+
+∥∞ ≤ M |ωj | ∀j, 
+
+where L(ω, W, β) is the empirical loss (e.g., RE (x; E, D) from (2.2)), λ ≥ 0 controls sparsity via the ℓ1-penalty, and M > 0 governs the strength of the hierarchical con-straint linking skip-layer and first hidden-layer weights. This hierarchical constraint ∥W (1)  
+
+> j
+
+∥∞ ≤ M |ωj | is key for feature selection. That is, when the ℓ1-penalty drives a skip-layer weight ωj to zero, this constraint forces all associated first hidden layer weights W(1)  
+
+> j
+
+to zero as well, completely eliminating feature j from the network. This differs fundamentally from na¨ ıvely applying Lasso penalties to NN weights, which produces weight sparsity but not feature removal. 
+
+Training via Continuation Strategy. LassoNet employs proximal gradient descent with a new hierarchical proximal operator that simultaneously enforces the ℓ1-penalty and hierarchical constraint (see [43] for optimization details). Critically, rather than solving (2.7) for a single fixed λ, LassoNet implements a continuation strategy [30, 31] that solves a sequence of problems with increasing λ values λ1 < λ 2 < · · · < λ K .Starting from λ1 ≈ 0 (yielding a dense model), each subsequent problem at λk+1 is initialized from the solution at λk, following the solution path as λ increases toward 
+
+λK . This path-following approach is computationally efficient—each warm-started subproblem converges faster than solving from scratch—and produces a sequence of models (i.e., regularization path [47, 24]) with progressively increasing sparsity. For POD mode selection, this continuation strategy provides a systematic frame-work: as λ increases along the path, POD modes are sequentially removed from the NN decoder inputs according to their importance for reconstruction. The sparsest model (fewest POD modes) that maintains acceptable reconstruction accuracy can then be selected, yielding an expressive nonlinear manifold with sparse, physically interpretable input features and reduced computational cost automatically. SPARSE MODE SELECTING NEURAL NET 7
+
+3. SparseModesNet: Sparse Mode Selecting Neural Network. This sec-tion presents SparseModesNet, our framework for selecting optimal POD modes dur-ing nonlinear decoder training. We first formulate the mode selection problem in Sub-section 3.1. In Subsection 3.2, we show how to restructure the nonlinear decoder into a ResNet-style architecture incorporating feature sparsity [43]. Subsection 3.3 describes the training procedure, and Subsection 3.4 discusses implementation details for data normalization and NN architecture. 
+
+3.1. Mathematical Formulation for Mode Selection. The goal is to se-lect optimal POD modes by minimizing reconstruction error while training the NN decoder. To select r modes from s candidate modes, let Sr ∈ Rs×r be a column selector matrix [9, Sec. 7.2] where each column has a single entry of one at the row corresponding to a selected left singular vector in Us, such that Ur = Us Sr .Our NN learns the matrix Sr S⊤ 
+
+> r
+
+, which is a diagonal matrix with ones at entries corresponding to selected r left singular vectors. Define ˆ zi = U⊤ 
+
+> s
+
+xi ∈ Rs and a binary vector w ∈ { 0, 1}s with r ones at entries corresponding to selected left singular vectors, such that diag (w) = Sr S⊤ 
+
+> r
+
+∈ Rs×s. The reconstruction error is then (3.1) RE (x; w) = 1
+
+n
+
+> n
+
+X
+
+> i=1
+
+xi − Us(w ⊙ ˆzi) − WhNN (w ⊙ ˆzi) 22.
+
+Note the NN mapping is now hNN : Rs → Rp since the input ˆ zi is the full projection onto all s POD modes, not just the selected r modes. However, ˆ zi has zeros at rows corresponding to zero elements of w, ultimately selecting r modes from s candidates. The set of nonzero entries in w gives the indices of selected modes, i.e., Ir = {i ∈
+
+[s] : wi = w(i)̸ = 0 }. We identify Ir by training the NN to minimize reconstruction error. To do so, we reformulate the nonlinear decoder as a ResNet-style architecture incorporating feature sparsity through a linear skip connection, following the LassoNet framework [43], as discussed in the next section. 
+
+3.2. LassoNet Formulation of the Nonlinear Decoder. To restructure the nonlinear decoder into a ResNet-style architecture, we first relax the problem to learn a continuous skip weight vector ω ∈ Rs, allowing more flexible mode selection rather than learning a restrictive binary vector w. We then minimize the reconstruction error over the training data while enforcing two critical constraints. First, following LassoNet (2.7), we impose an ℓ1-penalty λ∥ω∥1 on the skip weights to promote sparsity. This is paired with the hierarchical constraint ∥W (1)  
+
+> j
+
+∥∞ ≤ M |ωj |
+
+on the first-layer NN weights, ensuring that if a mode is unselected ( ωj = 0), all associated first-layer weights W(1)  
+
+> j
+
+are also zero, preventing unselected modes from influencing the nonlinear mapping. Second, we impose an orthogonality constraint 
+
+[Usdiag (1{ωj̸ =0 }(ω))] ⊤W = 0 while learning W from data to ensure the linear and nonlinear decoder components do not interfere, maintaining clear separation of their contributions as discussed in Subsection 2.1. Here, 1{ωj̸ =0 }(ω) is an indicator function returning 1 if ωj̸ = 0 and 0 otherwise. Hence, the following optimization enables joint mode selection and NN training: (3.2) min 
+
+> ω,h NN ,W
+
+1
+
+n
+
+> n
+
+X
+
+> i=1
+
+xi − Us(ω ⊙ ˆzi) − WhNN (ω ⊙ ˆzi) 22 + λ∥ω∥1
+
+subject to ∥W (1)  
+
+> j
+
+∥∞ ≤ M |ωj | and [Usdiag (1{ωj̸ =0 }(ω))] ⊤W = 0 , ∀j ∈ [s],
+
+where W(1) , M , and λ are equivalent to those in the LassoNet optimization (2.7). 8 T. KOIKE, P. MOHAN, M. T. H. FRAHAN, E. QIAN, J. BESSAC 
+
+To draw a clear connection to LassoNet, recognize that this decoder closely re-sembles the LassoNet architecture (2.6) with a linear skip connection and NN branch: 
+
+D(ˆ z) = Us(ω ⊙ ˆz)
+
+| {z }
+
+> linear skip connection
+
++ WhNN (ω ⊙ ˆz)
+
+| {z }
+
+> neural network
+
+,
+
+This NN architecture and mode selection mechanism is summarized in Figure 1. 
+
+3.2.1. Design Choices and Their Theoretical Justification. SparseMod-esNet differs from the original LassoNet and simple ℓ1-regularization in two key re-spects, each essential for guaranteeing monotonic mode elimination (i.e., eliminated modes are never reactivated) when training via the continuation strategy. 
+
+Remark 3.1 (Input masking). Unlike the original LassoNet (2.6), which inputs the full feature vector ˆ z to the NN, we employ ω ⊙ ˆz as the NN input such that the unselected modes are effectively zero. Here, ω remains a trainable parameter optimized via (3.2), while ω ⊙ ˆz serves as the parametrized input to hNN (·). 
+
+Remark 3.2 (Hierarchical constraint). An alternative approach may be to remove the hierarchical constraint and keep only the ℓ1-penalty, given the latent variable to both the linear and nonlinear terms of the decoder are already masked with ω.The input masking yields gradient severance . The gradient of the loss with respect to the first-layer weights satisfies ∂L/∂ W(1)  
+
+> j
+
+= 0 whenever ωj = 0. The hierarchical constraint ∥W (1)  
+
+> j
+
+∥∞ ≤ M |ωj | complements this by enforcing W(1)  
+
+> j
+
+= 0 whenever ωj =0. Together, these properties completely sever mode j’s computational path through the NN. No gradient signal can flow to update the zeroed-out weights, preventing the reactivation of an eliminated mode. Hence, combining gradient severance with the hierarchical constraint guarantees 
+
+monotonic mode elimination . That is, under mild regularity conditions on the so-lution path, modes eliminated at regularization level λk remain eliminated for all subsequent λℓ > λ k. This monotonicity ensures that SparseModesNet produces a stable, nested sequence of active modes, enabling reliable mode selection. Without both design choices, the nonzero weights may oscillate and spuriously reactivate pre-viously eliminated modes as λ increases, forcing the network to repeatedly relearn mode suppression. In Section SM2, empirical validations of our design choices are shown through an ablation study comparing SparseModesNet against variants without input masking (Remark 3.1) and without the hierarchical constraint (Remark 3.2), demonstrating how our formulation achieves lower reconstruction error and more reliable mode se-lection. However, the monotonic mode elimination alone does not explain the better selection of modes. Specifically, we lack the mathematical machinery to explain how our method is less affected by the spectral bias [52] as we see in our empirical vali-dations; while possible future directions would be to explore neural tangent kernels (NTKs) [34]. Hence, we postpone the formal statement and proof of monotonic mode elimination, including the precise regularity assumptions to Section SM1. 
+
+3.3. Training the SparseModesNet. SparseModesNet training consists of two sequential phases, the first employs the continuation strategy from LassoNet [43] to select modes, and the second retrains the decoder with the selected modes. 
+
+Phase 1: Mode Selection. We solve (3.2) via continuation, incrementally increas-ing λ ← (1 + ϵ)λ with path multiplier ϵ > 0 to promote sparsity while warm-starting each subproblem with the previous solution. At each gradient descent iteration, we SPARSE MODE SELECTING NEURAL NET 9Layer        
+
+> Layer
+> Layer
+> z
+> 0
+> 0
+> 0
+> 0
+> selected modes
+> Fig. 1 .The SparseModesNet architecture with a linear skip connection (Us(ω⊙ˆz)) and a neural network branch (WhNN (ω⊙ˆz)) forming a residual network. The top right illustrates how the mode selector zeros out unselected modes via element-wise multiplication (colored cells are nonzero).
+
+apply a proximal gradient step: (i) compute gradients via backpropagation and up-date all parameters, then (ii) apply the hierarchical proximal operator from [43, Alg. 2] to enforce the constraint ∥W (1)  
+
+> j
+
+∥∞ ≤ M |ωj |. To maintain orthogonality between the linear and nonlinear components, we project W onto the orthogonal complement of selected modes via W ← W − Usdiag (1{ωj̸ =0 }(ω)) U⊤ 
+
+> s
+
+W after each parameter up-date. This phase terminates when the number of active modes reaches the target r,yielding the optimal mode selector ω.
+
+Phase 2: Decoder Retraining. With modes selected, we fix zi = U⊤ 
+
+> r
+
+xi ∈ Rr
+
+where Ur = UsSr ∈ Rd×r contains the r selected POD modes (see Subsection 3.1), and retrain the decoder from scratch without the ℓ1-penalty or hierarchical constraint: min 
+
+> hNN ,W
+
+1
+
+n
+
+> n
+
+X
+
+> i=1
+
+xi − Ur zi − WhNN (zi) 22 subject to U⊤ 
+
+> r
+
+W = 0 .
+
+Orthogonality is enforced at each iteration via W ← W − Ur (U⊤ 
+
+> r
+
+W). Retraining without the penalty allows more effective learning by removing the downward bias on parameters [43]. Upon convergence with hNN fixed, we obtain the optimal W by solving the following linear least-squares problem only once: (3.3) W⋆ = arg min  
+
+> W
+
+X − Ur U⊤ 
+
+> r
+
+X − WhNN (U⊤ 
+
+> r
+
+X) 2 
+
+> F
+
++ γ∥W∥2 
+
+> F
+
+,
+
+where hNN (U⊤ 
+
+> r
+
+X) ∈ Rp×n applies hNN column-wise and γ is the ℓ2-penalty parameter. This least-squares solution automatically satisfies the orthogonality constraint [28]. The complete training procedure is detailed in Algorithms 3.1 and 3.2. Hyperpa-rameters ( r, M, λ 0, ϵ ) are selected following recommendations from [43] with problem-specific tuning during experimentation. 
+
+3.4. Additional Implementation Details. 
+
+Data Normalization. We center the data by its temporal mean and apply min-max normalization to scale data to [ −1, 1], allowing training across different data scales. Centering and normalization are applied before computing POD modes. Dur-ing inference, outputs are denormalized and decentered to the original scale. 
+
+Stopping Criteria. Training continues until the number of active modes (nonzero entries in ω) reaches the target r. However, if the active mode count remains un-changed for a number of iterations (e.g., 50), we terminate training and select the 
+
+r highest weighted modes in ω, ensuring convergence when the model has stabilized and allowing a fully automated mode selection even when r is unknown a priori. 10 T. KOIKE, P. MOHAN, M. T. H. FRAHAN, E. QIAN, J. BESSAC 
+
+Algorithm 3.1 SparseModesNet Phase 1: Mode Selection 
+
+Require: Training data X, ˆZ, basis Us, neural network hNN , target modes r, initial 
+
+λ0, hierarchy multiplier M , epochs B, path multiplier ϵ > 0 
+
+> 1:
+
+Initialize hNN with parameters ( ω, W, β, W) and set λ = λ0, k = s 
+
+> 2:
+
+while k > r do  
+
+> 3:
+
+for b = 1 , . . . , B do  
+
+> 4:
+
+Perform proximal gradient step: compute gradients, update parameters, ap-ply hierarchical proximal operator to ( ω, W(1) ) 
+
+> 5:
+
+Project to orthogonal complement: W ← W − Usdiag (1{ωj̸ =0 }(ω)) U⊤ 
+
+> s
+
+W 
+
+> 6:
+
+end for  
+
+> 7:
+
+Increment λ ← (1 + ϵ)λ and update k ← |{ i ∈ [s] : ωi̸ = 0 }|  
+
+> 8:
+
+end while  
+
+> 9:
+
+return mode selector ω, decoder parameters ( W, β, W)
+
+Algorithm 3.2 SparseModesNet Phase 2: Decoder Retraining 
+
+Require: Training data X, selected basis Ur , neural network hNN , epochs B 
+
+> 1:
+
+Initialize hNN with parameters ( W, β, W) 
+
+> 2:
+
+for b = 1 , . . . , B do  
+
+> 3:
+
+Compute gradients via backpropagation and update parameters  
+
+> 4:
+
+Project to orthogonal complement: W ← W − Ur (U⊤ 
+
+> r
+
+W) 
+
+> 5:
+
+end for  
+
+> 6:
+
+Solve least-squares problem (3.3) for optimal W⋆ 
+
+> 7:
+
+return decoder parameters ( W, β, W⋆)
+
+Neural Network Architecture. For hNN , we employ a hybrid architecture consist-ing of a single fully connected layer followed by a Deep Polynomial NN (Π-Net) [16]. The fully connected layer transforms input modes into a representation suitable for the Π-Net to capture polynomial nonlinearities and serves as the gate layer where the hierarchical sparsity constraint is applied during training. The Π-Net then models high-order polynomial functions, enabling rich representation of complex relation-ships. While this layer can be extended to multiple fully connected layers for more intricate problems, a single layer proved sufficient for the datasets considered. We experimented with other architectures, including standard multi-layer per-ceptrons, convolutional neural networks, and U-Nets, but found the hybrid fully connected-Π-Net architecture provided superior reconstruction accuracy and mode selection for our problems. Further details on the hybrid Π-Net architecture are pro-vided in Section SM3. 
+
+4. Numerical Experiments. In this section, we demonstrate SparseModesNet on three problems with high Kolmogorov n-width necessitating nonlinear decoders: (i) the linear transport equation, (ii) Kuramoto-Sivashinsky equation (KSE), and (iii) turbulent channel flow. The turbulent channel flow simulations were performed on NLR’s Kestrel high-performance computing cluster with H100 Nvidia GPUs. The SparseModesNet implementation and all experiments are publicly available 1. Essen-tial hyperparameters and nonlinear mapping dimensions are reported in Table 4.  
+
+> 1Code: https://github.com/smallpondtom/sparsemodesnet SPARSE MODE SELECTING NEURAL NET
+
+11 
+
+4.1. Linear Transport Equation. 4.1.1. Problem Setup. Following [28, 60], we consider the one-dimensional linear transport equation (4.1) ∂∂t x(ξ, t ) + c ∂∂ξ x(ξ, t ) = 0 , ξ ∈ R,
+
+with spatial coordinate ξ, time t ∈ [0 , T ], and constant advection velocity c. The exact solution is x(ξ, t ) = x0(ξ − ct ), where x0 is a Gaussian bump initial condition: 
+
+x0 = x(ξ, 0) = 1
+
+√0.0005 π exp − (ξ − 0.1) 2
+
+0.0005 
+
+!
+
+.
+
+We define the spatial domain ξ ∈ [0 , 1] with 1024 grid points and time domain t ∈
+
+[0 , 0.15] with 10 3 instances, yielding data dimension d = 1024 and n = 1000 snapshots. The advection velocity is set to c = 5. For mode selection, we use s = 100 candidate modes and select r = 15 modes. Using all data to construct decoders, we compare relative reconstruction errors: (4.2) relative reconstruction error = ∥X − (D ◦ E )( X)∥F
+
+∥X∥F
+
+,
+
+where X ∈ Rd×n contains all snapshots, and E and D are the encoder and decoder mappings applied column-wise to X.Beyond reconstruction error, we assess decoder interpretability through mode fit-ting as done in [63, 19]. Given reconstructed data from the decoder, we compute POD modes from this reconstruction and compare them to the true modes from original data X. While data fitting evaluates pointwise accuracy via reconstruction errors, mode fitting reveals whether the decoder preserves underlying physical structures en-coded in dominant spatial patterns. A decoder may achieve low reconstruction error while failing to capture the physically meaningful modes that govern system dynamics. We consider several decoder structures across all experiments: 1. A linear decoder selecting the leading r modes based on the energy heuristic. 2. The Greedy Quadratic Manifold approach [60], which uses quadratic mani-folds and greedy mode selection to minimize reconstruction error. We also include a Greedy Cubic Manifold extension (not in the original work) using cubic mappings for fair comparison with our Π 3-Net. Both use the authors’ publicly available code 2. For more details on greedy methods, see Section A. 3. SparseModesNet with hybrid 2 nd -order (Π 2-Net) and 3 rd -order (Π 3-Net) deep polynomial networks as nonlinear decoders (architecture details are included in Section SM3). For comparison, we also present results training these archi-tectures with the leading r modes instead of SparseModesNet-selected modes, using identical hyperparameters to highlight mode selection importance. 
+
+4.1.2. Results. Figure 2 presents relative reconstruction errors versus mode count for various decoder architectures. Standard POD with leading-r modes (black) exhibits a persistent error plateau at 10 −1, demonstrating that linear combinations of energetic modes cannot capture the nonlinear solution manifold structure. 
+
+> 2GreedyQM Code: https://github.com/Algopaul/greedy quadratic manifolds
+
+12 T. KOIKE, P. MOHAN, M. T. H. FRAHAN, E. QIAN, J. BESSAC 0 2 4 6 8 10 12 14       
+
+> Number of Modes r
+> 10 −12
+> 10 −9
+> 10 −6
+> 10 −3
+> 10 0
+> Relative Reconstruction Error
+> POD (leading-r) Greedy Quadratic Manifold Greedy Cubic Manifold SparseModesNet Π2-Net (selected) SparseModesNet Π3-Net (selected) SparseModesNet Π2-Net (leading-r) SparseModesNet Π3-Net (leading-r)
+> Fig. 2 .Relative reconstruction errors for the linear transport with different decoder structures.
+
+SparseModesNet’s Π 3-Net achieves relative reconstruction error of 10 −14 at r = 15 compared to 10 −8 for Π 2-Net, amounting to an O(10 6) improvement. Comparing se-lected (solid) versus leading-r (dotted) modes shows learned mode selection is critical: Π3-Net with selected modes outperforms leading modes by O(10 5) at r = 15. Greedy quadratic and cubic manifold approaches show similar performance to Π 2-Net and Π3-Net, respectively, confirming polynomial decoders are effective and our method is competitive with state-of-the-art greedy methods. However, while greedy cubic man-ifold requires output dimension p = r(r + 1)( r + 2) /6 = 680 for r = 15 (due to 680 total cubic monomial combinations), our Π 3-Net maintains fixed p = 400, achieving 
+
+40% fewer output dimensions (see Table 4). Figure 3 compares POD modes of the reconstructed data for mode fitting across three regimes: leading-r (1–4), seen training candidates (16, 38, 62, 100), and ex-trapolation beyond training (mode 137). Unlike turbulent systems, this linear trans-port equation exhibits structured wave patterns across the entire energy spectrum. SparseModesNet with Π 3-Net accurately reconstructs modes across all regimes, in-cluding mode 137 beyond the s = 100 training candidates, confirming the decoder captures underlying advection physics rather than memorizing data. Standard POD fails beyond leading-r modes, while greedy approaches and Π 2-Net show increasing ex-trapolation errors. For further qualitative assessment, we provide state reconstruction analysis in Subsection SM4.1. Table 1 reveals distinct mode selection patterns. Analyzing the final selected modes are crucial as they provide further insight of the physical meaning of the se-lected modes rather than merely the successful sparsification of modes. The Π 3-Net se-lects consecutive odd modes [1 , 3, 5, 7, 9, . . . , 19] initially, followed by higher-frequency modes [29 , 24 , . . . , 42], suggesting low-frequency modes capture primary wave struc-ture while selected high-frequency modes represent fine-scale features. The Π 2-Net shows similar preference for odd modes with different high-frequency selection, indi-cating cubic architecture enables different mode utilization. In contrast, greedy meth-ods exhibit less structured patterns, with Greedy Cubic Manifold notably including mode 92 early in greedy selection. Nevertheless, even though the SparseModesNet-selected modes are ordered by decreasing ω magnitude rather than greedy selection order, it is notable that they share similar selection patterns. In Subsection SM4.2, we further visualize the automated mode selection process during training. These results demonstrate SparseModesNet outperforms traditional linear ap-proaches and competes with state-of-the-art greedy methods. The combination of mode selection and cubic nonlinearity achieves machine-precision reconstruction with only 15 modes, providing critical computational efficiency for MOR. SPARSE MODE SELECTING NEURAL NET 13 Mode 1 ( σ = 1 .16 e + 03 ) Mode 2 ( σ = 1 .16 e + 03 ) Mode 3 ( σ = 1 .15 e + 03 ) Mode 4 ( σ = 1 .13 e + 03 )                          
+
+> Mode 16 = r+1 ( σ= 6 .93 e+ 02 )Mode 38 ( σ= 6 .47 e+ 01 ) without POD
+> Mode 62 ( σ= 6 .54 e−01 ) without POD Mode 100 = s ( σ= 1 .04 e−05 ) without POD
+> Mode 137 ( σ= 4 .46 e−12 ) without POD
+> Mode 137 ( σ= 4 .46 e−12 ) without POD/GreedyQM/SMN Π2-Net Original POD GreedyQM SMN Π2-Net GreedyCM SMN Π3-Net
+
+Fig. 3 . Mode-fitting by different decoders for the linear transport, spanning modes within the leading-r, within seen s candidates, and extrapolation beyond s to assess decoder interpretability. “SMN” indicates SparseModesNet. Once the method fails, it is excluded in higher modes. 
+
+Table 1 
+
+Selected modes for each decoder in the linear transport equation, ordered by greedy selection order (GreedyQM/CM) or decreasing ω magnitude (SparseModesNet). 
+
+Decoder Selected Modes GreedyQM [1, 3, 5, 7, 4, 12, 10, 20, 28, 38, 15, 48, 23, 68, 75] GreedyCM [2, 1, 3, 92, 4, 8, 5, 7, 29, 48, 69, 42, 70, 86, 18] SparseModesNet (Π 2-Net) [1, 3, 5, 7, 9, 13, 17, 33, 11, 31, 27, 29, 26, 47, 24] SparseModesNet (Π 3-Net) [1, 3, 5, 9, 13, 15, 17, 19, 29, 24, 22, 26, 18, 31, 42] 
+
+4.2. Kuramoto-Sivashinsky Equation. 4.2.1. Problem Setup. The Kuramoto-Sivashinsky equation [41, 62] is a one-dimensional nonlinear partial differential equation: (4.3) ∂∂t x(ξ, t ) + ∂2
+
+∂ξ 2 x(ξ, t ) + ∂4
+
+∂ξ 4 x(ξ, t ) + x(ξ, t ) ∂∂ξ x(ξ, t ) = 0 .
+
+We use spatial-temporal domain [0 , 32 π]×[0 , 100] discretized with 1024 gridspaces and 2500 time instances, yielding d = 1024 and n = 2500. Due to the chaotic nature of this equation, a larger number of modes is required for accurate flow field reconstruction. As in the linear transport experiment, we use s = 100 candidate modes and select 
+
+r = 15 modes. We assess performance through relative reconstruction error (4.2) and compare mode fitting across the same decoder structures from the previous example. 
+
+4.2.2. Results. Figure 4 presents relative reconstruction errors for KSE. While standard POD with leading-r modes shows poor performance near 10 −1 to 10 0, the performance gap between selected and leading modes is smaller than for linear trans-port. SparseModesNet with Π 3-Net achieves approximately 10 −9 relative error at 14 T. KOIKE, P. MOHAN, M. T. H. FRAHAN, E. QIAN, J. BESSAC 0 2 4 6 8 10 12 14       
+
+> Number of Modes r
+> 10 −8
+> 10 −6
+> 10 −4
+> 10 −2
+> 10 0
+> Relative Reconstruction Error
+> POD (leading-r) Greedy Quadratic Manifold Greedy Cubic Manifold SparseModesNet Π2-Net (selected) SparseModesNet Π3-Net (selected) SparseModesNet Π2-Net (leading-r) SparseModesNet Π3-Net (leading-r)
+> Fig. 4 .Relative reconstruction errors for KSE using different decoder structures.
+
+r = 15 for both selection strategies, contrasting the O(10 5) difference in the linear transport case. This suggests the KSE solution manifold is less sensitive to mode selection due to chaotic, diffusion-dominated dynamics. The Π 2-Net achieves approx-imately 10 −3 error at r = 15, showing higher-order polynomial nonlinearity remains important. Greedy manifold approaches exhibit performance comparable to corre-sponding Π-Net architectures. This reduced sensitivity to mode selection stems from two factors. First, chaotic KSE dynamics distribute energy more broadly across frequencies than coherent wave structures in linear transport, reducing the distinction between optimal and subop-timal mode choices. Second, joint training of the NN decoder with mode selection weights allows the decoder to adapt its nonlinear mapping to work effectively with se-lected modes, extracting relevant information even when mode choice is energetically suboptimal. This suggests nonlinear mapping quality may be as important as mode selection for turbulent systems, highlighting the value of expressive NN decoders. Figure 5 compares reconstructed POD modes across three regimes: leading-r
+
+(1–4), seen training candidates (16, 38, 62, 100), and extrapolation (mode 240). Un-like linear transport, KSE shows high-energy modes (1–4) with chaotic, unstructured patterns while low-energy modes (100, 240) display well-defined periodic oscillations, reflecting how energy concentrates in large-scale chaotic motions while coherent struc-tures persist at lower energies. SparseModesNet with Π 3-Net accurately reconstructs modes across all regimes, including mode 240 beyond the s = 100 training set, confirm-ing it captures underlying chaotic dynamics. Greedy cubic manifold shows comparable performance consistent with Figure 4, while Π 2-Net and greedy quadratic manifold exhibit larger extrapolation errors. Standard POD fails beyond leading-r modes. Suc-cessful reconstruction of structured low-energy modes demonstrates SparseModesNet maintains interpretability when capturing energetically subdominant features. For state reconstruction, we provide additional analysis in Subsection SM4.3. Table 2 shows mode selection patterns differing from linear transport. The Π 3-Net selects predominantly higher-frequency modes, with modes 60 and 56 most im-portant, followed by gradual transition to lower frequencies [18 , 30 , 19 , . . . , 3, 2], con-trasting with the low-frequency odd mode dominance in linear transport. This higher-frequency preference reflects chaotic dynamics where energy cascades across scales and fine-scale structures are crucial. The Π 2-Net shows mixed pattern from [11 , 6, 3, 16 , . . . ]to [ . . . , 10 , 7, 2, 23], while greedy methods favor sequential low-frequency modes. That SparseModesNet achieves comparable accuracy with both selected and leading modes despite dramatically different indices underscores the NN decoder’s ability to learn effective nonlinear mappings compensating for non-optimal mode selection—valuable SPARSE MODE SELECTING NEURAL NET 15 Mode 1 ( σ = 1 .66 e + 03 ) Mode 2 ( σ = 5 .80 e + 02 ) Mode 3 ( σ = 5 .60 e + 02 ) Mode 4 ( σ = 5 .43 e + 02 )                         
+
+> Mode 16 = r+1 ( σ= 2 .68 e+ 02 )Mode 38 ( σ= 7 .10 e+ 01 ) without POD
+> Mode 62 ( σ= 1 .11 e+ 01 ) without POD Mode 100 = s ( σ= 2 .80 e−01 ) without POD
+> Mode 240 ( σ= 8 .27 e−08 ) without POD
+> Mode 240 ( σ= 8 .27 e−08 ) without POD/GreedyQM/SMN Π2-Net Original POD GreedyQM SMN Π2-Net GreedyCM SMN Π3-Net
+
+Fig. 5 . Mode fitting by different decoders for KSE, spanning modes within leading-r, within seen s candidates, and extrapolation beyond s to assess decoder interpretability. “SMN” indicates SparseModesNet. Once the method fails, it is excluded in higher modes. 
+
+Table 2 
+
+Selected modes for each decoder in KSE, ordered by greedy selection order (GreedyQM/CM) or decreasing ω magnitude (SparseModesNet). 
+
+Decoder Selected Modes GreedyQM [1, 2, 4, 3, 5, 6, 7, 10, 9, 8, 16, 13, 12, 14, 11] GreedyCM [1, 2, 3, 5, 4, 7, 9, 10, 6, 13, 14, 12, 82, 92, 81] SparseModesNet Π 2-Net [11, 6, 3, 16, 5, 4, 8, 13, 1, 12, 18, 10, 7, 2, 23] SparseModesNet Π 3-Net [60, 56, 18, 30, 19, 14, 12, 10, 13, 9, 8, 5, 6, 3, 2] 
+
+for turbulent systems where optimal mode identification is challenging. In Subsec-tion SM4.4, we further visualize the automated mode selection process during training. These results demonstrate that while SparseModesNet maintains strong perfor-mance for chaotic KSE, achieving approximately 10 −9 reconstruction error with 15 modes, learned sparse mode selection benefits are less pronounced than for transport-dominated problems. Comparable performance of selected and leading modes suggests that for diffusion-dominated turbulent systems, nonlinear decoder mapping quality may be more critical than precise mode selection, favoring expressive NN decoders. This result also confirms the energy heuristic is not optimal and alternative mode combinations could improve reconstruction. 
+
+4.3. Turbulent Channel Flow. 4.3.1. Problem Setup. Following [60, 59, 37], we consider turbulent channel flow data simulated using the AMR-Wind solver [61, 39]. Turbulent channel flow is common in engineering applications such as turbomachinery and vehicles [10]. AMR-Wind solves the incompressible Navier-Stokes (NS) equations in Large-Eddy Simula-tion (LES) formulation. Using ( e· ) to denote spatial filtering, the governing equations 16 T. KOIKE, P. MOHAN, M. T. H. FRAHAN, E. QIAN, J. BESSAC 
+
+in Cartesian coordinates with Einstein summation convention are 
+
+∂ euj
+
+∂ξ j
+
+= 0 ,(4.4) 
+
+∂ eui
+
+∂t + ∂ eui euj
+
+∂ξ j
+
+= − 1
+
+ρ∂ ep∂ξ i
+
+− ∂τ ij 
+
+∂ξ j
+
++ ν ∂2 eui
+
+∂ξ j ∂ξ j
+
++ Fi,(4.5) where ξi denotes spatial coordinate in direction i = {1, 2, 3}, eui is the spatially-filtered velocity field, ep is pressure, ν is kinematic viscosity, ρ is fluid density, and τij is the subgrid-scale stress tensor modeling unresolved turbulent scales: τij = guiuj − eui euj .The body force Fi maintains the flow, where the three coordinate directions represent streamwise, spanwise, and wall-normal components, respectively. We simulate turbulent channel flow at friction Reynolds number Re τ = 5200 in domain 12 πδ × 6δ × 1δ, where δ is the channel half-width. The domain is discretized on a finite-volume grid of size 384 × 192 × 32. We collect n = 1000 snapshots after the flow reaches statistical stationarity and slice the data at the spanwise centerline to obtain two-dimensional velocity fields of size d = 384 × 32 = 12288. We individ-ually analyze streamwise ( u1) and wall-normal ( u3) velocity components, evaluating SparseModesNet on a larger-scale turbulent example where wall-normal velocity is more advection-dominated than streamwise velocity. Figure 6 visualizes the turbulent channel flow using isosurfaces and spanwise slices for both velocity components at a time instant. Intricate turbulent structures in both components highlight the challenges in reconstructing such high-dimensional, 
+
+(a) Streamwise Velocity Component, u1
+
+(b) Wall-Normal Velocity Component, u3  
+
+> Fig. 6 .(Left ) Isosurface and ( right ) spanwise sliced flow field at a time instant for (a) stream-wise and (b) wall-normal velocity components. SPARSE MODE SELECTING NEURAL NET
+
+17 0 250 500 750 1000 
+
+Mode Number, i   
+
+> 10 −1
+> 10 1
+> 10 3
+> Singular Value,  σi
+> 050 100
+> 10 1
+> 10 2
+> 10 3Streamwise Velocity Wall-Normal Velocity
+> Fig. 7 .(Left ) Spectral decay of POD modes for turbulent channel flow for both velocity com-ponents and ( right ) zoomed view of leading 100 modes.
+
+nonlinear flow fields. Figure 7 shows the spectral decay of POD modes for both velocity components, including a zoomed view of the leading 100 modes. The slow energy decay across modes indicates many modes are necessary to capture flow energy for linear reconstruction methods, emphasizing the problem’s difficulty. For both velocity components, the data matrix is X ∈ R12288 ×1000 with s = 100 candidate and r = 15 selected modes. As in previous examples, we evaluate relative reconstruction error (4.2) and mode fitting for standard POD with leading-r modes, SparseModesNet with Π 3-Net, and Greedy Quadratic and Cubic Manifold approaches. 
+
+4.3.2. Results: Streamwise and Wall-Normal Velocity Components. 
+
+The top plot of Figure 8 presents relative reconstruction errors for the streamwise velocity component. SparseModesNet with Π 3-Net achieves superior performance compared to all baselines. Standard POD with leading-r modes plateaus at approx-imately 4 × 10 −2, confirming linear methods are inadequate for this high-Reynolds-number flow. Greedy Quadratic Manifold achieves error slightly above 1 × 10 −2 at 
+
+r = 15, while Greedy Cubic Manifold improves to approximately 1 .4 × 10 −3. Sparse-ModesNet with Π 3-Net achieves approximately 6 .6 × 10 −4 at r = 15, representing 
+
+51% reduction versus Greedy Cubic Manifold and over 94% reduction versus Greedy Quadratic Manifold. Similar to KSE, the performance gap between selected and leading modes is minimal (7 .7 × 10 −4 at r = 15), suggesting that for large-scale turbulent systems with less advection dominance, the NN decoder’s ability to learn effective nonlinear mappings is as critical as precise mode selection. The bottom plot of Figure 8 presents reconstruction errors for the wall-normal velocity component, revealing similar trends. The wall-normal velocity exhibits more intricate, smaller-scale turbulent structures (see Figure 6). Despite this complexity, SparseModesNet achieves approximately 8 .7 × 10 −3 at r = 15, outperforming Greedy Cubic Manifold by 78% and Greedy Quadratic Manifold by 97% . For wall-normal velocity, SparseModesNet with mode selection achieves 33% error reduction versus leading r modes, indicating that for the more advection-dominated component, careful mode selection provides additional benefits beyond NN decoder expressivity. Figures 9 and 10 compare reconstructed POD modes for both velocity components across mode 2 (high-energy), mode 16 (r+1), mode 100 (s), and mode 300 (extrapola-tion). Both components exhibit clear progression from large-scale coherent structures in leading modes to fine-scale periodic patterns in lower-energy modes, characteris-tic of wall-bounded turbulence where energy cascades across scales. SparseModesNet with Π 3-Net accurately reconstructs modes across all regimes for both components, including mode 300 beyond the s = 100 training set, demonstrating the decoder captures underlying turbulent physics. Greedy cubic manifold exhibits similar recon-18 T. KOIKE, P. MOHAN, M. T. H. FRAHAN, E. QIAN, J. BESSAC 0 3 6 9 12 15           
+
+> Number of Modes r
+> 10 −3
+> 10 −2
+> Relative Reconstruction Error  Streamwise Velocity 036912 15
+> Number of Modes r
+> 10 −2
+> 10 −1
+> 10 0
+> Wall-Normal Velocity
+> POD (leading-r) Greedy Quadratic Manifold Greedy Cubic Manifold SparseModesNet Π3-Net (selected) SparseModesNet Π3-Net (leading-r)
+> Fig. 8 .Relative reconstruction errors for ( left ) streamwise velocity and ( right ) wall-normal velocity of the turbulent channel flow using different decoders.
+
+struction quality. For additional qualitative assessments, we provide comparisons of flow field reconstructions in Subsection SM4.5. Table 3 shows distinct mode selection patterns between velocity components, providing physical insight into turbulent channel flow structure. For streamwise ve-locity, SparseModesNet selects mixed distribution [1 , 16 , 18 , 41 , . . . , 3, 29 , 13 , 44 , 20 , 6], beginning with the mean flow (mode 1) followed by low-to-intermediate frequency modes with some higher-frequency modes, reflecting characteristic large-scale coherent structures and elongated streaks. Wall-normal velocity selects predominantly higher-frequency modes [1 , 51 , 45 , 55 , . . . , 60 , 21 , 12 , 20], with six of the top seven non-mean modes in the 45–60 range. This higher-frequency preference corresponds physically to wall-normal velocity’s role in turbulent transport perpendicular to the wall, charac-terized by smaller-scale ejection and sweep events dominating turbulent momentum transfer [68, 54]. Greedy methods select more sequential low-to-intermediate fre-quency modes, with Greedy Cubic Manifold occasionally selecting very high-frequency modes (e.g., modes 97, 98 for streamwise; mode 100 for wall-normal), potentially in-dicating sensitivity to initialization or local optima. These results demonstrate SparseModesNet achieves state-of-the-art performance for dimensionality reduction of high-Reynolds-number turbulent channel flow, pro-viding superior quantitative accuracy and qualitative reconstruction fidelity across velocity components. Achieving approximately 6 .6 × 10 −4 or 8 .7 × 10 −3 relative error with only 15 modes—over 51% and 78% error reduction versus existing non-linear approaches—represents significant advance in computational efficiency. Crit-ically, SparseModesNet achieves this while using lower-dimensional nonlinear map-ping ( p = 400) compared to generic cubic mapping ( p = 680) across all experiments (see Table 4), reducing inference costs. The comparable performance of selected ver-sus leading modes suggests that for large-scale turbulent systems, investing computa-tional effort in training high-quality nonlinear decoders may be more beneficial than exhaustive mode selection optimization, though learned mode selection can provide improved accuracy and valuable physical insights into multi-scale turbulent structure. 
+
+5. Conclusion. In this work, we introduced SparseModesNet, a novel NN archi-tecture that automates the selection of sparse, interpretable POD modes for nonlinear manifold learning and dimensionality reduction. By integrating LassoNet’s hierarchi-cal ℓ1-regularization strategy with a nonlinear manifold decoder, SparseModesNet simultaneously learns low-dimensional representations while enforcing sparsity in the selected modes. This approach identifies a small subset of the most relevant modes SPARSE MODE SELECTING NEURAL NET 19 ξ3                
+
+> Original Data: Mode 2 ( σ= 5 .86 e+ 01 )
+> ξ3
+> GreedyCM: Mode 2 SparseModesNet Π3-Net: Mode 2
+> ξ3
+> Original Data: Mode 16 = r+1 ( σ= 2 .34 e+ 01 )
+> ξ3
+> GreedyCM: Mode 16 = r+1 SparseModesNet Π3-Net: Mode 16 = r+1
+> ξ3
+> Original Data: Mode 100 = s ( σ= 7 .21 e+ 00 )
+> ξ3
+> GreedyCM: Mode 100 = s SparseModesNet Π3-Net: Mode 100 = s
+> ξ3
+> Original Data: Mode 300 ( σ= 7 .87 e−01 )
+> ξ1
+> ξ3
+> GreedyCM: Mode 300
+> ξ1
+> SparseModesNet Π3-Net: Mode 300
+
+Spanwise Sliced Streamwise Velocity POD Mode Reconstruction Comparison      
+
+> Fig. 9 .Reconstructed POD modes by different decoders for streamwise velocity, spanning modes within leading-r, within seen scandidates, and extrapolation beyond sto assess decoder interpretabil-ity.
+
+from a larger candidate set while minimizing reconstruction error. Our numerical experiments across three problems, the linear transport equation, KSE, and turbulent channel flow, demonstrated that SparseModesNet outperforms traditional energy-based mode selection and state-of-the-art greedy algorithms in re-construction accuracy. The SparseModesNet with Π 3-Net architecture achieves 50– 90% reduction in reconstruction error compared to greedy manifold methods for the turbulent channel flow while selecting different modes, confirming that energy content is not an optimal criterion for mode selection in turbulent systems. SparseModesNet accurately reconstructs not only the candidate POD modes within the training set but also extrapolates to unseen modes beyond the candidate set. This extrapolation confirms the interpretability of the learned NN decoder through its ability to cap-20 T. KOIKE, P. MOHAN, M. T. H. FRAHAN, E. QIAN, J. BESSAC ξ3                
+
+> Original Data: Mode 2 ( σ= 1 .89 e+ 01 )
+> ξ3
+> GreedyCM: Mode 2 SparseModesNet Π3-Net: Mode 2
+> ξ3
+> Original Data: Mode 16 = r+1 ( σ= 1 .34 e+ 01 )
+> ξ3
+> GreedyCM: Mode 16 = r+1 SparseModesNet Π3-Net: Mode 16 = r+1
+> ξ3
+> Original Data: Mode 100 = s ( σ= 6 .32 e+ 00 )
+> ξ3
+> GreedyCM: Mode 100 = s SparseModesNet Π3-Net: Mode 100 = s
+> ξ3
+> Original Data: Mode 300 ( σ= 9 .45 e−01 )
+> ξ1
+> ξ3
+> GreedyCM: Mode 300
+> ξ1
+> SparseModesNet Π3-Net: Mode 300
+
+Spanwise Sliced Wall-Normal Velocity POD Mode Reconstruction Comparison      
+
+> Fig. 10 .Reconstructed POD modes by different decoders for wall-normal velocity, spanning modes within leading-r, within seen scandidates, and extrapolation beyond sto assess decoder interpretability.
+
+ture underlying physics via physically meaningful POD modes, rather than merely memorizing training data. Results highlight the potential of SparseModesNet to fa-cilitate more accurate, interpretable, and efficient reduced-order models across diverse scientific and engineering applications. Future work could pursue several promising directions. First, integrating Sparse-ModesNet with operator learning methods such as Operator Inference (OpInf) [49, 38, 46, 17] could enable joint learning of encoder-decoder pairs with ROMs. Sec-ond, incorporating physical constraints directly into the mode selection and manifold learning process through physics-informed neural networks [53] could further enhance interpretability and generalization. Finally, we can extend SparseModesNet to other modal bases, such as wavelet bases [67], to assess its versatility. SPARSE MODE SELECTING NEURAL NET 21 
+
+Table 3 
+
+Selected modes for each decoder in turbulent channel flow for (a) streamwise and (b) wall-normal velocities, ordered by greedy selection order (GreedyQM/CM) or decreasing ω magnitude (SparseModesNet). 
+
+(a) Streamwise Velocity Component, u1
+
+Decoder Selected Modes GreedyQM [1, 2, 5, 6, 9, 11, 8, 7, 3, 21, 25, 26, 19, 48, 54] GreedyCM [1, 2, 3, 4, 12, 13, 5, 9, 19, 27, 72, 78, 97, 98, 73] SparseModesNet Π 3-Net [1, 16, 18, 41, 17, 33, 12, 10, 32, 3, 29, 13, 44, 20, 6] 
+
+(b) Wall-Normal Velocity Component, u3
+
+Decoder Selected Modes GreedyQM [1, 2, 9, 3, 8, 12, 5, 6, 30, 15, 27, 28, 4, 13, 7] GreedyCM [1, 2, 3, 6, 5, 4, 8, 18, 7, 9, 29, 56, 32, 65, 100] SparseModesNet Π 3-Net [1, 51, 45, 55, 52, 36, 19, 46, 50, 47, 43, 60, 21, 12, 20] 
+
+Table 4 
+
+Summary of SparseModesNet hyperparameters and nonlinear mapping dimensions used for each numerical experiment. λ0 is the initial ℓ1 penalty, ϵ is the ℓ1 penalty’s increment factor, M is the hierarchy constraint scaling parameter, and γ is the ℓ2 penalty parameter for W⋆ computation.                                                             
+
+> Hyperparameters Nonlinear Mapping h:Rr→Rp
+> λ0ϵMγQuadratic Cubic Π2-Net Π3-Net Linear Transport 3.00.0005 12 1e–15 R15 →R120 R15 →R680 R15 →R225 R15 →R400
+> KSE 3.00.01 12 1e–15 R15 →R120 R15 →R680 R15 →R300 R15 →R680
+> Channel Flow u1, u 310 0.112 1e–15 R15 →R120 R15 →R680 –––– R15 →R624
+
+Acknowledgements. The authors were supported by the Department of En-ergy Office of Science Advanced Scientific Computing Research, DOE Award DE-SC0024721. This work was authored in part by NLR for the U.S. Department of Energy (DOE), operated under Contract No. DE-AC36-08GO28308. The views ex-pressed in the article do not necessarily represent the views of the DOE or the U.S. Government. The U.S. Government retains and the publisher, by accepting the ar-ticle for publication, acknowledges that the U.S. Government retains a nonexclusive, paid-up, irrevocable, worldwide license to publish or reproduce the published form of this work, or allow others to do so, for U.S. Government purposes. A portion of the research was performed using computational resources sponsored by the Depart-ment of Energy’s Office of Critical Minerals and Energy Innovation and located at the National Laboratory of the Rockies. 
+
+Appendix A. Greedy Quadratic Manifold Construction. 
+
+We summarize the greedy quadratic manifold (Greedy-QM) approach of [60], which serves as a main comparison method in our numerical experiments. A quadratic manifold decoder augments linear POD with a quadratic correction: 
+
+D(z) = Ur z + Wh2(z),
+
+where Ur ∈ Rd×r contains r orthonormal modes, W ∈ Rd×p2 is a weight matrix, and 
+
+h2 : Rr → Rp2 with p2 = r(r + 1) /2 is the quadratic feature map (A.1) h2(z) = z1z1 z1z2 · · · z1zr z2z2 · · · zr zr
+
+⊤ ,
+
+for z = [ z1, . . . , z r ]⊤. The encoder is linear: E(x) = U⊤ 
+
+> r
+
+x.22 T. KOIKE, P. MOHAN, M. T. H. FRAHAN, E. QIAN, J. BESSAC 
+
+Let the j-th column of U be uj . A key insight of [60] is that selecting Ur as the leading r POD modes (as in [28, 35]) can be suboptimal: the resulting latent coordinates z = U⊤ 
+
+> r
+
+x may discard information critical for the quadratic correction. Instead, the greedy method selects r modes uj1 , . . . , ujr from a candidate pool of the first s > r POD modes, where the indices j1, . . . , j r ∈ [s] need not be the leading r.In the greedy selection algorithm, given basis Ui−1 = [ uj1 , . . . , uji−1 ] with selected index set Ii−1 = {j1, . . . , j i−1} at iteration i, the next mode is chosen by (A.2) 
+
+ji = arg min 
+
+> j∈[s]\I i−1
+
+min 
+
+> W′∈Rd×p2
+
+X − P[Ui−1,uj ]X − W′h2
+
+ [Ui−1, uj ]⊤X 2 
+
+> F
+
++ γ∥W′∥2 
+
+> F
+
+,
+
+where PU denotes the orthogonal projector onto the column space of U and γ > 0 is a 
+
+ℓ2-regularization parameter. After r iterations, Ur = [ U(: , j 1), . . . , U(: , j r )] is formed and W is computed via linear least squares. The method exploits the precomputed SVD to reformulate (A.2) so that the computational cost scales with the number of snapshots n rather than the state dimension d; see [60, Section 3.2]. 
+
+Extension to cubic manifolds. The framework extends to a greedy cubic manifold (Greedy-CM) approach with cubic corrections by replacing (A.1) with a cubic feature map h3 : Rr → Rp3 containing all cubic monomials: 
+
+h3(z) = z31 z21 z2 · · · z21 zr z1z22 z1z2z3 · · · z3
+
+> r
+
+⊤ ,
+
+where p3 = r(r + 1)( r + 2) /6. Note that as r increases, the feature dimension p and number of parameters in W in the greedy manifold approach grow rapidly, whereas SparseModesNet’s use of NN decoder allows to select more modes with smaller feature dimension p by training the NN in lieu of fixing the mapping form a priori. 
+
+REFERENCES [1] S. E. Ahmed and O. San , Breaking the Kolmogorov Barrier in Model Reduction of Fluid Flows , Fluids, 5 (2020), p. 26, https://doi.org/10.3390/fluids5010026. [2] A. C. Antoulas , Approximation of large-scale dynamical systems , SIAM, 2005. [3] S. Ares de Parga, R. Tezaur, C. G. Hern´ andez, and C. Farhat , Nonlinear projection-based model order reduction with machine learning regression for closure error modeling in the latent space , Computer Methods in Applied Mechanics and Engineering, 448 (2026), p. 118443, https://doi.org/10.1016/j.cma.2025.118443. [4] M. Balajewicz, I. Tezaur, and E. Dowell , Minimal subspace rotation on the stiefel manifold for stabilization and enhancement of projection-based reduced order models for the com-pressible navier–stokes equations , Journal of Computational Physics, 321 (2016), pp. 224– 241. [5] J. Barnett and C. Farhat , Quadratic approximation manifold for mitigating the Kolmogorov barrier in nonlinear projection-based model order reduction , Journal of Computational Physics, 464 (2022), p. 111348, https://doi.org/10.1016/j.jcp.2022.111348. [6] J. Barnett, C. Farhat, and Y. Maday , Neural-network-augmented projection-based model order reduction for mitigating the Kolmogorov barrier to reducibility , Journal of Compu-tational Physics, 492 (2023), p. 112420, https://doi.org/10.1016/j.jcp.2023.112420. [7] P. Benner, S. Gugercin, and K. Willcox , A Survey of Projection-Based Model Reduction Methods for Parametric Dynamical Systems , SIAM Review, 57 (2015), pp. 483–531, https: //doi.org/10.1137/130932715. [8] G. Berkooz, P. Holmes, and J. L. Lumley , The Proper Orthogonal Decomposition in the Analysis of Turbulent Flows , Annual Review of Fluid Mechanics, 25 (1993), pp. 539–575, https://doi.org/10.1146/annurev.fl.25.010193.002543. [9] S. Boyd and L. Vandenberghe , Introduction to applied linear algebra: vectors, matrices, and least squares , Cambridge university press, 2018. [10] J. Bredberg , On the wall boundary condition for turbulence models , Chalmers University of Technology, Department of Thermo and Fluid Dynamics. Internal Report 00/4. G oteborg, (2000), pp. 8–16. SPARSE MODE SELECTING NEURAL NET 23 
+
+[11] S. L. Brunton, J. L. Proctor, and J. N. Kutz , Discovering governing equations from data by sparse identification of nonlinear dynamical systems , Proceedings of the national academy of sciences, 113 (2016), pp. 3932–3937. [12] K. Carlberg, M. Barone, and H. Antil , Galerkin v. least-squares Petrov–Galerkin projection in nonlinear model reduction , Journal of Computational Physics, 330 (2017), pp. 693–734, https://doi.org/10.1016/j.jcp.2016.10.033. [13] K. Champion, B. Lusch, J. N. Kutz, and S. L. Brunton , Data-driven discovery of coor-dinates and governing equations , Proceedings of the National Academy of Sciences, 116 (2019), pp. 22445–22451. [14] P. Chen, T. Hu, and J. Guilleminot , A nonlinear-manifold reduced-order model and operator learning for partial differential equations with sharp solution gradients , Computer Methods in Applied Mechanics and Engineering, 419 (2024), p. 116684, https://doi.org/10.1016/j. cma.2023.116684. [15] H. A. Chipman and H. Gu , Interpretable dimension reduction , Journal of applied statistics, 32 (2005), pp. 969–987. [16] G. G. Chrysos, S. Moschoglou, G. Bouritsas, J. Deng, Y. Panagakis, and S. Zafeiriou ,
+
+Deep Polynomial Neural Networks , IEEE Transactions on Pattern Analysis and Machine Intelligence, 44 (2022), pp. 4021–4034, https://doi.org/10.1109/TPAMI.2021.3058891. [17] G. Codega, A. Ivagnes, N. Demo, and G. Rozza , Machine Learning-Based Quadratic Clo-sures for Non-Intrusive Reduced Order Models , SIAM Journal on Scientific Computing, (2026), pp. C505–C525, https://doi.org/10.1137/25M1766759. [18] A. Cohen and R. DeVore , Kolmogorov widths under holomorphic mappings , IMA Journal of Numerical Analysis, 36 (2016), pp. 1–12, https://doi.org/10.1093/imanum/dru066. [19] H. Csala and A. Arzani , Decomposed sparse modal optimization: Interpretable reduced-order modeling of unsteady flows , International Journal of Heat and Fluid Flow, 117 (2026), p. 110124, https://doi.org/10.1016/j.ijheatfluidflow.2025.110124. [20] Z. Dar, J. Baiges, and R. Codina , Artificial neural network based correction for reduced order models in computational fluid mechanics , Computer Methods in Applied Mechanics and Engineering, 415 (2023), p. 116232, https://doi.org/10.1016/j.cma.2023.116232. [21] A. N. Diaz, J. T. Needels, I. K. Tezaur, and P. J. Blonigan , Kernel Manifolds: Nonlinear-Augmentation Dimensionality Reduction Using Reproducing Kernel Hilbert Spaces , Inter-national Journal for Numerical Methods in Engineering, 126 (2025), p. e70230, https: //doi.org/10.1002/nme.70230. [22] P. D´ ıez, A. Muix´ ı, S. Zlotnik, and A. Garc´ ıa-Gonz´ alez , Nonlinear dimensionality reduction for parametric problems: A kernel proper orthogonal decomposition , International Journal for Numerical Methods in Engineering, 122 (2021), pp. 7306–7327, https://doi.org/10. 1002/nme.6831. [23] C. Eckart and G. Young , The approximation of one matrix by another of lower rank , Psy-chometrika, 1 (1936), pp. 211–218. [24] J. H. Friedman, T. Hastie, and R. Tibshirani , Regularization paths for generalized linear models via coordinate descent , Journal of statistical software, 33 (2010), pp. 1–22. [25] K. Fukami, T. Murata, K. Zhang, and K. Fukagata , Sparse identification of nonlinear dynamics with low-dimensionalized flow representations , Journal of Fluid Mechanics, 926 (2021), p. A10. [26] R. Geelen, L. Balzano, and K. Willcox , Learning Latent Representations in High-Dimensional State Spaces Using Polynomial Manifold Constructions , in 2023 62nd IEEE Conference on Decision and Control (CDC), Dec. 2023, pp. 4960–4965, https://doi.org/10. 1109/CDC49753.2023.10384209. [27] R. Geelen, L. Balzano, S. Wright, and K. Willcox , Learning physics-based reduced-order models from data using nonlinear manifolds , Chaos: An Interdisciplinary Journal of Non-linear Science, 34 (2024), p. 033122, https://doi.org/10.1063/5.0170105. [28] R. Geelen, S. Wright, and K. Willcox , Operator inference for non-intrusive model reduc-tion with quadratic manifolds , Computer Methods in Applied Mechanics and Engineering, 403 (2023), p. 115717, https://doi.org/10.1016/j.cma.2022.115717. [29] J. Guo and D. Xiao , Nonlinear Model Reduction by Probabilistic Manifold Decomposition ,SIAM Journal on Scientific Computing, 48 (2026), pp. A209–A235, https://doi.org/10. 1137/25M1738863. [30] E. T. Hale, W. Yin, and Y. Zhang , A fixed-point continuation method for ℓ1-regularized minimization with applications to compressed sensing , CAAM TR07-07, Rice University, 43 (2007), p. 2. [31] E. T. Hale, W. Yin, and Y. Zhang , Fixed-point continuation for ℓ1-minimization: Method-ology and convergence , SIAM Journal on Optimization, 19 (2008), pp. 1107–1130. 24 T. KOIKE, P. MOHAN, M. T. H. FRAHAN, E. QIAN, J. BESSAC [32] K. He, X. Zhang, S. Ren, and J. Sun , Deep Residual Learning for Image Recognition , Dec. 2015, https://doi.org/10.48550/arXiv.1512.03385. [33] P. Holmes , Turbulence, coherent structures, dynamical systems and symmetry , Cambridge university press, 2012. [34] A. Jacot, F. Gabriel, and C. Hongler , Neural tangent kernel: Convergence and general-ization in neural networks , Advances in neural information processing systems, 31 (2018). [35] S. Jain, P. Tiso, J. B. Rutzmoser, and D. J. Rixen , A quadratic manifold for model order reduction of nonlinear structural dynamics , Computers & Structures, 188 (2017), pp. 80– 94, https://doi.org/10.1016/j.compstruc.2017.04.005. [36] T. Kadeethum, F. Ballarin, D. O’Malley, Y. Choi, N. Bouklas, and H. Yoon , Reduced order modeling for flow and transport problems with Barlow Twins self-supervised learning ,Scientific Reports, 12 (2022), p. 20654, https://doi.org/10.1038/s41598-022-24545-3. [37] T. Koike, P. Mohan, M. T. H. de Frahan, J. Bessac, and E. Qian , Streaming Operator Inference for Model Reduction of Large-Scale Dynamical Systems , Feb. 2026, https://doi. org/10.48550/arXiv.2601.12161. [38] B. Kramer, B. Peherstorfer, and K. E. Willcox , Learning Nonlinear Reduced Models from Data with Operator Inference , Annual Review of Fluid Mechanics, 56 (2024), p. null, https://doi.org/10.1146/annurev-fluid-121021-025220. [39] M. B. Kuhn, M. T. Henry de Frahan, P. Mohan, G. Deskos, M. Churchfield, L. Che-ung, A. Sharma, A. Almgren, S. Ananthan, M. J. Brazell, L. A. Mart´ ınez-Tossas, R. Thedin, J. Rood, P. Sakievich, G. Vijayakumar, W. Zhang, and M. Sprague ,
+
+AMR-Wind: A Performance-Portable, High-Fidelity Flow Solver for Wind Farm Simula-tions , Wind Energy, 28 (2025), p. e70010, https://doi.org/10.1002/we.70010. [40] K. Kunisch and S. Volkwein , Galerkin proper orthogonal decomposition methods for a general equation in fluid dynamics , SIAM Journal on Numerical analysis, 40 (2002), pp. 492–515. [41] Y. Kuramoto , Diffusion-induced chaos in reaction systems , Progress of Theoretical Physics Supplement, 64 (1978), pp. 346–367. [42] K. Lee and K. T. Carlberg , Model reduction of dynamical systems on nonlinear mani-folds using deep convolutional autoencoders , Journal of Computational Physics, 404 (2020), p. 108973, https://doi.org/10.1016/j.jcp.2019.108973. [43] I. Lemhadri, F. Ruan, L. Abraham, and R. Tibshirani , LassoNet: A Neural Network with Feature Sparsity , Journal of Machine Learning Research, 22 (2021), pp. 1–29. [44] M. Ma, L. Fu, X. Guo, and Z. Zhai , Incorporating lasso regression to physics-informed neural network for inverse pde problem. , CMES-Computer Modeling in Engineering & Sciences, 141 (2024). [45] L. Mirsky , Symmetric gauge functions and unitarily invariant norms , The quarterly journal of mathematics, 11 (1960), pp. 50–59. [46] E. Parish, A. Gruber, P. Blonigan, and I. Tezaur , NN-OpInf: An operator inference approach using structure-preserving composable neural networks , Mar. 2026, https://doi. org/10.48550/arXiv.2603.08488. [47] M. Y. Park and T. Hastie , l1-regularization path algorithm for generalized linear models ,Journal of the Royal Statistical Society Series B: Statistical Methodology, 69 (2007), pp. 659–677. [48] B. Peherstorfer , Breaking the Kolmogorov Barrier with Nonlinear Model Reduction , Notices of the American Mathematical Society, 69 (2022), p. 1, https://doi.org/10.1090/noti2475. [49] B. Peherstorfer and K. Willcox , Data-driven operator inference for nonintrusive projection-based model reduction , Computer Methods in Applied Mechanics and Engineer-ing, 306 (2016), pp. 196–215, https://doi.org/10.1016/j.cma.2016.03.025. [50] H. Qiao, P. Zhang, D. Wang, and B. Zhang , An Explicit Nonlinear Mapping for Manifold Learning , IEEE transactions on systems, man, and cybernetics. Part B, Cybernetics : a publication of the IEEE Systems, Man, and Cybernetics Society, 43 (2012), https://doi. org/10.1109/TSMCB.2012.2198916. [51] A. Quarteroni, A. Manzoni, and F. Negri , Reduced basis methods for partial differential equations: an introduction , vol. 92, Springer, 2015. [52] N. Rahaman, A. Baratin, D. Arpit, F. Draxler, M. Lin, F. Hamprecht, Y. Bengio, and A. Courville , On the spectral bias of neural networks , in International conference on machine learning, PMLR, 2019, pp. 5301–5310. [53] M. Raissi, P. Perdikaris, and G. E. Karniadakis , Physics-informed neural networks: Adeep learning framework for solving forward and inverse problems involving nonlinear partial differential equations , Journal of Computational Physics, 378 (2019), pp. 686–707, https://doi.org/10.1016/j.jcp.2018.10.045. [54] S. K. Robinson , Coherent Motions in the Turbulent Boundary Layer , Annual Review of Fluid SPARSE MODE SELECTING NEURAL NET 25 
+
+Mechanics, 23 (1991), pp. 601–639, https://doi.org/10.1146/annurev.fl.23.010191.003125. [55] F. Romor, G. Stabile, and G. Rozza , Non-linear Manifold Reduced-Order Models with Con-volutional Autoencoders and Reduced Over-Collocation Method , Journal of Scientific Com-puting, 94 (2023), p. 74, https://doi.org/10.1007/s10915-023-02128-2. [56] C. W. Rowley, T. Colonius, and R. M. Murray , Model reduction for compressible flows us-ing POD and Galerkin projection , Physica D: Nonlinear Phenomena, 189 (2004), pp. 115– 129, https://doi.org/10.1016/j.physd.2003.03.001. [57] J. B. Rutzmoser, D. J. Rixen, P. Tiso, and S. Jain , Generalization of quadratic manifolds for reduced order modeling of nonlinear structural dynamics , Computers & Structures, 192 (2017), pp. 196–209, https://doi.org/10.1016/j.compstruc.2017.06.003. [58] P. Schwerdtner, S. Gugercin, and B. Peherstorfer , Empirical Sparse Regression on Qua-dratic Manifolds , SIAM Journal on Scientific Computing, 47 (2025), pp. A3085–A3107, https://doi.org/10.1137/24M1717270. [59] P. Schwerdtner, P. Mohan, A. Pachalieva, J. Bessac, D. O’Malley, and B. Pe-herstorfer , Online learning of quadratic manifolds from streaming data for nonlin-ear dimensionality reduction and nonlinear model reduction , Proceedings of the Royal Society A: Mathematical, Physical and Engineering Sciences, 481 (2025), p. 20240670, https://doi.org/10.1098/rspa.2024.0670. [60] P. Schwerdtner and B. Peherstorfer , Greedy construction of quadratic manifolds for nonlinear dimensionality reduction and nonlinear model reduction , Mar. 2024, https: //doi.org/10.48550/arXiv.2403.06732. [61] A. Sharma, M. J. Brazell, G. Vijayakumar, S. Ananthan, L. Cheung, N. deVelder, M. T. Henry de Frahan, N. Matula, P. Mullowney, J. Rood, P. Sakievich, A. Almgren, P. S. Crozier, and M. Sprague , ExaWind: Open-source CFD for hybrid-RANS/LES geometry-resolved wind turbine simulations in atmospheric flows , Wind En-ergy, 27 (2024), pp. 225–257, https://doi.org/10.1002/we.2886. [62] G. I. Sivashinsky , Nonlinear analysis of hydrodynamic instability in laminar flames—i. deriva-tion of basic equations , Acta astronautica, 4 (1977), pp. 1207–1221. [63] A. Solera-Rico, C. Sanmiguel Vila, M. G´ omez-L´ opez, Y. Wang, A. Almashjary, S. T. M. Dawson, and R. Vinuesa , β-Variational autoencoders and transformers for reduced-order modelling of fluid flows , Nature Communications, 15 (2024), p. 1361, https://doi.org/10. 1038/s41467-024-45578-4. [64] N. Somasekharan and S. Pan , Beyond the Kolmogorov barrier: A learnable weighted hybrid autoencoder for model order reduction , Proceedings of the Royal Society A: Mathematical, Physical and Engineering Sciences, 481 (2025), p. 20250159, https://doi.org/10.1098/rspa. 2025.0159. [65] A. Sudjianto and A. Zhang , Designing Inherently Interpretable Machine Learning Models ,Nov. 2021, https://doi.org/10.48550/arXiv.2111.01743. [66] J. Tencer and K. Potter , A Tailored Convolutional Neural Network for Nonlinear Mani-fold Learning of Computational Physics Data Using Unstructured Spatial Discretizations ,SIAM Journal on Scientific Computing, 43 (2021), pp. A2581–A2613, https://doi.org/10. 1137/20M1344263. [67] C. Tilki and S. Gugercin , Wavelet-Based Observables for Koopman Analysis: An Extended Dynamic Mode Decomposition Framework , May 2026, https://doi.org/10.48550/arXiv. 2605.14224. [68] J. M. Wallace, H. Eckelmann, and R. S. Brodkey , The wall region in turbulent shear flow , Journal of Fluid Mechanics, 54 (1972), pp. 39–48, https://doi.org/10.1017/ S0022112072000515. [69] Y. Xia, Q. Lu, J. Feng, and H.-Y. Bae , An Explicit Sparse Mapping for Nonlinear Di-mensionality Reduction , in Rough Sets and Knowledge Technology, D. Miao, W. Pedrycz, D. ´Sl¸ ezak, G. Peters, Q. Hu, and R. Wang, eds., Cham, 2014, Springer International Pub-lishing, pp. 149–157, https://doi.org/10.1007/978-3-319-11740-9 15. [70] B. Zhang , Nonlinear mode decomposition via physics-assimilated convolutional autoencoder for unsteady flows over an airfoil , Physics of Fluids, 35 (2023), p. 095115, https://doi.org/ 10.1063/5.0164250. SUPPLEMENTARY MATERIALS: SPARSE POD MODE SELECTION AND MANIFOLD DIMENSIONALITY REDUCTION WITH NEURAL NETWORKS ∗      
+
+> TOMOKI KOIKE †, PRAKASH MOHAN ‡, MARC T. HENRY DE FRAHAN ‡, ELIZABETH QIAN †,AND JULIE BESSAC ‡
+
+SM1. Theoretical Analysis of SparseModesNet’s Design Choice. We establish theoretical foundations for the design choices in SparseModesNet. 
+
+SM1.1. Assumptions & Constraints. Throughout this section, we impose the following standing assumptions and constraints. 
+
+Assumption SM1.1. The training data {xi}ni=1 ⊂ Rd as well as projected data 
+
+{ˆzi}ni=1 ⊂ Rs satisfy ˆ zi̸ = 0 for all i ∈ [n]. 
+
+Assumption SM1.2. The neural network (NN) hNN : Rs → Rp is continuously differentiable, composed of several affine transformations and smooth activations (e.g., tanh). Its Jacobian is denoted JhNN (ζ) = ∂h NN /∂ ζ ∈ Rp×s.
+
+Constraint SM1.3. The first-layer weights W(1) ∈ Rp1×s and skip weights ω ∈ Rs
+
+satisfy ∥W (1)  
+
+> j
+
+∥∞ ≤ M |ωj | for all j ∈ [s], where M > 0 is the hierarchy coefficient and 
+
+W(1)  
+
+> j
+
+∈ Rp1 denotes the j-th column of W(1) [SM4]. 
+
+SM1.2. Notation. The standard basis vector in Rs with 1 in position j is de-noted ej . For ω ∈ Rs, we define diag (ω) ∈ Rs×s as the diagonal matrix with entries [diag (ω)] jj = ωj . Note that the elementwise product ω ⊙ ˆzi equals diag (ω)ˆ zi. We denote Θ to be the collection of NN parameters. We distinguish two types of superscripts throughout this section: 
+
+• For a regularization parameter λ > 0, the pair ( ω∗(λ), Θ∗(λ)) denotes a 
+
+stationary point of the regularized objective (SM1.2), i.e., a point satisfying the first-order optimality (KKT) conditions for the constrained problem. 
+
+• Given current values ( ωj , W(1)  
+
+> j
+
+), the notation ( ω+ 
+
+> j
+
+, W(1)+  
+
+> j
+
+) denotes the output of a single proximal gradient iteration. For a regularization parameter λ > 0, the active set at a stationary point is 
+
+A(λ) = {j ∈ [s] : ω∗ 
+
+> j
+
+(λ)̸ = 0 }.
+
+SM1.3. The SparseModesNet Objective. Define the mean-squared error loss functional L : Rs × Θ → R by (SM1.1) L(ω, Θ) = 1
+
+n
+
+> n
+
+∑
+
+> i=1
+
+∥∥xi − Usdiag (ω)ˆ zi − WhNN (diag (ω)ˆ zi; Θ) ∥∥22.
+
+The regularized objective is then (SM1.2) min  
+
+> ω,Θ
+
+Jλ(ω, Θ) := L(ω, Θ) + λ∥ω∥1                     
+
+> ∗Submitted to the editors May 26, 2026.
+> Funding: The authors were supported by the Department of Energy Office of Science Advanced Scientific Computing Research, DOE Award DE-SC0024721.
+> †School of Aerospace Engineering, Georgia Institute of Technology, Atlanta, GA ({tkoike, eqian }@gatech.edu)
+> ‡Computational Science Center, National Laboratory of the Rockies (NLR), Golden, CO ({julie.bessac }@nlr.gov) SM1
+
+SM2 T. KOIKE, P. MOHAN, M. T. H. FRAHAN, E. QIAN, J. BESSAC 
+
+subject to the Hierarchical Constraint SM1.3. 
+
+SM1.4. Gradient Structure Analysis. We first establish the precise form of the gradient and contrast it with the standard LassoNet architecture. 
+
+Definition SM1.4 (Masked vs. unmasked architectures). 
+
+• The masked architecture (SparseModesNet) uses the NN input that masks ˆzi
+
+with the mode selector weight ω, i.e., ζi(ω) = diag (ω)ˆ zi ∈ Rs.
+
+• The unmasked architecture (standard LassoNet, cf. Remark 3.1 ) uses the NN input ζi = ˆ zi ∈ Rs, independent of ω.
+
+Definition SM1.5. Define the residual vector ri(ω, Θ) ∈ Rd by 
+
+(SM1.3) ri(ω, Θ) = xi − Usdiag (ω)ˆ zi − WhNN (diag (ω)ˆ zi; Θ) .
+
+Then, the loss functional admits the representation 
+
+L(ω, Θ) = 1
+
+n
+
+> n
+
+∑
+
+> i=1
+
+∥ri(ω, Θ) ∥22
+
+and is continuously differentiable in (ω, Θ) .
+
+The loss representation is immediate from Definition SM1.5 and its continuous differ-entiability follows from Assumption SM1.2 and the chain rule, noting that diag (ω)ˆ zi
+
+is linear in ω and hNN is C1 by assumption. 
+
+Theorem SM1.6 (Gradient characterization for SparseModesNet). Under As-sumptions SM1.1 and SM1.2 , the gradient of the loss functional with respect to ωj for 
+
+j ∈ [s] is 
+
+(SM1.4) ∂L
+
+∂ω j
+
+= − 2
+
+n
+
+> n
+
+∑
+
+> i=1
+
+ˆzij · r⊤
+
+> i
+
+[uj + WJ hNN (diag (ω)ˆ zi)ej
+
+],
+
+where uj ∈ Rd is the j-th column of Us, ˆzij = [ˆ zi]j is the j-th component of ˆzi, and 
+
+JhNN (·) ∈ Rp×s is the Jacobian of hNN .Proof. Fix j ∈ [s]. Differentiating under the sum: 
+
+∂L
+
+∂ω j
+
+= 1
+
+n
+
+> n
+
+∑
+
+> i=1
+
+∂∂ω j
+
+∥ri∥22 = 2
+
+n
+
+> n
+
+∑
+
+> i=1
+
+r⊤
+
+> i
+
+∂ri
+
+∂ω j
+
+.
+
+We compute ∂ri/∂ω j term by term. 
+
+Term 1: Linear skip connection. Since [ diag (ω)ˆ zi]k = ωk ˆzik , we have 
+
+∂[diag (ω)ˆ zi]k/∂ω j = δjk ˆzik = ˆ zij δjk , giving ∂[diag (ω)ˆ zi]/∂ω j = ˆ zij ej . Therefore, 
+
+∂∂ω j
+
+[Usdiag (ω)ˆ zi
+
+] = ˆ zij Usej = ˆ zij uj .
+
+Term 2: NN branch. Define ζi = diag (ω)ˆ zi. By the chain rule: 
+
+∂∂ω j
+
+[WhNN (ζi)] = WJ hNN (ζi) ∂ζi
+
+∂ω j
+
+= ˆ zij WJ hNN (ζi)ej .
+
+Combining terms: Since ri = xi − Usdiag (ω)ˆ zi − WhNN (ζi), 
+
+∂ri
+
+∂ω j
+
+= −ˆzij 
+
+[uj + WJ hNN (diag (ω)ˆ zi)ej
+
+].
+
+Substituting yields (SM1.4). SUPPLEMENTARY MATERIALS: SPARSE MODE SELECTING NEURAL NET SM3 
+
+Corollary SM1.7 (Gradient characterization for standard LassoNet). In the unmasked architecture (Definition SM1.4 ) where the NN input is ˆzi, the gradient of the loss with respect to ωj reduces to 
+
+(SM1.5) ∂L
+
+∂ω j
+
+= − 2
+
+n
+
+> n
+
+∑
+
+> i=1
+
+ˆzij · r⊤ 
+
+> i
+
+uj .
+
+Proof. In the unmasked case, the NN term WhNN (ˆ zi; Θ) is independent of ω,so ∂∂ω j [WhNN (ˆ zi; Θ)] = 0. The result follows from Term 1 of the proof of Theo-rem SM1.6. 
+
+Definition SM1.8. Define the skip gradient and network gradient components: 
+
+Gskip  
+
+> j
+
+(ω, Θ) = − 2
+
+n
+
+> n
+
+∑
+
+> i=1
+
+ˆzij · ri(ω, Θ) ⊤uj ,(SM1.6) 
+
+Gnet  
+
+> j
+
+(ω, Θ) = − 2
+
+n
+
+> n
+
+∑
+
+> i=1
+
+ˆzij · ri(ω, Θ) ⊤WJ hNN (diag (ω)ˆ zi)ej .(SM1.7) 
+
+Then for SparseModesNet: ∂L/∂ω j = Gskip  
+
+> j
+
++ Gnet  
+
+> j
+
+, while for standard LassoNet: 
+
+∂L/∂ω j = Gskip  
+
+> j
+
+.Remark SM1.9. The skip gradient Gskip  
+
+> j
+
+in (SM1.6) is a weighted sum of inner products r⊤ 
+
+> i
+
+uj . As training progresses and mode j becomes less informative, the residuals ri are increasingly explained by the remaining active modes or by those beyond the s candidates, causing ri to lie approximately orthogonal to uj . This near-orthogonality drives |Gskip  
+
+> j
+
+| toward zero. Consequently, the network gradient Gnet 
+
+> j
+
+in (SM1.7), which couples the dynamics of ωj to the NN’s sensitivity to mode j, can dominate the overall gradient in SparseModesNet, accelerating the shrinkage of ωj .
+
+SM1.5. Proof of Monotonic Mode Elimination. We now prove the mono-tonic mode elimination property stated in Subsection 3.2.1 of the main text. We begin by establishing lemmas on the nullification of weights and gradients induced by the hierarchical constraint and input masking. 
+
+SM1.5.1. Preliminary Lemmas. 
+
+Lemma SM1.10 (Constraint-induced weight nullification). Under the Hierarchi-cal Constraint SM1.3 , if ωj = 0 for some j ∈ [s], then W(1)  
+
+> j
+
+= 0 ∈ Rp1 .Proof. The constraint ∥W (1)  
+
+> j
+
+∥∞ ≤ M |ωj | = 0 implies |[W(1)  
+
+> j
+
+]k| ≤ 0 for all k ∈ [p1]. Since | · | ≥ 0, we have [ W(1)  
+
+> j
+
+]k = 0 for all k, i.e., W(1)  
+
+> j
+
+= 0.
+
+Lemma SM1.11 (Input nullification). If ωj = 0 , then the j-th component of the masked input vanishes: [diag (ω)ˆ zi]j = 0 for all i ∈ [n].Proof. Direct computation: [ diag (ω)ˆ zi]j = ωj ˆzij = 0. 
+
+Theorem SM1.12 (Gradient severance). Suppose ωj = 0 for some j ∈ [s].Under the masked architecture (Definition SM1.4 ), the gradient of the loss L with respect to the first-layer weights W(1)  
+
+> j
+
+satisfies 
+
+∂L
+
+∂W(1) 
+
+> j
+
+= 0 ∈ Rp1 .SM4 T. KOIKE, P. MOHAN, M. T. H. FRAHAN, E. QIAN, J. BESSAC 
+
+Proof. Let the NN have the form hNN (ζ; Θ) = hNN (L) ◦ · · · ◦ hNN (2) ◦ hNN (1) (ζ), where hNN (1) (ζ) = σ(W(1) ζ + β(1) ) with elementwise activation σ. Define the preac-tivation a(1) (ζ) = W(1) ζ + β(1) ∈ Rp1 .For the masked input ζi = diag (ω)ˆ zi, the k-th component of the preactivation is [a(1) (ζi)] k =
+
+> s
+
+∑
+
+> m=1
+
+[W(1)  
+
+> m
+
+]kωm ˆzim + [ β(1) ]k.
+
+Differentiating with respect to [ W(1)  
+
+> j
+
+]k (the ( k, j )-entry of W(1) ): 
+
+∂[a(1) (ζi)] k
+
+∂[W(1)  
+
+> j
+
+]k
+
+= ωj ˆzij .
+
+By the chain rule: 
+
+∂L
+
+∂W(1) 
+
+> j
+
+= 2
+
+n
+
+> n
+
+∑
+
+> i=1
+
+∂L
+
+∂a(1) (ζi) · ∂a(1) (ζi)
+
+∂W(1) 
+
+> j
+
+= 2
+
+n
+
+> n
+
+∑
+
+> i=1
+
+ωj ˆzij · ∂L
+
+∂a(1) (ζi) .
+
+When ωj = 0, ∂L
+
+> ∂W(1)
+> j
+
+= 0 regardless of the values of ˆ zij and ∂L/∂ a(1) (ζi). 
+
+Remark SM1.13. Theorem SM1.12 shows that input masking causes the gradient with respect to W(1)  
+
+> j
+
+to vanish exactly when ωj = 0. This severs mode j’s computa-tional path: no gradient signal can update W(1)  
+
+> j
+
+. In the unmasked architecture, by contrast, ∂L/∂ W(1)  
+
+> j
+
+is generically nonzero even when ωj = 0, since the NN receives the full input ˆ zi. However, gradient severance alone only freezes W(1)  
+
+> j
+
+at its current value; it does not force W(1)  
+
+> j
+
+= 0. The hierarchical constraint (Lemma SM1.10) is necessary to ensure that when ωj = 0, the constraint enforces W(1)  
+
+> j
+
+= 0.
+
+SM1.5.2. The Hier-Prox Operator. The optimization problem (SM1.2) is solved via the continuation strategy described in Subsection 2.2, using the hierarchical proximal (Hier-Prox) operator developed in [SM4]. 
+
+Definition SM1.14 (Preproximal values). In a proximal gradient iteration with step size α > 0, given current values (ωj , W(1)  
+
+> j
+
+), the preproximal values are 
+
+(SM1.8) ˜ωj = ωj − α ∂L
+
+∂ω j
+
+, ˜W(1)  
+
+> j
+
+= W(1)  
+
+> j
+
+− α ∂L
+
+∂W(1) 
+
+> j
+
+.
+
+Definition SM1.15 (Hier-Prox operator). For mode j ∈ [s], step size α > 0,regularization parameter λ > 0, hierarchy coefficient M > 0, and preproximal values 
+
+(˜ωj , ˜W(1)  
+
+> j
+
+) ∈ R × Rp1 , the Hier-Prox operator is 
+
+(SM1.9) HierProx αλ,M 
+
+(˜ωj , ˜W(1) 
+
+> j
+
+) := arg min  
+
+> (ωj,w)∈C
+
+12 (ωj − ˜ωj )2 + 12 ∥w − ˜W(1)  
+
+> j
+
+∥22 +αλ |ωj |,
+
+where the constraint set is C = {(ωj , w) ∈ R × Rp1 : ∥w∥∞ ≤ M |ωj |} .
+
+The constraint set C is a double cone with apex at the origin. The Hier-Prox operator produces the updated values ( ω+ 
+
+> j
+
+, W(1)+  
+
+> j
+
+) = HierProx αλ,M (˜ωj , ˜W(1)  
+
+> j
+
+). SUPPLEMENTARY MATERIALS: SPARSE MODE SELECTING NEURAL NET SM5 
+
+Proposition SM1.16 (Zero attractor condition). The Hier-Prox operator sat-isfies HierProx αλ,M (˜ωj , ˜W(1)  
+
+> j
+
+) = (0 , 0) if and only if 
+
+(SM1.10) |˜ωj | + M ∥ ˜W(1)  
+
+> j
+
+∥1 ≤ αλ. 
+
+Proof. Define f (ωj , w) = 12 (ωj − ˜ωj )2 + 12 ∥w − ˜W(1)  
+
+> j
+
+∥22 + αλ |ωj |. For brevity, write 
+
+˜ω = ˜ωj and ˜w = ˜W(1)  
+
+> j
+
+.Since C is a cone, its tangent cone at the origin equals itself: 
+
+TC (0 , 0) = C = {(dω , d) ∈ R × Rp1 : ∥d∥∞ ≤ M |dω |}.
+
+For any direction ( dω , d) ∈ TC (0 , 0), the directional derivative of f at (0 , 0) is 
+
+f ′((0 , 0); ( dω , d)) = lim 
+
+> t→0+
+
+f (td ω , t d) − f (0 , 0)
+
+t .
+
+Expanding f (td ω , t d): 
+
+f (td ω , t d) = 12 (td ω − ˜ω)2 + 12 ∥td − ˜w∥22 + αλ |td ω |
+
+= 12 ˜ω2 + 12 ∥ ˜w∥22 − td ω ˜ω − td⊤ ˜w + αλt |dω | + O(t2).
+
+Since f (0 , 0) = 12 ˜ω2 + 12 ∥ ˜w∥22, we obtain (SM1.11) f ′((0 , 0); ( dω , d)) = −dω ˜ω − d⊤ ˜w + αλ |dω |.
+
+Following the first-order optimality conditions, since f and a single cone of C with the apex at the origin are convex, (0 , 0) is optimal if and only if f ′((0 , 0); ( dω , d)) ≥ 0for all ( dω , d) ∈ TC (0 , 0). We analyze three cases. 
+
+Case 1: dω = 0 . The constraint forces d = 0, giving f ′((0 , 0); (0 , 0)) = 0 ≥ 0. 
+
+Case 2: dω > 0. The directional derivative (SM1.11) becomes f ′((0 , 0); ( dω , d)) = 
+
+dω (αλ − ˜ω) − d⊤ ˜w. Maximizing d⊤ ˜w over ∥d∥∞ ≤ M d ω is achieved at dk = M d ω ·
+
+sign ( ˜wk) for each coordinate k where ˜wk = [ ˜w]k, yielding max 
+
+> ∥d∥∞≤M d ω
+
+d⊤ ˜w =
+
+> p1
+
+∑
+
+> k=1
+
+M d ω | ˜wk| = M d ω ∥ ˜w∥1.
+
+Thus, the infimum of the directional derivative over dω > 0 and feasible d is inf   
+
+> dω>0,∥d∥∞≤M d ω
+
+f ′((0 , 0); ( dω , d)) = dω
+
+(αλ − ˜ω − M ∥ ˜w∥1
+
+).
+
+For this to be nonnegative for all dω > 0, we require (SM1.12) ˜ω + M ∥ ˜w∥1 ≤ αλ. 
+
+Case 3: dω < 0. Writing dω = −δ with δ > 0, a similar argument yields (SM1.13) − ˜ω + M ∥ ˜w∥1 ≤ αλ. 
+
+Combining (SM1.12) and (SM1.13) gives |˜ω| + M ∥ ˜w∥1 ≤ αλ , which is (SM1.10). SM6 T. KOIKE, P. MOHAN, M. T. H. FRAHAN, E. QIAN, J. BESSAC 
+
+SM1.5.3. The Jacobian Structure. The following fact establishes how the network Jacobian depends on the first-layer weights. 
+
+Fact SM1.17. Consider a NN with first layer hNN (1) (ζ) = σ(W(1) ζ + β(1) ), where 
+
+σ is an elementwise activation with derivative σ′. Let J(L:2) denote the Jacobian of the composition of layers 2 through L. Then the j-th column of the network Jacobian satisfies (SM1.14) JhNN (ζ)ej = J(L:2) · diag (σ′(W(1) ζ + β(1) )) · W (1)  
+
+> j
+
+.
+
+In particular, if W(1)  
+
+> j
+
+= 0, then JhNN (ζ)ej = 0; and if W(1) 
+
+> j
+
+̸ = 0, then generically 
+
+JhNN (ζ)ej̸ = 0.By the chain rule, JhNN (ζ) = J(L:2) · diag (σ′(W(1) ζ + β(1) )) · W (1) . The j-th column is obtained by right-multiplying by ej , which extracts W(1)  
+
+> j
+
+. This fact follows from the linearity of this expression in W(1)  
+
+> j
+
+.
+
+SM1.5.4. Additional Assumptions for Monotonicity. To establish mono-tonic mode elimination, we impose two regularity conditions on the solution path. These assumptions involve the stationary points ( ω∗(λ), Θ∗(λ)) of the regularized objective (SM1.2) at parameter λ.
+
+Assumption SM1.18 (Lipschitz regularity of the skip gradient). There exists a constant L > 0 such that for all regularization parameters λ, λ ′ along the path and all eliminated modes j ∈ [s] \ A (λ) ∩ [s] \ A (λ′): 
+
+∣∣Gskip  
+
+> j
+
+(ω∗(λ′), Θ∗(λ′)) − Gskip  
+
+> j
+
+(ω∗(λ), Θ∗(λ)) ∣∣ ≤ L|λ′ − λ|,
+
+where Gskip  
+
+> j
+
+is defined in (SM1.6) and ( ω∗(λ), Θ∗(λ)) denotes a stationary point of (SM1.2) at parameter λ.
+
+Assumption SM1.19 (Strict complementarity with margin). There exists a mar-gin δ ∈ (0 , 1) such that at each stationary point ( ω∗(λ), Θ∗(λ)) of (SM1.2), for all eliminated modes j ∈ [s] \ A (λ): 
+
+|Gskip  
+
+> j
+
+(ω∗(λ), Θ∗(λ)) | ≤ (1 − δ)λ. 
+
+Remark SM1.20. Assumption SM1.18 requires the skip gradient for eliminated modes to vary Lipschitz-continuously along the solution path. Note that this is a condition on the scalar map λ 7 → Gskip  
+
+> j
+
+(ω∗(λ), Θ∗(λ)), not on the full solution map 
+
+λ 7 → (ω∗(λ), Θ∗(λ)). For eliminated modes j, we obtain the value ω∗ 
+
+> j
+
+(λ) = 0, so Gskip 
+
+> j
+
+varies only through changes in the residual induced by the active parameters; this dependence is typically well-behaved. Assumption SM1.19 posits a strict gap between the gradient magnitude |Gskip  
+
+> j
+
+| and the threshold λ. Recalling Remark SM1.9, it is natural for |Gskip  
+
+> j
+
+| to be small given Gskip  
+
+> j
+
+is a weighted sum of inner products r⊤ 
+
+> i
+
+uj
+
+(cf. (SM1.6)) with ri and uj being nearly orthogonal. The margin δ quantifies this gap as a fraction of λ, ensuring it grows with the regularization strength. 
+
+SM1.5.5. Main Result. 
+
+Theorem SM1.21 (Monotonic mode elimination). Let Assumptions SM1.1 ,
+
+SM1.2 , SM1.18 , and SM1.19 and Constraint SM1.3 hold. Consider the regulariza-tion path λk+1 = (1 + ϵ)λk for k = 0 , 1, . . . , K − 1 with path multiplier ϵ > 0. Under SUPPLEMENTARY MATERIALS: SPARSE MODE SELECTING NEURAL NET SM7 
+
+the SparseModesNet architecture (input masking + hierarchical constraint) optimizing objective (SM1.2) , if mode j is eliminated at λk, i.e., ω∗ 
+
+> j
+
+(λk) = 0 , then 
+
+ω∗ 
+
+> j
+
+(λℓ) = 0 for all ℓ ≥ k, 
+
+provided one of the following conditions holds: 
+
+1. L ≤ 1 and ϵ > 0 is arbitrary, or 
+
+2. L > 1 and 0 < ϵ ≤ δL−1 ,where L and δ are from Assumptions SM1.18 and SM1.19, respectively. Equivalently, the active sets are nested: λ′ > λ =⇒ A (λ′) ⊆ A (λ).Proof. Suppose ω∗ 
+
+> j
+
+(λk) = 0 for some mode j and index k. We show ω∗ 
+
+> j
+
+(λk+1 ) = 0; the full result follows by induction. By Lemma SM1.10, the hierarchical constraint forces W(1) ∗ 
+
+> j
+
+(λk) = 0. At λk+1 ,warm-start initialization sets ( ωj , W(1)  
+
+> j
+
+) = (0 , 0). Consider a proximal gradient iteration with step size α > 0. From Defini-tion SM1.14, the preproximal values starting from (0 , 0) are 
+
+˜ωj = 0 − α ∂L
+
+∂ω j
+
+∣∣∣(ωj ,W(1)  
+
+> j)=(0 ,0)
+
+, ˜W(1)  
+
+> j
+
+= 0 − α ∂L
+
+∂W(1) 
+
+> j
+
+∣∣∣(ωj ,W(1)  
+
+> j)=(0 ,0)
+
+.
+
+By Theorem SM1.12, ∂L
+
+> ∂W(1)
+> j
+
+∣∣ωj =0 = 0, hence ˜W(1)  
+
+> j
+
+= 0.Then, from Proposition SM1.16, the zero attractor condition becomes 
+
+|˜ωj | + M · 0 = α
+
+∣∣∣∣
+
+∂L
+
+∂ω j
+
+∣∣∣(ωj ,W(1)  
+
+> j)=(0 ,0)
+
+∣∣∣∣ ≤ αλ k+1 .
+
+Since ωj = 0 and W(1)  
+
+> j
+
+= 0, by Fact SM1.17 we have JhNN (ζ)ej = 0, hence Gnet  
+
+> j
+
+= 0 by (SM1.7). The condition simplifies to 
+
+|Gskip  
+
+> j
+
+(ω, Θ) | ≤ λk+1 .
+
+By Assumption SM1.19, at the stationary point for λk:
+
+|Gskip  
+
+> j
+
+(ω∗(λk), Θ∗(λk)) | ≤ (1 − δ)λk.
+
+By Assumption SM1.18, at the stationary point for λk+1 :
+
+|Gskip  
+
+> j
+
+(ω∗(λk+1 ), Θ∗(λk+1 )) | ≤ | Gskip  
+
+> j
+
+(ω∗(λk), Θ∗(λk)) | + L|λk+1 − λk|≤ (1 − δ)λk + Lϵλ k = λk(1 − δ + Lϵ ).
+
+For (7) to hold, we need λk(1 − δ + Lϵ ) ≤ λk+1 = (1 + ϵ)λk, i.e., 0 < 1 − δ + Lϵ ≤ 1 + ϵ ⇐⇒ (L − 1) ϵ ≤ δ. 
+
+Case L ≤ 1: For any ϵ > 0, ( L − 1) ϵ ≤ 0 < δ , so the inequality holds. 
+
+Case L > 1: The inequality holds if and only if ϵ ≤ δ/ (L − 1). Under the stated conditions, the Hier-Prox operator returns ( ω+ 
+
+> j
+
+, W(1)+  
+
+> j
+
+) = (0 , 0)at each iteration. The algorithm converges to a stationary point with ω∗ 
+
+> j
+
+(λk+1 ) = 0. By Assumption SM1.19, this new stationary point satisfies |Gskip  
+
+> j
+
+| ≤ (1 − δ)λk+1 , so the argument repeats for subsequent λℓ, and thus, completing the induction. SM8 T. KOIKE, P. MOHAN, M. T. H. FRAHAN, E. QIAN, J. BESSAC 
+
+Remark SM1.22. It is critical that gradient severance (Theorem SM1.12) ensures 
+
+˜W(1)  
+
+> j
+
+= 0, eliminating the term M ∥ ˜W(1)  
+
+> j
+
+∥1 from the threshold (SM1.10). This reduces the Hier-Prox condition to a bound on |Gskip  
+
+> j
+
+| alone. 
+
+Remark SM1.23 (Interpretation of the step size bound). When L > 1, the bound 
+
+ϵ ≤ δ/ (L − 1) balances two effects: 
+
+• The margin δ measures how far below λk the gradient |Gskip  
+
+> j
+
+| lies. Larger δ
+
+permits larger steps. 
+
+• The Lipschitz constant L measures how rapidly Gskip  
+
+> j
+
+can change. Larger L
+
+requires smaller steps. When L ≤ 1, the gradient changes more slowly than the threshold of the zero attractor condition grows, so any path multiplier ϵ suffices. 
+
+SM1.6. Failure of Monotonicity Without Both Design Choices. We now show that both input masking and the hierarchical constraint are essential and neither alone guarantees monotonic mode elimination. 
+
+SM1.6.1. Failure Without Input Masking. 
+
+Corollary SM1.24 (Potential reactivation without input masking). Consider the unmasked architecture (Definition SM1.4 ) with the Hierarchical Constraint SM1.3 
+
+and Assumptions SM1.18 and SM1.19 . There exist problem instances where a mode 
+
+j, eliminated at λk, is reactivated at λk+1 = (1 + ϵ)λk for any ϵ > 0.Proof. By Lemma SM1.10, warm-start initialization sets ( ωj , W(1)  
+
+> j
+
+) = (0 , 0) at 
+
+λk+1 . The preproximal values after one gradient step are 
+
+˜ωj = −α ∂L
+
+∂ω j
+
+∣∣∣(ωj ,W(1)  
+
+> j)=(0 ,0)
+
+, ˜W(1)  
+
+> j
+
+= −α ∂L
+
+∂W(1) 
+
+> j
+
+∣∣∣(ωj ,W(1)  
+
+> j)=(0 ,0)
+
+.
+
+In the unmasked architecture, the NN input is ˆ zi rather than diag (ω)ˆ zi. The gradient with respect to W(1)  
+
+> j
+
+becomes 
+
+∂L
+
+∂W(1) 
+
+> j
+
+∣∣∣(ωj ,W(1)  
+
+> j)=(0 ,0)
+
+= 2
+
+n
+
+> n
+
+∑
+
+> i=1
+
+ˆzij · ∂L
+
+∂a(1) (ˆ zi) ,
+
+which is generically nonzero since the NN observes the full input ˆ zi. Hence ˜W(1) 
+
+> j
+
+̸ = 0.By Proposition SM1.16, the Hier-Prox operator returns (0 , 0) only if 
+
+∣∣∣∣
+
+∂L
+
+∂ω j
+
+∣∣∣∣ + M
+
+∥∥∥∥∥
+
+∂L
+
+∂W(1) 
+
+> j
+
+∥∥∥∥∥1
+
+≤ λk+1 .
+
+By Assumption SM1.19, |∂L/∂ω j | ≤ (1 − δ)λk since ∂L/∂ω j = Gskip  
+
+> j
+
+from Defini-tion SM1.8. However, there is no bound on ∥∂L/∂ W(1)  
+
+> j
+
+∥1. Reactivation occurs when 
+
+M
+
+∥∥∥∥∥
+
+∂L
+
+∂W(1) 
+
+> j
+
+∥∥∥∥∥1
+
+> (δ + ϵ)λk,
+
+which can be satisfied for any ϵ > 0 in problem instances where mode j is informative through the network path. Without input masking, ∂L/∂ W(1) 
+
+> j
+
+̸ = 0 even when ωj = 0. This produces a nonzero ˜W(1)  
+
+> j
+
+, contributing the term M ∥ ˜W(1)  
+
+> j
+
+∥1 to the Hier-Prox threshold. If this term is large enough, the threshold is exceeded and the mode reactivates. SUPPLEMENTARY MATERIALS: SPARSE MODE SELECTING NEURAL NET SM9 
+
+SM1.6.2. Failure with ℓ1-Penalty Alone. 
+
+Corollary SM1.25 (Failure without hierarchical constraint). Consider an ar-chitecture with ℓ1-penalty on ω but without the Hierarchical Constraint SM1.3 . Mono-tonic mode elimination is not guaranteed, even with input masking and Assump-tions SM1.18 and SM1.19 .Proof. Without the hierarchical constraint, the proximal update for ωj is soft-thresholding: ω+ 
+
+> j
+
+= Sαλ (˜ωj ), where Sτ (x) = sign( x) max( |x| − τ, 0) [SM5]. Consider the iteration at which ωj first reaches zero while W(1)  
+
+> j
+
+may be nonzero. Suppose at iteration t, we have ω(t) 
+
+> j
+
+= 0 but W(1)( t)
+
+> j
+
+̸ = 0. By Fact SM1.17, W(1) 
+
+> j
+
+̸ = 0
+
+implies JhNN (ζ)ej̸ = 0, hence Gnet 
+
+> j
+
+̸ = 0 by (SM1.7). The preproximal value is 
+
+˜ωj = −α(Gskip  
+
+> j
+
++ Gnet  
+
+> j
+
+).
+
+Soft-thresholding gives ω(t+1)  
+
+> j
+
+= 0 only if |Gskip  
+
+> j
+
++ Gnet  
+
+> j
+
+| ≤ λ [SM5]. Even if |Gskip  
+
+> j
+
+| ≤ 
+
+(1 − δ)λ per Assumption SM1.19, the term Gnet  
+
+> j
+
+can cause the sum to exceed λ,yielding 
+
+ω(t+1)  
+
+> j
+
+= Sαλ (−α(Gskip  
+
+> j
+
++ Gnet  
+
+> j
+
+)) ̸ = 0 ,
+
+and mode j is reactivated. The mechanism underlying Corollary SM1.25 is the dependence of JhNN (ζ)ej on 
+
+W(1)  
+
+> j
+
+established in Fact SM1.17. Even though input masking ensures the NN output 
+
+does not depend on W(1)  
+
+> j
+
+when ωj = 0, the sensitivity JhNN ej does depend on W(1)  
+
+> j
+
+.This sensitivity appears in Gnet  
+
+> j
+
+and hence in ∂L/∂ω j .
+
+SM1.7. Summary of design choice. Monotonic mode elimination requires: 1. Input masking (Theorem SM1.12): Ensures ∂L/∂ W(1)  
+
+> j
+
+= 0 when ωj = 0, preventing reactivation through the Hier-Prox threshold. 2. Hierarchical constraint (Lemma SM1.10): Forces W(1)  
+
+> j
+
+= 0 when ωj = 0, ensuring Gnet  
+
+> j
+
+= 0. Neither condition alone suffices: without the hierarchical constraint, W(1)  
+
+> j
+
+is not forced to zero (Corollary SM1.25); without input masking, gradients are not severed (Corol-lary SM1.24). SparseModesNet employs both, achieving the monotonic mode elimi-nation of Theorem SM1.21. 
+
+SM2. Comparison Study of Different Mode Selection Strategies. As discussed in Remark 3.1, the proposed SparseModesNet framework differs from the original LassoNet framework in that the NN component receives only the selected modes ( ω ⊙ z) rather than the full set of candidate modes ( z). Specifically, if we were to follow the original LassoNet framework, the optimization problem would be (SM2.1) min 
+
+> ω,h NN ,W
+> n
+
+∑
+
+> i=1
+
+∥∥xi − Us(ω ⊙ zi) − WhNN (zi)∥∥22 + λ∥ω∥1
+
+subject to ∥W (1)  
+
+> j
+
+∥∞ ≤ M |ωj | and [Usdiag (1{ωj̸ =0 }(ω))] ⊤W = 0 , ∀j ∈ [s].
+
+Furthermore, in Remark 3.2, we discussed how one could argue that when both the linear and nonlinear components receive the same input of selected modes, im-posing the hierarchical sparsity constraint may be unnecessary, and a simpler ℓ1 reg-ularization on ω might suffice. This leads to the following alternative optimization SM10 T. KOIKE, P. MOHAN, M. T. H. FRAHAN, E. QIAN, J. BESSAC 
+
+problem: (SM2.2) min 
+
+> ω,h NN ,W
+> n
+
+∑
+
+> i=1
+
+∥∥xi − Us(ω ⊙ zi) − WhNN (ω ⊙ zi)∥∥22 + λ∥ω∥1
+
+subject to [Usdiag (1{ωj̸ =0 }(ω))] ⊤W = 0 , ∀j ∈ [s].
+
+To evaluate the effectiveness of the proposed SparseModesNet framework relative to these alternative approaches, we conduct a comparative study of three different mode selection strategies: 
+
+• SparseModesNet (Proposed) : The proposed SparseModesNet framework as described in (3.2), where the NN component receives only the selected modes ( ω ⊙ z) and the hierarchical sparsity constraint is enforced. 
+
+• LassoNet with hNN (z) (unmasked) : A variant where the NN component receives the full set of candidate modes ( z) while the hierarchical sparsity constraint is maintained, as described in (SM2.1). 
+
+• ℓ1-penalty only : A simpler variant where the NN component receives only the selected modes ( ω ⊙ z) but uses only ℓ1 regularization on ω without the hierarchical sparsity constraint, as described in (SM2.2). We adopt the same experimental setup as described in Subsection 4.1, where we train a nonlinear decoder for a Π 2-Net model while selecting modes that minimize the reconstruction error for the linear transport equation. To account for variability due to random initialization of NN weights and biases, we repeat the training 100 times for each method. We report the statistics of the final reconstruction error for the reduced dimension r = 15 and analyze the mode selection patterns for each method. Note that the stopping criteria and hyperparameters are kept consistent across all three methods to ensure a fair comparison, where the mode selection is stopped when the number of modes decrease to r = 15. Figure SM1 presents the frequency of selecting each POD mode over 100 inde-pendent training runs for each method, while Figure SM2 displays the corresponding box plots of reconstruction errors. The results reveal several important insights. The proposed SparseModesNet framework selects a more diverse range of modes, including lower-energy modes, whereas both the ℓ1-penalty only variant and the LassoNet-style variant demonstrate a strong bias toward selecting higher-energy modes, commonly known as the spectral bias [SM6]. Quantitatively, the proposed SparseModesNet achieves the lowest mean recon-struction error ( μ = 1 .81 ×10 −8) with minimal variability ( σ = 1 .86 ×10 −8), as shown in Figure SM2. The LassoNet-style variant achieves a moderate performance with a mean error of μ = 1 .33 × 10 −7 and standard deviation σ = 1 .42 × 10 −7, representing approximately a 7-fold increase in reconstruction error compared to SparseModesNet. In contrast, the ℓ1-penalty only variant performs significantly worse, with a mean error of μ = 6 .04 × 10 −6 and standard deviation σ = 3 .85 × 10 −6—more than 300 times higher than the proposed method. These results suggest that the hierarchical sparsity constraint in SparseModesNet, combined with feeding selected modes to both the linear and nonlinear components, encourages the selection of modes that may not be the most energetic but lead to superior reconstruction performance. The ℓ1-penalty only variant exhibits a pronounced tendency to select the most energetic modes and rarely chooses lower-energy modes. Interestingly, in the rare instances when it does select lower-energy modes, it achieves reconstruction errors comparable to SparseModesNet, as evidenced by the low-error outliers in Figure SM2. However, this behavior is inconsistent and occurs infrequently. The variant faithful SUPPLEMENTARY MATERIALS: SPARSE MODE SELECTING NEURAL NET SM11 0 20 40 60 
+
+> Mode Index
+> 0
+> 20
+> 40
+> 60
+> 80
+> 100
+> Number of Times Selected
+
+SparseModesNet (Proposed)    
+
+> 020 40 60
+> Mode Index
+> 0
+> 20
+> 40
+> 60
+> 80
+> 100
+
+`1 penalty only    
+
+> 020 40 60
+> Mode Index
+> 0
+> 20
+> 40
+> 60
+> 80
+
+LassoNet with hNN (z)
+
+Fig. SM1 . Comparison of the three different mode selection strategies in terms of the frequency of selecting each POD mode over 100 independent training runs. The proposed SparseModesNet framework ( left ) selects a wider range of modes including low-energy modes, while the ℓ1-penalty only variant ( middle ) and LassoNet-style variant ( right ) exhibit a strong bias toward selecting higher-energy modes. 10 −9 10 −8 10 −7 10 −6 10 −5 10 −4
+
+Relative Reconstruction Error 
+
+SparseModesNet (Proposed) 
+
+`1 penalty only 
+
+LassoNet with hNN (z)                  
+
+> μ= 1 .81 e−08
+> σ= 1 .86 e−08
+> μ= 6 .04 e−06
+> σ= 3 .85 e−06
+> μ= 1 .33 e−07
+> σ= 1 .42 e−07
+
+Reconstruction Error Comparison Across Mode Selection Variants 
+
+Fig. SM2 . Box plot of the reconstruction error for the three different mode selection strategies over 100 independent training runs. The proposed SparseModesNet framework (bottom) achieves significantly lower reconstruction error with substantially less variability compared to the other two variants. 
+
+to the LassoNet formulation, which enforces the hierarchical sparsity constraint but provides the full set of candidate modes to the NN component, exhibits a bias toward selecting higher-energy modes. This bias likely contributes to its higher reconstruction errors compared to SparseModesNet, though it still substantially outperforms the ℓ1-penalty only approach. Overall, these results demonstrate the effectiveness of the proposed SparseModesNet framework in identifying relevant modes that consistently yield superior reconstruction performance compared to the alternative strategies. Figure SM3 further illustrates the mode elimination process of a single training instance throughout the entire regularization path including intermediate epochs for each λ value. The proposed SparseModesNet framework shows a monotonic elimina-tion of modes, while the other two variants show spurious reactivation of previously eliminated modes. This behavior is indicative of the theoretical results we have proven SM12 T. KOIKE, P. MOHAN, M. T. H. FRAHAN, E. QIAN, J. BESSAC 
+
+in Subsection SM1.5 for monotonic mode elimination of SparseModesNet. 0 100 200 300 400 
+
+> 0
+> 25
+> 50
+> 75
+> 100
+
+z-batch (unmasked)        
+
+> 010 20 30 40 50 60 70
+> 0
+> 25
+> 50
+> 75
+> 100
+> Number of Selected Modes ( s = 100 , r  = 15 )
+
+`1 penalty only         
+
+> 010 20 30 40 50 60 70 80
+
+Entire Regularization Path Including Intermediate Epochs 
+
+> 0
+> 25
+> 50
+> 75
+> 100
+
+SparseModesNet (Proposed)     
+
+> Fig. SM3 .Comparison of mode elimination for a single training instance throughout the entire regularization path including intermediate epochs for each λvalue. Our proposed SparseModesNet shows monotonic mode elimination while the other shows spurious reactivation of previously elimi-nated modes.
+
+SM3. Hybrid Neural Network Architecture. In this section, we provide additional details on the NN architecture employed in our proposed SparseMod-esNet framework. Specifically, we describe the Deep Polynomial NNs known as Π-Nets [SM2], and its combination with a linear layer to form the hybrid architecture used in our experiments. 
+
+SM3.1. Deep Polynomial Neural Networks. Deep Polynomial NNs, or Π-Nets, introduced in [SM2], are a class of function approximators where the output is a high-order polynomial of the input. This approach contrasts with standard Deep Convolutional NNs (DCNNs), which typically rely on a composition of linear operators and nonlinear activation functions. While any smooth function can be approximated by a polynomial, a direct imple-mentation faces a combinatorial explosion in the number of parameters, which grows polynomially with the order of the approximation, i.e., O(oN ) for an o-dimensional input and an N th -order polynomial. To overcome this challenge, Π-Nets cast the problem of parameter estimation as a coupled tensor factorization. That is, by decomposing the high-order tensors that represent the polynomial’s parameters and enforcing factor sharing, the model significantly reduces the number of learnable parameters and enables an efficient im-plementation through hierarchical neural network architectures. A vector-valued function g(y) : Ro → Rp (where o is an arbitrary input dimension) is modeled as an N th -order multivariate polynomial of the input y. In its vectorized SUPPLEMENTARY MATERIALS: SPARSE MODE SELECTING NEURAL NET SM13 form, the output v is expressed as: (SM3.1) v = g(y) = βπ +
+
+> N
+
+∑
+
+> n=1
+
+W(n)
+
+> πn+1
+
+∏
+
+> j=2
+
+×j y
+
+
+
+where βπ ∈ Rp is a bias term and {W (n) 
+
+> π
+
+∈ Rp×o×···× o}Nn=1 are the learnable parameter tensors for each order n of the polynomial. Note that we distinguish the first layer weight in our SparseModesNet architecture W(1) from W(n) 
+
+> π
+
+, which we denote as the parameter tensors of the Π-Net layers for n = 1 , . . . , N .The core innovation of Π-Nets lies in structuring these parameter tensors W(n)
+
+> π
+
+through specific joint tensor decompositions. That is, the Π-Net model jointly fac-torizes all parameter tensors {W (n) 
+
+> π
+
+}Nn=1 using a coupled CANDECOMP/PARAFAC (CP) decomposition [SM1, SM3], where factors corresponding to lower-order terms are shared. Let the CP decomposition of W(n) 
+
+> π
+
+in matrix form be denoted as W(n) 
+
+> π
+
+∈
+
+Rp×on
+
+and the factor matrices as C ∈ Rp×k and Pn ∈ Ro×k for n = 1 , . . . , N , where 
+
+k is the CP rank. Then, for example, a 3 rd -order polynomial can be expressed as 
+
+g(y) = βπ + CP ⊤ 
+
+> 1
+
+y + C(P3 ∗ P1)⊤(y ∗ y) + C(P2 ∗ P1)⊤(y ∗ y)+ C(P3 ∗ P2 ∗ P1)⊤(y ∗ y ∗ y)where ∗ denotes the Khatri-Rao or column-wise Kronecker product. This polynomial can then be generalized by the following recursive relation: (SM3.2) vn = ( P⊤ 
+
+> n
+
+y) ⊙ vn−1 + vn−1, n = 2 , . . . , N 
+
+with v1 = C(P⊤ 
+
+> 1
+
+y) and v = Cv N + βπ , where ⊙ denotes the element-wise product and βπ is an optional bias term. This recursive form illustrates how a standard linear or convolutional layer can be transformed into a polynomial one. For more details, see [SM2]. For the implementation of Π-Nets, practitioners can simply define the desired polynomial order N and the CP rank k, then form C, Pn, and the bias βπ as learnable parameters. The forward model is then computed using the recursive relation (SM3.2), allowing for efficient training and inference. 
+
+SM3.2. Hybrid Architecture: Fully Connected Layer + Π-Net. The Π-Net architecture in itself is highly expressive, capable of approximating complex functions through polynomial expansions. However, in certain scenarios, especially when dealing with reconstructing the data that exhibits both linear and nonlinear characteristics with limited number of modes, a hybrid approach can be beneficial. To this end, we propose a hybrid architecture that combines a standard fully connected layer with a Π-Net. This combination allows the model to leverage the strengths of both nonlinear transformations of a standard NN and polynomial approximations. Figure SM4 illustrates the schematic of this hybrid architecture. The part in the schematic following the first layer illustrates the recursive relation in (SM3.2) for a 3rd -order polynomial receiving the output from the first layer as an input in the form: (SM3.3) y = W(1) (ω ⊙ ˆz) + β(1) ∈ Ro,
+
+with an identity activation function and first layer weights W(1) ∈ Ro×s and bias 
+
+β(1) ∈ Ro.SM14 T. KOIKE, P. MOHAN, M. T. H. FRAHAN, E. QIAN, J. BESSAC 
+
+The first fully connected layer serves as an affine transformation to transform the input features/modes into a more suitable representation for the Π-Net to capture the polynomial nonlinearities effectively. Furthermore, the first fully connected layer also serves as the gate layer where the hierarchical sparsity constraint is applied during training. Hybrid Architecture (Π 3-Net): Fully Connected Layer + 3 rd -Order Π-Net    
+
+> Fig. SM4 .Schematic of the hybrid architecture combining a fully connected layer with a Π-Net. The input first passes through a fully connected layer, which is then fed into the Π-Net to produce the final output. This architecture leverages the strengths of both linear transformations and polynomial approximations for enhanced expressivity.
+
+This design choice is necessary because applying the hierarchical sparsity con-straint directly to the CP factors of the Π-Net would be non-trivial and could com-plicate the training process. By placing the sparsity constraint on the fully connected layer, we can effectively control the selection of modes while still benefiting from the polynomial expressivity of the Π-Net. N.B., we found this shallow hybrid architecture consisting of a single fully con-nected layer with no nonlinear activation functions followed by a Π-Net to perform best in our experiments compared to deeper architectures with multiple fully con-nected layers before the Π-Net or even adding fully connected layers after the Π-Net. This suggests that complicated architectures are not necessary when the goal is to reconstruct data from a limited number of modes, as the polynomial nature of the Π-Net already provides sufficient expressivity. 
+
+SM4. Additional Numerical Results. SM4.1. Wave profile reconstructions of the linear transport equation. 
+
+For the linear transport equation example, we also conduct comparisons of the recon-structed wave profiles in Figure SM5. This analysis provides qualitative validation of the reconstruction accuracy at three different time instances. At all times, the POD reconstruction exhibits significant amplitude and phase errors, while both the Greedy Quadratic Manifold and SparseModesNet (Π 3-Net) maintain high fidelity. 
+
+SM4.2. Sparse mode selection process for the linear transport equa-tion. Figure SM6 shows mode selection weight ω evolution during training for Π 2-Net. This plot is essential as it demonstrates the automated mode selection process, in which SparseModesNet identifies 15 important modes (solid lines converging to 10 −2–10 −4) while pruning others toward zero (faded lines decaying to 10 −6 or below). Convergence to r = 15 occurs within 6–8 λ iterations (100 epochs each), demonstrat-ing efficient sparse selection. The O(10 2) magnitude spread among selected ω values reveals an importance hierarchy. Furthermore, this plot demonstrates the monotonic SUPPLEMENTARY MATERIALS: SPARSE MODE SELECTING NEURAL NET SM15 0.0 0.2 0.4 0.6 0.8 1.0 
+
+> Space ξ
+> 0
+> 5
+> 10
+> 15
+> 20
+> 25
+> x(ξ, t )
+
+t = 0 .010       
+
+> Original POD (r=15) GreedyQM SMN ( Π3-Net)
+> 0.00.20.40.60.81.0
+> Space ξ
+> 0
+> 5
+> 10
+> 15
+> 20
+> 25
+> x(ξ, t )
+
+t = 0 .075       
+
+> 0.00.20.40.60.81.0
+> Space ξ
+> 0
+> 5
+> 10
+> 15
+> 20
+> 25
+> x(ξ, t )
+
+t = 0 .113 
+
+Wave Profiles at Different Time Points 
+
+Fig. SM5 . Comparison of the wave profiles at different time instances for the exact solution and the reconstructed solutions for different decoder structures for the linear transport equation. “SMN” is a shorthand for SparseModesNet. 0 1 2 3 4 5 6 7 8
+
+λ iteration 
+
+10 −6
+
+10 −5
+
+10 −4
+
+10 −3
+
+10 −2
+
+> ω values
+
+# ω Evolution ( Π2-Net) 
+
+selected not selected 
+
+Fig. SM6 . Evolution of selected modes ω over sparsity parameter λ updates for SparseModesNet with Π2-Net for the linear transport, showcasing the automatic mode selection process. 
+
+mode elimination as stated in Theorem SM1.21. The Π 3-Net exhibits qualitatively similar behavior and is omitted for brevity. 
+
+SM4.3. Wave profile reconstructions of the KSE. Similar to the linear transport equation, we compare wave profiles in Figure SM7, which demonstrate the reconstruction quality at three time instances spanning the turbulent evolution. Across all times, the Proper Orthogonal Decomposition (POD) reconstruction fails to capture the complex turbulent structures, exhibiting significant amplitude errors sim-ilar to the previous example. The Greedy Quadratic Manifold and SparseModesNet (Π 3-Net) maintain high fidelity to the exact solution. 
+
+SM4.4. Sparse mode selection process for the KSE. Figure SM8 shows mode selection weight evolution during training for Π 3-Net. Compared to linear transport, KSE requires longer training, with modes remaining constant at 16 for an extended period rather than 6–8 iterations. After 50 iterations, the mode with lowest weight in ω was automatically removed to select the best 15 modes. This automatic truncation based on the weight magnitudes demonstrate the mode selection SM16 T. KOIKE, P. MOHAN, M. T. H. FRAHAN, E. QIAN, J. BESSAC 0 25 50 75 100 
+
+> Space ( ξ)
+> −1
+> 0
+> 1
+> 2
+> 3
+> x(ξ, t )
+
+t = 25 .010     
+
+> Original POD (r=15) GreedyQM SMN ( Π3-Net)
+> 025 50 75 100
+> Space ( ξ)
+> −2
+> −1
+> 0
+> 1
+> 2
+> 3
+> 4
+> x(ξ, t )
+
+t = 50 .020     
+
+> 025 50 75 100
+> Space ( ξ)
+> −2
+> −1
+> 0
+> 1
+> 2
+> 3
+> 4
+> x(ξ, t )
+
+t = 75 .030 
+
+Wave Profiles at Different Time Points 
+
+Fig. SM7 . Comparison of the wave profiles at different time instances for the exact solution and the reconstructed solutions for different decoder structures for the KSE. “SMN” is a shorthand for SparseModesNet. 0 10 20 30 40 50 
+
+λ iteration 
+
+10 −6
+
+10 −5
+
+10 −4
+
+10 −3
+
+10 −2
+
+10 −1
+
+> ω values
+
+# ω Evolution ( Π3-Net) 
+
+selected not selected 
+
+Fig. SM8 . Evolution of selected modes ω over sparsity parameter λ updates for SparseModesNet 
+
+Π3-Net for KSE, showcasing the automatic mode selection with the continuation strategy. 
+
+automation in SparseModesNet, which is especially beneficial when the target reduced rank-r to achieve a specific target reconstruction error is unknown a priori. Selected modes (solid lines) converge to 10 −2 to 10 −1, while non-selected modes are pruned to 10 −6 or below. 
+
+SM4.5. Reconstructed Velocities for the Turbulent Channel Flow. Fig-ures SM9 and SM10 provide qualitative validation through spanwise-sliced flow field visualizations, comparing reconstructions against the Greedy Quadratic and Cubic Manifold methods, respectively. The top four panels show the original data and recon-structions from different methods, revealing that all nonlinear approaches capture the large-scale turbulent structures. However, the error fields in the bottom three panels expose differences in reconstruction fidelity. When compared to the Greedy Quadratic Manifold (Figure SM9), the error field shows absolute errors spanning ±0.06 through-out the domain, with particularly pronounced errors in high-shear regions near the bottom wall. Both the SparseModesNet with leading-r modes and SparseModesNet with intelligent mode selection shows reduced errors. Similarly, Figure SM10 demon-SUPPLEMENTARY MATERIALS: SPARSE MODE SELECTING NEURAL NET SM17 ξ3
+
+Original Data 
+
+> ξ3
+
+GreedyQM 
+
+> ξ3
+
+SparseModesNet Π3-Net (leading-r) 
+
+> ξ3
+
+SparseModesNet Π3-Net 
+
+> ξ3
+
+GreedyQM Error 
+
+> ξ3
+
+SparseModesNet Π3-Net (leading-r) Error 
+
+> ξ1
+> ξ3
+
+SparseModesNet Π3-Net Error 
+
+> 0.50.60.70.80.91.01.1
+> u1(ξ1, ξ 3)
+> −0.06
+> −0.04
+> −0.02 0.00 0.02 0.04 0.06
+> abs. error
+
+Spanwise Sliced Streamwise Velocity Reconstruction Comparison    
+
+> Fig. SM9 .Spanwise sliced streamwise velocity field reconstructions at a certain time tusing different decoder structures compared to the Greedy quadratic manifold (GreedyQM) method.
+
+strates that even the Greedy Cubic Manifold, which represents the state-of-the-art, produces visible errors with magnitudes up to ±0.010, whereas both SparseModesNet variants achieve reconstruction errors that are visually indistinguishable from zero. These qualitative comparisons demonstrate that SparseModesNet not only achieves better quantitative metrics but also produces accurate flow field reconstructions that preserve fine-scale turbulent structures throughout the domain. In Figures SM11 and SM12 we see improved wall-normal velocity reconstructions compared to the streamwise component. Figure SM11 shows the Greedy Quadratic Manifold has errors up to ±0.08 and fails to capture fine-scale turbulent eddies and coherent structures. Figure SM12 shows the Greedy Cubic Manifold, while superior to its quadratic counterpart, still produces visible errors compared to SparseModesNet. SparseModesNet successfully preserves the complex multi-scale turbulent structures of wall-bounded turbulence at Re τ = 5200. This is particularly noteworthy for the SM18 T. KOIKE, P. MOHAN, M. T. H. FRAHAN, E. QIAN, J. BESSAC ξ3
+
+Original Data 
+
+> ξ3
+
+GreedyCM 
+
+> ξ3
+
+SparseModesNet Π3-Net (leading-r) 
+
+> ξ3
+
+SparseModesNet Π3-Net 
+
+> ξ3
+
+GreedyCM Error 
+
+> ξ3
+
+SparseModesNet Π3-Net (leading-r) Error 
+
+ξ1
+
+> ξ3
+
+SparseModesNet Π3-Net Error 
+
+> 0.50.60.70.80.91.01.1
+> u1(ξ1, ξ 3)
+> −0.010
+> −0.005 0.000 0.005 0.010
+> abs. error
+
+Spanwise Sliced Streamwise Velocity Reconstruction Comparison 
+
+Fig. SM10 . Spanwise sliced streamwise velocity field reconstructions at a certain time t using different decoder structures compared to the Greedy cubic manifold (GreedyCM) method. 
+
+wall-normal component, which is more advection-dominated and exhibits stronger fluctuations than the streamwise component. 
+
+REFERENCES [SM1] J. D. Carroll and J.-J. Chang , Analysis of individual differences in multidimensional scaling via an n-way generalization of “eckart-young” decomposition , Psychometrika, 35 (1970), pp. 283–319. [SM2] G. G. Chrysos, S. Moschoglou, G. Bouritsas, J. Deng, Y. Panagakis, and S. Zafeiriou ,
+
+Deep Polynomial Neural Networks , IEEE Transactions on Pattern Analysis and Machine Intelligence, 44 (2022), pp. 4021–4034, https://doi.org/10.1109/TPAMI.2021.3058891. [SM3] R. A. Harshman et al. , Foundations of the parafac procedure: Models and conditions for an “explanatory” multi-modal factor analysis , UCLA working papers in phonetics, 16 (1970), p. 84. [SM4] I. Lemhadri, F. Ruan, L. Abraham, and R. Tibshirani , LassoNet: A Neural Network with SUPPLEMENTARY MATERIALS: SPARSE MODE SELECTING NEURAL NET SM19 ξ3
+
+Original Data 
+
+> ξ3
+
+GreedyQM 
+
+> ξ3
+
+SparseModesNet Π3-Net (leading-r) 
+
+> ξ3
+
+SparseModesNet Π3-Net 
+
+> ξ3
+
+GreedyQM Error 
+
+> ξ3
+
+SparseModesNet Π3-Net (leading-r) Error 
+
+ξ1
+
+> ξ3
+
+SparseModesNet Π3-Net Error 
+
+> −0.10
+> −0.05 0.00 0.05 0.10 0.15
+> u3(ξ1, ξ 3)
+> −0.08
+> −0.06
+> −0.04
+> −0.02 0.00 0.02 0.04 0.06 0.08
+> abs. error
+
+Spanwise Sliced Wall-Normal Velocity Reconstruction Comparison 
+
+Fig. SM11 . Spanwise sliced wall-normal velocity field reconstructions at a certain time t using different decoder structures compared to the Greedy quadratic manifold (GreedyQM) method. Feature Sparsity , Journal of Machine Learning Research, 22 (2021), pp. 1–29. [SM5] N. Parikh, S. Boyd, et al. , Proximal algorithms , Foundations and trends ® in Optimization, 1 (2014), pp. 127–239. [SM6] N. Rahaman, A. Baratin, D. Arpit, F. Draxler, M. Lin, F. Hamprecht, Y. Bengio, and A. Courville , On the spectral bias of neural networks , in International conference on machine learning, PMLR, 2019, pp. 5301–5310. SM20 T. KOIKE, P. MOHAN, M. T. H. FRAHAN, E. QIAN, J. BESSAC ξ3
+
+Original Data 
+
+> ξ3
+
+GreedyCM 
+
+> ξ3
+
+SparseModesNet Π3-Net (leading-r) 
+
+> ξ3
+
+SparseModesNet Π3-Net 
+
+> ξ3
+
+GreedyCM Error 
+
+> ξ3
+
+SparseModesNet Π3-Net (leading-r) Error 
+
+ξ1
+
+> ξ3
+
+SparseModesNet Π3-Net Error 
+
+> −0.10
+> −0.05 0.00 0.05 0.10 0.15
+> u3(ξ1, ξ 3)
+> −0.0075
+> −0.0050
+> −0.0025 0.0000 0.0025 0.0050 0.0075
+> abs. error
+
+Spanwise Sliced Wall-Normal Velocity Reconstruction Comparison 
+
+Fig. SM12 . Spanwise sliced wall-normal velocity field reconstructions at a certain time t using different decoder structures compared to the Greedy cubic manifold (GreedyCM) method.

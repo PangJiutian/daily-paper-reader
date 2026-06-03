@@ -1,0 +1,4966 @@
+Title: Conservative neural posterior estimation via distributionally robust training
+
+URL Source: https://arxiv.org/pdf/2605.28516v1
+
+Published Time: Thu, 28 May 2026 01:21:53 GMT
+
+Number of Pages: 49
+
+Markdown Content:
+# Conservative neural posterior estimation via distributionally robust training 
+
+William Laplante 1,3,∗ Yuga Hikida 2,∗ Charita Dellaporta 1
+
+François-Xavier Briol 1 Ayush Bharti 2
+
+> 1
+
+Department of Statistical Science, University College London, UK 
+
+> 2
+
+Department of Computer Science, Aalto University, Finland 
+
+> 3
+
+The Alan Turing Institute, UK Corresponding authors: william.laplante.24@ucl.ac.uk, yuga.hikida@aalto.fi 
+
+Abstract 
+
+Simulation-based inference with neural posterior estimation (NPE) often yields overconfi-dent and unreliable posteriors under limited simulation budgets. To address this, we propose DRO-NPE, a distributionally robust approach that replaces the standard NPE objective with a worst-case loss over a Wasserstein ambiguity set. We introduce KL-based metrics for miscoverage and miscalibration, and use these to show that the DRO-NPE objective controls overfitting and reduces posterior overconfidence. Our method is tractable, parallelisable, and readily integrates with standard normalising flows. Across benchmark SBI tasks, DRO-NPE consistently improves coverage and calibration, while narrowing the gap between empirical and population NPE loss, leading to more reliable inference in low-simulation regimes. 
+
+# 1 Introduction 
+
+Simulation-based inference (SBI; Cranmer et al., 2020) is a powerful framework for inferring parameters of scientific models whose likelihood functions are unavailable or computationally prohibitive to evaluate, but for which simulating data is straightforward. The use of flexible neural conditional density estimators has substantially expanded the applicability of SBI to challenging problems, especially in fields such as particle physics (Brehmer, 2021), cognitive neuroscience (Fengler et al., 2021), economics (Dyer et al., 2024) and cosmology (Alsing et al., 2018; Jeffrey et al., 2021). Neural SBI methods rely on simulations from the scientific model to approximate intractable quantities such as the posterior, the likelihood, the likelihood-to-evidence ratio, or the score function; see Zammit-Mangion et al. (2024) for a recent review. In this work, we focus on the widely used neural posterior estimation (NPE) method (Papamakarios and Murray, 2016; Radev et al., 2022). A central practical limitation of NPE is the simulation budget required to train the conditional density estimator. As many scientific simulators are expensive to run, generating a sufficiently large training set is often the main computational bottleneck. Prior work has sought to reduce simulation cost using sequential training schemes (Papamakarios and Murray, 2016; Lueckmann et al., 2017; Greenberg et al., 2019), multi-fidelity simulations (Hikida et al., 2025; Krouglova et al., 2026; Tatsuoka et al., 2025; Saoulis et al., 2025), or by exploiting heterogeneous simulation costs (Bharti et al., 2025). However, these strategies do not directly address the challenge of ensuring reliable uncertainty estimates in low-simulation regimes. In practice, the adequacy of a given simulation budget is rarely clear a priori , and neural SBI methods trained on limited 
+
+> ∗Equal contribution.
+
+1
+
+> arXiv:2605.28516v1 [stat.ML] 27 May 2026
+
+simulations can exhibit poor uncertainty quantification, leading Hermans et al. (2022) to warn of the potential for a “trust crisis”. Under finite simulations, NPE can yield overconfident posterior approximations whose credible regions contain the true parameter less often than their nominal coverage suggests. Such undercoverage is especially problematic in scientific applications, where overstated certainty can lead to misleading conclusions. By contrast, conservative posteriors are often safer as they widen uncertainty statements rather than overstating confidence. This has motivated several works on conservative uncertainty quantification in neural SBI: Delaunoy et al. (2022) proposed regularised balanced neural ratio estimation (NRE; Hermans et al., 2020) to inflate estimator uncertainty, and Delaunoy et al. (2023) extended this idea to contrastive NRE (Miller et al., 2022) and NPE. Falkiewicz et al. (2023) instead regularise NPE directly with a coverage error term. However, these methods remain largely heuristic: they approximate constrained objectives to encourage conservativeness without statistical guarantees for the resulting uncertainty quantification. Instead of regularising standard NPE, Delaunoy et al. (2024) use Bayesian neural networks for conservative inference, at the cost of Bayesian inference over network weights. Complementarily, conformal and Neyman-inversion methods (Masserano et al., 2023; Patel et al., 2024; Cabezas et al., 2025) post-hoc calibrate credible sets with coverage guarantees, but do not directly address poor conditional density estimation. 0.7 0.8 0.9 1.0 
+
+> θ1
+> 0.015 0.020 0.025 0.030 0.035 0.040
+> θ2
+> True θ
+
+Figure 1: Lotka–Volterra pos-teriors in a low-simulation regime; details in Section 5. In this paper, we view NPE through the lens of empirical risk minimisation . Standard NPE minimises an empirical risk over a finite set of simulated parameter–data pairs. When the simulation budget is limited, the empirical risk can be a poor proxy for the population risk, leading to overfitting and poorly calibrated posteriors (Hermans et al., 2022). This is illustrated in Figure 1 on Lotka–Volterra model: standard NPE ( ) is concentrated away from the true parameter, while a wider reference NPE posterior trained with many more simulations ( ) assigns mass around it. We make NPE conservative using distributionally robust optimisation (DRO; Kuhn et al., 2025), a framework for optimisation under distributional uncertainty. Our method (DRO-NPE; ) yields a broader posterior that covers the true parameter, reflecting uncertainty from the limited simulation budget. Our contributions are as follows. First, we introduce Kullback–Leibler (KL) divergence-based uncertainty-quantification metrics (Section 3) that generalise standard notions of coverage and calibration errors (Hermans et al., 2022; Talts et al., 2018). Second, we propose a Wasserstein DRO objective that upper-bounds these metrics and the population NPE loss, so that, under suitable conditions, minimising it controls both posterior-fitting and uncertainty-quantification error (Theorem 4.1). We also derive a tractable regularised objective that upper-bounds the DRO objective (Proposition 4.2), and verify its assumptions for standard normalising-flow architectures used in NPE (Lemma 4.3). Third, we establish excess-risk, miscoverage, and miscalibration guarantees for DRO-NPE, and compare them to those of standard NPE (Appendix B.3). Finally, we show that DRO-NPE improves uncertainty quantification and generalisation across challenging benchmarks (Section 5.1) and a real-world cosmology application (Section 5.3). 
+
+# 2 Background 
+
+We introduce NPE and uncertainty-quantification metrics revealing its finite-simulation failure modes. 
+
+Simulation-based inference with neural posterior estimation. Let X ⊆ RdX and 
+
+Θ ⊆ RdΘ denote the data and parameter spaces, and let Z := X × Θ ⊆ RdZ , where dZ = dX + dΘ.2Consider a prior Π on Θ with density π and a conditional distribution Px|θ from which one can simulate, but whose density p(x | θ), and therefore the likelihood, cannot be evaluated pointwise. Together, Π and Px|θ induce a joint distribution Px,θ, denoted by P for simplicity, with marginal 
+
+Px and posterior Pθ|x. The goal of SBI is to approximate this posterior distribution Pθ|x0 given observed data xo.NPE is an amortised SBI method that approximates the posterior using flexible conditional density estimators such as mixture-density networks (Bishop, 1994) and normalising flows (Papamakarios et al., 2021). Let qϕ(θ | x) denote such an estimator with parameter ϕ ∈ Φ ⊆ RdΦ ,and let Qθ|x be the corresponding distribution (we remove the explicit dependence on ϕ for notational simplicity). Assuming Pθ|x is absolutely continuous with respect to Qθ|x, the NPE objective is obtained by minimising the expected KL divergence between Pθ|x and Qθ|x over ϕ:
+
+Ex∼Px
+
+h
+
+KL 
+
+
+
+Pθ|x ∥ Qθ|x
+
+i +K(P )
+
+= E(θ,x)∼P [− log qϕ(θ | x)] := LNPE (qϕ; P ), (1) where z = ( x, θ), and the additive constant K(P ) does not depend on ϕ. Note that LNPE (qϕ; P )
+
+can be thought of as a population risk , as it is defined as an expectation under P , induced by the pointwise loss ℓNPE (qϕ; z) := − log qϕ(θ | x). In practice, LNPE (qϕ; P ) is approximated using independent and identically distributed (i.i.d.) samples z1: n ∼ P , where each zi is obtained by first sampling θi ∼ Π, and then simulating xi ∼ Px|θi . These samples induce the empirical measure Pn := 1/n
+
+Pni=1 δzi , such that LNPE (qϕ; Pn) := 1/n
+
+Pni=1 ℓNPE (qϕ; zi) is the associated 
+
+empirical risk . The conditional density model is then trained by minimising the empirical risk, 
+
+ˆϕn := arg min ϕ∈Φ LNPE (qϕ; Pn). As a result, the estimator qˆϕn is amortised: for new observed data xo, the posterior is approximated by a simple forward pass, namely qˆϕn (θ | xo) ≈ p(θ | xo),without requiring retraining. 
+
+Uncertainty quantification metrics in SBI. Despite its widespread success, NPE remains prone to failures in uncertainty quantification. We focus on the two most widely used diagnostics for assessing this: expected coverage of high-probability density region (HPDR) (Ward et al., 2022; Hermans et al., 2022) and simulation-based calibration (Talts et al., 2018; Säilynoja et al., 2022; Modrák et al., 2023). Other diagnostics have also been studied (Zhao et al., 2021; Linhart et al., 2022; Lemos et al., 2023; Chung et al., 2024; Dey et al., 2025), but are less common in SBI. 
+
+Definition 2.1 (Expected coverage of HPDR) . The (1 − α) HPDR induced by q at x is the region where q(θ | x) is largest while containing 1 − α of its mass. Formally, Rqα(x) := 
+
+{θ ∈ Θ : q(θ | x) ≥ τ qα(x)}, where τ qα(x) is a threshold such that Qθ|x(Rqα(x)) = 1 − α. The expected coverage of the HPDR is then: 
+
+CPα (q) := Ez∼P
+
+h
+
+1
+
+n
+
+θ ∈ Rqα(x)
+
+oi 
+
+. (2) Expected coverage of HPDR is estimated by repeatedly drawing zi = ( xi, θi) ∼ P . For each 
+
+xi, M posterior samples ˜θi, 1, . . . , ˜θi,M ∼ Qθ|xi are used to evaluate the densities q( ˜θi,m | xi)
+
+for m = 1 , . . . , M , and the empirical α-quantile of these values approximates the threshold 
+
+τ qα(xi) defining the (1 − α) HPDR. Expected coverage of HPDR is then assessed by whether the ground-truth parameter θi satisfies q(θi | xi) ≥ τ qα(xi). We say Qθ|x is conservative when 
+
+CPα (q) > 1 − α and overconfident when CPα (q) < 1 − α.
+
+Definition 2.2 (Calibration w.r.t. S). Let S : Θ × X → R be a summary, and QS|x, PS|x be the distributions of S(θ; x) under θ ∼ Qθ|x and θ ∼ Pθ|x, respectively. Let the CDF of QS|x
+
+be denoted as F QS|x. We say that Qθ|x (or equivalently q) is calibrated with respect to S if, for 
+
+SP 
+
+> x
+
+∼ PS|x, the random variable F QS|x(SP 
+
+> x
+
+) is distributed as U[0 , 1] under x ∼ Px.
+
+3Calibration with respect to S means that, under mild conditions on the CDF of QS|x,the distribution of S under Pθ|x is the same as that of S under Qθ|x, for Px-almost every x.In practice, simulation-based calibration (SBC) is used to approximate calibration w.r.t. S
+
+by repeatedly drawing (θi, xi) ∼ P and computing ui := F QS|xi
+
+ S(θi; xi), i = 1 , . . . , n . The empirical distribution of u1: n is then compared to U[0 , 1] , for example via histograms, empirical CDFs, or summary statistics. The function S allows SBC to be applied in higher-dimensional settings. For example, S(θ; x) = ∥θ − θ0∥2 for a reference point θ0 is used in the BayesFlow 
+
+library (Kühmichel et al., 2026). Note that expected coverage of HPDR is a special case of SBC when S(θ; x) = q(θ | x) (Delaunoy et al., 2022); see also Appendix A, Lemma A.1. 
+
+# 3 A new KL-based perspective on uncertainty quantification metrics 
+
+We consider errors in the expected coverage of HPDR and in calibration w.r.t. S, which we refer to as miscoverage of HPDR and miscalibration w.r.t. S, respectively. Miscoverage is often measured by the absolute deviation (Falkiewicz et al., 2023; Yao et al., 2024): 
+
+∆α
+
+> cov
+
+(q; P ) := CPα (q) − (1 − α) .
+
+However, this definition is blind to the prior, as the latter attains perfect expected coverage of HPDR, i.e, for any α ∈ (0 , 1) , CPα (π) = Ez∼P [1{θ ∈ Rπα}] = Π( Rπα) = 1 − α; therefore, 
+
+∆α
+
+> cov
+
+(π; P ) = 0 for all valid α. This motivates an alternative notion of miscoverage. We adopt a KL-based approach because it removes prior blindness, links miscoverage and miscalibration to the NPE objective (Theorem 4.1), and provides a natural target for hyperparameter selection. 
+
+Definition 3.1 (KL-based miscoverage of HPDR) . Fix α ∈ (0 , 1) , and let TA(θ) := 1{θ ∈
+
+A} ∈ { 0, 1} denote the indicator of a set A ⊆ Θ. Let (TA)#Pθ|x denote the pushforward of 
+
+Pθ|x through TA, i.e., the Bernoulli distribution of TA(θ) when θ ∼ Pθ|x. Define (TA)#Qθ|x
+
+analogously. Then, KL-based miscoverage of HPDR is: 
+
+kl α
+
+> cov
+
+(q; P ) := Ex∼Px
+
+h
+
+KL 
+
+
+
+(TRqα(x))#Pθ|x (TRqα(x))#Qθ|x
+
+i 
+
+.
+
+KL-based miscoverage of HPDR is weaker than the expected KL divergence between the full conditionals Pθ|x and Qθ|x in Equation (1), since it compares only the Bernoulli distributions induced by whether θ lies in the HPDR Rqα(x). This follows from the data-processing inequality (Polyanskiy and Wu, 2025), which states that KL divergence cannot increase under pushforwards. Moreover, kl α 
+
+> cov
+
+upper-bounds ∆α 
+
+> cov
+
+via Pinsker’s inequality: ∆α
+
+> cov
+
+(q; P ) ≤ p1/2kl α
+
+> cov
+
+(q; P ); see Lemma A.3. Small KL-based miscoverage of HPDR then implies small ∆α
+
+> cov
+
+, but not conversely: 
+
+kl α
+
+> cov
+
+(q; P ) may remain positive even when ∆α
+
+> cov
+
+(q; P ) = 0 , and, unlike ∆α
+
+> cov
+
+, kl α
+
+> cov
+
+(q; P ) does not generally vanish for the prior. The latter would require the posterior to place the same mass as the prior on the HPDR for almost every x.The standard notion of CDF-based miscalibration quantifies deviation of the distribution of 
+
+F QS|x(SP 
+
+> x
+
+) from standard uniform (Talts et al., 2018; Gneiting et al., 2007). For the pushforward distributions (F QS|x)#PS|x and (F QS|x)#QS|x, where the latter is uniformly distributed under mild assumptions, this deviation is often measured via Kolmogorov–Smirnov distances or via Cramér–von Mises criteria (Rossi and Sekhposyan, 2019; Zhao et al., 2021; Falkiewicz et al., 2023). We introduce a KL-based alternative that captures deviation from uniformity and can be related to the population NPE risk. 
+
+Definition 3.2 (KL-based miscalibration with respect to S). For S : Θ × X → R, KL-based miscalibration is: 
+
+kl S
+
+> cal
+
+(q; P ) := Ex∼Px
+
+h
+
+KL 
+
+
+
+(F QS|x)#PS|x (F QS|x)#QS|x
+
+i 
+
+.
+
+4This notion is motivated by KL-based miscalibration discrepancies previously used in proba-bilistic regression (Utpala and Rai, 2020; Dheur and Taieb, 2023). As with kl α
+
+> cov
+
+, kl S 
+
+> cal
+
+is weaker than the full KL divergence between Pθ|x and Qθ|x by the data-processing inequality. The two nevertheless capture different notions of mismatch: for fixed α, kl α 
+
+> cov
+
+compares only the mass assigned to the HPDR, so kl α
+
+> cov
+
+(q; P ) = 0 does not imply Pθ|x = Qθ|x. By contrast, kl S 
+
+> cal
+
+= 0 
+
+implies equality of the induced distributions, and under mild conditions on F QS|x, equality of PS|x
+
+and QS|x. If S is sufficiently informative, this further implies Pθ|x = Qθ|x. For S(θ, x) = q(θ | x),under which coverage of HPDR is a special case of SBC, kl S 
+
+> cal
+
+upper-bounds kl α
+
+> cov
+
+; see Theorem 4.1. 
+
+# 4 Distributionally robust optimisation for NPE 
+
+NPE would ideally target the population risk L(qϕ; P ), but P is accessible only through the empirical measure Pn, which can be a poor approximation when n is not sufficiently large. In such settings, this leads to substantial performance degradation (Wang et al., 2025), and gives rise to the classical generalisation gap (Vapnik, 1991; Shalev-Shwartz and Ben-David, 2014). In particular, minimisation over Pn yields an overly optimistic estimate of the achievable population risk (Kuhn et al., 2019): Ez1: ni.i.d.   
+
+> ∼P
+
+[inf ϕ L(qϕ; Pn)] ≤ inf ϕ Ez1: ni.i.d.   
+
+> ∼P
+
+[L(qϕ; Pn)] = inf ϕ L(qϕ; P ).
+
+In NPE, this gap can translate into poor conditional density estimation. We therefore use distributionally robust optimisation (DRO) to minimise an upper bound on the population risk, thus accounting for distributional uncertainty (Kuhn et al., 2019; Rahimian and Mehrotra, 2022; Wang et al., 2025). 
+
+Motivating DRO-NPE. We formalise DRO-NPE as a Wasserstein distributionally robust objective. Rather than minimising the empirical NPE risk directly, we replace it by its worst-case value over an ambiguity set A(Pn) of distributions centred at Pn (Blanchet et al., 2024; Kuhn et al., 2025): 
+
+inf ϕ
+
+> empirical risk
+
+z }| {
+
+LNPE (qϕ; Pn) risk aversion 
+
+−−−−−−−→ inf ϕ
+
+> DRO-NPE risk
+
+z }| {
+
+sup ˜P ∈A (Pn) LNPE (qϕ; ˜P ) .
+
+We define the ambiguity set to be a Wasserstein ball around Pn, i.e., Ap(Pn; ε) := { ˜P ∈ P p :
+
+Wp( ˜P , P n) ≤ ε}, where Wp is the p−Wasserstein between ˜P and Pn, Pp := { ˜P : Ez∼ ˜P [∥z−z′∥p] <
+
+∞ ∀z′ ∈ Z} is the set of probability distributions with finite p-th moment, and ∥ · ∥ is the Euclidean norm. The radius ε ≥ 0 controls the size of the ambiguity set (see Rahimian and Mehrotra, 2022; Kuhn et al., 2025): ε = 0 recovers the empirical risk, while larger values yield a more conservative objective by guarding against perturbations of Pn within the Wasserstein ball (Wang et al., 2025). Although many distances and divergences have been considered for defining ambiguity sets in DRO, Wasserstein balls are particularly natural here. For example, the commonly used f -divergence-based ambiguity sets (Hu and Hong, 2013; Bayraksan and Love, 2015; Husain et al., 2023) primarily re-weight the support of the empirical distribution. By contrast, Wasserstein balls are based on mass transport (Kuhn et al., 2019), and can contain distributions supported away from the observed simulations, including continuous distributions. We first show that the population NPE risk upper bounds both kl α 
+
+> cov
+
+and kl S 
+
+> cal
+
+by the data-processing inequality for the KL divergence (see Lemma A.2). Thus, if P were available, the NPE objective would provide a principled criterion for controlling these forms of posterior uncertainty. In finite-simulation settings, however, P is unavailable, so we instead construct a high-probability upper bound on the population risk. To do so, we rely on Wasserstein concentration results (Fournier and Guillin, 2015; Kuhn et al., 2019), stating that for a suitable radius ε decreasing with 
+
+n, the true distribution P belongs to the ambiguity set A(Pn) with high probability. This directly implies that the DRO-NPE objective upper-bounds the population NPE risk, and therefore also 
+
+kl α 
+
+> cov
+
+and kl S
+
+> cal
+
+; see Appendix B.1 for the proof. 5Theorem 4.1. Let S(θ; x) = f (q(θ | x)) , for some strictly increasing function f , then for any 
+
+qϕ:
+
+sup α∈(0 ,1) kl α
+
+> cov
+
+(qϕ; P ) ≤ kl S
+
+> cal
+
+(qϕ; P ) +K(P )
+
+≤ LNPE (qϕ; P ).
+
+Moreover, suppose p ∈ [1 , d Z /2) , and that there exists α > 2p such that Mα := Ez∼P [∥z∥α] < ∞.Fix δ ∈ (0 , 1) . Then, for every ς ∈ (0 , α ) there exist positive constants C1, C 2 depending only on 
+
+p, d Z , α, M α, ς such that for any qϕ, whenever ε ≥ ε(n, δ ), where 
+
+ε(n, δ ) := max 
+
+ 1 
+
+> C1n
+
+log 2C2
+
+> δ
+
+ 1 
+
+> dZ
+
+,   2C2
+
+> δ
+
+ 1 
+
+> α−ς
+
+n 1  
+
+> α−ς−1
+> p
+
+
+
+,
+
+with probability at least 1 − δ: LNPE (qϕ; P ) ≤ sup ˜P ∈A p(Pn;ε) LNPE (qϕ; ˜P ).
+
+The moment condition on P is mild: for p = 2 , which is what we use (see Section 4), it reduces to P having at least a finite fourth moment, which is satisfied by many light-tailed distributions. The dependence of ε(n, δ ) on dZ reflects the curse of dimensionality inherent to Wasserstein concentration, with rates that are essentially optimal (Kuhn et al., 2019; Weed and Bach, 2019; Fournier and Guillin, 2015). In practice, however, SBI is often performed on handcrafted or learned summary statistics rather than raw observations (Radev et al., 2022; Deistler et al., 2025), which can substantially reduce the effective dimension. We state the results for p ∈ [1 , d Z /2) , the regime most relevant here; other cases are covered by Fournier and Guillin (2015) and mainly affect the form of ε(n, δ ). Alternative DRO-based upper-bounding strategies may yield faster rates in some settings (see, e.g., An and Gao, 2021; Gao, 2023) but require stronger assumptions, particularly on the loss, whereas our approach accommodates the general losses used in SBI. Next, we discuss the implementation of DRO-NPE. 
+
+A tractable objective for DRO-NPE. DRO-NPE admits two closely related formulations: a strong dual form (Equation (3)) and a regularised form (Proposition 4.2). Both provide upper bounds on the NPE population risk as in Theorem 4.1; the strong dual formulation is exact but challenging to obtain numerically, while the regularised form is computationally cheaper but approximate. We begin with the strong dual view, which replaces the generally intractable primal Wasserstein-DRO objective with an optimisation problem over auxiliary variables. Let the class of functions sat-isfying ρ−growth for ρ ≥ 1 be Gρ(Z) := {f : Z → R : ∃ C > 0 s .t. |f (z)| ≤ C(1 + ∥z∥ρ) ∀z ∈ Z} .
+
+Under the assumptions that for fixed qϕ, z 7 → ℓNPE (qϕ; z) is upper-semicontinuous and belongs to Gp(Z), the strong dual formulation is exact and finite (Gao and Kleywegt, 2023, Theorem 1): 
+
+sup  
+
+> ˜P∈A p(Pn;ε)
+
+LNPE (qϕ; ˜P ) = inf 
+
+> λ≥0
+
+(
+
+λε p + 1
+
+n
+
+> n
+
+X
+
+> i=1
+
+sup 
+
+> z′∈Z
+
+
+
+ℓNPE (qϕ; z′) − λ∥z′ − zi∥p)
+
+. (3) Although the dual formulation retains the upper bound guarantee we seek and is more tractable than the primal Wasserstein-DRO objective, the inner supremum remains computationally demanding. Focusing on the case p = 2 , we therefore derive in Proposition 4.2 a tractable finite-sample upper bound on the dual objective based on a second-order Taylor argument and growth control of the loss. This yields a regularised objective well-suited for gradient-based optimisation. In practice, we omit the O(ε2) remainder, which we expect to be negligible in most cases. The proof is in Appendix B.2. 
+
+Proposition 4.2. Fix qϕ ∈ Q . Suppose that z 7 → ℓNPE (qϕ; z) admits a twice continuously differentiable extension to RdZ , and belongs to G2(Z). Then, for every ε ≥ 0,
+
+sup ˜P ∈A 2(Pn;ϵ) LNPE (qϕ; ˜P ) ≤ L NPE (qϕ; Pn) + ε   1
+
+> n
+
+Pni=1 ∥∇ z ℓNPE (qϕ; zi)∥2 12
+
+| {z }
+
+> the tractable DRO −NPE objective
+
++ Cnϕ ε2.
+
+6Further, if ∥∇ z ℓNPE (qϕ; ·)∥ ∈ G β (Z), ∥∇ 2 
+
+> z
+
+ℓNPE (qϕ; ·)∥ ∈ G α(Z), and P is light-tailed, i.e. there exist η > 0, a > 0, and M < ∞ such that Ez∼P
+
+ exp (η∥z∥a) ≤ M , then, for m := max {2, 2β, α }
+
+and any sequence εn = o(( log n)−m/ 2a), the second-order term Cnϕ ε2 
+
+> n
+
+is negligible in probability. 
+
+Proposition 4.2 assumes twice continuous differentiability and growth control to upper-bound the 2-Wasserstein DRO objective by the tractable DRO-NPE objective with remainder of order 
+
+O(ε2). Under further light-tail and derivative-growth conditions, this remainder vanishes in probability for any εn decaying slightly faster than logarithmically, a mild requirement satisfied in particular by polynomial rates. Importantly, as shown in Lemma 4.3 below, these assumptions hold for Masked Autoregressive Flows (MAFs) (Papamakarios et al., 2017) and coupling flows, the default density estimators in the sbi (Tejero-Cantero et al., 2020) and BayesFlow (Kühmichel et al., 2026) libraries; see Appendix B.4 for a proof. By contrast, existing upper bounds for p = 2 
+
+Wasserstein DRO typically require global smoothness assumptions on the loss, such as Lipschitz gradients (e.g., Gao, 2023), and are therefore not directly suited to NPE with normalising flows. 
+
+Lemma 4.3. Suppose qϕ is a MAF or coupling flow (formally defined in Appendix B.4), then 
+
+ℓNPE satisfies the assumptions of Proposition 4.2. 
+
+Following Proposition 4.2, in practice, we minimise the tractable DRO-NPE objective: 
+
+LNPE (qϕ; Pn) + εΩ( ϕ; Pn), where Ω( ϕ; Pn) := 1
+
+n
+
+> n
+
+X
+
+> i=1
+
+∥∇ z ℓNPE (qϕ; zi)∥2
+
+! 12
+
+.
+
+As ε → 0, this reduces to standard NPE. As ε increases, the regularisation term dominates, and the optimisation problem approaches inf ϕ Ω( ϕ; Pn) ≥ 0. If this infimum is attained at zero, then any minimiser ϕmin satisfies ∇z log qϕmin (θi | xi) = 0 ∀i = 1 , . . . , n. Provided qϕmin (θi | xi) > 0,this implies ∇z qϕmin (θi | xi) = 0 ∀i = 1 , . . . , n . Thus, for large ε, the objective favours conditional densities that vary less sharply in z at the simulated pairs. This is consistent with improving expected coverage of HPDR, since overconfident densities tend to allocate excess mass around training pairs. The DRO-NPE objective also requires the selection of ε. The theoretical choice of ε in Theorem 4.1 is a high-probability concentration radius ensuring P ∈ A p(Pn; ε), but it depends on unknown constants and is not directly usable. We therefore follow common DRO practice and treat ε as a hyperparameter selected using a validation set (Mohajerin Esfahani and Kuhn, 2018). In our setting, a natural criterion is KL-based miscalibration. Indeed, Theorem 4.1 implies that miscalibration upper-bounds miscoverage, so reducing the former can also improve the latter when the bound is sufficiently tight. As noted in Section 3, miscalibration is also linked to entropy maximisation, making it a principled and interpretable criterion for choosing 
+
+ε. We estimate kl S 
+
+> cal
+
+by density-ratio estimation, using its representation as the KL divergence between the dependent joint P ˜U , x, where ˜U | x ∼ (F QS|x)#PS|x, and the independent reference 
+
+PU, x = PU ⊗ Px, where ⊗ denotes the product distribution, i.e. PU, x is the joint distribution obtained when U ∼ U [0 , 1] is independent of x. This yields an ε-dependent objective, optimised using standard training-validation splits and a one-dimensional search via Bayesian optimisation (Garnett, 2023); see Appendix C.1 for details. 
+
+Further statistical guarantees for DRO-NPE. We derive statistical guarantees on the excess risk, miscalibration and miscoverage of both the exact and tractable formulations of DRO-NPE and NPE relative to the oracle estimator ϕ⋆ := arg min ϕ LNPE (qϕ; P ) (see Appendix B.3). To the best of our knowledge, comparable guarantees are not available for existing methods. In particular, under a stronger Lipschitz gradient assumption that could be satisfied in the NPE setting for bounded Θ, we derive a DRO-NPE excess risk bound that depends on Ω( ϕ⋆; Pn)
+
+along with other n−dependent constants. In contrast, the equivalent excess risk bound for NPE 70.00.51.0                      
+
+> SLCP
+> n= 1024 n= 2048 n= 4096 n= 8192 n= 16384
+> 0.00.51.0
+> Lotka–Volterra
+> 0.00.51.0
+> Two Moons
+> 0.00.51.00.00.51.0
+> Inverse Kinematics
+> 0.00.51.00.00.51.00.00.51.00.00.51.0
+
+Nominal Coverage 1 − α
+
+> Expected Coverage  CPN
+> α
+> (
+> qˆφn
+> )
+
+(a) Coverage curves 10 20 30 
+
+> −10
+> −505
+> −3.0
+> −1.50.01.5
+> 1024 2048 4096 8192 16384
+> −5.0
+> −2.50.02.5
+
+n (b) NLPD 0.00.40.81.2
+
+> 0.00.30.60.9
+> 0.00 0.15 0.30 0.45
+> 1024 2048 4096 8192 16384
+> 0.00.30.60.9
+
+n (c) kl q
+
+> cal
+
+Figure 2: Benchmarking DRO-NPE ( ), CR-NPE ( ), Bal-NPE ( ) and standard NPE ( ) across four simulators and five simulation budgets. Means and standard deviations are shown over five random seeds. (a) Expected coverage curves of HPDR; the diagonal denotes perfect coverage, with curves above indicating conservativeness and curves below overconfidence. Coverage is computed at 18 nominal levels using N = 500 test pairs and 1000 posterior samples per test point. (b) Negative log predictive density (NLPD) on held-out test data. (c) KL-based calibration metric kl q 
+
+> cal
+
+used for selecting ε. Some CR-NPE results are missing due to numerical instabilities during training. additionally depends on the regulariser Ω( ˆϕn; Pn), which relies on the empirical risk minimiser. As a result, DRO-NPE can yield sharper bounds compared to NPE, when qˆϕn exhibits high functional variation relative to qϕ⋆ .
+
+# 5 Experiments 
+
+We evaluate DRO-NPE on a range of SBI tasks in Section 5.1, comparing it with existing NPE methods that encourage conservative posteriors. In Section 5.2, we study the effect of ε, compare alternative hyperparameter-selection metrics, and quantify the training overhead of DRO-NPE. Finally, we apply DRO-NPE to a real-world cosmology problem in Section 5.3. The code to reproduce our experiments is available at https://github.com/yugahikida/dro-npe .
+
+5.1 Benchmarking DRO-NPE 
+
+We benchmark DRO-NPE against standard NPE, coverage-regularised NPE (CR-NPE; Falkiewicz et al., 2023), and balanced NPE (Bal-NPE; Delaunoy et al., 2023) on the following common SBI tasks from Lueckmann et al. (2021); Kühmichel et al. (2026): SLCP ( dX = 8 , dΘ = 5 ), Lotka–Volterra ( dX = 20 , dΘ = 4 ), Two Moons ( dX = 2 , dΘ = 2 ), and Inverse Kinematics (dX = 2 , dΘ = 4 ). Evaluation is based on three metrics: (i) coverage plots, which show empirical versus nominal coverage, (ii) negative log predictive density (NLPD), which is the average negative log-density assigned by the learned posterior to the true parameter on held-out test points, and 8−15 −10 
+
+> Risk
+> 0.00 0.02 0.06 0.10 0.14 0.18 0.22
+> ε
+> Train Test
+
+(a) 0.5 1.0 
+
+> Nominal Coverage
+> 0.00.51.0
+> Expected Coverage
+> via kl q
+> cal
+> via NLPD via kl ‖θ−θ0‖2
+> cal
+> via ∆ 0.05 cov
+
+(b) 0.00.5  
+
+> ∆0.05 cov
+> 0.00.10.2
+
+ε 
+
+> 0.00.5
+> kl q
+> cal
+
+(c) 1024 2048 4096 8192 16384  
+
+> n
+> 1.00 1.25 1.50 1.75 2.00 2.25
+> Comp. overhead
+> CPU GPU
+
+(d) 
+
+Figure 3: Analysis of DRO-NPE on Lotka–Volterra. Means and standard deviations are shown over five random seeds. (a) training and test risk across ε. (b) Coverage curves for ε selected by kl q 
+
+> cal
+
+( ), NLPD ( ), kl ∥θ−θ0∥2 
+
+> cal
+
+with θ0 drawn from the prior ( ), and absolute miscoverage at α = 0 .05 ( ). (c) Absolute miscoverage at α = 0 .05 ( ) and kl q 
+
+> cal
+
+( ) across ε. (d) Relative wall-clock runtime of DRO-NPE versus standard NPE on GPU and CPU. (iii) our kl q 
+
+> cal
+
+metric. Details of the baselines, tasks, and implementation are in Appendix C. Following Falkiewicz et al. (2023); Delaunoy et al. (2023), we report results averaged over five random seeds; see Figure 2. NPE yields overconfident posteriors for SLCP and Lotka–Volterra. Although this effect is more pronounced in low-sample regimes, it persists for larger n. For Two Moons and Inverse Kinematics, the averaged NPE coverage curve is closer to the diagonal, though in some cases it shows substantial variability across runs. Bal-NPE yields conservative posteriors for SLCP and Two Moons overall, but is overconfident for Lotka–Volterra and Inverse Kinematics in low-sample regimes. A possible explanation is that the approximation qϕ(θ | x) ≈ p(θ | x)
+
+used to derive the regularisation term in Bal-NPE is inaccurate early in training, which may hinder optimisation. Interestingly, Bal-NPE yields overly conservative posteriors for Inverse Kinematics and Two Moons when the simulation budget is large. CR-NPE is conservative across almost all experiments, except for SLCP. We also observe numerical instabilities at larger sample sizes, leading to missing results in some cases (such as Inverse Kinematics with n = 16384 ); see Appendix C.3 for details. DRO-NPE yields conservative posteriors for SLCP and near-perfect coverage for Two Moons and Inverse Kinematics. In the latter two cases, standard NPE already attains near-perfect coverage, but DRO-NPE does so with lower variance across runs. The only notable failure is Lotka–Volterra at n = 1024 , where the posterior remains slightly overconfident. This may be mitigated by selecting a larger ε. In terms of NLPD, DRO-NPE achieves the lowest values overall. This is consistent with the fact that the baselines primarily encourage conservativeness, often at the expense of predictive performance. DRO-NPE also often improves on standard NPE, which we attribute to reduced generalisation error induced by distributional robustness. Finally, DRO-NPE consistently yields low kl q 
+
+> cal
+
+across simulation budgets and tasks, as expected because 
+
+ε is selected to minimise this criterion. 
+
+5.2 Analysing DRO-NPE 
+
+We now study the behaviour of DRO-NPE with respect to the key design choices involved in its implementation. All experiments are conducted using the Lotka–Volterra simulator with 
+
+n = 2048 .
+
+Generalisation gap versus ε. We first examine how ε affects the generalisation gap by comparing empirical risk on training and test data. As shown in Figure 3(a), small values of ε
+
+lead to a large generalisation gap and poor test performance, reflecting the optimistic bias of 9empirical risk minimisation in this setting. As ε increases, the gap narrows and test performance improves, attaining its minimum at ε = 0 .14 . Further increasing ε continues to reduce the gap but worsens test performance, as the posterior estimator becomes excessively conservative. 
+
+Choice of hyperparameter-selection metric. In Section 5.1, we select ε using the KL-based miscalibration metric kl q
+
+> cal
+
+, corresponding to S(θ, x) = q(θ | x). We compare this choice with three alternatives: NLPD, absolute miscoverage ∆0.05 cov , and kl ∥θ−θ0∥2 
+
+> cal
+
+, computed with S(θ, x) = ∥θ − θ0∥2 for a fixed reference point θ0. NLPD is a natural validation metric because it equals the NPE loss and upper-bounds kl q
+
+> cal
+
+, while absolute miscoverage directly measures deviation from nominal coverage. As shown in Figure 3(b), selecting ε via kl q 
+
+> cal
+
+yields a coverage curve closest to the diagonal. Selection via NLPD and ∆0.05 cov produces more conservative posteriors, whereas kl ∥θ−θ0∥2 
+
+> cal
+
+leads to undercoverage and higher variability across runs. Results for SLCP are in Appendix D. To understand the behaviour of absolute miscoverage, Figure 3(c) plots ∆0.05 cov as a function of ε, together with kl q
+
+> cal
+
+. We observe that ∆0.05 cov decreases nearly monotonically with ε, as larger values produce wider, more conservative posteriors and hence better coverage. This explains why selecting ε via absolute miscoverage can favour overly conservative posterior approximations. By contrast, kl q 
+
+> cal
+
+is minimised at an intermediate value of ε, making it more informative for selecting ε in DRO-NPE. 
+
+Computational cost. DRO-NPE is more expensive than standard NPE, but only by a moderate constant factor. The main overhead comes from higher-order automatic differentiation through ∇z log qϕ(θ | x), so the computational cost of this regularisation term grows with the joint parameter–data dimension dZ . As shown in Figure 3(d), DRO-NPE takes roughly 2× the wall-clock time of standard NPE on CPU, but only about 1.25 × on GPU, as the additional operations are highly parallelisable. This relative overhead varies little with n over the range considered, though it may increase once GPU resources are saturated. 
+
+5.3 Application to cosmology 0.0 0.5 1.0
+
+> Nominal Coverage
+> 0.00.51.0
+> Expected Coverage 015 30 45
+> NLPD 0.00.5
+> kl q
+> cal
+
+Figure 4: Cosmology results: expected coverage, NLPD, and kl q 
+
+> cal
+
+for DRO-NPE ( ), CR-NPE ( ), Bal-NPE ( ), and standard NPE ( ). Finally, we evaluate DRO-NPE on the CAMELS suite (Villaescusa-Navarro et al., 2021, 2023), a state-of-the-art cosmology dataset ( dX = 39 ) for machine learning on simulated universes, used previously by Hikida et al. (2025). One of the goals of CAMELS is to enable accurate constraints on dΘ = 2 
+
+cosmological parameters: the matter density 
+
+Ωm and the amplitude of matter fluctuations 
+
+σ8. We use 1,000 high-fidelity baryonic hydro-dynamic simulations available to us, reserving 
+
+900 for training and 100 for testing. Conser-vative inference is particularly important in this setting as simulations are scarce, and the observables depend not only on Ωm and σ8, but also on nuisance astrophysical processes that can produce similar simulated data (Villaescusa-Navarro et al., 2021). Overconfident posteriors can therefore lead to overstated cosmological constraints and misleading scientific conclusions. Figure 4 reports expected coverage, NLPD, and kl q 
+
+> cal
+
+across five independent training runs for each method on the same fixed train–test split. Standard NPE ( ) is severely overconfident and has much worse NLPD than all conservative methods, while Bal-NPE ( ) improves NLPD but remains strongly undercovered. CR-NPE ( ) improves upon Bal-NPE across all metrics, yet its 10 coverage remains below the diagonal for all nominal levels. DRO-NPE ( ) performs best overall, with the closest coverage to the diagonal, the lowest NLPD, and the lowest kl q
+
+> cal
+
+. These results suggest that DRO-NPE can provide conservative yet efficient posterior inference in challenging low-simulation settings. 
+
+# 6 Conclusion 
+
+We proposed DRO-NPE, a conservative formulation of NPE, to address finite-simulation failure modes including overconfidence, poor calibration, and large generalisation gaps. Our approach yields an objective that upper bounds the population NPE loss and KL-based metrics for uncertainty-quantification error, admits a tractable regularised objective, and enjoys statistical guarantees on excess risk, miscoverage, and miscalibration. Importantly, it remains compatible with standard normalising-flow architectures commonly used in SBI. However, DRO-NPE inherits limitations from DRO: it is more expensive than standard NPE, and there remains a theory– practice gap in selecting ε, since computing a theoretical radius guaranteeing the derived upper bounds is typically infeasible. Although we focused on NPE, DRO-NPE could be extended to other conditional density estimation problems, variational inference, amortised inference tasks, and losses beyond NPE via analogous DRO formulations. It could also be combined with complementary post-hoc calibration methods (Masserano et al., 2023; Patel et al., 2024; Cabezas et al., 2025) and ensembles (Hermans et al., 2022). More broadly, DRO has provided one route to upper-bounding the population NPE objective; future work could investigate whether alternative frameworks, such as PAC-Bayes (Alquier, 2024; Haddouche et al., 2021), offer analogous guarantees that can yield practical training objectives. 
+
+Acknowledgments 
+
+The authors thank Niall Jeffrey for help with using the CAMELS dataset. WL was supported by UCL’s Center for Doctoral Training in Data-Intensive Science and by the Alan Turing Institute. YH and AB were supported by the Research Council of Finland grant no. 362534. CD and FXB were supported by the EPSRC grant [EP/Y022300/1]. CD was additionally supported by the project ‘Reliable insights from scientific simulations’ funded from the EPSRC grant [UKRI3030]. The authors acknowledge the computational resources provided by the Aalto Science-IT project. 
+
+# References 
+
+Alquier, P. (2024). User-friendly introduction to PAC-Bayes bounds. Foundations and Trends in Machine Learning , 17(2):174–303. 11 Alsing, J., Wandelt, B., and Feeney, S. (2018). Massive optimal data compression and density estimation for scalable, likelihood-free inference in cosmology. Monthly Notices of the Royal Astronomical Society , 477(3):2874–2885. 1 An, Y. and Gao, R. (2021). Generalization bounds for (Wasserstein) robust optimization. In 
+
+Advances in Neural Information Processing Systems . 6 Bayraksan, G. and Love, D. K. (2015). Data-driven stochastic programming using phi-divergences. In The operations research revolution , pages 1–19. Informs. 5 Bharti, A., Dellaporta, C., Hikida, Y., and Briol, F.-X. (2026). Amortised and provably-robust simulation-based inference. arXiv:2602.11325 . 31 11 Bharti, A., Huang, D., Kaski, S., and Briol, F.-X. (2025). Cost-aware simulation-based inference. In International Conference on Artificial Intelligence and Statistics , volume 258, pages 28–36. 1Bishop, C. M. (1994). Mixture density networks. Technical Report NCRG/94/004, Neural Computing Research Group, Department of Computer Science and Applied Mathematics, Aston University. 3 Blanchet, J., Li, J., Lin, S., and Zhang, X. (2024). Distributionally robust optimization and robust statistics. arXiv:2401.14655 . 5 Brehmer, J. (2021). Simulation-based inference in particle physics. Nature Reviews Physics ,3(5):305–305. 1 Cabezas, L., Santos, V. S., Ramos, T. R., Rodrigues, P. L., and Izbicki, R. (2025). CP4SBI: Local conformal calibration of credible sets in simulation-based inference. arXiv:2508.17077 . 2, 11 Chung, Y., Char, I., and Schneider, J. (2024). Sampling-based multi-dimensional recalibration. In International Conference on Machine Learning , volume 235, pages 8919–8940. 3 Cranmer, K., Brehmer, J., and Louppe, G. (2020). The frontier of simulation-based inference. 
+
+Proceedings of the National Academy of Sciences , 117(48). 1 Deistler, M., Boelts, J., Steinbach, P., Moss, G., Moreau, T., Gloeckler, M., Rodrigues, P. L., Linhart, J., Lappalainen, J. K., Miller, B. K., et al. (2025). Simulation-based inference: A practical guide. arXiv:2508.12939 . 6 Delaunoy, A., Bonardeaux, M. d. l. B., Mishra-Sharma, S., and Louppe, G. (2024). Low-budget simulation-based inference with Bayesian neural networks. arXiv:2408.15136 . 2 Delaunoy, A., Hermans, J., Rozet, F., Wehenkel, A., and Louppe, G. (2022). Towards reliable simulation-based inference with balanced neural ratio estimation. In Advances in Neural Information Processing Systems . 2, 4, 17, 41 Delaunoy, A., Kurt Miller, B., Forré, P., Weniger, C., and Louppe, G. (2023). Balancing simulation-based inference for conservative posteriors. In Symposium on Advances in Approximate Bayesian Inference . 2, 8, 9, 41 Dey, B., Zhao, D., Andrews, B. H., Newman, J. A., Izbicki, R., and Lee, A. B. (2025). Towards instance-wise calibration: local amortized diagnostics and reshaping of conditional densities (LADaR). Machine Learning: Science and Technology , 6(4):045058. 3 Dheur, V. and Taieb, S. B. (2023). A large-scale study of probabilistic calibration in neural network regression. In International Conference on Machine Learning , volume 202, pages 7813–7836. 5 Dyer, J., Cannon, P., Farmer, J. D., and Schmon, S. M. (2024). Black-box Bayesian inference for agent-based models. Journal of Economic Dynamics and Control , 161:104827. 1 Falkiewicz, M., Takeishi, N., Shekhzadeh, I., Wehenkel, A., Delaunoy, A., Louppe, G., and Kalousis, A. (2023). Calibrating neural simulation-based inference with differentiable coverage probability. In Conference on Neural Information Processing Systems . 2, 4, 8, 9, 41, 43, 45 Fengler, A., Govindarajan, L. N., Chen, T., and Frank, M. J. (2021). Likelihood approximation networks (LANs) for fast inference of simulation models in cognitive neuroscience. Elife ,10:e65074. 1 12 Folland, G. B. (2024). Advanced Calculus . Second edition. Freely available online PDF. 22 Fournier, N. and Guillin, A. (2015). On the rate of convergence in Wasserstein distance of the empirical measure. Probability theory and related fields , 162(3):707–738. 5, 6, 20, 21, 25 Gao, R. (2023). Finite-sample guarantees for Wasserstein distributionally robust optimization: Breaking the curse of dimensionality. Operations Research , 71(6):2291–2306. 6, 7, 25, 26, 27, 28 Gao, R. and Kleywegt, A. (2023). Distributionally robust stochastic optimization with Wasserstein distance. Mathematics of Operations Research , 48(2):603–655. 6, 23 Garnett, R. (2023). Bayesian optimization . Cambridge University Press. 7, 40 Gneiting, T., Balabdaoui, F., and Raftery, A. E. (2007). Probabilistic forecasts, calibration and sharpness. Journal of the Royal Statistical Society Series B: Statistical Methodology ,69(2):243–268. 4 Greenberg, D., Nonnenmacher, M., and Macke, J. (2019). Automatic posterior transformation for likelihood-free inference. In International Conference on Machine Learning , volume 97, pages 2404–2414. 1, 42 Haddouche, M., Guedj, B., Rivasplata, O., and Shawe-Taylor, J. (2021). Pac-bayes unleashed: Generalisation bounds with unbounded losses. Entropy , 23(10):1330. 11 Hermans, J., Begy, V., and Louppe, G. (2020). Likelihood-free MCMC with amortized approxi-mate ratio estimators. In International Conference on Machine Learning , volume 119, pages 4239–4248. 2 Hermans, J., Delaunoy, A., Rozet, F., Wehenkel, A., Begy, V., and Louppe, G. (2022). Atrust crisis In simulation-based inference? Your posterior approximations can be unfaithful. 
+
+Transactions in Machine Learning Research . 2, 3, 11, 42 Hikida, Y., Bharti, A., Jeffrey, N., and Briol, F.-X. (2025). Multilevel neural simulation-based inference. Conference on Neural Information Processing Systems . 1, 10 Hu, Z. and Hong, L. J. (2013). Kullback-Leibler divergence constrained distributionally robust optimization. Available at Optimization Online , 1(2):9. 5 Husain, H., Nguyen, V., and van den Hengel, A. (2023). Distributionally robust Bayesian optimization with φ-divergences. In Conference on Neural Information Processing Systems . 5 Jeffrey, N., Alsing, J., and Lanusse, F. (2021). Likelihood-free inference with neural compression of DES SV weak lensing map statistics. Monthly Notices of the Royal Astronomical Society ,501(1):954–969. 1 Kingma, D. P. and Dhariwal, P. (2018). Glow: Generative flow with invertible 1x1 convolutions. In Advances in Neural Information Processing Systems . 34 Kobyzev, I., Prince, S. J., and Brubaker, M. A. (2020). Normalizing flows: An introduction and review of current methods. IEEE transactions on pattern analysis and machine intelligence ,43(11):3964–3979. 20 Krouglova, A. N., Johnson, H. R., Confavreux, B., Deistler, M., and Goncalves, P. J. (2026). Mul-tifidelity simulation-based inference for computationally expensive simulators. In International Conference on Learning Representations . 1 13 Kruse, J., Ardizzone, L., Rother, C., and Köthe, U. (2021). Benchmarking invertible architectures on inverse problems. arXiv:2101.10763 . 43 Kuhn, D., Esfahani, P. M., Nguyen, V. A., and Shafieezadeh-Abadeh, S. (2019). Wasserstein dis-tributionally robust optimization: Theory and applications in machine learning. In Operations research & management science in the age of analytics , pages 130–166. Informs. 5, 6 Kuhn, D., Shafiee, S., and Wiesemann, W. (2025). Distributionally robust optimization. Acta Numerica , 34:579–804. 2, 5 Kühmichel, L., Huang, J. M., Pratz, V., Arruda, J., Olischläger, H., Habermann, D., Kucharsky, S., Elsemüller, L., Mishra, A., Bracher, N., Jedhoff, S., Schmitt, M., Bürkner, P.-C., and Radev, S. T. (2026). BayesFlow 2: Multi-backend amortized Bayesian inference in python. 
+
+arXiv:2602.07098 . 4, 7, 8, 34, 42 Lemos, P., Coogan, A., Hezaveh, Y., and Perreault-Levasseur, L. (2023). Sampling-based accuracy testing of posterior estimators for general inference. In International Conference on Machine Learning , volume 202, pages 19256–19273. 3 Linhart, J., Gramfort, A., and Rodrigues, P. L. C. (2022). Validation diagnostics for SBI algorithms based on normalizing flows. In NeurIPS 2022 Machine Learning and the Physical Sciences Workshop . 3 Loshchilov, I. and Hutter, F. (2017). Decoupled weight decay regularization. arXiv preprint arXiv:1711.05101 . 42 Lotka, A. J. (1920). Analytical note on certain rhythmic relations in organic systems. Proceedings of the National Academy of Sciences , 6(7):410–415. 42 Lueckmann, J.-M., Boelts, J., Greenberg, D., Goncalves, P., and Macke, J. (2021). Benchmarking simulation-based inference. In International Conference on Artificial Intelligence and Statistics ,volume 130, pages 343–351. 8, 42 Lueckmann, J.-M., Gonçalves, P. J., Bassetto, G., Öcal, K., Nonnenmacher, M., and Macke, J. H. (2017). Flexible statistical inference for mechanistic models of neural dynamics. In Conference on Neural Information Processing Systems . 1 Masserano, L., Dorigo, T., Izbicki, R., Kuusela, M., and Lee, A. (2023). Simulator-based inference with WALDO: Confidence regions by leveraging prediction algorithms and posterior estimators for inverse problems. In International Conference on Artificial Intelligence and Statistics ,volume 206, pages 2960–2974. 2, 11 Miller, B. K., Weniger, C., and Forré, P. (2022). Contrastive neural ratio estimation. In Advances in Neural Information Processing Systems . 2 Modrák, M., Moon, A. H., Kim, S., Bürkner, P., Huurre, N., Faltejsková, K., Gelman, A., and Vehtari, A. (2023). Simulation-based calibration checking for Bayesian computation: The choice of test quantities shapes sensitivity. Bayesian Analysis , 20(2):461. 3 Mohajerin Esfahani, P. and Kuhn, D. (2018). Data-driven distributionally robust optimiza-tion using the Wasserstein metric: Performance guarantees and tractable reformulations. 
+
+Mathematical Programming , 171(1):115–166. 7 Papamakarios, G. and Murray, I. (2016). Fast ϵ -free inference of simulation models with Bayesian conditional density estimation. In Advances in Neural Information Processing Systems . 1 14 Papamakarios, G., Nalisnick, E., Rezende, D. J., Mohamed, S., and Lakshminarayanan, B. (2021). Normalizing flows for probabilistic modeling and inference. Journal of Machine Learning Research , 22(57):1–64. 3, 20 Papamakarios, G., Pavlakou, T., and Murray, I. (2017). Masked autoregressive flow for density estimation. In Advances in Neural Information Processing Systems . 7, 29 Papamakarios, G., Sterratt, D., and Murray, I. (2019). Sequential neural likelihood: Fast likelihood-free inference with autoregressive flows. In International Conference on Artificial Intelligence and Statistics , volume 89, pages 837–848. 42 Patel, Y., Mcnamara, D., Loper, J., Regier, J., and Tewari, A. (2024). Variational inference with coverage guarantees in simulation-based inference. In International Conference on Machine Learning , volume 235, pages 39861–39888. 2, 11 Polyanskiy, Y. and Wu, Y. (2025). Information theory: From coding to learning . Cambridge University Press. 4, 18 Radev, S. T., Mertens, U. K., Voss, A., Ardizzone, L., and Köthe, U. (2022). Bayesflow: Learning complex stochastic models with invertible neural networks. IEEE Transactions on Neural Networks and Learning Systems , 33(4):1452–1466. 1, 6, 34 Rahimian, H. and Mehrotra, S. (2022). Frameworks and results in distributionally robust optimization. Open Journal of Mathematical Optimization , 3:1–85. 5 Rossi, B. and Sekhposyan, T. (2019). Alternative tests for correct specification of conditional predictive densities. Journal of Econometrics , 208(2):638–657. 4 Säilynoja, T., Bürkner, P.-C., and Vehtari, A. (2022). Graphical test for discrete uniformity and its applications in goodness-of-fit evaluation and multiple sample comparison. Statistics and Computing , 32(2):32. 3 Saoulis, A. A., Piras, D., Jeffrey, N., Spurio-Mancini, A., Ferreira, A. M. G., and Joachimi, B. (2025). Transfer learning for multifidelity simulation-based inference in cosmology. 
+
+arXiv:2505.21215 . 1 Schmitt, M., Pratz, V., Köthe, U., Bürkner, P.-C., and Radev, S. T. (2024). Consistency models for scalable and fast simulation-based inference. Advances in Neural Information Processing Systems , 37:126908–126945. 43 Shalev-Shwartz, S. and Ben-David, S. (2014). Understanding machine learning: From theory to algorithms . Cambridge University Press. 5 Sonthalia, R., Lok, J., and Rebrova, E. (2024). On regularization via early stopping for least squares regression. arXiv:2406.04425 . 47 Talts, S., Betancourt, M., Simpson, D., Vehtari, A., and Gelman, A. (2018). Validating Bayesian inference algorithms with simulation-based calibration. arXiv:1804.06788 . 2, 3, 4 Tatsuoka, C., Yang, M., Xiu, D., and Zhang, G. (2025). Multi-fidelity parameter estimation using conditional diffusion models. arXiv:2504.01894 . 1 Tejero-Cantero, A., Boelts, J., Deistler, M., Lueckmann, J.-M., Durkan, C., Gonçalves, P., Greenberg, D., and Macke, J. (2020). sbi: A toolkit for simulation-based inference. Journal of Open Source Software , 5(52):2505. 7, 29, 47 Utpala, S. and Rai, P. (2020). Quantile regularization: Towards implicit calibration of regression models. arXiv:2002.12860 . 5 15 Vapnik, V. (1991). Principles of risk minimization for learning theory. In Advances in Neural Information Processing Systems . 5 Villaescusa-Navarro, F. et al. (2021). The CAMELS Project: Cosmology and Astrophysics with Machine-learning Simulations. The Astrophysical Journal , 915(1):71. 10, 43 Villaescusa-Navarro, F. et al. (2023). The CAMELS Project: Public Data Release. The Astrophysical Journal Supplement Series , 265(2):54. 10, 43 Wang, S., Wang, H., Li, X., and Honorio, J. (2025). Learning against distributional uncertainty: On the trade-off between robustness and specificity. IEEE Journal of Selected Topics in Signal Processing . 5 Ward, D., Cannon, P., Beaumont, M., Fasiolo, M., and Schmon, S. M. (2022). Robust neural posterior estimation and statistical model criticism. In Advances in Neural Information Processing Systems . 3 Weed, J. and Bach, F. (2019). Sharp asymptotic and finite-sample rates of convergence of empirical measures in Wasserstein distance. Bernoulli , 25(4A):2620–2648. 6 Yao, Y., Régaldo-Saint Blancard, B., and Domke, J. (2024). Simulation-based stacking. In 
+
+International Conference on Artificial Intelligence and Statistics , volume 238, pages 4267–4275. 4Zammit-Mangion, A., Sainsbury-Dale, M., and Huser, R. (2024). Neural methods for amortised parameter inference. arxiv 2404.12484 . 1 Zeng, Y. and Lam, H. (2022). Generalization bounds with minimal dependency on hypothesis class via distributionally robust optimization. In Advances in Neural Information Processing Systems . 25 Zhao, D., Dalmasso, N., Izbicki, R., and Lee, A. B. (2021). Diagnostics for conditional density models and Bayesian inference algorithms. In Uncertainty in Artificial Intelligence , pages 1830–1840. 3, 4 16 Appendix 
+
+We start by presenting the theoretical results on calibration, expected coverage of HPDR, miscalibration, and miscoverage in Appendix A. Then, in Appendix B, we present theoretical results relating to the DRO-NPE method. Finally, we present implementation details and additional experiments in Appendix C and Appendix D, respectively. 
+
+# A Theory: calibration and expected coverage of HPDR 
+
+In this section, we first show that the expected coverage of HPDR is a special case of calibration. Second, we present the data-processing inequality (DPI) and the chain rule for the Kullback-Leibler (KL) divergence, which lets us compare P and Q after applying pushforwards. Third, we prove that KL-based miscoverage upper-bounds its absolute value notion. Finally, we establish that KL-based miscalibration upper-bounds miscoverage. We first prove that the expected coverage of HPDR is a special case of calibration, a result that was briefly shown in Delaunoy et al. (2022). This will require a statement more mathematical than Definition 2.2, presented below. We say that Qθ|x (or equivalently q) is calibrated w.r.t. to 
+
+S if: 
+
+Ex∼Px
+
+h
+
+PS|x
+
+
+
+F QS|x(SP 
+
+> x
+
+) ≤ u
+
+i 
+
+= u ∀u ∈ [0 , 1] . (4) This is equivalent to stating that F QS|x(SP 
+
+> x
+
+) is distributed as U[0 , 1] under x ∼ Px.
+
+Lemma A.1 (Expected coverage of HPDR as a special case of calibration) . Fix q. Let S(θ; x) := 
+
+q(θ | x), and assume that the CDF of QS|x is continuous and that F QS|x is strictly increasing. Then, for every α ∈ (0 , 1) ,
+
+CPα (q) = 1 − Ex∼Px
+
+h
+
+PS|x
+
+
+
+F QS|x(SP 
+
+> x
+
+) < α 
+
+i 
+
+.
+
+Proof. Suppose S(θ; x) = q(θ | x). Then, notice that 
+
+F QS|x(τ qα(x)) = QS|x(( −∞ , τ qα(x)]) = Qθ|x({S(θ; x) ≤ τ qα(x)})= Qθ|x({q(θ | x) ≤ τ qα(x)}) = α, 
+
+where the first equality is by definition of the cumulative distribution function, the second by that of the pushforward, the third by that of S, and the last by that of τ qα(x) together with continuity of the CDF of QS|x. Therefore, denoting SP 
+
+> x
+
+= S(θ; x) whenever θ ∼ Pθ|x, we have that for any x ∈ X ,
+
+Pθ|x (Rqα(x)) = Pθ|x (q(θ | x) ≥ τ qα(x)) = PS|x
+
+ SP 
+
+> x
+
+≥ τ qα(x)
+
+= PS|x
+
+
+
+F QS|x(SP 
+
+> x
+
+) ≥ F QS|x(τ qα(x)) 
+
+
+
+= PS|x
+
+
+
+F QS|x(SP 
+
+> x
+
+) ≥ α
+
+
+
+.
+
+The first equality is the definition of the HPDR at level α. The second follows from the choice 
+
+S(θ; x) = q(θ | x). The third uses that F QS|x is continuous and strictly increasing. The last 17 equality uses that F QS|x(τ qα(x)) = α, established above. Finally, we get that: 
+
+CPα (q) = Ex∼Px
+
+Pθ|x(Rqα(x)) 
+
+= Ex∼Px
+
+h
+
+PS|x
+
+
+
+F QS|x(SP 
+
+> x
+
+) ≥ α
+
+i 
+
+= 1 − Ex∼Px
+
+h
+
+PS|x
+
+
+
+F QS|x(SP 
+
+> x
+
+) < α 
+
+i 
+
+.
+
+Since this identity holds for every α ∈ (0 , 1) , it shows that expected HPDR coverage is exactly the special case of (4) obtained by taking S(θ; x) = q(θ | x) and u = α.We now define the expected Kullback-Leibler (KL) divergence, which will be used frequently in this paper. Suppose Pθ|x is absolutely continuous w.r.t. Qθ|x, and for simplicity, that Pθ|x
+
+and Qθ|x admit densities p(θ | x), q (θ | x). Then, the KL divergence is: 
+
+Ex∼Px
+
+h
+
+KL 
+
+
+
+Pθ|x ∥ Qθ|x
+
+i 
+
+:= Ex∼Px
+
+
+
+Eθ∼Pθ|x
+
+
+
+log p(θ | x)
+
+q(θ | x)
+
+ 
+
+.
+
+We can then state the data-processing inequality and the chain rule for the KL divergence. 
+
+Lemma A.2 (Theorem 2.15 & Corollary 2.18 from Polyanskiy and Wu (2025). Chain rule and data-processing inequality for KL divergence) . Suppose that for some measurable space Y,
+
+f : Θ → Y is a measurable function. Then, for any fixed x ∈ X and any two distributions 
+
+Pθ|x, Q θ|x, such that Pθ|x ≪ Qθ|x, i.e. Pθ|x is absolutely continuous w.r.t. Qθ|x,
+
+KL( Pθ|x∥Qθ|x) = KL( f#Pθ|x∥f#Qθ|x) + Et∼f#Pθ|x
+
+KL( Pθ|f (θ)= t, x∥Qθ|f (θ)= t, x) . (5) 
+
+In particular, 
+
+KL( f#Pθ|x∥f#Qθ|x) ≤ KL( Pθ|x∥Qθ|x),
+
+and equality holds if f is one-to-one, or when f is a sufficient statistic for testing Pθ|x against 
+
+Qθ|x.
+
+We now show that KL-based miscoverage controls the usual absolute coverage error. In particular, by Pinsker’s inequality, small KL-based miscoverage implies small absolute miscoverage. When this upper bound is reasonably tight, reducing the former also reduces the latter. The proof uses the following elementary identity for Bernoulli distributions. Let P1 and P2 be Bernoulli distributions with probability parameters p1 and p2, respectively. Then 
+
+TV( P1, P 2) := 12
+
+X
+
+> s∈{ 0,1}
+
+|P1(s) − P2(s)| = |p1 − p2|.
+
+Lemma A.3 (KL-based miscoverage upper-bounds its absolute value notion) . Define kl α 
+
+> cov
+
+as in Definition 3.1, and ∆α
+
+> cov
+
+(q; P ) := CPα (q) − (1 − α) . Then, for any α ∈ (0 , 1) and q(θ | x),
+
+∆α
+
+> cov
+
+(q; P ) ≤
+
+r 12 kl α
+
+> cov
+
+(q; P ).
+
+Proof. By definition of CPα , we have that 
+
+∆α
+
+> cov
+
+(q; P ) = |Ex∼Px [Pθ|x(Rqα(x)) − (1 − α)] | ≤ Ex∼Px [|Pθ|x(Rqα(x)) − (1 − α)|].
+
+Then, for each fixed x,
+
+|Pθ|x(Rqα(x)) − (1 − α)| = TV 
+
+
+
+(TRqα(x))#Pθ|x, (TRqα(x))#Qθ|x
+
+
+
+,
+
+18 since (TRqα(x))#Pθ|x and (TRqα(x))#Qθ|x are Bernoulli laws with parameters Pθ|x(Rqα(x)) and 
+
+Qθ|x(Rqα(x)) = 1 − α. Therefore, applying Pinsker’s inequality pointwise in x yields: 
+
+∆α
+
+> cov
+
+(q; P ) ≤ Ex∼Px
+
+h
+
+TV 
+
+
+
+(TRqα(x))#Pθ|x, (TRqα(x))#Qθ|x
+
+i 
+
+≤ Ex∼Px
+
+"r 12 KL 
+
+
+
+(TRqα(x))#Pθ|x ∥ (TRqα(x))#Qθ|x
+
+#
+
+.
+
+Finally, Jensen’s inequality gives: 
+
+Ex∼Px
+
+"r 12 KL 
+
+
+
+(TRqα(x))#Pθ|x ∥ (TRqα(x))#Qθ|x
+
+#
+
+≤
+
+r 12 Ex∼Px
+
+h
+
+KL 
+
+
+
+(TRqα(x))#Pθ|x ∥ (TRqα(x))#Qθ|x
+
+i 
+
+=
+
+r 12 kl α
+
+> cov
+
+(q; P ).
+
+We end this section by showing that miscalibration is an upper-bound to miscoverage. This result will be used to prove Theorem 4.1 in the next section. 
+
+Lemma A.4 (Miscalibration upper-bounds miscoverage) . Define 
+
+kl NPE (q; P ) := Ex∼Px
+
+KL( Pθ|x ∥ Qθ|x) = LNPE (q; P ) + K(P ).
+
+Then, for any distribution Q with density q,
+
+sup 
+
+> α∈(0 ,1)
+
+kl α
+
+> cov
+
+(q; P ) ≤ kl NPE (q; P ) and kl S
+
+> cal
+
+(q; P ) ≤ kl NPE (q; P ).
+
+Further, suppose that S(θ; x) = f (q(θ | x)) for some strictly increasing f : [0 , ∞) → R, and F QS|x
+
+is also strictly increasing. Then 
+
+sup 
+
+> α∈(0 ,1)
+
+kl α
+
+> cov
+
+(q; P ) ≤ kl S
+
+> cal
+
+(q; P ) ≤ kl NPE (q; P ).
+
+Proof. Showing that kl α
+
+> cov
+
+(q; P ) ≤ kl NPE (q; P ) and kl S
+
+> cal
+
+(q; P ) ≤ kl NPE (q; P ) is a direct application of the data-processing inequality (DPI) from Lemma A.2. In particular, since kl α
+
+> cov
+
+(q; P ) ≤
+
+kl NPE (q; P ) holds for any α ∈ (0 , 1) , we can further conclude that sup α∈(0 ,1) kl α
+
+> cov
+
+(q; P ) ≤
+
+kl NPE (q; P ). We then focus on showing kl α
+
+> cov
+
+(q; P ) ≤ kl S
+
+> cal
+
+(q; P ).First, whenever S(θ; x) = f (q(θ | x)) and f is strictly increasing, then 
+
+(TRqα(x))#Pθ|x(1) = Pθ|x(Rqα(x)) = Pθ|x({q(θ | x) ≥ τ qα(x)})= Pθ|x({f (q(θ | x)) ≥ f (τ qα(x)) }) since f is strictly increasing, 
+
+= PS|x({s ≥ f (τ qα(x)) }) using that S(θ; x) = f (q(θ | x)) ,
+
+= ( TAqα(x))#PS|x(1) ,
+
+where Aqα(x) := {s ≥ f (τ qα(x)) }, and similarly, 
+
+(TRqα(x))#Pθ|x(0) = PS|x({s < f (τ qα(x)) }) = ( TAqα(x))#PS|x(0) 
+
+Therefore, the laws (TRqα(x))#Pθ|x and (TAqα(x))#PS|x coincide. This also holds for (TRqα(x))#Qθ|x
+
+and (TAqα(x))#QS|x. Hence, we can rewrite miscoverage as follows: 
+
+kl α
+
+> cov
+
+(q; P ) = Ex∼Px
+
+h
+
+KL 
+
+
+
+(TAqα(x))#PS|x (TAqα(x))#QS|x
+
+i 
+
+.
+
+19 But, 
+
+TAqα(x)(s) = 1{s ≥ f (τ qα(x)) }
+
+= 1{F QS|x(s) ≥ F QS|x(f (τ qα(x))) } since F QS|x is strictly increasing ,
+
+= TBqα(x)(F QS|x(s)) 
+
+for Bqα(x) := [ F QS|x(f (τ qα(x))) , 1] . Therefore, 
+
+(TAqα(x))#PS|x = ( TBqα(x))#
+
+
+
+(F QS|x)#PS|x
+
+
+
+,
+
+and similarly for QS|x. Thus, 
+
+kl α
+
+> cov
+
+(q; P ) = Ex∼Px
+
+h
+
+KL 
+
+
+
+(TBqα(x))#
+
+
+
+(F QS|x)#PS|x
+
+
+
+(TBqα(x))#
+
+
+
+(F QS|x)#QS|x
+
+i 
+
+≤ Ex∼Px
+
+h
+
+KL 
+
+
+
+(F QS|x)#PS|x (F QS|x)#QS|x
+
+i 
+
+by the DPI, 
+
+= kl S
+
+> cal
+
+(q; P ).
+
+Since this line of reasoning holds for any α ∈ (0 , 1) , we further conclude that 
+
+sup 
+
+> α∈(0 ,1)
+
+kl α
+
+> cov
+
+(q; P ) ≤ kl S
+
+> cal
+
+(q; P ).
+
+# B Theory: DRO-NPE method 
+
+In Section B.1, we adapt a Wasserstein concentration result and use it to prove Theorem 4.1. Then, in Section B.2, we specialise to the Wasserstein distance with p = 2 , and derive a local quadratic upper bound under a growth condition and a continuous differentiability assumption, which in turn yields Proposition 4.2. In Section B.3, we further prove an excess risk type of result for miscoverage and miscalibration under stricter conditions. Finally, we verify these conditions for normalising flows (Papamakarios et al., 2021; Kobyzev et al., 2020). Recall the Wasserstein distance is defined as: 
+
+Wp(P, Q ) := 
+
+
+
+inf π∈Π( P,Q )
+
+R 
+
+> Z×Z
+
+∥z − z′∥pπ(dz, d z′)
+
+ 1
+
+> p
+
+where Π( P, Q ) denotes the set of all joint probability distributions of z and z′ with marginals P
+
+and Q respectively. 
+
+B.1 Wasserstein concentration results and proof of Theorem 4.1 
+
+In this subsection, we first adapt a result from Fournier and Guillin (2015) to our setting. Then, we use this result, as well as the data-processing inequality (Lemma A.2), to prove Theorem 4.1. 
+
+Lemma B.1 (Adapting Theorem 2 from Fournier and Guillin (2015)) . Suppose that p ∈ [1 , d Z /2) ,and that there exists α > 2p such that Mα := Ez∼P [∥z∥α] < ∞. Then, ∀ς ∈ (0 , α ) there exists positive constants C1, C 2 depending only on p, d Z , α, M α, ς such that for any δ > 0,
+
+P(Wp(Pn, P ) ≤ ε) ≥ 1 − δ, 
+
+whenever ε ≥ ε(n, δ ), where: 
+
+ε(n, δ ) := max 
+
+( 1
+
+C1n log 2C2
+
+δ
+
+ 1
+
+> dZ
+
+,
+
+ 2C2
+
+δ
+
+ 1
+
+> α−ς
+
+n 1(α−ς) − 1
+
+> p
+
+)
+
+20 Proof. From Theorem 2 of Fournier and Guillin (2015), whenever P is probability distribution on RdZ , if there exists α > 2p such that Mα := Ez∼P [∥z∥α] < ∞, then for all n ≥ 1, ε > 0,
+
+P(W pp (Pn, P ) ≥ ε) ≤ a(n, ε )1ε≤1 + b(n, ε ),
+
+where 
+
+a(n, ε ) = C2
+
+
+
+exp( −C1nε 2), if p > dZ
+
+> 2
+
+exp −C1n
+
+
+
+> ε
+> log
+
+(2+ 1 
+
+> ε
+
+)
+
+2!
+
+if p = dZ
+
+> 2
+
+exp 
+
+
+
+−C1nε dZ
+
+> p
+
+
+
+if p ∈ [1 , dZ 
+
+> 2
+
+)
+
+and 
+
+b(n, ε ) = C2n(nε )− α−ςp ∀ς ∈ (0 , α ).
+
+The positive constants C1, C 2 depend only on p, d Z and on α, M α, ς . Therefore, 
+
+P(Wp(Pn, P ) ≤ ε) = 1 − P(Wp(Pn, P ) ≥ ε) ≥ 1 − a(n, ε p)1εp≤1 − b(n, ε p)
+
+For simplicity, constrain p ∈ [1 , d Z /2) , which is most relevant in our setting. The other cases follow the same logic. Fix δ > 0. We wish to find conditions for ε in terms of δ, n and other constants such that: 
+
+P(Wp(Pn, P ) ≤ ε) ≥ 1 − δ. 
+
+We do so by selecting ε such that it satisfies both a(n, ε p) ≤ δ/ 2, b (n, ε p) ≤ δ/ 2, so that: 
+
+1 − a(n, ε p)1εp≤1 − b(n, ε p) ≥ 1 − δ =⇒ P(Wp(Pn, P ) ≤ ε) ≥ 1 − δ. 
+
+Therefore, 
+
+a(n, ε p) = C2 exp( −C1nε dZ ) ≤ δ
+
+2 =⇒ εa =
+
+ 1
+
+C1n log 2C2
+
+δ
+
+ 1
+
+> dZ
+
+,
+
+and similarly 
+
+b(n, ε p) = C2n(nε )− α−ςp ≤ δ
+
+2 =⇒ εb =
+
+ 2C2
+
+δ
+
+ 1
+
+> q−ς
+
+n 1   
+
+> α−ς−1
+> p
+
+.
+
+We then select: 
+
+ε(n, δ ) := max 
+
+( 1
+
+C1n log 2C2
+
+δ
+
+ 1
+
+> dZ
+
+,
+
+ 2C2
+
+δ
+
+ 1
+
+> α−ς
+
+n 1  
+
+> α−ς−1
+> p
+
+)
+
+.
+
+We are now ready to prove the Theorem. 
+
+Proof of Theorem 4.1. By Lemma A.4, we have that for any qϕ:
+
+kl α
+
+> cov
+
+(qϕ; P ) ≤ kl S
+
+> cal
+
+(qϕ; P ) ≤ kl NPE (qϕ; P ) ≡ L NPE (qϕ; P ) + K(P ).
+
+Further, since the assumptions of Lemma B.1 are satisfied, we obtain that whenever ε ≥ ε(n, δ ),where ε(n, δ ) is given in Lemma B.1, 
+
+P(Wp(P, P n) ≤ ε) ≥ 1 − δ, 
+
+21 which implies that with probability 1 − δ, P ∈ A p(Pn; ε). This gives that with probability 1 − δ,for any qϕ,
+
+LNPE (qϕ; P ) ≤ sup  
+
+> ˜P∈A p(Pn;ε)
+
+LNPE (qϕ; ˜P ).
+
+Hence, putting the inequalities together, with probability 1 − δ, for any qϕ,
+
+kl α
+
+> cov
+
+(qϕ; P ) ≤ kl S
+
+> cal
+
+(qϕ; P ) ≤ L NPE (qϕ; P ) + K(P ) ≤ sup  
+
+> ˜P∈A p(Pn;ε)
+
+LNPE (qϕ; ˜P ) + K(P ).
+
+B.2 Proof of Proposition 4.2 
+
+We first show that under the assumption of 2−growth, we can prove a local quadratic upper bound, so long as the function class is also twice continuously differentiable on RdZ .
+
+Lemma B.2. Fix qϕ ∈ Q. Suppose that z 7 → ℓ(qϕ; z) ∈ G 2(Z), and that it is twice continuously differentiable on RdZ . Then, for any fixed z0 ∈ Z , there exists a Cϕ(z0) < ∞ which is constant in z such that 
+
+ℓ(qϕ; z) ≤ ℓ(qϕ; z0) + ∇z ℓ(qϕ; z0)⊤(z − z0) + Cϕ(z0)∥z − z0∥2, ∀z ∈ Z .
+
+Proof. We proceed by considering two cases: when ∥z − z0∥ < 1 and ∥z − z0∥ ≥ 1. We denote 
+
+B(z0, 1) := {z : ∥z − z0∥ < 1}, and ¯B(z0, 1) its closure. 
+
+Case 1: ∥z − z0∥ < 1: Since B(z0, 1) ⊂ RdZ , and the mapping z 7 → ℓ(qϕ; z) is continuously differentiable on RdZ , which is open and convex, Taylor’s theorem (Theorem 2.68 of Folland (2024)) applies at z0 for every z ∈ B(z0, 1) :
+
+ℓ(qϕ; z) = ℓ(qϕ; z0) + ∇z ℓ(qϕ; z0)⊤(z − z0) + R1(z0, z − z0), ∀z ∈ B(z0, 1) 
+
+where R1(z0, z − z0) is the Taylor expansion remainder term. Further, since ¯B(z0, 1) is com-pact and the Hessian ∇2 
+
+> z
+
+ℓ(qϕ; z) is continuous by assumption, the Hessian has finite norm: 
+
+∥∇ 2 
+
+> z
+
+ℓ(qϕ; z)∥ ≤ M (z0) ∀z ∈ ¯B(z0, 1) for some constant M (z0) independent of z. Therefore, with Corollary 2.75 of Folland (2024), we obtain: 
+
+|R1(z0, z − z0)| ≤ M (z0)2 ∥z − z0∥2, ∀z ∈ B(z0, 1) .
+
+We then conclude: 
+
+ℓ(qϕ; z) ≤ ℓ(qϕ; z0) + ∇z ℓ(qϕ; z0)⊤(z − z0) + M (z0)2 ∥z − z0∥2, ∀z ∈ B(z0, 1) .
+
+Case 2: ∥z − z0∥ ≥ 1: Notice that 
+
+−∇ z ℓ(qϕ; z0)⊤(z − z0) ≤ ∥∇ z ℓ(qϕ; z0)∥∥ z − z0∥ ≤ 12 ∥∇ z ℓ(qϕ; z0)∥2 + 12 ∥z − z0∥2,
+
+where the first inequality is by Cauchy-Schwarz, and the second holds because whenever a, b > 0,
+
+ab ≤ 12 a2 + 12 b2. Further, using the growth condition of the map z 7 → ℓ(qϕ; z) for ρ = 2 , for some constant ˜Cϕ,
+
+ℓ(qϕ; z) ≤ ˜Cϕ(1 + ∥z0 + z − z0∥2) ≤ ˜Cϕ(1 + 2 ∥z0∥2 + 2 ∥z − z0∥2),
+
+where the second inequality is using that ∥a + b∥2 ≤ 2∥a∥2 + 2 ∥b∥2. Together, these results imply: 
+
+ℓ(qϕ; z) − ∇ z ℓ(qϕ; z0)⊤(z − z0) ≤ ˜Cϕ(1 + 2 ∥z0∥2 + 2 ∥z − z0∥2)+ 12 ∥∇ z ℓ(qϕ; z0)∥2 + 12 ∥z − z0∥2 + ℓ(qϕ; z0) − ℓ(qϕ; z0):= Kϕ(z0) + ℓ(qϕ; z0) + 
+
+
+
+2 ˜Cϕ + 12
+
+
+
+∥z − z0∥2,
+
+22 for some constant Kϕ(z0) independent of z, defined as: 
+
+Kϕ(z0) := ˜Cϕ + 2 ˜Cϕ∥z0∥2 + 12 ∥∇ z ℓ(qϕ; z0)∥2 − ℓ(qϕ; z0).
+
+Finally, since ∥z − z0∥ ≥ 1, we have that 
+
+Kϕ(z0) + 
+
+
+
+2 ˜Cϕ + 12
+
+
+
+∥z − z0∥2 ≤
+
+
+
+|Kϕ(z0)| + 2 ˜Cϕ + 12
+
+
+
+∥z − z0∥2 := Aϕ(z0)∥z − z0∥2,
+
+implying 
+
+ℓ(qϕ; z) ≤ ℓ(qϕ; z0) + ∇z ℓ(qϕ; z0)⊤(z − z0) + Aϕ(z0)∥z − z0∥2, ∀z ∈ { z ∈ Z : ∥z − z0∥ ≥ 1}.
+
+Finally, taking Cϕ(z0) := max 
+
+n M (z0)2 , A ϕ(z0)
+
+o
+
+, we get that 
+
+ℓ(qϕ; z) ≤ ℓ(qϕ; z0) + ∇z ℓ(qϕ; z0)⊤(z − z0) + Cϕ(z0)∥z − z0∥2 ∀z ∈ Z .
+
+This quadratic upper bound can then be used to solve the inner supremum in the strong dual of the Wasserstein DRO objective and prove Proposition 4.2. Note that the proof keeps the loss function more general, with ℓNPE recovered by setting ℓ ≡ ℓNPE .
+
+Proof of Proposition 4.2. We divide this proof into two parts. First, we derive the upper bound in terms of the gradient regulariser and the Cnϕ remainder term. Second, we show that the remainder term remains negligible under the assumptions considered in the Proposition. We keep the proof at a general level of loss function ℓ, and do not use ℓNPE specifically. First, recall that, as in Equation (3), under the upper semi-continuity and 2−growth assump-tions on ℓ, which hold in this setting, we have (Gao and Kleywegt, 2023): 
+
+sup  
+
+> ˜P∈A p(Pn;ε)
+
+Ez∼ ˜P [ℓ(qϕ; z)] = inf 
+
+> λ≥0
+
+(
+
+λε 2 + 1
+
+n
+
+> n
+
+X
+
+> i=1
+
+sup 
+
+> z′∈Z
+
+
+
+ℓ(qϕ; z′) − λ∥z′ − zi∥2)
+
+.
+
+Further, by Lemma B.2, for each i and every z′ ∈ Z ,
+
+ℓ(qϕ; z′) ≤ ℓ(qϕ; zi) + ∇z ℓ(qϕ; zi)⊤(z′ − zi) + Cϕ(zi)∥z′ − zi∥2.
+
+Hence, for every λ ≥ 0,
+
+sup 
+
+> z′∈Z
+
+
+
+ℓ(qϕ; z′) − λ∥z′ − zi∥2
+
+≤ ℓ(qϕ; zi) + sup 
+
+> z′∈Z
+
+n
+
+∇z ℓ(qϕ; zi)⊤(z′ − zi)+ ( Cϕ(zi) − λ)∥z′ − zi∥2o
+
+≤ ℓ(qϕ; zi) + sup 
+
+> z′∈RdZ
+
+n
+
+∇z ℓ(qϕ; zi)⊤(z′ − zi)+ ( Cϕ(zi) − λ)∥z′ − zi∥2o
+
+.
+
+Now, restrict λ such that λ > C ϕ(zi), ∀i = 1 , . . . , n . Then, since the objective inside the supremum is strictly concave and over RdZ , we get that the solution for every i to the following is the unique maximiser z⋆i :
+
+0 = ∇z′
+
+
+
+∇z ℓ(qϕ; zi)⊤(z′ − zi) + ( Cϕ(zi) − λ)∥z′ − zi∥2
+
+= ∇z ℓ(qϕ; zi) + 2( Cϕ(zi) − λ)( z′ − zi) = ⇒ z⋆i = zi + ∇z ℓ(qϕ; zi)2( λ − Cϕ(zi)) .
+
+23 Fix Cnϕ := max 1≤i≤n Cϕ(zi). Then, substituting back, we get that for every λ > C nϕ ,
+
+λε 2 + 1
+
+n
+
+> n
+
+X
+
+> i=1
+
+sup 
+
+> z′∈Z
+
+
+
+ℓ(qϕ; z′) − λ∥z′ − zi∥2
+
+≤ 1
+
+n
+
+> n
+
+X
+
+> i=1
+
+ℓ(qϕ; zi) + λε 2 + 14( λ − Cnϕ ) · 1
+
+n
+
+> n
+
+X
+
+> i=1
+
+∥∇ z ℓ(qϕ; zi)∥2
+
+= 1
+
+n
+
+> n
+
+X
+
+> i=1
+
+ℓ(qϕ; zi) + Cnϕ ε2 + tε 2 + 14t · 1
+
+n
+
+> n
+
+X
+
+> i=1
+
+∥∇ z ℓ(qϕ; zi)∥2,
+
+where in the last line we substitute t = λ − Cnϕ . Now, 
+
+inf 
+
+> λ≥0
+
+(
+
+λε 2 + 1
+
+n
+
+> n
+
+X
+
+> i=1
+
+sup 
+
+> z′∈Z
+
+
+
+ℓ(qϕ; z′) − λ∥z′ − zi∥2)
+
+≤ inf  
+
+> λ−Cnϕ>0
+
+(
+
+λε 2 + 1
+
+n
+
+> n
+
+X
+
+> i=1
+
+sup 
+
+> z′∈Z
+
+
+
+ℓ(qϕ; z′) − λ∥z′ − zi∥2)
+
+≤ inf 
+
+> t> 0
+
+(
+
+1
+
+n
+
+> n
+
+X
+
+> i=1
+
+ℓ(qϕ; zi) + Cnϕ ε2 + tε 2 + 14t · 1
+
+n
+
+> n
+
+X
+
+> i=1
+
+∥∇ z ℓ(qϕ; zi)∥2
+
+)
+
+= 1
+
+n
+
+> n
+
+X
+
+> i=1
+
+ℓ(qϕ; zi) + ε 1
+
+n
+
+> n
+
+X
+
+> i=1
+
+∥∇ z ℓ(qϕ; zi)∥2
+
+!1/2
+
++ Cnϕ ε2,
+
+where in the first line we restrict the infimum to λ > C nϕ , in the second line we use the previously derived upper-bound and replace t = λ − Cnϕ , and in the last line, we use that for some A, ε 
+
+constant in t,
+
+inf 
+
+> t> 0
+
+
+
+tε 2 + A
+
+4t
+
+
+
+= ε√A. 
+
+For the remainder term, recall that 
+
+Cnϕ := max  
+
+> 1≤i≤n
+
+Cϕ(zi), Cϕ(zi) := max 
+
+(
+
+12 sup  
+
+> z∈¯B(zi,1)
+
+∥∇ 2 
+
+> z
+
+ℓ(qϕ; z)∥, 2 ˜Cϕ + 12 + |Kϕ(zi)|
+
+)
+
+,
+
+with 
+
+Kϕ(zi) = ˜Cϕ + 2 ˜Cϕ∥zi∥2 + 12 ∥∇ z ℓ(qϕ; zi)∥2 − ℓ(qϕ; zi).
+
+Then, using the growth condition for ℓ, ∇z ℓ, there exist C0,ϕ < ∞ and C1,ϕ < ∞ such that 
+
+Kϕ(zi) ≤ ˜Cϕ + 2 ˜Cϕ∥zi∥2 + 12 (C1,ϕ + C1,ϕ ∥zi∥β )2 + C0,ϕ (1 + ∥zi∥2) ≤ C(1 + ∥zi∥max {2,2β})
+
+for some C < ∞ independent of zi. Further, from the growth assumption for ∇2ℓ there exists 
+
+C2,ϕ < ∞ such that: 
+
+12 sup  
+
+> z∈¯B(zi,1)
+
+∥∇ 2ℓ(qϕ; z)∥ ≤ 12 sup  
+
+> z∈¯B(zi,1)
+
+C2,ϕ (1 + ∥z∥α) ≤ C2,ϕ 
+
+2 (1 + (1 + ∥zi∥)α) ≤ C′(1 + ∥zi∥α)
+
+for some constant C′ independent of zi. Hence, for any zi, there exists some Aϕ < ∞, such that 
+
+Cϕ(zi) ≤ Aϕ(1 + ∥zi∥m), m := max {2, 2β, α }.
+
+Therefore, we obtain: 
+
+Cnϕ = max  
+
+> 1≤i≤n
+
+Cϕ(zi) ≤ Aϕ(1 + max  
+
+> 1≤i≤n
+
+∥zi∥m) := ¯Cnϕ .
+
+24 Now, we turn to the light-tail assumption. Recall that Ez∼P [exp (η∥z∥a)] ≤ M . By Markov’s inequality, for t > 0,
+
+P(∥z∥ > t ) = P(exp( η∥z∥a) > exp( ηt a)) ≤ Ez∼P [exp( η∥z∥a)] exp( ηt a) ≤ M exp( −ηt a).
+
+Hence, 
+
+P( max  
+
+> 1≤i≤n
+
+∥zi∥ ≤ t) = P(∥z1∥ ≤ t, . . . , ∥zn∥ ≤ t)= 1 − P({∥ z1∥ > t } ∪ · · · ∪ {∥ zn∥ > t })
+
+≥ 1 −
+
+> n
+
+X
+
+> i=1
+
+P(∥zi∥ > t ) ≥ 1 − nM exp( −ηt a).
+
+Now, since m > 0, ∥z∥m is increasing, so we have that max i ∥zi∥m = (max i ∥zi∥)m. Hence, 
+
+P
+
+
+
+max  
+
+> 1≤i≤n
+
+∥zi∥ ≤ t
+
+
+
+= P
+
+
+
+( max  
+
+> 1≤i≤n
+
+∥zi∥)m ≤ tm
+
+
+
+= P
+
+
+
+max  
+
+> 1≤i≤n
+
+∥zi∥m ≤ tm
+
+
+
+= P   ¯Cnϕ ≤ Aϕ(1 + tm)
+
+so that 
+
+P   ¯Cnϕ ≤ Aϕ(1 + tm) ≥ 1 − nM exp( −ηt a).
+
+For some fixed δ > 0, we then have that with probability at least 1 − δCnϕ ≤ ¯Cnϕ ≤ Aϕ 1 + 
+
+ 1
+
+η log M n δ
+
+m/a !
+
+.
+
+Selecting εn = o((log n)−m/ 2a) then yields the desired result: 
+
+Cnϕ ε2 
+
+> n
+
+→ 0 in probability under P. 
+
+B.3 Excess risk, miscoverage, and miscalibration 
+
+In this section, we investigate the excess risk, miscoverage and miscalibration rates of the density estimator obtained by DRO-NPE. To obtain such theoretical results, we require a stricter assumption on the pointwise loss function ℓ: Lipschitz gradient, as stated in Assumption B.1. 
+
+Assumption B.1 (Lipschitz gradient. Gao (2023), Assumption 2) . For every qϕ ∈ Q , the map 
+
+z 7 → ℓ(qϕ; z) is differentiable on Z, and there exists h > 0 such that ∥∇ z ℓ(qϕ; z1)−∇ z ℓ(qϕ; z2)∥ ≤ 
+
+h∥z1 − z2∥, ∀z1, z2 ∈ Z , ∀qϕ ∈ Q .
+
+The first result, Theorem B.3, shows the excess miscoverage and miscalibration error rates of the DRO-NPE estimator when the objective is in its exact (or equivalently, strong dual) form relative to the oracle minimiser, which corresponds to the density estimator that minimises the population risk. The proof of Theorem B.3 relies on the excess DRO risk (or optimality gap), a quantity commonly studied in DRO (see e.g. Zeng and Lam, 2022; Gao, 2023), and uses a hybrid of Wasserstein concentration results from Fournier and Guillin (2015) and generalisation bounds from Gao (2023). 
+
+Theorem B.3 (DRO-NPE miscoverage and miscalibration rate) . Define the oracle NPE and DRO minimisers as follows: 
+
+ϕ⋆ := arg min  
+
+> ϕ
+
+LNPE (qϕ; P ), ϕDRO  
+
+> n
+
+:= arg min  
+
+> ϕ
+
+sup  
+
+> ˜P∈A 2(Pn;ε)
+
+LNPE (qϕ; ˜P ).
+
+25 Also let 
+
+Gα
+
+> cov
+
+(qϕ; P ) : = kl NPE (qϕ; P ) − kl α
+
+> cov
+
+(qϕ; P )= Ex∼Px
+
+h
+
+Et∼(TRqα(x))#Pθ|x
+
+h
+
+KL( Pθ|TRqα(x)(θ)= t, x∥Qθ|TRqα(x)(θ)= t, x)
+
+ii 
+
+≥ 0,GS
+
+> cal
+
+(qϕ; P ) := kl NPE (qϕ; P ) − kl S
+
+> cal
+
+(qϕ; P )= Ex∼Px
+
+
+
+Eu∼(F QS|x)#PS|x
+
+
+
+KL 
+
+
+
+Pθ|F QS|x(S(θ;x))= u, x Qθ|F QS|x(S(θ;x))= u, x
+
+ 
+
+≥ 0.
+
+Suppose the assumptions from Theorem 4.1 hold and pick ε ≥ ε(n, δ ) accordingly, for some δ > 0.Further, suppose Assumption B.1 holds for ℓNPE (qϕ; z) = − log qϕ(θ | x) . Then, with probability at least 1 − δ, for any α ∈ (0 , 1) ,
+
+kl α
+
+> cov
+
+(qϕDRO  
+
+> n
+
+; P ) − kl α
+
+> cov
+
+(qϕ⋆ ; P ) ≤ 2ε Ez∼P [∥∇ ℓNPE (qϕ⋆ ; z)∥2] 12 + 4 hε 2 + Gα
+
+> cov
+
+(qϕ⋆ ; P ) (6) 
+
+with h as in Assumption B.1, and also: 
+
+kl S
+
+> cal
+
+(qϕDRO  
+
+> n
+
+; P ) − kl S
+
+> cal
+
+(qϕ⋆ ; P ) ≤ 2ε Ez∼P [∥∇ ℓNPE (qϕ⋆ ; z)∥2] 12 + 4 hε 2 + GS
+
+> cal
+
+(qϕ⋆ ; P ) (7) 
+
+Proof. We pick ε ≥ ε(n, δ ), as stated in Theorem 4.1. Then, with probability at least 1 − δ,
+
+LNPE (qϕDRO  
+
+> n
+
+; P ) ≤ sup  
+
+> ˜P∈A 2(Pn;ε)
+
+LNPE (qϕDRO  
+
+> n
+
+; ˜P ) ≤ sup  
+
+> ˜P∈A 2(Pn;ε)
+
+LNPE (qϕ⋆ ; ˜P ),
+
+where the first inequality holds because the concentration result ensures that P ∈ A 2(Pn; ε), and the second holds by the definition of the DRO minimiser ϕDRO  
+
+> n
+
+. We further conclude that with probability 1 − δ,
+
+sup  
+
+> ˜P∈A 2(Pn;ε)
+
+LNPE (qϕ⋆ ; ˜P ) ≤ sup  
+
+> ˜P∈A 2(Pn;2 ε)
+
+LNPE (qϕ⋆ ; ˜P ),
+
+since W2( ˜P , P ) ≤ W2( ˜P , P n) + W2(Pn, P ) ≤ 2ε by the triangle inequality, implying A2(Pn; ε) ⊆A2(Pn; 2 ε).Now, we may use Lemma 2 of Gao (2023), which states that whenever z 7 → ℓ(qϕ; z) has an 
+
+h−Lipschitz gradient, ∀ε ≥ 0, for any distribution Q on Z,
+
+sup  
+
+> ˜P∈A 2(Pn;ε)
+
+Ez∼ ˜P [ℓ(qϕ; z)] − Ez∼Q[ℓ(qϕ; z)] − ε Ez∼Q
+
+∥∇ z ℓ(qϕ; z)∥2 12 ≤ ε2h. 
+
+We use this result with ℓNPE (qϕ; z) := − log qϕ(θ | x). Then, with probability at least 1 − δ,
+
+sup  
+
+> ˜P∈A 2(Pn;2 ε)
+
+LNPE (qϕ⋆ ; ˜P ) − L NPE (qϕ⋆ ; P ) ≤ 2ε Ez∼P
+
+∥∇ z ℓNPE (qϕ⋆ ; z)∥2 12 + 4 ε2h. 
+
+We then obtain the DRO excess risk as follows: 
+
+LNPE (qϕDRO  
+
+> n
+
+; P ) − L NPE (qϕ⋆ ; P ) ≤ 2ε Ez∼P
+
+∥∇ z ℓNPE (qϕ⋆ ; z)∥2 12 + 4 ε2h. (8) Now, recall that 
+
+kl NPE (qϕ; P ) := Ex∼Px
+
+h
+
+KL 
+
+
+
+Pθ|x ∥ Qθ|x
+
+i 
+
+≡ L NPE (qϕ; P ) + K(P ).
+
+26 By Lemma A.4, for any α ∈ (0 , 1) and qϕ, Gα
+
+> cov
+
+(qϕ; P ) ≥ 0. Similarly, for any choice of S and qϕ,
+
+GS
+
+> cal
+
+(qϕ; P ) ≥ 0. Therefore, 
+
+kl α
+
+> cov
+
+(qϕDRO  
+
+> n
+
+; P ) − kl α
+
+> cov
+
+(qϕ⋆ ; P )
+
+≤ kl NPE (qϕDRO  
+
+> n
+
+; P ) − kl α
+
+> cov
+
+(qϕ⋆ ; P )= LNPE (qϕDRO  
+
+> n
+
+; P ) − L NPE (qϕ⋆ ; P ) + kl NPE (qϕ⋆ ; P ) − kl α
+
+> cov
+
+(qϕ⋆ ; P )
+
+≤ 2ε Ez∼P
+
+∥∇ z ℓNPE (qϕ⋆ ; z)∥2 12 + 4 ε2h + Gα
+
+> cov
+
+(qϕ⋆ ; P ),
+
+and similarly for calibration, 
+
+kl S
+
+> cal
+
+(qϕDRO  
+
+> n
+
+; P ) − kl S
+
+> cal
+
+(qϕ⋆ ; P ) ≤ 2ε Ez∼P
+
+∥∇ z ℓNPE (qϕ⋆ ; z)∥2 12 + 4 ε2h + GS
+
+> cal
+
+(qϕ⋆ ; P ).
+
+Next, in Lemma B.4, we derive an excess risk bound under additional assumptions for the NPE empirical risk minimiser as well as for the regularised, first-order DRO-NPE objective, so that they can be compared. The proof pattern for Lemma B.4 is almost the same for NPE and DRO-NPE, both using the generalisation bound in Corollary 3 of Gao (2023) and sharing the same remainder terms and sample-dependent DRO radius. Note that although all of the below results are in terms of ℓNPE , LNPE , similar proof patterns can be used for more general risks and pointwise losses L, ℓ .Before proving Lemma B.4, we first define the following NPE and DRO-NPE minimisers, and establish the additional Assumption B.2 needed for Lemma B.4. 
+
+ˆϕn := arg min  
+
+> ϕ
+
+LNPE (qϕ; Pn)
+
+ϕDRO −NPE  
+
+> n
+
+:= arg min  
+
+> ϕ
+
+LNPE (qϕ; Pn) + ε 1
+
+n
+
+> n
+
+X
+
+> i=1
+
+∥∇ z ℓNPE (qϕ; zi)∥2
+
+! 12
+
+.
+
+We now state the additional assumptions needed for Lemma B.4: 
+
+Assumption B.2 (Assumptions of Corollary 3 Gao (2023)) . Suppose that: (i) P satisfies the transportation-information inequality T2(τ ) i.e. there exists τ > 0 such that 
+
+W2(P, Q ) ≤ pτ KL( Q|| P ) ∀Q ∈ P 2.
+
+(ii) There exists measurable functions κ : Z → R+ and κ2 : Z → R+ and constants κM , κ L, κ 2,M , κ 2,L ≥
+
+0 satisfying κ(z) ≤ κM + κL∥z∥2 and κ2(z) ≤ κ2,M + κ2,L ∥z∥2 for all z ∈ Z , such that: 
+
+|ℓ(q˜ϕ; z) − ℓ(qϕ; z)| ≤ κ(z)∥ ˜ϕ − ϕ∥ for all ϕ, ˜ϕ ∈ Φ, P − a.e. z ∈ Z |∇ z ℓ(q˜ϕ; z) − ∇ z ℓ(qϕ; z)| ≤ κ2(z)∥ ˜ϕ − ϕ∥ for all ϕ, ˜ϕ ∈ Φ, P − a.e. z ∈ Z 
+
+(iii) Let N (ϵ; Φ , ∥ · ∥ ) denote the covering number of set Φ equipped with norm ∥ · ∥ , defined as the smallest cardinality of an ϵ-cover of Φ, where Φϵ is an ϵ-cover of Φ if for each ϕ ∈ Φ,there exists ˜ϕ ∈ Φϵ such that ∥ ˜ϕ − ϕ∥ ≤ ϵ. We assume that the parameter space admits a finite covering number at scale 1 
+
+> n
+
+, i.e. log N ( 1 
+
+> n
+
+; Φ , ∥ · ∥ ) < ∞.(iv) Assume σ = sup ϕ∈Φ
+
+(Ez∼P [∥∇ z ℓ(qϕ;z)∥42]) 12 
+
+> Ez∼P
+
+[∥∇ z ℓ(qϕ;z)∥22] < ∞.
+
+27 As noted by Gao (2023), Assumption B.2(i) is implied by a log-Sobolev inequality. This condition holds, for example, for Gaussian and strongly log-concave distributions, and more generally for many light-tailed distributions with Gaussian-type concentration. Assumption B.2(ii) is a Lipschitz continuity assumption in ϕ for the loss and its gradient, with a Lipschitz constant allowed to grow at most quadratically in z. Thus, changes in the parameter ϕ induce controlled changes in the loss and its gradient, up to a quadratic envelope in the data variable. Finally, Assumption B.2(iii) controls the complexity of the parameter space, and hence, together with Assumption B.2(ii), the induced loss class {ℓ(qϕ; ·) : ϕ ∈ Φ}. Since Φ ⊆ RdΦ , the assumption is satisfied, for example, whenever Φ is bounded. Finally, Assumption B.2(iv) is a uniform moment condition on the input-gradient norm, and is satisfied when ∥∇ z ℓ(qϕ; z)∥2 has uniformly controlled fourth moment relative to its second moment under P , over ϕ ∈ Φ.Having now stated the assumptions, before presenting Lemma B.4, we define a few quantities that will appear in the Lemma. Let t > 0 and n > 8σ2t. Define the sample-dependent DRO radius εn, the moment-based concentration remainder term ρn, and the covering-number, function class complexity penalty term ϱn as: 
+
+εn := 
+
+s
+
+τ  t + log  1 + N (1 /n ; Φ , ∥ · ∥ ) 
+
+n
+
+1 + σ
+
+s
+
+2 t + log  1 + N (1 /n ; Φ , ∥ · ∥ ) 
+
+n
+
+ ,ρn := 2Ez∼P [κ2] + pVz∼P [κ2] + εn
+
+q
+
+Ez∼P [κ22] + pVz∼P [κ22]
+
+nϱn := τ (t + log(1 + N ( 1 
+
+> n
+
+; Φ , ∥ · ∥ ))) 
+
+n
+
+Lemma B.4 (NPE vs DRO-NPE excess risk) . Assume that Assumption B.1 and Assumption B.2 hold with ℓNPE and εn, ρ n, ϱ n are defined as in the above. Then, with probability at least 1 −
+
+2/n − 2e−t,
+
+LNPE (qˆϕn ; P ) − L NPE (qϕ⋆ ; P )
+
+≤ εn
+
+1
+
+n
+
+> n
+
+X
+
+> i=1
+
+∥∇ z ℓNPE (qϕ⋆ ; zi)∥2
+
+! 12
+
++ 1
+
+n
+
+> n
+
+X
+
+> i=1
+
+∥∇ z ℓNPE (qˆϕn ; zi)∥2
+
+! 12
+
++ 2 ρn + 2 hϱ n.
+
+Moreover, under the same assumptions: 
+
+LNPE (qϕDRO −NPE  
+
+> n
+
+; P ) − L NPE (qϕ⋆ ; P ) ≤ 2εn
+
+1
+
+n
+
+> n
+
+X
+
+> i=1
+
+∥∇ z ℓNPE (qϕ⋆ ; zi)∥2
+
+! 12
+
++ 2 ρn + 2 hϱ n
+
+Proof. It follows from Corollary 3 of Gao (2023) that with probability at least 1 − 2 
+
+> n
+
+− 2e−t:
+
+Ez∼P [ℓNPE (qϕ; z)] ≤ 1
+
+n
+
+> n
+
+X
+
+> i=1
+
+ℓNPE (qϕ; zi) + εn
+
+1
+
+n
+
+> n
+
+X
+
+> i=1
+
+∥∇ z ℓNPE (qϕ; zi)∥2
+
+! 12
+
++ ρn + hϱ n, ∀ϕ, (9) Note that the same result may be applied to the function −ℓNPE (qϕ; z); this will be used below. Importantly, since the bound holds uniformly over ϕ, we may use it to handle ˆϕn.28 Hence, applying the bound for ℓNPE and ˆϕn,
+
+LNPE (qˆϕn ; P ) − L NPE (qϕ⋆ ; P )
+
+≤ L NPE (qˆϕn ; Pn) + εn
+
+1
+
+n
+
+> n
+
+X
+
+> i=1
+
+∥∇ z ℓNPE (qˆϕn ; zi)∥2
+
+! 12
+
++ ρn + hϱ n − L NPE (qϕ⋆ ; P )
+
+≤ L NPE (qϕ⋆ ; Pn) + εn
+
+1
+
+n
+
+> n
+
+X
+
+> i=1
+
+∥∇ z ℓNPE (qˆϕn ; zi)∥2
+
+! 12
+
++ ρn + hϱ n − L NPE (qϕ⋆ ; P )
+
+≤ εn
+
+ 1
+
+n
+
+> n
+
+X
+
+> i=1
+
+∥∇ z ℓNPE (qϕ⋆ ; zi)∥2
+
+! 12
+
++ 1
+
+n
+
+> n
+
+X
+
+> i=1
+
+∥∇ z ℓNPE (qˆϕn ; zi)∥2
+
+! 12
+
+ + 2 ρn + 2 hϱ n,
+
+where in the first inequality we use the corollary’s bound for ϕ = ˆϕn; in the second inequality we use the fact that ˆϕn minimises LNPE (qϕ; Pn); and in the third inequality we use Equation (9), applied to the pointwise −ℓNPE (qϕ⋆ ; z). Similarly, 
+
+LNPE (qϕDRO −NPE  
+
+> n
+
+; P ) − L NPE (qϕ⋆ ; P )
+
+≤ L NPE (qϕDRO −NPE  
+
+> n
+
+; Pn) + εn
+
+1
+
+n
+
+> n
+
+X
+
+> i=1
+
+∥∇ z ℓNPE (qϕDRO −NPE ; zi)∥2
+
+! 12
+
++ ρn + hϱ n − L NPE (qϕ⋆ ; P )
+
+≤ L NPE (qϕ⋆ ; Pn) + εn
+
+1
+
+n
+
+> n
+
+X
+
+> i=1
+
+∥∇ z ℓNPE (qϕ⋆ ; zi)∥2
+
+! 12
+
++ ρn + hϱ n − L NPE (qϕ⋆ ; P )
+
+≤ 2εnEz∼Pn [∥∇ z ℓNPE (qϕ⋆ ; z)∥2] 12 + 2 ρn + 2 hϱ n
+
+where we follow the same steps as before, except for the second inequality, where we use that 
+
+ϕDRO −NPE  
+
+> n
+
+minimises LNPE (qϕ; Pn) + εn
+
+  1
+
+> n
+
+Pni=1 ∥∇ z ℓNPE (qϕ; zi)∥2 12 .Lemma B.4 derives an excess risk upper bound for NPE and for the regularised objective of DRO-NPE. The two bounds are derived in similar ways and differ only in the regulariser term Ω( ϕ; Pn), which can be thought of as an empirical measure of functional variation via the loss gradient. Indeed, the key distinction between the DRO and NPE bounds derived is that the DRO-NPE bound only depends on the oracle variation Ω( ϕ⋆; Pn). In contrast, the NPE bound depends on both the oracle variation and the variation of the learned empirical minimiser, 
+
+Ω( ˆϕn; Pn). This means that the NPE bound can be affected by the roughness of the empirical minimiser. Thus, the DRO guarantee is sharper whenever the empirical minimiser has larger variation than the oracle. 
+
+B.4 Verifying conditions for normalising flows (proof of Lemma 4.3) 
+
+In this section, we formally introduce MAFs and coupling flows and prove Lemma 4.3, showing that all assumptions of Proposition 4.2 are satisfied when qϕ is chosen to be one of these commonly used normalising flows. 
+
+Masked autoregressive flows. We first write the masked autoregressive flows (MAFs; Papa-makarios et al. (2017)) for qϕ(θ | x), implemented in the sbi library (Tejero-Cantero et al., 2020), defined through a single autoregressive transform u = u(θ, x) ∈ R dΘ with coordinates 
+
+ui(θ, x) := θi − μi(θ<i , x)
+
+σi(θ<i , x) , θ<i := ( θ1, . . . , θ i−1).
+
+29 We set 
+
+μi(θ<i , x) = v⊤ 
+
+> i
+
+g(L) 
+
+> i
+
+(θ<i , x) + ci,
+
+g(ℓ) 
+
+> i
+
+(θ<i , x) = tanh  B(ℓ) 
+
+> i
+
+g(ℓ−1)  
+
+> i
+
+(θ<i , x) + d(ℓ)
+
+> i
+
+, ℓ = 1 , . . . , L, 
+
+g(0)  
+
+> i
+
+(θ<i , x) = [ θ<i ; x],σi(θ<i , x) = softplus  si(θ<i , x), softplus (t) := log(1 + et),si(θ<i , x) = w⊤ 
+
+> i
+
+h(L) 
+
+> i
+
+(θ<i , x) + bi,
+
+h(ℓ) 
+
+> i
+
+(θ<i , x) = tanh  A(ℓ) 
+
+> i
+
+h(ℓ−1)  
+
+> i
+
+(θ<i , x) + a(ℓ)
+
+> i
+
+, ℓ = 1 , . . . , L. 
+
+h(0)  
+
+> i
+
+(θ<i , x) = [ θ<i ; x],
+
+for some depth L, weight matrices {B(ℓ) 
+
+> i
+
+}Lℓ=1 and {A(ℓ) 
+
+> i
+
+}Lℓ=1 , biases {d(ℓ) 
+
+> i
+
+}Lℓ=1 and {a(ℓ) 
+
+> i
+
+}Lℓ=1 , and final weights (vi, c i) and (wi, b i); all of these parameters are part of ϕ. Here [θ<i ; x] denotes vector concatenation. Finally, we let the base density be standard Gaussian, i.e. 
+
+p0(u) = (2 π)−dΘ/2 exp 
+
+
+
+− 12 ∥u∥2
+
+
+
+.
+
+Hence, 
+
+log qϕ(θ | x) = − 12 ∥u(θ, x)∥2 −
+
+> dΘ
+
+X
+
+> i=1
+
+log σi(θ<i , x) − dΘ
+
+2 log 2 π
+
+= − 12
+
+> dΘ
+
+X
+
+> i=1
+
+ θi − μi
+
+σi
+
+2
+
+−
+
+> dΘ
+
+X
+
+> i=1
+
+log σi − dΘ
+
+2 log 2 π. 
+
+For simplicity, in what follows, we will use the notation μi := μi(θ<i , x), σi := σi(θ<i , x),
+
+g(ℓ) 
+
+> i
+
+:= g(ℓ) 
+
+> i
+
+(θ<i , x), h(ℓ) 
+
+> i
+
+:= h(ℓ) 
+
+> i
+
+(θ<i , x), and si := si(θ<i , x).
+
+Lemma B.5. Let qϕ(θ | x) be a masked autoregressive flow of the form described above, with tanh hidden layers, softplus scale function, and standard Gaussian base density. Let 
+
+ℓNPE (qϕ; z) := − log qϕ(θ | x), z = ( θ, x) ∈ RdZ . Then the map z 7 → ℓNPE (qϕ; z) is twice continuously differentiable on RdZ , and there exists a constant C > 0, depending on ϕ, such that for all z ∈ RdZ ,
+
+|ℓNPE (qϕ; z)| ≤ C(1 + ∥z∥2).
+
+Moreover, there exist constants C1, C 2 > 0, depending on ϕ, such that for all z ∈ RdZ
+
+∥∇ z ℓNPE (qϕ; z)∥ ≤ C1(1 + ∥z∥2), ∥∇ 2 
+
+> z
+
+ℓNPE (qϕ; z)∥ ≤ C2(1 + ∥z∥2).
+
+Proof. We first show that the loss ℓNPE has at most a quadratic growth rate. Recall that 
+
+log qϕ(θ | x) = − 12
+
+> dΘ
+
+X
+
+> i=1
+
+ θi − μi
+
+σi
+
+2
+
+−
+
+> dΘ
+
+X
+
+> i=1
+
+log σi − dΘ
+
+2 log 2 π. (10) Since the hidden activations are tanh, all hidden-layer outputs are uniformly bounded. Hence, for each i,1. there exists Cμ,i < ∞ such that |μi(θ<i , x)| ≤ Cμ,i for all z;30 2. si(θ<i , x) is uniformly bounded, and therefore 0 < σ i, min ≤ σi(θ<i , x) ≤ σi, max < ∞ for all 
+
+z.Therefore, 
+
+ θi − μi
+
+σi
+
+2
+
+≤
+
+ θi − μi
+
+σi, min 
+
+2
+
+≤ 2θ2 
+
+> i
+
++ 2 μ2
+
+> i
+
+σ2
+
+> i, min
+
+≤ 2θ2 
+
+> i
+
++ 2 C2
+
+> μ,i
+
+σ2
+
+> i, min
+
+.
+
+Substituting this bound and using | log σi| ≤ max {| log σi, min |, | log σi, max |} := Clog σ, we get that 
+
+|log qϕ(θ | x)| ≤ 12
+
+> dΘ
+
+X
+
+> i=1
+
+2θ2 
+
+> i
+
++ 2 C2
+
+> μ,i
+
+σ2
+
+> i, min
+
++ Clog σ
+
+!
+
++ dΘ
+
+2 log 2 π. 
+
+Hence, there exists constants Aϕ, B ϕ > 0 such that 
+
+|log qϕ(θ | x)| ≤ Aϕ∥θ∥2 + Bϕ.
+
+Since ∥θ∥ ≤ ∥ (θ, x)∥ = ∥z∥, we obtain 
+
+|ℓNPE (qϕ; z)| ≤ Aϕ∥z∥2 + Bϕ,
+
+showing that the MAF with log-loss has a finite 2−growth rate. Next, we show that the map z → ℓNPE is twice continuously differentiable on RdZ . Indeed, since each layer of the networks defining μi and si consists of affine transformations followed by tanh , it follows that μi, s i ∈ C∞(RdZ ). Since σi = softplus (si) and softplus is C∞ with strictly positive output, we have σi ∈ C∞(RdZ ) and σi(z) > 0 for all z ∈ RdZ . Therefore, the map 
+
+z → ℓNPE is a composition of C∞ functions and is thus C∞ on RdZ .We now verify the condition on the growth of gradients. Note that from the proof of Proposition 3 (see Equation 38) in Bharti et al. (2026), it follows by the same arguments after swapping θ and x (since this proposition refers to the NLE case in which the MAF has an identical form after swapping θ and x everywhere) we have that there exists C0 < ∞ such that: 
+
+∥∇ θ log qϕ(θ | x)∥ ≤ C0(1 + ∥θ∥2).
+
+We now verify that a similar argument holds for ∥∇ x log qϕ(θ | x)∥. In particular, for each 
+
+j = 1 , . . . , d X :
+
+∂∂xj
+
+log qϕ(θ | x) = − 12
+
+> dΘ
+
+X
+
+> i=1
+
+∂∂xj
+
+ θi − μi
+
+σi
+
+2
+
+−
+
+> dΘ
+
+X
+
+> i=1
+
+∂∂xj
+
+log σi
+
+=
+
+> dΘ
+
+X
+
+> i=1
+
+θi − μi
+
+σ2
+
+> i
+
+∂μ i
+
+∂xj
+
++
+
+> dΘ
+
+X
+
+> i=1
+
+(θi − μi)2
+
+σ3
+
+> i
+
+∂σ i
+
+∂xj
+
+−
+
+> dΘ
+
+X
+
+> i=1
+
+1
+
+σi
+
+∂σ i
+
+∂xj
+
+.
+
+Following Equation (32) of Bharti et al. (2026) we have that since outputs of μi and si are affine functions of hLi , there exists C1, C 2 < ∞ such that: 
+
+|μi(θ<i , x)| ≤ C1, ∂μ i
+
+∂xj
+
+≤ C2.
+
+We now turn to the derivative of σi, recalling that 
+
+σi(θ<i , x) = softplus  si(θ<i , x), si(θ<i , x) = w⊤ 
+
+> i
+
+h(L) 
+
+> i
+
+(θ<i , x) + bi,
+
+softplus ′(t) = 11 + exp( −t) , softplus ′′ (t) = exp( −t)(1 + exp( −t)) 2 ,
+
+31 where, for each ℓ ∈ { 1, . . . , L }, h(ℓ) 
+
+> i
+
+= tanh  A(ℓ) 
+
+> i
+
+h(ℓ−1)  
+
+> i
+
++ a(ℓ)
+
+> i
+
+. Hence, 
+
+∂σ i
+
+∂xj
+
+= 11 + exp( −si)
+
+∂s i
+
+∂xj
+
+= 11 + exp( −si) w⊤
+
+> i
+
+∂h (L)
+
+> i
+
+∂xj
+
+.
+
+Moreover, for each hidden layer, 
+
+∂h (ℓ)
+
+> i
+
+∂xj
+
+= sech 2 A(ℓ) 
+
+> i
+
+h(ℓ−1)  
+
+> i
+
++ a(ℓ)
+
+> i
+
+ ⊙ A(ℓ)
+
+> i
+
+∂h (ℓ−1) 
+
+> i
+
+∂xj
+
+!
+
+.
+
+where ⊙ denotes element-wise multiplication of vectors. Since i) sech 2 is uniformly bounded, ii) the network has finitely many layers with fixed finite weight matrices, and iii) ∂h (0)  
+
+> i
+
+/∂ xj = er, it follows that ∂h (ℓ) 
+
+> i
+
+/∂ xj is uniformly bounded on X for every ℓ, i, j . Therefore, both ∂s i/∂ xj and 
+
+∂σ i/∂ xj are uniformly bounded on RdX and there exists C3 < ∞ such that: 
+
+∂σ i
+
+∂xj
+
+≤ C3.
+
+Therefore, 
+
+∂∂xj
+
+log qϕ(θ | x) ≤ 1
+
+σ3
+
+> i, min
+> dΘ
+
+X
+
+> i=1
+
+(C2|θi − μi| + |θi − μi|2C3 + C3)
+
+and since |μi| ≤ C1 it follows that there exist C4, C 5 < ∞ such that: |θi − μi| ≤ C4(1 + |θi|) and 
+
+|θi − μi|2 ≤ C5(1 + |θi|2). Thus, there exists C6 < ∞ such that 
+
+∂∂xj
+
+log qϕ(θ | x) ≤ 1
+
+σ3
+
+> i, min
+> dΘ
+
+X
+
+> i=1
+
+(C2C4(1 + |θi| + C3C5(1 + |θi|2) + C3) ≤ C6(1 + ∥θ∥2).
+
+Therefore, we have: 
+
+∥∇ θ log qϕ(θ | x)∥ ≤ C0(1 + ∥θ∥2), ∥∇ x log qϕ(θ | x)∥ ≤ C6
+
+pdX (1 + ∥θ∥2)
+
+and hence: 
+
+∥∇ z ℓNPE (qϕ; z)∥ = ∥∇ z (− log qϕ(θ | x)) ∥ ≤ ∥∇ θ log qϕ(θ | x)∥ + ∥∇ x log qϕ(θ | x)∥≤ C0(1 + ∥θ∥2) + C6
+
+pdX (1 + ∥θ∥2):= C7(1 + ∥θ∥2)
+
+≤ C7(1 + ∥z∥2).
+
+Lastly, we verify the growth condition for the norm of the Hessian. Recall that 
+
+− log qϕ(θ | x) = 12
+
+> dΘ
+
+X
+
+> i=1
+
+u2 
+
+> i
+
++
+
+> dΘ
+
+X
+
+> i=1
+
+log σi + dΘ
+
+2 log 2 π, 
+
+where ui = θi−μi 
+
+> σi
+
+. Therefore, for any j, k ∈ { 1, . . . , d Z },
+
+∂zj (− log qϕ(θ | x)) = 
+
+> dΘ
+
+X
+
+> i=1
+
+
+
+ui ∂zj ui + 1
+
+σi
+
+∂zj σi
+
+
+
+, (11) 
+
+∂zk ∂zj (− log qϕ(θ | x)) = 
+
+> dΘ
+
+X
+
+> i=1
+
+
+
+ui ∂zk ∂zj ui + ( ∂zk ui)( ∂zj ui) − 1
+
+σ2
+
+> i
+
+(∂zk σi)( ∂zj σi) + 1
+
+σi
+
+∂zk ∂zj σi
+
+
+
+.
+
+(12) 32 By points 1. and 2. above we have, |ui| = θi−μi 
+
+> σi
+
+≤ |θi|+Cμ,i  
+
+> σi, min
+
+≤ Cu(1 + |θi|) for Cu := max i( max {1/σ i, min , C μ,i /σ i, min }) < ∞. Moreover, since we have shown that both |∂zj μi| ≤ Cμ′
+
+and |∂zj σi| ≤ Cσ′ where Cμ′ and Cσ′ are constants independent of z and 
+
+∂zj ui = ∂zj (θi − μi)
+
+σi
+
+− θi − μi
+
+σ2
+
+> i
+
+∂zj σi,
+
+it follows that |∂zj ui| ≤ Cu′ (1 + |θi|) ≤ Cu′ (1 + |θi|) for some Cu′ < ∞ depending on σi, min , C μ′
+
+and Cσ′ .We now consider the second derivative of σi:
+
+∂2σi
+
+∂z k∂z j
+
+= exp( −si)(1 + exp( −si)) 2
+
+∂s i
+
+∂z k
+
+∂s i
+
+∂z j
+
++ 11 + exp( −si)
+
+∂2si
+
+∂z k∂z j
+
+. (13) Thus it remains to bound ∂2si/(∂z k∂z j ). Since 
+
+∂s i
+
+∂z j
+
+= w⊤
+
+> i
+
+∂h (L)
+
+> i
+
+∂z j
+
+, ∂2si
+
+∂z k∂z j
+
+= w⊤
+
+> i
+
+∂2h(L)
+
+> i
+
+∂z k∂z j
+
+,
+
+it suffices to bound the second derivatives of the hidden states. Differentiating once more, 
+
+∂2h(ℓ)
+
+> i
+
+∂z k∂z j
+
+= ∂∂z k
+
+"
+
+sech 2 A(ℓ) 
+
+> i
+
+h(ℓ−1)  
+
+> i
+
++ a(ℓ)
+
+> i
+
+ ⊙ A(ℓ)
+
+> i
+
+∂h (ℓ−1) 
+
+> i
+
+∂z j
+
+!# 
+
+=
+
+h
+
+−2sech 2 A(ℓ) 
+
+> i
+
+h(ℓ−1)  
+
+> i
+
++ a(ℓ)
+
+> i
+
+ tanh  A(ℓ) 
+
+> i
+
+h(ℓ−1)  
+
+> i
+
++ a(ℓ)
+
+> i
+
+i
+
+⊙ A(ℓ)
+
+> i
+
+∂h (ℓ−1) 
+
+> i
+
+∂z k
+
+!
+
+⊙ A(ℓ)
+
+> i
+
+∂h (ℓ−1) 
+
+> i
+
+∂z j
+
+!
+
++ sech 2 A(ℓ) 
+
+> i
+
+h(ℓ−1)  
+
+> i
+
++ a(ℓ)
+
+> i
+
+ ⊙ A(ℓ)
+
+> i
+
+∂2h(ℓ−1) 
+
+> i
+
+∂z k∂z j
+
+!
+
+.
+
+Now, we have that: i) tanh and sech 2 are uniformly bounded, ii) the first derivatives ∂h (ℓ−1)  
+
+> i
+
+/∂z j
+
+have already been shown to be bounded, iii) the flow has finitely many layers with fixed finite weight matrices, and iv) 
+
+∂2h(0) 
+
+> i
+
+∂z k∂z j
+
+= 0 .
+
+Hence, or each layer, 
+
+∂2h(ℓ)
+
+> i
+
+∂z k∂z j
+
+< ∞ ∀ ℓ, i, j, k, z ∈ RdZ .
+
+Consequently, ∂2si/(∂z k∂z j ) is uniformly bounded on RdZ . Returning to (13), and using that 
+
+0 < exp( −si)(1 + exp( −si)) 2 ≤ 14 , 0 < 11 + exp( −si) < 1,
+
+we conclude that 
+
+∂2σi
+
+∂z k∂z j
+
+≤ Cσ′′ 
+
+for some finite constant Cσ′′ , uniformly over z ∈ RdZ . We now treat μi. Recall that 
+
+μi(θ<i , x) = v⊤ 
+
+> i
+
+g(L) 
+
+> i
+
+(θ<i , x) + ci,
+
+33 where the hidden layers g(ℓ) 
+
+> i
+
+are again defined through finitely many linear maps composed with 
+
+tanh . Therefore, using the same argument as above, but without the final softplus layer, we get that 
+
+∂2μi
+
+∂z k∂z j
+
+≤ Cμ′′ 
+
+for some finite constant Cμ′′ , uniformly over z ∈ RdZ . Using the bounds on the first and second derivatives of μi and σi we first have that 
+
+∂zj ui = ∂zj (θi − μi)
+
+σi
+
+− θi − μi
+
+σ2
+
+> i
+
+∂zj σi,
+
+and hence |∂zj ui| ≤ Cu′ (1 + ∥θ∥) for some positive constant Cu′ < ∞. Differentiating once more, 
+
+∂zk ∂zj ui = ∂zk ∂zj (θi − μi)
+
+σi
+
+− ∂zj (θi − μi)
+
+σ2
+
+> i
+
+∂zk σi − ∂zk (θi − μi)
+
+σ2
+
+> i
+
+∂zj σi
+
+− θi − μi
+
+σ2
+
+> i
+
+∂zk ∂zj σi + 2 θi − μi
+
+σ3
+
+> i
+
+(∂zk σi)( ∂zj σi),
+
+so that |∂zk ∂zj ui| ≤ Cu′′ (1 + ∥θ∥) for some positive constant Cu′′ < ∞ . Returning to the expression in Equation (12), we have that for each of the four terms: 
+
+ui∂zk ∂zj ui ≤ Cu(1 + ∥θ∥)Cu′′ (1 + ∥θ∥) ≤ C8(1 + ∥θ∥2)
+
+(∂zk ui)( ∂zj ui) ≤ C2 
+
+> u′
+
+(1 + ∥θ∥)2 ≤ C9(1 + ∥θ∥2)
+
+1
+
+σ2
+
+> i
+
+(∂zk σi)( ∂zj σi) ≤ σ−2
+
+> i, min
+
+C2 
+
+> σ′
+
+:= C10 
+
+1
+
+σi
+
+∂zk ∂zj σi ≤ σ−1
+
+> i, min
+
+Cσ′′ := C11 
+
+for some finite constant C8, C 9, C 10 , C 11 < ∞. Therefore, 
+
+∂zk ∂zj (− log qϕ(θ | x)) ≤ dΘ
+
+ C8(1 + ∥θ∥2) + C9(1 + ∥θ∥2) + C10 + C11 
+
+
+
+≤ C12 (1 + ∥θ∥2)
+
+≤ C12 (1 + ∥z∥2)
+
+for some positive constant C12 < ∞. To conclude note that, for ∥ · ∥ F denoting the Frobenius norm, it follows that: 
+
+∇2 
+
+> z
+
+ℓNPE (qϕ; z) ≤ ∇2 
+
+> z
+
+ℓNPE (qϕ; z) F
+
+=
+
+vuut dZX
+
+> j=1
+> dZ
+
+X
+
+> k=1
+
+∂zk ∂zj (− log qϕ(θ | x)) 2
+
+≤
+
+q
+
+d2 
+
+> Z
+
+C212 (1 + ∥z∥2)2
+
+= dZ C12 (1 + ∥z∥2).
+
+Coupling flows. We next describe coupling flows (Kingma and Dhariwal, 2018; Radev et al., 2022) implemented in BayesFlow package (Kühmichel et al., 2026) for qϕ(θ | x). First, the Actnorm layer, which is an invertible adaptation of batch normalisation for stable training, is applied to θ. It is followed by a permutation, multiplying by the permutation matrix 34 P ∈ { 0, 1}dΘ×dΘ : ˜θ = P (α ⊙ θ + β) where α, β ∈ RdΘ are trainable parameters, and ⊙ denotes element-wise multiplication. We then split the dimension into two parts, followed by affine transformation: ˜θ = [ ˜θA; ˜θB]
+
+where ˜θA = ˜θ1: ⌊dΘ/2⌋ is the first ⌊dΘ/2⌋ elements and ˜θB = ˜θ⌊dΘ/2⌋+1: dΘ is the last dΘ − ⌊ dΘ/2⌋
+
+elements of ˜θ. An affine coupling transformation u = u( ˜θ, x) ∈ RdΘ is defined by 
+
+u( ˜θA, x) := σ( ˜θB, x) ⊙ ˜θA + μ( ˜θB, x). u( ˜θB, x) := ˜θB.
+
+Note that the forward coupling transformation is defined differently than for MAFs. The parameters μ ∈ R⌊dΘ/2⌋ and σ ∈ R⌊dΘ/2⌋ are defined in a similar way as in MAF in sbi package. However, we use the tanh activation function: 
+
+σ( ˜θB, x) = softplus   sinh −1(˜ σ( ˜θB, x)) + 1 log( e − 1) ,
+
+[μ( ˜θB, x); ˜ σ( ˜θB, x)] = W ⊤h(L)( ˜θB, x) + b, 
+
+h(ℓ)( ˜θB, x) = tanh  A(ℓ)h(ℓ−1) ( ˜θB, x) + a(ℓ), ℓ = 1 , . . . , L. 
+
+h(0) ( ˜θB, x) = [ ˜θB; x],
+
+where softplus , sinh −1, tanh are applied element-wise. The log-determinant of the Actnorm and the affine transformation is defined by 
+
+log det ∂ ˜θ
+
+∂θ =
+
+> dΘ
+
+X
+
+> i=1
+
+log |αi|, log det ∂u ∂ ˜θ =
+
+> ⌊dΘ/2⌋
+
+X
+
+> i=1
+
+log σi( ˜θB, x)
+
+Finally, taking the base density to be standard Gaussian, we have 
+
+log qϕ(θ | x) = − 12
+
+
+
+> ⌊dΘ/2⌋
+
+X
+
+> i=1
+
+
+
+σi( ˜θB, x) ˜θA,i + μi( ˜θB, x)
+
+2
+
++ ∥ ˜θB∥22
+
+
+
++
+
+> dΘ
+
+X
+
+> i=1
+
+log |αi| +
+
+> ⌊dΘ/2⌋
+
+X
+
+> i=1
+
+log σi( ˜θB, x) − dΘ
+
+2 log 2 π. 
+
+In practice, the sequence of the Actnorm layer, the permutation, and the mapping from ˜θ to u
+
+forms a block, which is repeated multiple times to increase the flow’s expressiveness. 
+
+Lemma B.6 (Single BayesFlow coupling block) . Let z = ( θ, x) ∈ RdΘ+dX , and consider the BayesFlow coupling block defined above by 
+
+˜θ = P (α ⊙ θ + β), uA = σ( ˜θB, x) ⊙ ˜θA + μ( ˜θB, x), uB = ˜θB,
+
+where μ and σ are defined through the network architecture above. Then z 7 → ℓNPE (qϕ; z) belongs to G2(Z) and is of class C2. Moreover, 
+
+∥∇ z ℓNPE (qϕ; ·)∥ ∈ G 2(Z), ∥∇ 2 
+
+> z
+
+ℓNPE (qϕ; ·)∥ ∈ G 2(Z).
+
+Proof. By construction, the ActNorm parameters satisfy αi̸ = 0 for all i. Moreover, since the hidden activations are tanh and the output layers are affine, the maps μ and ˜σ are bounded and belong to C2, with uniformly bounded first and second derivatives. Since 
+
+σ = softplus   sinh −1(˜ σ) + 1 log( e − 1) ,
+
+the same holds for σ. As ˜σ is bounded, there exist constants 
+
+0 < σ min ≤ σi( ˜θB, x) ≤ σmax < ∞
+
+35 for all i and ( ˜θB, x). Hence there exist constants 
+
+Cμ, C μ′ , C μ′′ , C σ′ , C σ′′ < ∞
+
+such that for all i, j, k ,
+
+|μi| ≤ Cμ, |∂zj μi| ≤ Cμ′ , |∂zk ∂zj μi| ≤ Cμ′′ ,
+
+|∂zj σi| ≤ Cσ′ , |∂zk ∂zj σi| ≤ Cσ′′ .
+
+Since P is a permutation matrix, it preserves the Euclidean norm. Hence 
+
+∥ ˜θ∥2 = ∥P (α ⊙ θ + β)∥2 = ∥α ⊙ θ + β∥2 ≤ ∥ diag (α)∥ ∥ θ∥2 + ∥β∥2 ≤ C0(1 + ∥θ∥2)
+
+for some C0 < ∞. Also, ˜θ is affine in θ, so all first derivatives ∂zj ˜θi are bounded and all second derivatives ∂zk ∂zj ˜θi vanish. We first control the loss. Since uB = ˜θB, we have 
+
+∥uB∥2 ≤ ∥ ˜θ∥2 ≤ C0(1 + ∥θ∥2).
+
+For each i ≤ ⌊ dΘ/2⌋,
+
+|uA,i | = |σi( ˜θB, x) ˜θA,i + μi( ˜θB, x)| ≤ σmax | ˜θA,i | + Cμ ≤ C1(1 + ∥θ∥2)
+
+for some C1 < ∞. Therefore, 
+
+∥u∥22 ≤ C2(1 + ∥θ∥22)
+
+for some C2 < ∞. Since PdΘ 
+
+> i=1
+
+log |αi| is constant and each log σi( ˜θB, x) is uniformly bounded, it follows from the expression for log qϕ(θ | x) that 
+
+|ℓNPE (qϕ; z)| = | − log qϕ(θ | x)| ≤ C3(1 + ∥θ∥22) ≤ C3(1 + ∥z∥22)
+
+for some C3 < ∞. Hence ℓNPE (qϕ; ·) ∈ G 2(Z).We next control the gradient. For uB = ˜θB, the first derivatives are bounded and the second derivatives vanish. For uA, for each i, j ,
+
+∂zj uA,i = ( ∂zj σi) ˜θA,i + σi ∂zj ˜θA,i + ∂zj μi.
+
+Hence 
+
+|∂zj uA,i | ≤ Cσ′ C0(1 + ∥θ∥2) + σmax sup 
+
+> i,j
+
+|∂zj ˜θA,i | + Cμ′ ≤ C4(1 + ∥θ∥2)
+
+for some C4 < ∞. Therefore, 
+
+∂zj
+
+12 ∥u∥22 = X
+
+> i
+
+ui∂zj ui ≤ C5(1 + ∥θ∥22)
+
+for some C5 < ∞. Moreover, since σi ≥ σmin ,
+
+∂zj log σi = ∂zj σi
+
+σi
+
+≤ σ−1min Cσ′ .
+
+Thus 
+
+∥∇ z ℓNPE (qϕ; z)∥ ≤ C6(1 + ∥θ∥22) ≤ C6(1 + ∥z∥22)
+
+for some C6 < ∞, and hence ∥∇ z ℓNPE (qϕ; ·)∥ ∈ G 2(Z).36 Finally, for the Hessian, for each i, j, k ,
+
+∂zk ∂zj uA,i = ( ∂zk ∂zj σi) ˜θA,i + ( ∂zj σi)( ∂zk ˜θA,i ) + ( ∂zk σi)( ∂zj ˜θA,i )+ σi ∂zk ∂zj ˜θA,i + ∂zk ∂zj μi.
+
+Since ∂zk ∂zj ˜θA,i = 0 , this yields 
+
+|∂zk ∂zj uA,i | ≤ C7(1 + ∥θ∥2)
+
+for some C7 < ∞. Consequently, 
+
+∂zk ∂zj
+
+12 ∥u∥22 = X
+
+> i
+
+h
+
+(∂zk ui)( ∂zj ui) + ui ∂zk ∂zj ui
+
+i
+
+≤ C8(1 + ∥θ∥22)
+
+for some C8 < ∞. Also, 
+
+∂zk ∂zj log σi = ∂zk ∂zj σi
+
+σi
+
+− (∂zk σi)( ∂zj σi)
+
+σ2
+
+> i
+
+,
+
+so 
+
+|∂zk ∂zj log σi| ≤ σ−1min Cσ′′ + σ−2min C2 
+
+> σ′
+
+.
+
+Thus 
+
+∥∇ 2 
+
+> z
+
+ℓNPE (qϕ; z)∥ ≤ C9(1 + ∥θ∥22) ≤ C9(1 + ∥z∥22)
+
+for some C9 < ∞, and hence ∥∇ 2 
+
+> z
+
+ℓNPE (qϕ; ·)∥ ∈ G 2(Z). Since all components in the construction are C2, we also have ℓNPE (qϕ; ·) ∈ C2(RdΘ+dX ).
+
+Lemma B.7 (Multiple BayesFlow coupling blocks) . Fix M ≥ 1, the number of blocks, and let 
+
+z(0) = z = ( θ, x).
+
+For ℓ = 1 , . . . , M , write z(ℓ) = ( θ(ℓ), x), where θ(ℓ) is obtained from θ(ℓ−1) as follows: 
+
+˜θ(ℓ) = P (ℓ) α(ℓ) ⊙ θ(ℓ−1) + β(ℓ),
+
+split 
+
+˜θ(ℓ) =  ˜θ(ℓ) 
+
+> A
+
+; ˜θ(ℓ)
+
+> B
+
+,
+
+and define 
+
+θ(ℓ) 
+
+> A
+
+= σ(ℓ)  ˜θ(ℓ) 
+
+> B
+
+, x ⊙ ˜θ(ℓ) 
+
+> A
+
++ μ(ℓ)  ˜θ(ℓ) 
+
+> B
+
+, x, θ(ℓ) 
+
+> B
+
+= ˜θ(ℓ) 
+
+> B
+
+,
+
+where each μ(ℓ) and σ(ℓ) is defined through the BayesFlow architecture above. Then z 7 → ℓNPE (qϕ; z) belongs to G2(Z) and is of class C2. Moreover, with 
+
+βM := M + 1 , αM := 2 M, 
+
+we have 
+
+∥∇ z ℓNPE (qϕ; ·)∥ ∈ G βM (Z), ∥∇ 2 
+
+> z
+
+ℓNPE (qϕ; ·)∥ ∈ G αM (Z).
+
+Proof. For each ℓ = 1 , . . . , M , let F (ℓ) : Z → Z denote the ℓ-th block map, defined by 
+
+z(ℓ) = F (ℓ)(z(ℓ−1) ), z(0) = z = ( θ, x).
+
+By Lemma B.6, each F (ℓ) belongs to C2, and there exist constants aℓ, b ℓ, c ℓ < ∞ such that for all z ∈ Z ,
+
+∥F (ℓ)(z)∥2 ≤ aℓ(1 + ∥z∥2),
+
+∥∇ z F (ℓ)(z)∥ ≤ bℓ(1 + ∥z∥2),
+
+∥∇ 2 
+
+> z
+
+F (ℓ)(z)∥ ≤ cℓ(1 + ∥z∥2).
+
+37 Since each P (ℓ) is a permutation matrix, it preserves Euclidean norms, so it affects only constants and not growth orders. We first bound the iterates. Since 
+
+∥z(ℓ)∥2 = ∥F (ℓ)(z(ℓ−1) )∥2 ≤ aℓ(1 + ∥z(ℓ−1) ∥2),
+
+an induction on ℓ yields 
+
+∥z(M )∥2 ≤ CM (1 + ∥z∥2)
+
+for some CM < ∞. In particular, 
+
+∥θ(M )∥2 ≤ CM (1 + ∥z∥2).
+
+Now the full log-density is given by 
+
+log qϕ(θ | x) = − 12 ∥θ(M )∥22 +
+
+> M
+
+X
+
+> ℓ=1
+
+log det ∂θ(ℓ)
+
+∂ ˜θ(ℓ) +
+
+> M
+
+X
+
+> ℓ=1
+
+log det ∂ ˜θ(ℓ)
+
+∂θ(ℓ−1) − dΘ
+
+2 log(2 π).
+
+The second sum is constant in z, since each term equals P 
+
+> i
+
+log |α(ℓ) 
+
+> i
+
+|. The first sum equals 
+
+> M
+
+X
+
+> ℓ=1
+> ⌊dΘ/2⌋
+
+X
+
+> i=1
+
+log σ(ℓ)
+
+> i
+
+  ˜θ(ℓ) 
+
+> B
+
+, x,
+
+which is uniformly bounded because each σ(ℓ) 
+
+> i
+
+is bounded above and below away from zero by the single-block analysis. Hence 
+
+|ℓNPE (qϕ; z)| ≤ C′ 
+
+> M
+
+(1 + ∥θ(M )∥22) ≤ C′ 
+
+> M
+
+(1 + ∥z∥22)
+
+for some C′ 
+
+> M
+
+< ∞. Therefore ℓNPE (qϕ; ·) ∈ G 2(Z).We next control the gradient. By the chain rule, 
+
+∇z z(M )(z) = ∇z F (M ) z(M −1) (z) · · · ∇ z F (1)  z(0) (z).
+
+Hence 
+
+∥∇ z z(M )(z)∥ ≤ 
+
+> M
+
+Y
+
+> ℓ=1
+
+bℓ
+
+ 1 + ∥z(ℓ−1) (z)∥2
+
+ ≤ C′′  
+
+> M
+
+(1 + ∥z∥2)M
+
+for some C′′  
+
+> M
+
+< ∞. Since θ(M ) is the first component of z(M ), this implies 
+
+∥∇ z θ(M )(z)∥ ≤ C′′  
+
+> M
+
+(1 + ∥z∥2)M .
+
+Therefore 
+
+∇z
+
+ 12 ∥θ(M )(z)∥22
+
+
+
+= ∇z θ(M )(z)⊤θ(M )(z),
+
+and so 
+
+∇z
+
+ 12 ∥θ(M )(z)∥22
+
+
+
+≤ ∥∇ z θ(M )(z)∥ ∥ θ(M )(z)∥2 ≤ C′′′  
+
+> M
+
+(1 + ∥z∥2)M +1 
+
+for some C′′′  
+
+> M
+
+< ∞. The derivatives of the accumulated log-determinant terms are controlled similarly, since each block contributes derivatives of log σ(ℓ) 
+
+> i
+
+composed with the pre-coupling variables ( ˜θ(ℓ) 
+
+> B
+
+, x), and the derivatives of log σ(ℓ) 
+
+> i
+
+are bounded by the single-block analysis. Hence 
+
+∥∇ z ℓNPE (qϕ; z)∥ ≤ C′′′  
+
+> M
+
+(1 + ∥z∥2)M +1 ,
+
+so ∥∇ z ℓNPE (qϕ; ·)∥ ∈ G M +1 (Z).38 Finally, we control the Hessian. Differentiating 
+
+∇z
+
+ 12 ∥θ(M )(z)∥22
+
+
+
+= ∇z θ(M )(z)⊤θ(M )(z)
+
+gives 
+
+∇2
+
+> z
+
+ 12 ∥θ(M )(z)∥22
+
+
+
+=  ∇z θ(M )(z)⊤∇z θ(M )(z) + X
+
+> i
+
+θ(M ) 
+
+> i
+
+(z) ∇2 
+
+> z
+
+θ(M ) 
+
+> i
+
+(z).
+
+It therefore remains to bound ∇2 
+
+> z
+
+z(M )(z). Since z(0) (z) = z, we have 
+
+∇z z(0) (z) = I, ∇2 
+
+> z
+
+z(0) (z) = 0 .
+
+The second-order chain rule gives the recursion 
+
+∇2 
+
+> z
+
+z(ℓ)(z) = ∇2 
+
+> z
+
+F (ℓ) z(ℓ−1) (z) ∇z z(ℓ−1) (z), ∇z z(ℓ−1) (z) + ∇z F (ℓ) z(ℓ−1) (z) ∇2 
+
+> z
+
+z(ℓ−1) (z),
+
+Hence 
+
+∥∇ 2 
+
+> z
+
+z(ℓ)(z)∥ ≤ cℓ(1 + ∥z(ℓ−1) (z)∥2)∥∇ z z(ℓ−1) (z)∥2 + bℓ(1 + ∥z(ℓ−1) (z)∥2)∥∇ 2 
+
+> z
+
+z(ℓ−1) (z)∥.
+
+Using the bounds 
+
+∥z(ℓ−1) (z)∥2 ≤ CM (1 + ∥z∥2), ∥∇ z z(ℓ−1) (z)∥ ≤ C′′  
+
+> M
+
+(1 + ∥z∥2)ℓ−1,
+
+an induction on ℓ yields 
+
+∥∇ 2 
+
+> z
+
+z(M )(z)∥ ≤ C′′′′  
+
+> M
+
+(1 + ∥z∥2)2M −1
+
+for some C′′′′  
+
+> M
+
+< ∞. In particular, 
+
+∥∇ 2 
+
+> z
+
+θ(M )(z)∥ ≤ C′′′′  
+
+> M
+
+(1 + ∥z∥2)2M −1.
+
+Therefore 
+
+∇2
+
+> z
+
+ 12 ∥θ(M )(z)∥22
+
+
+
+≤ ∥∇ z θ(M )(z)∥2 + ∥θ(M )(z)∥2 ∥∇ 2 
+
+> z
+
+θ(M )(z)∥ ≤ C′′′′′  
+
+> M
+
+(1 + ∥z∥2)2M
+
+for some C′′′′′  
+
+> M
+
+< ∞. The second derivatives of the accumulated log-determinant terms are controlled in the same way and are of no larger polynomial order. Hence 
+
+∥∇ 2 
+
+> z
+
+ℓNPE (qϕ; z)∥ ≤ C′′′′′  
+
+> M
+
+(1 + ∥z∥2)2M ,
+
+so ∥∇ 2 
+
+> z
+
+ℓNPE (qϕ; ·)∥ ∈ G 2M (Z). Since each F (ℓ) is C2, the composition is also C2, and therefore 
+
+ℓNPE (qϕ; ·) ∈ C2(Z).Lemma 4.3 then follows directly from Lemmas B.5 and B.7. 
+
+# C Experimental details 
+
+This section is organised as follows. Appendix C.1 outlines our hyperparameter-selection proce-dure using the KL-based miscalibration metric, Appendix C.2 describes the baseline methods, Appendix C.3 contains the implementation details, Appendix C.4 contains the details of the simulators used in Section 5, and Appendix C.5 discusses the computational cost. 39 C.1 Hyperparameter selection – selection method for DRO-NPE 
+
+Estimating KL-based miscalibration. Recall that Px is the marginal distribution of the joint simulator P ≡ Pθ,x, and F QS|x is the CDF of QS|x, which is the distribution of S(θ; x)
+
+whenever θ | x ∼ Qθ|x. For each x, we define ˜U | x ∼ (F QS|x)#PS|x. Let P ˜U , x denote the resulting joint distribution of ( ˜U , x). We also define an independent reference pair (U, x), where 
+
+U ∼ U [0 , 1] is independent of x ∼ Px, so that PU, x = PU ⊗ Px. We write the respective densities as pU, x(u, x) = pU (u)px(x) = px(x) since pU (u) = 1 and p ˜U , x( ˜u, x) = p ˜U |x( ˜u | x)px(x). For any 
+
+Qθ|x with density qϕ, the KL-based miscalibration is 
+
+kl S
+
+> cal
+
+(qϕ; P ) = Ex∼Px
+
+h
+
+−h
+
+
+
+(F QS|x)#PS|x
+
+i 
+
+=
+
+Z
+
+px(x)
+
+Z
+
+p ˜U (˜ u | x) log p ˜U (˜ u | x)d˜u d x
+
+where h(μ) = − R p(u) log p(u) du denotes the differential entropy. Since pU ( ˜u) = 1 on [0 , 1] , we can equivalently write: 
+
+Z
+
+px(x)
+
+Z
+
+p ˜U (˜ u | x) log p ˜U (˜ u | x)d˜u d x =
+
+Z Z
+
+p ˜U (˜ u | x)px(x) log p ˜U (˜ u | x)px(x)
+
+pU (˜ u)px(x) d˜u d x
+
+| {z } 
+
+> =KL( P˜U , x∥PU, x)
+
+,
+
+Therefore, kl S
+
+> cal
+
+(qϕ; P ) can be estimated by density-ratio estimation between samples from the dependent joint P ˜U , x and the independent reference PU ⊗ Px. To this end, we formulate a binary classification problem: samples from class y = 1 are drawn from ( ˜u, x) ∼ P ˜U , x, while samples from class y = 0 are drawn from (u, x) ∼ PU, x = PU ⊗ Px. With equal class priors, the Bayes-optimal classifier D⋆ : [0 , 1] × X → [0 , 1] is given by 
+
+D⋆(u, x) = p ˜U , x(u, x)
+
+p ˜U , x(u, x) + pU, x(u, x) .
+
+Rearranging gives 
+
+p ˜U |x(u | x)px(x)
+
+pU (u) px(x) = p ˜U , x(u, x)
+
+pU, x(u, x) = D⋆(u, x)1 − D⋆(u, x) .
+
+Thus, the desired ratio can be recovered directly from the classifier via its odds. In practice, we train a discriminator Dψ by minimising the binary cross-entropy loss, yielding the approximation 
+
+p ˜U , x(u, x)
+
+pU, x(u, x) ≈ D ˆψ(u, x)1 − D ˆψ(u, x) .
+
+Further, we do not use x directly in the discriminator. Instead, we map it to the scalar summary 
+
+γϕ(x) := 
+
+> dΘ
+
+X
+
+> i=1
+
+Var θ∼Qθ|x (θi | x),
+
+where Qθ|x denotes the distribution with density qϕ(θ | x). We then model the discriminator as a function of (u, γ ϕ(x)) via logistic regression: 
+
+Dψ(u, x) = 11 + exp  −(ψ0 + ψ1u + ψ2γϕ(x))  .
+
+Selecting ε. Given an estimate of kl S
+
+> cal
+
+, we choose ε using a validation set. We split n samples from P into training and validation sets, and minimise the validation estimate of kl S 
+
+> cal
+
+over 
+
+ε ∈ [εmin , ε max ]. For each queried value of ε, we train qϕ on the training set and evaluate kl S
+
+> cal
+
+on the validation set. The selected value ε⋆ is then used to retrain qϕ on the full dataset. In our experiments, we perform Bayesian optimisation (Garnett, 2023) over log ε on the interval 
+
+[log 0.001 , log 10] , using a budget of 10 iterations. Optimising over log ε explores each order of magnitude equally, which is appropriate because ε controls the strength of regularisation. 40 C.2 Description of baseline methods 
+
+Balanced NPE (Delaunoy et al., 2023). The method extends the Balanced NRE method proposed by Delaunoy et al. (2022) to NPE. NRE relies on the ratio r(x | θ) := p(θ,x) 
+
+> p(θ)p(x)
+
+and the Bayes-optimal classifier d⋆ : Θ × X → [0 , 1] , which distinguishes samples from the joint distribution Pθ,x and the product of marginals Π ⊗ Px. The optimal classifier is defined as 
+
+d⋆(θ, x) := p(θ,x) 
+
+> p(θ,x)+ p(θ)p(x)
+
+, and relates to r(x | θ) via r(x | θ) = d⋆(θ,x)1−d⋆(θ,x) .In practice, the optimal classifier is not available and is estimated from finite samples, denoted 
+
+ˆd. Delaunoy et al. (2023) suggest that overconfident posteriors obtained from NRE originate from overconfidence in ˆd. To mitigate this, they introduce a regularisation term that encourages 
+
+ˆd to be more conservative than d⋆. Specifically, they define a balanced classifier db satisfying 
+
+Eθ,x∼Pθ,x [db(θ, x)] + Eθ,x∼Π⊗Px [db(θ, x)] = 1 . They show that any balanced classifier satisfies 
+
+Eθ,x∼Pθ,x
+
+h d⋆(θ,x)
+
+> db(θ,x)
+
+i
+
+≥ 1 and Eθ,x∼Π⊗Px
+
+h 1−d⋆(θ,x)1−db(θ,x)
+
+i
+
+≥ 1, implying that db is less confident than 
+
+d⋆ in expectation. To impose this property in the NPE setting, Delaunoy et al. (2023) add the balancing regularisation term Eθ,x∼Pθ,x [ ˆd(θ, x)] + Eθ,x∼Π⊗Px [ ˆd(θ, x)] − 1 on top of the standard NPE loss. This term is estimated using the approximate posterior density by noting that r(x | θ) = p(θ|x) 
+
+> p(θ)
+
+≈ 
+
+> q(θ|x)
+> p(θ)
+
+and ˆd(θ, x ) ≈ r(x | θ)/(1 + r(x | θ)) . The resulting regularised objective is 
+
+LBal (q; Pθ,x, Π ⊗ Px) := LNPE (q; Pθ,x) + λ
+
+
+
+Eθ,x∼Pθ,x
+
+ q(θ|x) 
+
+> p(θ)
+> 1+ q(θ|x)
+> p(θ)
+
+
+
++ Eθ,x∼Π⊗Px
+
+ q(θ|x) 
+
+> p(θ)
+> 1+ q(θ|x)
+> p(θ)
+
+
+
+− 1
+
+
+
+,
+
+where λ > 0 is a regularisation parameter. In their implementation, samples from Π ⊗ Px are approximated using joint samples {(θi, xi)}ni=1 ∼ Pθ,x. While these are used for estimating terms involving the joint, samples from the marginals are constructed by cyclically shifting θ, yielding mismatched pairs {(θn, x1), (θ1, x2), . . . , (θn−1, xn)}.
+
+Coverage-regularised NPE (Falkiewicz et al., 2023). This method penalises deviations of the SBC ranks—computed as in Definition 2.2—from the standard uniform distribution, using S(θ; x) = q(θ | x). Given (θ, x) from the joint distribution, define u = u(q; θ, x) = 
+
+> 1
+> M
+
+PMm=1 1q( ˜θ(m) | x) < q (θ | x) , where ˜θ(1) , . . . , ˜θ(M ) ∼ Qθ|x. Let u(1) , . . . , u (n) denote the sorted sequence of {ui}ni=1 in ascending order with ui = u(q; θi, xi). The empirical CDF evaluated at these points is given by ˆF (u(i)) = in , i = 1 , . . . , n. This empirical CDF is compared to the CDF of the standard uniform distribution, which satisfies F (u(i)) = u(i). The resulting calibration error over n samples is defined as 1
+
+> n
+
+Pni=1 
+
+ u(i) − in
+
+2. To encourage conservative approximate posteriors, they propose penalising only overconfident deviations. This is achieved by introducing a one-sided penalty that considers only cases where the uniform CDF dominates the empirical CDF, namely 1
+
+> n
+
+Pni=1 
+
+ max u(i) − in , 0 2, which is the formulation adopted in their main experiments. To avoid backpropagation through posterior samples for broad applicability, u is estimated via self-normalised importance sampling with the prior as a proposal distribution such that 
+
+u =
+
+PMm=1  
+
+> q( ˜θ(m)|x)
+> p( ˜θ(m))
+
+1q( ˜θ(m) | x) < q (θ | x)
+
+PMm=1 
+
+> q( ˜θ(m)|x)
+> p( ˜θ(m))
+
+,
+
+where ˜θ(1) , . . . , ˜θ(M ) ∼ Π. Moreover, differentiable relaxations of both the indicator function and the sorting operation are employed. The resulting regularised objective is 
+
+LCal (q; Pn) := LNPE (q; Pn) + λ 1
+
+n
+
+> n
+
+X
+
+> i=1
+
+
+
+max 
+
+
+
+u(i)
+
+ q; θ(i), x(i)
+
+ − in , 0
+
+ 2
+
+.
+
+41 C.3 Implementation details 
+
+Conditional density estimator. Across all experiments, we employ a conditional normalising flow model based on coupling layers, as implemented in the Bayesflow package (Kühmichel et al., 2026), for both DRO-NPE and the baseline methods. We use six coupling layers and adopt affine transformations as the coupling functions, following the default configuration. For the multi-layer perceptron used to predict the parameters of the affine transformations, we retain the default architecture except for the choice of activation function: we replace the standard activation with the tanh, which ensures that the theoretical assumptions underlying our method are satisfied. 
+
+Training procedure. The model is trained for 1000 epochs with a batch size of 64. We train the network using the AdamW optimiser (Loshchilov and Hutter, 2017) with a learning rate of 5 × 10 −4. Unless otherwise stated, we do not use a validation set for early stopping or model selection, in order to isolate the effect of the training objective. For CR-NPE, we observed numerical instabilities during prolonged training. Therefore, for this method, we train the network until instability occurs (i.e., loss value becoming nan ) or for 1000 epochs (whichever occurs first). In case of instability, we set the final model to be the one in the last stable training epoch. Note that while this instability is also present in the original implementation, it is more pronounced in our setting, potentially due to the use of a different conditional density estimator from the original paper. Nevertheless, we retain this choice to ensure a fair and meaningful comparison across methods. For ε-selection in DRO-NPE, we use 10% of the data as validation set. 
+
+Hyperparameters for other methods. Following the recommendations in the respective works, we set λ = 5 and M = 16 in CR-NPE and λ = 100 in Bal-NPE. 
+
+C.4 Description of simulators 
+
+SLCP. The simulator is deliberately constructed to exhibit a simple likelihood while inducing a complex posterior, making it well-suited for benchmarking. The parameter θ ∈ R5 governs a two-dimensional Gaussian distribution. We draw four independent samples from this distribution and concatenate them, resulting in an observation x ∈ R8 (Papamakarios et al., 2019; Lueckmann et al., 2021; Hermans et al., 2022). 
+
+Prior: θ ∼ U ([ −3, 3] 5)
+
+Model: xi ∼ N 
+
+ θ1
+
+θ2
+
+
+
+,
+
+ θ43 tanh( θ5) θ23θ24
+
+tanh( θ5) θ23θ24 θ44
+
+ 
+
+, i = 1 , . . . , 4
+
+x = [ x⊤ 
+
+> 1
+
+, . . . , x⊤ 
+
+> 4
+
+]⊤
+
+Two moons. The two moons simulator is a commonly used toy benchmark in SBI, designed to exhibit a posterior distribution with multimodality. Both the parameter and observation spaces are two-dimensional, with θ ∈ R2 and x ∈ R2 (Lueckmann et al., 2021; Greenberg et al., 2019). 
+
+Prior: θ ∼ U ([ −1, 1] 2),
+
+Model: x =
+
+−| θ1 + θ2|/√2(−θ1 + θ2)/2
+
+
+
++
+
+r cos α + 0 .25 
+
+r sin α
+
+
+
+,
+
+where α ∼ U (−π/ 2, π/ 2) and r ∼ N (0 .1, 0.01 2).
+
+Lotka–Volterra. The Lotka–Volterra model describes the nonlinear dynamics of interacting prey and predator populations. The objective is to infer the parameter vector θ ∈ R4, which controls the species interaction dynamics, from noisy observations of both populations over time. Each population is summarised at 10 evenly spaced time points, yielding an observation x ∈ R20 
+
+(Lueckmann et al., 2021; Lotka, 1920). 42 Prior: θ1 ∼ LogNormal( −0.125 , 0.5) , θ2 ∼ LogNormal( −3, 0.5) 
+
+θ3 ∼ LogNormal( −0.125 , 0.5) , θ4 ∼ LogNormal( −3, 0.5) 
+
+Model: x1,i ∼ LogNormal(log( X(ti)) , 0.1) , i = 1 , . . . 10 
+
+x2,i ∼ LogNormal(log( Y (ti)) , 0.1) , i = 1 , . . . 10 
+
+where (X, Y ) evolve according to 
+
+dX dt = θ1X − θ2XY, dY dt = −θ3Y + θ4XY, 
+
+with time horizon T = 20 , and initial condition (X(0) , Y (0)) = (30 , 1) .
+
+Observations are collected at 10 evenly spaced time points ti ∈ [0 , T ].
+
+Inverse Kinematics. The inverse kinematics benchmark models a two-dimensional, multi-jointed robotic arm whose forward mapping sends joint configurations to the arm endpoint position. The parameter θ ∈ R4 specifies the configuration of the arm, consisting of an initial height θ1
+
+and three subsequent joint angles θ2, θ 3, θ 4. The resulting observation x ∈ R2 corresponds to the two-dimensional coordinates of the arm (Kruse et al., 2021; Schmitt et al., 2024). 
+
+Prior: θ ∼ N  0, diag   116 , 14 , 14 , 14
+
+ 
+
+Model: x1 = l1 sin( θ2) + l2 sin( θ2 + θ3) + l3 sin( θ2 + θ3 + θ4) + θ1
+
+x2 = l1 cos( θ2) + l2 cos( θ2 + θ3) + l3 cos( θ2 + θ3 + θ4)
+
+with segment lengths: l1 = l2 = 12 , l 3 = 1 .
+
+Cosmology. We use the high-fidelity hydrodynamic simulations from the CAMELS suite (Villaescusa-Navarro et al., 2021, 2023), a benchmark dataset for machine learning in astrophysics. These simulations model 25 Mpc /h cosmological volumes and include complex astrophysical processes such as feedback. The inference task is to estimate the cosmological parameters 
+
+θ = (Ω m, σ 8), where Ωm is the matter density and σ8 the amplitude of fluctuations, from mock power spectrum measurements P (k).
+
+C.5 Computational cost comparison 
+
+Here, we briefly compare the computational overhead of DRO-NPE with that of the baselines, focusing primarily on the additional memory requirements during training. Following Falkiewicz et al. (2023), we focus on memory because it can be characterised more directly than wall-clock time, which depends strongly on the automatic-differentiation backend and hardware. We do not report wall-clock times for all baselines because CR-NPE uses PyTorch, whereas the other methods use JAX through BayesFlow/Keras due to package-specific support for differentiable sorting; this would make timing comparisons unfair. DRO-NPE incurs additional overhead from computing input gradients with respect to z and differentiating through them, requiring higher-order automatic differentiation and memory that scales with the mini-batch size B and dZ . CR-NPE incurs overhead from importance sampling, which scales with B, dΘ, and the number of samples M . Bal-NPE only requires additional density evaluations on cyclically shifted mini-batch pairs, so its extra memory usage scales mainly with B. Thus, although DRO-NPE introduces higher-order automatic differentiation, its memory overhead should remain moderate in typical SBI settings, especially when low-dimensional summary embeddings are used. 43 0.7 0.8 0.9 1.0
+
+θ1    
+
+> 0.02 0.03 0.04
+> θ2
+> True θ
+> 1.41.61.82.0
+
+θ3
+
+> 0.05 0.06 0.07
+> θ4
+
+Figure 5: Posterior contour plots of Lotka–Volterra model obtained using NPE ( ) and DRO-NPE ( ) trained with n = 1024 simulations. The reference NPE posterior ( ) is obtained using 
+
+n = 131072 .1024 2048 4096 8192 16384 
+
+> 0246
+> ε?
+> SLCP
+> 1024 2048 4096 8192 16384
+> 0.05 0.10
+> Lotka–Volterra
+> 1024 2048 4096 8192 16384
+> 0.000 0.005
+> Two Moons
+> 1024 2048 4096 8192 16384 0.000 0.005 0.010 0.015
+> Inverse Kinematics
+
+# n
+
+Figure 6: Selected DRO radius ε⋆ across benchmark tasks and simulation budgets. Values are chosen by minimising validation kl q
+
+> cal
+
+; means and standard deviations are shown over five random seeds. 
+
+# D Additional results 
+
+In this section, we present additional results related to experiments shown in Section 5. 
+
+Additional details and results for Figure 1. The posterior contour plots of Lotka–Volterra parameters in Figure 1 were obtained using n = 1024 simulations for both NPE and DRO-NPE. To produce a reference posterior, we train NPE with n = 131072 simulations. The contour plots are computed using kernel density estimation from 5000 posterior samples. In Figure 5, we show the results for all four parameters using paired two-dimensional marginals for (θ1, θ 2) and 
+
+(θ3, θ 4). We observe similar results for (θ3, θ 4) as we did for (θ1, θ 2): NPE posterior is biased, while DRO-NPE covers the true parameter and yields conservative posterior. 
+
+Selected values of ε. Figure 6 reports the selected value ε, which we denote as ε⋆, obtained by minimising the validation estimate of kl q 
+
+> cal
+
+in the benchmarking results of Section 5.1. Across most tasks, ε⋆ decreases as the simulation budget grows, as expected since larger simulation budgets require less conservativeness. The selected values also vary substantially across tasks, suggesting that a single choice of ε as a function of n is unlikely to be adequate. 
+
+Sensitivity of DRO-NPE to ε. We provide additional sensitivity analyses for the DRO radius ε, extending the results of Section 5.2 to different simulation budgets and including the SLCP task. We report training and test risks in Figure 7, coverage curves in Figure 8, and the behaviour of absolute miscoverage and kl q 
+
+> cal
+
+in Figure 9. As shown in Figure 7, increasing ε consistently reduces the generalisation gap across tasks and simulation budgets. For small n, this reduction is accompanied by improved test risk, whereas for larger n, overly large ε can worsen test risk, indicating excessive conservativeness. 44 0 20 0.00.20.40.60.81.0          
+
+> ε
+> n= 1024
+> Train Test
+> 010
+> n= 2048
+> 510
+> n= 4096
+> 2.55.07.5
+> n= 8192
+> 46
+> n= 16384 Risk
+
+(a) SLCP −10 00.00 0.02 0.06 0.10 0.14 0.18 0.22           
+
+> ε
+> n= 1024
+> Train Test
+> −15 −10
+> n= 2048
+> −14 −12 −10
+> n= 4096
+> −14 −12
+> n= 8192
+> −14 −12
+> n= 16384 Risk
+
+(b) Lotka–Volterra 
+
+Figure 7: Training and test risk across ε for SLCP and Lotka–Volterra at different simulation budgets. Increasing ε reduces the generalisation gap, but overly large values can worsen test risk. Means are shown over five random seeds. Figure 8 shows the corresponding coverage behaviour. Increasing ε generally moves coverage curves upward, making the posterior more conservative. The value of ε that yields coverage closest to the diagonal decreases as n increases, consistent with the intuition that larger simulation budgets require less regularisation. Finally, Figure 9 compares absolute miscoverage at α = 0 .05 with kl q 
+
+> cal
+
+for different ε. Absolute miscoverage decreases nearly monotonically with ε, favouring increasingly conservative posteriors. By contrast, kl q 
+
+> cal
+
+is minimised at an intermediate value of ε, making it more informative for selecting a radius that balances coverage and posterior quality. 
+
+Choice of hyperparameter-selection metric. We report additional results for selecting ε
+
+using validation metrics other than kl q
+
+> cal
+
+. Across SLCP and Lotka–Volterra, selecting ε via kl q
+
+> cal
+
+generally yields coverage curves closest to the diagonal while maintaining competitive NLPD. In contrast, absolute miscoverage tends to select overly conservative posteriors, whereas kl ∥θ−θ0∥
+
+> cal
+
+often leads to undercoverage and higher variability across runs. Selection by NLPD also performs well, but tends to produce slightly more conservative coverage curves than kl q
+
+> cal
+
+.
+
+Hyperparameter tuning on baseline methods. We now use kl q 
+
+> cal
+
+to tune the regularisation hyperparameter of the baseline methods in settings where they exhibit poor coverage in Section 5.1. For CR-NPE, that is Lotka–Volterra with n = 1024 , and for Bal-NPE, that is SLCP with n = 1024 .For CR-NPE, we search over [1 , 40] , following the sensitivity range used by Falkiewicz et al. (2023). Although Falkiewicz et al. (2023) analyse sensitivity using both NLPD and the area under the coverage curve, using two metrics for model selection would require an additional weighting choice; we therefore use kl q 
+
+> cal
+
+as a single validation criterion. For Bal-NPE, we search over [100 , 1000] , since the default λ = 100 appears too small in Figure 2. The selected values are 
+
+λ = 29 .6 ± 15 .8 for CR-NPE and λ = 415 .4 ± 303 .0 for Bal-NPE. Figure 11 shows the results over five random seeds. For CR-NPE, tuning the hyperparameter yields the same coverage results as before, while the NLPD performance degrades slightly, both in terms of the average value and the variance across runs. This is consistent with Falkiewicz et al. (2023), who find that CR-NPE is relatively insensitive to λ. For Bal-NPE, tuning substantially 45 0.5 1.0
+
+Nominal Coverage 
+
+> 0.00.51.0
+> Expected Coverage
+
+n = 1024  
+
+> ε
+> 0.00.20.40.60.81.00.51.0
+
+Nominal Coverage 
+
+> 0.00.51.0
+> Expected Coverage
+
+n = 2048 0.5 1.0
+
+Nominal Coverage 
+
+> 0.00.51.0
+> Expected Coverage
+
+n = 4096 0.5 1.0
+
+Nominal Coverage 
+
+> 0.00.51.0
+> Expected Coverage
+
+n = 8192 0.5 1.0
+
+Nominal Coverage 
+
+> 0.00.51.0
+> Expected Coverage
+
+n = 16384 (a) SLCP 0.5 1.0
+
+Nominal Coverage 
+
+> 0.00.51.0
+> Expected Coverage
+
+n = 1024  
+
+> ε
+> 0.00.02 0.06 0.10.14 0.18 0.22 0.51.0
+
+Nominal Coverage 
+
+> 0.00.51.0
+> Expected Coverage
+
+n = 2048 0.5 1.0
+
+Nominal Coverage 
+
+> 0.00.51.0
+> Expected Coverage
+
+n = 4096 0.5 1.0
+
+Nominal Coverage 
+
+> 0.00.51.0
+> Expected Coverage
+
+n = 8192 0.5 1.0
+
+Nominal Coverage 
+
+> 0.00.51.0
+> Expected Coverage
+
+n = 16384 
+
+(b) Lotka–Volterra 
+
+Figure 8: Coverage curves across ε for SLCP and Lotka–Volterra at different simulation budgets. Larger ε generally yields more conservative posteriors, while the radius closest to the diagonal decreases as the simulation budget grows. Means and standard deviations are shown over five seeds. 0.00.5
+
+> ∆0.05 cov
+
+n = 1024 n = 2048 n = 4096 n = 8192 n = 16384 
+
+0.0 0.5 1.00.00.5
+
+> kl q
+> cal
+
+0.0 0.5 1.0 0.0 0.5 1.0 0.0 0.5 1.0 0.0 0.5 1.0
+
+ε
+
+(a) SLCP 0.00.5
+
+> ∆0.05 cov
+
+n = 1024 n = 2048 n = 4096 n = 8192 n = 16384 
+
+0.0 0.1 0.20.00.5
+
+> kl q
+> cal
+
+0.0 0.1 0.2 0.0 0.1 0.2 0.0 0.1 0.2 0.0 0.1 0.2
+
+ε
+
+(b) Lotka–Volterra 
+
+Figure 9: Absolute miscoverage at α = 0 .05 ( ) and KL-based miscalibration kl q
+
+cal ( ) across ε
+
+for SLCP and Lotka–Volterra. Means and standard deviations are shown over five random seeds. 46 0.5 1.0
+
+> Nominal Coverage
+> 0.00.51.0
+> Expected Coverage
+
+n = 1024  
+
+> via kl q
+> cal
+> via NLPD via kl ‖θ−θ0‖2
+> cal
+> via ∆ 0.05 cov 0.51.0
+> Nominal Coverage
+> 0.00.51.0
+> Expected Coverage
+
+n = 2048 0.5 1.0
+
+> Nominal Coverage
+> 0.00.51.0
+> Expected Coverage
+
+n = 4096 1024 2048 4096 
+
+> n
+> 025 50 75
+> NLPD
+
+(a) SLCP 0.5 1.0
+
+> Nominal Coverage
+> 0.00.51.0
+> Expected Coverage
+
+n = 1024 0.5 1.0
+
+> Nominal Coverage
+> 0.00.51.0
+> Expected Coverage
+
+n = 2048 0.5 1.0
+
+> Nominal Coverage
+> 0.00.51.0
+> Expected Coverage
+
+n = 4096 1024 2048 4096 
+
+> n
+> −10
+> −50
+> NLPD
+
+(b) Lotka–Volterra 
+
+Figure 10: Effect of the validation metric used to select ε on SLCP and Lotka–Volterra. We compare selection by kl q
+
+cal ( ), NLPD ( ), kl ∥θ−θ0∥2
+
+cal with θ0 drawn from the prior ( ), and absolute miscoverage at α = 0 .05 ( ). Selecting by kl q
+
+cal generally gives coverage closest to the diagonal while maintaining competitive NLPD. Means and standard deviations are shown over five seeds. 0.0 0.5 1.0
+
+Nominal Coverage    
+
+> 0.00.51.0
+> Expected Coverage Default Tuned 12 .013 .515 .0
+> NLPD 0.00.51.0
+
+Nominal Coverage  
+
+> 0.00.51.0
+> Expected Coverage Default Tuned
+> −6
+> −30
+> NLPD
+
+Figure 11: Effect of tuning regularisation hyperparameter using KL-based miscalibration kl q
+
+cal .Default settings of CR-NPE ( ) and Bal-NPE ( ) are compared with their tuned variants ( ). Coverage curves and NLPD are shown with means and standard deviations over five random seeds. improves NLPD but only modestly improves coverage, leaving the method undercovered. Overall, these results suggest that kl q
+
+cal could potentially be useful for tuning other conservative NPE objectives, whilst highlighting that hyperparameter tuning alone does not remove the coverage limitations of these baselines. 
+
+Comparison with NPE using early stopping. Another common way to reduce generalisa-tion error and mitigate overfitting is early stopping. Although its effect on miscoverage is less well understood theoretically, except in relatively simple settings such as linear models (Sonthalia et al., 2024), it may still help in practice by reducing the generalisation gap. To assess this empirically, we compare DRO-NPE with standard NPE and NPE trained with early stopping. For early stopping, we use the default configuration of the sbi package (Tejero-Cantero et al., 2020): 10% of the training data is held out for validation, training stops if the validation risk does not improve for 20 consecutive epochs, and the model with the lowest validation risk is returned. Figure 12 reports the resulting coverage curves and NLPD. Early stopping substantially improves both coverage and NLPD relative to standard NPE, confirming that reducing overfitting 47 0.00.51.0                      
+
+> SLCP
+> n= 1024 n= 2048 n= 4096 n= 8192 n= 16384
+> 0.00.51.00.00.51.0
+> Lotka–Volterra
+> 0.00.51.00.00.51.00.00.51.00.00.51.0
+
+Nominal Coverage 1 − α
+
+> Expected Coverage  CPN
+> α (qˆφn)
+
+(a) Coverage 10 20 30 
+
+> 1024 2048 4096 819216384
+> −10
+> −505
+
+n (b) NLPD 
+
+Figure 12: Effect of early stopping on coverage and NLPD for SLCP and Lotka–Volterra. DRO-NPE ( ) is compared with standard NPE ( ) and NPE with early stopping ( ). Early stopping improves standard NPE, but DRO-NPE remains more conservative in low-data regimes. Means and standard deviations are shown over five random seeds. 0.0 0.5 1.0
+
+> Nominal Coverage
+> 0.00.51.0
+> Expected Coverage
+
+(a) Coverage curve −8.8 
+
+> −8.0
+> −7.2
+> NLPD
+
+(b) NLPD 
+
+Figure 13: Comparison of standard DRO-NPE, with ε selected by kl q 
+
+> cal
+
+( ), against a more conservative variant with ε selected by kl q 
+
+> cal
+
+− γ ˜ε ( ), using γ = 0 .8. Results are shown for the Lotka–Volterra task with n = 1024 . Means and standard deviations over five seeds are shown. can already be beneficial. However, in the low-data regime it still yields overconfident posteriors, whereas DRO-NPE remains conservative. As the simulation budget increases, the gap narrows, but DRO-NPE continues to offer comparable performance. 
+
+A more conservative variant of DRO-NPE. In our main experiments, we select ε by minimising kl q
+
+> cal
+
+. Although this criterion yields good overall coverage, it does not explicitly encourage coverage curves to lie above the diagonal; rather, it penalises deviations from the diagonal in either direction. We therefore consider a more conservative variant of DRO-NPE, obtained by slightly modifying the selection criterion. Specifically, instead of minimising kl q
+
+> cal
+
+,we minimise kl q 
+
+> cal
+
+− γ ˜ε, where 
+
+˜ε = log ε − log εmin 
+
+log εmax − log εmin 
+
+is the log-normalised value of ε. The additional term favours larger values of ε, and hence more conservative posteriors. Here, γ ≥ 0 is a user-specified hyperparameter controlling the trade-off between calibration and additional conservativeness. We illustrate this variant in Figure 13, reporting the resulting coverage and NLPD for γ = 0 .8.The modified criterion yields a more conservative posterior approximation. Interestingly, it also achieves a slightly lower NLPD, suggesting that in this case the value of ε selected using the validation set with kl q 
+
+> cal
+
+alone may have been slightly smaller than optimal. 48 49

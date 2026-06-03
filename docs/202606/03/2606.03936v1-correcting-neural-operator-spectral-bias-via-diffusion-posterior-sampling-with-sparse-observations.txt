@@ -1,0 +1,2181 @@
+Title: Correcting Neural Operator Spectral Bias via Diffusion Posterior Sampling with Sparse Observations
+
+URL Source: https://arxiv.org/pdf/2606.03936v1
+
+Published Time: Wed, 03 Jun 2026 01:31:55 GMT
+
+Number of Pages: 35
+
+Markdown Content:
+# Correcting Neural Operator Spectral Bias via Diffusion Posterior Sampling with Sparse Observations 
+
+Niccolò Perrone 
+
+Université Paris-Saclay, CentraleSupélec, CNRS, ENS Paris-Saclay Laboratoire de Mécanique Paris-Saclay UMR 9026 8-10 rue Joliot Curie, 91190 Gif-sur-Yvette, France Politecnico di Milano P.zza Leonardo da Vinci 32, 20133 Milano, Italy 
+
+niccolo.perrone@mail.polimi.it 
+
+Fanny Lehmann 
+
+ETH AI Center Andreasstrasse 5, 8092 Zürich, Switzerland 
+
+fanny.lehmann@ai.ethz.ch 
+
+Stefania Fresca 
+
+Department of Mechanical Engineering University of Washington, Seattle, 98195, WA, USA 
+
+sfresca@uw.edu 
+
+Filippo Gatti 
+
+Université Paris-Saclay, CentraleSupélec, CNRS, ENS Paris-Saclay Laboratoire de Mécanique Paris-Saclay UMR 9026 8-10 rue Joliot Curie, 91190 Gif-sur-Yvette, France 
+
+filippo.gatti@centralesupelec.fr 
+
+## Abstract 
+
+Neural operator surrogates (NO) can approximate partial differential equations (PDE) solutions orders of magnitude faster than numerical solvers, but they suffer from spectral bias: high-frequency content is systematically attenuated, limiting their reliability for applications that depend on fine scale structure. In many settings, sparse sensor measurements of the true field are also available, offering pointwise accuracy without spectral distortion but covering only a small fraction of the domain. We address the spectral bias of neural operators by treating their predictions as auxiliary observations in a diffusion posterior sampling framework. Our method, FreqNO-DPS 1, combines an unconditional score-based diffusion prior, trained on high-fidelity simulations, with diffusion posterior sampling (DPS) conditioned on sparse observations and guided by a frozen neural operator. Naïve integration of the surrogate reintroduces its spectral bias into the prediction; we resolve this by deriving a closed-form, spectrally shaped guidance score that weights the surrogate contribution according to its frequency-dependent accuracy and requires no backpropagation through the denoiser. A distribution-free analysis bounds the approximation error across the frequency– diffusion-time plane and shows that the frequency dependence of the guidance is preserved regardless of distributional assumptions. On three-dimensional elastic wavefield prediction at 
+
+5% and 2% sensor coverage, the method achieves near-zero spectral bias across all frequency bands, where both the deterministic surrogate and sensor-only posterior sampling exhibit systematic high-frequency attenuation. Isotropic surrogate guidance, the natural baseline, improves pointwise accuracy but carries the spectral bias into the posterior nearly intact, confirming that frequency-dependent calibration is essential rather than merely beneficial. The framework requires only paired surrogate/reference data for calibration and exploits no problem-specific structure beyond the residual’s approximate spectral diagonality, a  
+
+> 1Code: https://github.com/niccoloperrone/FreqNO-DPS
+> Preprint.
+> arXiv:2606.03936v1 [cs.LG] 2 Jun 2026
+
+Preprint 
+
+prerequisite that can be empirically verified for new surrogates via the coherence diagnostic we provide. 
+
+## 1 Introduction 
+
+Neural operators (NO) [Li et al., 2020, Kovachki et al., 2023] have emerged as a promising alternative to costly numerical solvers of Partial Differential Equations (PDE), offering speedups of several orders of magnitude across fluid mechanics, solid mechanics, wave propagation, and other domains. However, surrogates trained under mean-squared-error objectives suffer from a well-documented spectral bias [Rahaman et al., 2019, Khodakarami et al., 2026]: low-frequency content is reproduced faithfully while high frequencies are more difficult to learn and consequently, get attenuated. The consequences are especially severe for hyperbolic and high-frequency problems where sharp features and small-scale oscillations are preserved or amplified over time: oversmoothing has been documented for shock-capturing in Burgers and Euler conservation laws [De Ryck and Mishra, 2024, Urbán and Pons, 2025], for fine scale structure in Navier–Stokes turbulence [Khodakarami et al., 2025, Cao et al., 2024], and for high frequencies in Helmholtz and elastic-wave dynamics [Zou et al., 2024, 2026]. In seismology, for instance, attenuated high frequency leads to underestimating peak amplitudes that impact buildings resistance and missing fine-scale geological features when solving inverse problems. In many physical systems, sparse sensor networks provide direct measurements of the field of interest at a limited number of locations. In seismology, permanent and temporary station deployments record ground motion with high fidelity but at spatial densities that cover a vanishing fraction of the domain [Ren et al., 2026]; analogous settings arise in meteorology [Kalnay, 2003], oceanography [Bolton and Zanna, 2019], and structural health monitoring [Farrar and Worden, 2007]. Reconstructing the complete field from such sparse observations is a severely ill-posed inverse problem [Manohar et al., 2018]: many physically plausible fields are consistent with the same measurements, and the problem is further compounded when the number of observations is orders of magnitude smaller than the spatial degrees of freedom. Neither sparse sensors alone, which lack spatial coverage, nor deterministic surrogates alone, which lack spectral accuracy, suffice for high-fidelity reconstruction. Sparse measurements thus serve a dual role: they anchor the reconstruction at observed locations, and they expose the surrogate’s spectral bias by providing the ground truth high-frequency content that the surrogate fails to reproduce. Several lines of work have sought to correct the spectral limitations of neural operator surrogates, but none addresses the problem we consider: correcting spectral bias of a fixed, pretrained surrogate at inference. Architecture-level remedies such as retaining more Fourier modes [Kong et al., 2026], factorizing the spectral convolutions [Tran et al., 2021], or imposing multi-scale training objectives [You et al., 2024] mitigate the bias by modifying or retraining the surrogate, which is not an option when it is established, expensive to retrain, or supplied externally. Generative remedies based on score-based diffusion models [Song et al., 2020, Karras et al., 2022] trained on PDE data preserve spectral content that deterministic surrogates suppress [Molinaro et al., 2024, Bastek et al., 2024], and conditioning a diffusion model on the surrogate output recovers high-frequency structure beyond what either component achieves alone [Oommen et al., 2024]. Such conditional models, however, couple the diffusion prior to a specific surrogate at training time and ignore the direct field observations that are often independently available in practice. Diffusion posterior sampling (DPS; Chung et al., 2022) provides a principled mechanism for combining sparse measurements with a pretrained generative prior. By Bayes’ rule, the posterior over fields consistent with the observations is proportional to the product of the prior, here a score-based diffusion model trained on reference simulations, and a measurement likelihood. Operationally this amounts to adding a measurement-fit gradient to the unconditional reverse-diffusion drift at each step of the generative process, with no retraining required. Additional sources of information enter on the same footing as additional likelihood terms. DPS has recently been extended to PDE-based inverse problems. Where a neural operator appears in these works, it does so as part of the model itself, as the denoiser architecture [Yao et al., 2025] or as a learned forward map between coefficient and solution spaces [Lin et al., 2026], never as a parallel observation of the field being reconstructed. To our knowledge, no existing diffusion-based method treats a frozen surrogate’s prediction as a direct auxiliary observation, and none explicitly targets the surrogate’s spectral bias. We close this gap. A frozen neural operator enters our posterior as an auxiliary observation alongside the sparse sensors, and the corresponding likelihood is calibrated in the Fourier domain so that the surrogate’s information is admitted at the low frequencies where it is reliable, while the sensor channel takes over at the high frequencies where the surrogate’s bias is most severe. 2Preprint 
+
+We propose FreqNO-DPS , a framework that combines an unconditional diffusion prior trained on high-fidelity numerical simulations with diffusion posterior sampling conditioned on both sparse sensor observations and a frozen neural operator prediction. The sensor term anchors the prediction at observed locations, while the neural operator term provides global structural information across the entire domain. To prevent the surrogate’s spectral bias from corrupting the posterior, we derive a spectrally shaped guidance score by marginalizing over the unknown ground-truth field in the Fourier domain. This yields a closed-form expression that accounts for the frequency-dependent accuracy of the surrogate and involves no backpropagation through the denoiser. We demonstrate FreqNO-DPS on 3D elastic wavefield enhancement from a Multiple-Input Fourier Neural Operator (MIFNO) surrogate. While the methodological and theoretical contributions are independent of this application, our empirical experiments are specific to this challenging setting. Our contributions are as follows: (i) We introduce FreqNO-DPS, a diffusion posterior sampler that incorporates a frozen neural operator as an auxiliary observation with a closed-form, frequency-calibrated likelihood, and requires no backpropagation through the denoiser (Sec. 4). (ii) We establish an exact, distribution-free identity for the neural operator likelihood score (Prop. 1) and highlight four regimes depending on the frequency content and diffusion time to show that frequency dependence of the guidance is preserved regardless of distributional assumptions. (iii) We demonstrate on 3D elastic wavefield prediction at 5% and 2% sensor coverage that the method achieves near-zero spectral bias across all frequency bands, and show via ablation that isotropic surrogate guidance reimports the spectral bias nearly intact, confirming that frequency-dependent calibration is essential. 
+
+## 2 Related Work 
+
+Spectral bias of neural operators. Neural networks trained under mean-squared-error objectives exhibit a documented bias toward low-frequency content [Rahaman et al., 2019, Xu et al., 2019], and recent work has characterized this phenomenon specifically for neural operators and physics-informed learning [Khodakarami et al., 2026, Qin et al., 2024]. In Fourier Neural Operator (FNO) architectures, the spectral convolution layers truncate high wavenumbers by construction [Li et al., 2020], although the pointwise residual branches can in principle carry high-frequency content past this truncation. In practice, predictions still exhibit systematic high-frequency attenuation [Kong et al., 2026], motivating dedicated remediation strategies. Existing remediation strategies modify the surrogate itself: retaining more Fourier modes through multistage training [Kong et al., 2026], factorizing the spectral convolutions to support larger mode counts [Tran et al., 2021], or imposing multi-scale training objectives that explicitly target oscillatory function spaces [You et al., 2024]. These approaches require modifying or retraining the surrogate. We take a complementary route: leaving a pretrained surrogate frozen and correcting its spectral bias at inference through a generative prior conditioned on sparse observations. 
+
+Diffusion models for PDE fields and spectral recovery. Score-based diffusion models [Song et al., 2020, Karras et al., 2022] have recently been applied to PDE-governed fields. Lippe et al. [2023] demonstrate that diffusion-inspired iterative refinement recovers frequency components that standard neural PDE solvers neglect, establishing a direct link between denoising objectives and spectral fidelity. Molinaro et al. [2024] and Bastek et al. [2024] show more broadly that diffusion models trained on PDE data preserve the spectral content that deterministic surrogates suppress. Most directly relevant, Oommen et al. [2024] demonstrate that conditioning a diffusion model on neural operator predictions recovers high-frequency turbulent structures beyond what either component achieves alone, though the diffusion model is coupled to the surrogate at training time and no direct observations enter. Closest to our application setting, Perrone et al. [2025] bring this conditional-diffusion approach to synthetic earthquake ground motion, improving the spectral representation of the synthetic ground motion, but additionally operate on individual stations and so do not reconstruct a spatially coherent surface wavefield. Our framework departs on all three counts: an unconditional prior decoupled from any specific surrogate, sparse sensor observations admitted as a parallel channel, and reconstruction of the full 3D surface field. 
+
+Sparse sensor inverse problems with diffusion guidance. Diffusion posterior sampling (DPS; Chung et al., 2022) enables zero-shot conditioning of a pretrained diffusion model on noisy linear measurements by approximating the likelihood score via the Tweedie denoised estimate [Efron, 2011]. Several recent works 3Preprint 
+
+extend this framework to PDE-based inverse problems. Amorós-Trepat et al. [2025] reconstruct turbulent flow fields from sparse data using a masked-diffusion sampling strategy that overwrites the denoised estimate at sensor locations with a smoothed interpolation of the true observations, enforcing the measurements as a hard constraint without backpropagation through the denoiser. CoNFiLD [Liu et al., 2025] trains an unconditional latent diffusion model for 3D spatiotemporal turbulence and performs zero-shot sparse-sensor reconstruction via Bayesian conditional sampling. Both methods address sparse-observation reconstruction with a diffusion prior alone; within our experimental setup, the sensor-only DPS baseline of Sec. 5.2 plays the same structural role (sparse-sensor reconstruction without a neural operator channel), differing in the specific guidance mechanism. FunDPS [Yao et al., 2025] instead uses a neural operator architecture as the diffusion denoiser, applying plug-and-play DPS guidance from sparse observations; in this formulation no auxiliary surrogate likelihood arises, so the spectral-bias question we study does not appear. DDIS [Lin et al., 2026] also pairs a diffusion prior with a neural operator, but the operator plays a different role: it serves as a learned forward physics surrogate that bridges the coefficient space (where the diffusion prior lives) and the solution space (where observations live), enabling likelihood evaluation for coefficient-from-solution inverse problems. In none of these methods does the neural operator enter the posterior as a direct, parallel observation of the field being reconstructed. The contribution of the present work is to treat the surrogate in exactly this role, as an auxiliary observation channel of the target field, and to derive a frequency-dependent likelihood calibrated against the surrogate’s mode-dependent accuracy, so that its spectral bias is corrected rather than absorbed into the posterior. 
+
+## 3 Data and Problem Setup 
+
+We consider the reconstruction of three-dimensional elastic surface wavefields from sparse spatial observations. This section describes the forward simulation framework and dataset (Sec. 3.1), the deterministic neural operator surrogate used as auxiliary information (Sec. 3.2), and the sparse observation model that defines the inverse problem (Sec. 3.3). 
+
+3.1 3D elastic wave propagation 
+
+We consider seismic-wave propagation in a heterogeneous, linearly elastic medium and follow the framework defined in Lehmann et al. [2024]. Let Ω = [0 , Λ] 3 ⊂ R3 be a cubic domain of size Λ = 9.6 km and denote by 
+
+∂Ωtop its traction-free upper surface. All other external faces are equipped with absorbing boundary conditions to approximate a semi-infinite propagation domain. The medium is described by spatially varying geological parameters. In the general setting, we denote by 
+
+a : Ω → R the field parametrizing the material properties (in our data, a is the shear wave velocity field VS ;the remaining parameters are obtained through fixed deterministic relationships). A seismic event is defined by a source location xs ∈ Ω and a source-mechanism parameter vector θs (e.g. a moment-tensor parametrization). Let u : Ω × [0 , T ] → R3 denote the displacement field. The forward model can be written abstractly as 
+
+L(a, u) = f (xs, θs), (1) where L is the (heterogeneous) elastic wave operator and f is the source term. Ground-truth wavefields are generated with high-fidelity Spectral Element Method (SEM, Touhami et al. [2022]) simulations and gathered in the HEMEW S-3D, which is directly used in the present work [Lehmann et al., 2024]. To reduce storage, we retain only surface time histories on ∂Ωtop , namely the surface particle velocity ˙u |∂Ωtop 
+
+sampled on a regular surface grid over time. For notational simplicity, in the remainder we denote these stored surface velocity fields by 
+
+u := ˙u |∂Ωtop ∈ RC×Nx×Ny ×T , (2) with C = 3 velocity components (east–west, north–south, vertical). In our pipeline, we use a temporal sampling ∆t = 0 .02 s over a time window of 6.4 s , hence T = 320 time steps (with Nx = Ny = 32 ). 
+
+3.2 Multiple-Input Fourier Neural Operator 
+
+We use a pretrained Multiple-Input Fourier Neural Operator (MIFNO) [Lehmann et al., 2025] as a deterministic surrogate for fast prediction of surface ground motion. The MIFNO learns the parametric mapping from a 3D geological input field a and source characteristics (xs, θs) to the corresponding surface velocity wavefield u:
+
+uNO = Gϕ(a, xs, θs) , Gϕ : A × Ω × Θ → RC×Nx×Ny ×T , (3) 4Preprint 
+
+where ϕ denotes learned parameters and uNO is the surrogate prediction. Architecturally, MIFNO extends 3D Fourier Neural Operators [Li et al., 2020, Tran et al., 2021] to heterogeneous multi-modal inputs by processing the structured 3D geology with Fourier operator layers while encoding the low-dimensional source parameters in a dedicated branch, before fusing both representations to predict the surface wavefield. The surrogate is trained in a supervised fashion to minimize discrepancy between the predicted wavefields 
+
+uNO and the SEM targets u over the training set. In our inference pipeline, the MIFNO is frozen : it serves as (i) a fast deterministic baseline and (ii) an auxiliary signal to stabilize diffusion-based posterior sampling in ultra-sparse measurement regimes (Sec. 4). Like other deterministic neural operator surrogates, MIFNO predictions can exhibit spectral bias [Rahaman et al., 2019]: small-scale, high-frequency fluctuations are harder to reproduce faithfully, often resulting in oversmoothed reconstructions and residual phase/spectral errors. Moreover, as a point predictor, MIFNO does not provide calibrated predictive uncertainty, which motivates the use of a generative diffusion prior and posterior sampling to recover plausible high-frequency content and produce an ensemble of reconstructions consistent with the observations. 
+
+3.3 Sparse observation model 
+
+We assume access to sparse measurements of the ground-truth surface velocity field u ∈ RC×Nx×Ny ×T .Observations correspond to a sparse subset of spatial sensor locations on the Nx × Ny surface grid, while retaining the full temporal history and all C = 3 components at each observed location. In this work, sensor data are obtained from SEM simulations to avoid any distribution shift with the MIFNO training objective. Future work will investigate the use of real measurements to remove all dependency on the numerical solver once the MIFNO is trained. Let G := {1, . . . , N x} × { 1, . . . , N y } denote the spatial surface grid. Sparse measurements correspond to a subset S ⊂ G of |S| grid locations at which the wavefield is observed; at each observed location, the full temporal history and all C = 3 velocity components are recorded. The observed sensor density is 
+
+ρ := |S| /(NxNy ). In the following, we refer to regimes with very small ρ (e.g., ρ ≤ 5% ) as ultra-sparse . We write the associated linear restriction operator MS that extracts the entries of u at the locations in S. The measurement model is 
+
+y = MS (u) + ε, ε ∼ N  0, σ 2 
+
+> y
+
+I , (4) where y ∈ RC×|S|× T stacks the observed values over all components, sensor locations, and time steps, and 
+
+σy controls the measurement noise level. In the experiments we report here the temporal discretization is fixed (T = 320 ), and sparsity refers exclusively to the spatial sampling pattern. Details on how S is constructed across densities are given in Appendix G. The Gaussian likelihood used by diffusion posterior sampling is 
+
+log p(y | u) = − 12σ2
+
+> y
+
+MS (u) − y 22 + const , (5) so that gradients of the data term act only on the observed entries. This gradient reads: 
+
+∇u log p(y | u) = − 1
+
+σ2
+
+> y
+
+M†S
+
+
+
+MS (u) − y
+
+
+
+, (6) where M†S is the adjoint operator that places values at the observed locations and fills the remaining entries with zeros. 
+
+## 4 Methods 
+
+This section develops the posterior sampling framework in three steps: we first define the unconditional diffusion prior (Sec. 4.1), then introduce standard DPS conditioning on sparse measurements (Sec. 4.2), and finally derive the spectrally shaped neural operator guidance that is the main methodological contribution of this work (Sec. 4.3). A concluding subsection establishes an exact, distribution-free identity for the neural operator likelihood score and bounds the error of the moment-matched approximation (Sec. 4.4). Figure 1 provides an overview of the full pipeline. 5Preprint Observations & calibration 
+
+> precomputed, one-time
+
+Denoiser training  
+
+> on SEM ground truth wavefield u
+
+Inference: posterior sampling        
+
+> one reverse-diffusion step on ∇uτlog pτ(uτ|y,uNO )
+
+(1) (2) 
+
+(3) 
+
+> a
+
+xs, θs
+
+MIFNO Gϕ ^
+
+> uNO
+> predicted
+> wavefield
+
+Spectral calibration 
+
+H(k), σ 2NO (k), P u(k)   
+
+> from paired ( u,uNO )
+> y(observations)
+> u+ητ
+> uτ
+
+Denoiser Dθ     
+
+> ¯u0
+> L(θ) = Eu,τ, ητ
+> [w(τ)∥¯u0−u∥2]
+> ∇θL
+> uτ
+> noisy state
+
+(i) Prior score 
+
+¯u0 − uτ
+
+σ2
+
+> τ
+
+uses D⋆θ
+
+(ii) NO guidance closed-form 
+
+F−1( ˜Λτ (k) ⊙ r(k))
+
+uses uNO , H (k), σ 2NO (k), P u(k)
+
+(iii) Sensor guidance 
+
+− 1
+
+> σ2
+> y
+
+( ∂ ¯u0
+
+> ∂uτ
+
+)⊤
+
+M†S
+
+(MS ¯u0 − y)
+
+uses D⋆θ , y
+
+∑   
+
+> Euler u0
+> posterior sample
+> repeat for Nsteps = 64 steps
+
+Figure 1: Overview of FreqNO-DPS. Top-left (Observations & calibration): the frozen MIFNO surrogate 
+
+Gϕ predicts surface wavefields uNO from geology and source inputs; spectral statistics H(k), σ 2NO (k), P u(k)
+
+are estimated once from paired (u, uNO ); sparse observations y are obtained from a random sensor mask on the ground truth wavefield u. Top-right (Denoiser training): an unconditional denoiser Dθ is trained on SEM ground truth u under an EDM-weighted denoising objective, yielding the frozen checkpoint D⋆θ used at inference. Bottom (Inference): at each reverse-diffusion step the posterior score combines a Tweedie prior term, a closed-form spectrally shaped NO term, and a DPS sensor term (12) ; iterating Nsteps =64 Euler steps yields a posterior sample u0.6Preprint 
+
+4.1 Unconditional diffusion prior 
+
+We model the distribution of SEM simulations via an unconditional score-based diffusion model. Under the variance-exploding (VE) schedule [Song et al., 2020], the forward process progressively corrupts a sample 
+
+u ∼ p0 by additive Gaussian noise 
+
+uτ = u + ητ , ητ ∼ N (0, σ 2 
+
+> τ
+
+I), (7) indexed by a diffusion time τ ∈ [0 , K ] (distinct from the physical time axis of the wavefield denoted by t), with σ0 = 0 and σK = 80 large enough that pK ≈ N (0, σ 2 
+
+> K
+
+I).We train a denoiser Dθ (uτ , σ τ ) to predict the clean sample from its noisy counterpart by minimizing 
+
+Lprior (θ) = Eu, τ, ητ
+
+h
+
+w(τ ) Dθ (u + ητ , σ τ ) − u 22
+
+i
+
+, (8) with EDM-style weighting w(τ ) [Karras et al., 2022]. The denoised estimate ¯u0(uτ , τ ) := Dθ (uτ , σ τ ) ≈
+
+E[u | uτ ] provides, via Tweedie’s formula [Efron, 2011], an approximation of the score: 
+
+∇uτ log pτ (uτ ) ≈ ¯u0 − uτ
+
+σ2
+
+> τ
+
+. (9) The score is the only learned ingredient required to simulate the reverse-time ODE that generates new samples from p0.
+
+4.2 Diffusion posterior sampling with sparse measurements 
+
+Given sparse sensor observations y from the measurement model (4), we seek samples from the posterior: 
+
+p(u | y) ∝ pθ (u) p(y | u), (10) where pθ (u) is the unconditional diffusion prior learned in Sec. 4.1 and p(y | u) is the measurement likelihood. The posterior score at each diffusion time decomposes as 
+
+∇uτ log pτ (uτ | y) = ∇uτ log pτ (uτ ) + ∇uτ log p(y | uτ ), (11) so that posterior sampling augments the prior-driven reverse diffusion ( ∇uτ log pτ (uτ )) with a data-consistency drift ( ∇uτ log p(y | uτ )). Evaluating the likelihood score ∇uτ log p(y | uτ ) requires the noisy state likelihood 
+
+p(y | uτ ) = R p(y | u)p(u | uτ )du, since the measurement model (4) is defined for clean wavefields u only. The integral has no closed form because the conditional p(u | uτ ) depends on the data prior. DPS approximates it by collapsing p(u | uτ ) onto the denoised estimate ¯u0 as defined in (9) , yielding the approximate likelihood score: 
+
+∇uτ log p(y | uτ ) ≈ − 1
+
+σ2
+
+> y
+
+ ∂ ¯u0
+
+∂uτ
+
+⊤
+
+M†S
+
+
+
+MS (¯ u0) − y
+
+
+
+, (12) computed by automatic differentiation through the denoiser. The gradient acts only on the |S| observed sensor locations; in ultra-sparse regimes, this constrains only a small fraction of degrees of freedom, motivating the additional neural operator guidance introduced next. 
+
+4.3 Neural operator-guided posterior sampling Augmented posterior. To compensate for the information deficit of DPS, we leverage the pretrained MIFNO of Sec. 3.2 by treating its frozen prediction uNO as an auxiliary observation of the clean wavefield 
+
+u. The problem is thus recast as inference of the augmented posterior p(u | y, uNO ), in which the sparse measurements act as the primary truth anchor while uNO provides a global inductive bias across the entire domain, including the locations unconstrained by sensors. It is natural to assume conditional independence given the clean wavefield: 
+
+p(y, uNO | u) = p(y | u) p(uNO | u) (13) since MIFNO predictions and extraction of sensor measurements are conditionally independent given the clean wavefield. To see this, let ξ = ( a, xs, θs) denote the geological and source parameters. The measurement 
+
+y = MS (u) + ε depends on u and on the instrument noise ε, while the surrogate prediction uNO = Gϕ(ξ)
+
+depends on ξ alone. Conditioning on u, the residual randomness in y is entirely ε, and the residual randomness in uNO is which ξ generated u (the inverse problem may admit multiple solutions). Since ε is independent of ξ by construction, the two channels carry no information about each other once u is given. A formal marginalization argument is provided in Appendix A.1. 7Preprint 
+
+Conditional independence given the clean wavefield does not, in general, transfer to the noisy state uτ : residual uncertainty about u at diffusion time τ couples the two observation channels through the prior. We adopt the modeling choice of factorizing the noisy state likelihood as 
+
+p(y, uNO | uτ ) ≈ p(y | uτ ) p(uNO | uτ ), (14) Under the standard DPS delta-mass collapse p(u | uτ ) ≈ δ(u − ¯u0), the factorization is exact, so the assumption made here is no stronger than DPS’s. A formal derivation, together with the exact joint score from which (14) departs, is given in Appendix A.3. Applying Bayes’ rule together with the Markov structure of the forward diffusion, the posterior score at each diffusion time admits the decomposition 
+
+∇uτ log pτ (uτ | y, uNO ) = ∇uτ log pτ (uτ )
+
+| {z }
+
+> prior
+
++ ∇uτ log p(y | uτ )
+
+| {z }
+
+> sensor
+
++ ∇uτ log p(uNO | uτ )
+
+| {z }
+
+> NO
+
+. (15) where the equality is exact under (14). The prior score is given by the pretrained denoiser through Tweedie’s formula (9) , while the sensor score coincides with the standard DPS expression (12) . The remainder of this section is devoted to the NO term ∇uτ log p(uNO | uτ ) for which we derive a closed-form spectral expression that accounts for the mode-dependent accuracy of the NO prediction. 
+
+Spectral observation model. Neural operators exhibit spectral bias : low-frequency content is reproduced more accurately than high-frequency modes, which are systematically attenuated or not captured. A model of the surrogate error with uniform power spectral density (white noise) is therefore structurally inadequate, since the surrogate error is concentrated at high frequencies. We instead model the NO prediction in the Fourier domain. The model that follows uses only the second-order statistics of paired (u, uNO ) data; we make no assumption on the distributional form of the clean signal or the surrogate residual, and no problem-specific physics enters the guidance term beyond what is contained in these statistics. Let F denote the unitary Fourier transform applied jointly over (Nx, N y , T ) per channel, with modes indexed by k = ( kx, k y , k t). At each mode and channel we decompose 
+
+F(uNO )( k) = H(k) F(u)( k) + ˆ ηNO (k), (16) where H(k) ∈ R is a deterministic mode-dependent transfer function and ˆηNO (k) is a zero-mean random residual with mode-dependent variance σ2NO (k) ∈ R>0; both H(k) and σ2NO (k) are parameters of the model, estimated from paired data as described below. H(k) is specifically the LMMSE regression coefficient of 
+
+F(uNO )( k) on F(u)( k), i.e. the value minimizing E|F (uNO )( k) − H(k) F(u)( k)|2. Concretely, H(k) is computed from paired data as the cross-spectral ratio 
+
+H(k) = Re N −1 PNn=1 F(uNO (n))( k) F(u(n))( k)
+
+Pu(k) , (17) where the real-part reduction is justified empirically (Appendix B.5). By construction (see Appendix B.3 for further details), the residual ˆηNO (k) is then orthogonal to F(u)( k):
+
+E[ˆ ηNO (k)] = 0 , E
+
+h
+
+ˆηNO (k) F(u)( k)
+
+i
+
+= 0 , E|ˆηNO (k)|2 = σ2NO (k). (18) The transfer function H thus absorbs all systematic, second-order linear structure of the NO error at mode 
+
+k, so that the residual ˆηNO carries no linear predictability from the clean signal. One expects |H(k)| ≈ 1
+
+at low frequencies and |H(k)| ≪ 1 in the spectral-bias regime. We assume the real-space residual field 
+
+ηNO (x, y, t ) is wide-sense stationary (WSS) in (x, y, t ): its mean is constant in (x, y, t ) and its autocovariance 
+
+E[ηNO (x, y, t ) ηNO (x + ∆ x, y + ∆ y, t + ∆ t)] depends only on the spatio-temporal lag (∆ x, ∆y, ∆t), not on the absolute position (x, y, t ). The expectations are taken over the training ensemble of geologies and source locations, and the approximation is supported by the shift-invariant structure of the FNO’s spectral truncation error. By the Wiener–Khinchin theorem, WSS implies that the residual covariance is diagonal in the Fourier basis with entries σ2NO (k) ∈ R>0. This diagonality is a verifiable property of the surrogate: we confirm it for the MIFNO via an off-diagonal cross-spectral coherence diagnostic, and the same diagnostic serves as a prerequisite check for applying the method to any new surrogate (Appendix B.6). The three mode-dependent quantities, H(k), σ2NO (k), and the ensemble-averaged signal power spectrum Pu(k) := 
+
+N −1 PNn=1 |F (u(n))( k)|2, are estimated from paired ground-truth/MIFNO data on a held-out calibration split and frozen as lookup tables at inference time. Explicit estimator formulas and empirical validation of the spectral model are given in Appendix B. 8Preprint 0.0 0.2 0.4 0.6 0.8      
+
+> k
+> 10 13
+> 10 10
+> 10 7
+> 10 4
+> 10 1
+> 10 2
+> [|score| 2]
+
+Expected NO guidance magnitude (E W) 
+
+> Spectrally shaped (ours)
+> Isotropic DPS
+> = 0.002
+> = 0.01
+> = 0.1
+> = 1.0
+> = 10.0
+> = 80.0
+
+Figure 2: Expected NO guidance magnitude at six noise levels across the diffusion schedule (E–W component). Solid: spectrally shaped guidance, with calibrated H(k), σ2NO (k), and LMMSE Wiener filter. Dashed: isotropic DPS guidance ( H = 1 , σ2NO = σ2NO ,iso ), frequency-independent at each noise level. At low ∥k∥ both are comparable; at high ∥k∥ the spectrally shaped guidance is suppressed by several orders of magnitude. The oscillations and subsequent flattening at high ∥k∥ reflect the 5 Hz low pass filtering of the data, where the signal power reaches numerical floor and the per-mode ratio is no longer meaningful; this does not affect sampling, since the guidance there is non-negligible only at low στ , by which point the reconstruction is already essentially complete. 
+
+Spectrally shaped diffusion posterior via LMMSE. Evaluating the NO likelihood at the noisy state uτ
+
+requires the marginal p(uNO | uτ ), obtained by integrating out the unknown clean state: p(uNO | uτ ) = R p(uNO | u) p(u | uτ ) du. Standard DPS collapses p(u | uτ ) onto a delta mass at ¯u0, which assigns a residual uncertainty of σ2 
+
+> τ
+
+per spatial degree of freedom. Since F is unitary, this isotropic spatial variance maps to a uniform variance σ2 
+
+> τ
+
+at every Fourier mode, a poor approximation for wavefields whose power spectrum spans orders of magnitude: it places the strongest NO guidance at high frequencies, precisely where the NO is least informative. We correct this by replacing the isotropic approximation with the linear minimum mean squared error (LMMSE) estimator of the clean Fourier coefficient X(k) := F(u)( k) from the noisy one Y (k) := F(uτ )( k) = 
+
+X(k) + ˆ ητ (k) with ˆητ (k) ∼ CN (0 , σ 2 
+
+> τ
+
+). The derivation requires only the first two moments of X: zero mean (from z-score normalization of the training data) and variance Pu(k); no distributional assumption on 
+
+X is made. The LMMSE estimate is ˆXL(k) := α(k) Y (k), where α(k) is the Wiener filter coefficient that optimally shrinks the noisy observation toward zero (the prior mean), and σ2
+
+> L
+
+(k) is the mean squared error of this estimate: 
+
+α(k) = Pu(k)
+
+σ2 
+
+> τ
+
++ Pu(k) , σ2
+
+> L
+
+(k) = σ2 
+
+> τ
+
+Pu(k)
+
+σ2 
+
+> τ
+
++ Pu(k) = σ2 
+
+> τ
+
+α(k). (19) The LMMSE error satisfies σ2
+
+> L
+
+(k) ≤ min  Pu(k), σ 2
+
+> τ
+
+: at low frequencies α(k) → 1 and the standard DPS posterior is recovered, while at high frequencies the posterior uncertainty is correctly bounded by the signal power rather than the diffusion noise level (full derivation in Appendix C). 
+
+Isotropic vs. spectrally shaped guidance. Figure 2 shows the expected per-mode NO guidance magnitude, comparing the spectrally shaped score to the isotropic DPS guidance across six noise levels. Under the isotropic baseline ( H(k) = 1 , σ2NO (k) = σ2NO ,iso , α(k) = 1 ), the expected guidance magnitude reduces to the frequency-independent scalar 4/(σ2NO ,iso + σ2 
+
+> τ
+
+), which assigns equal weight to every mode at each noise level. The spectrally shaped guidance tracks the isotropic level at low ∥k∥, where the surrogate is accurate, and is progressively suppressed at high ∥k∥, where the surrogate is unreliable, the two differing by several orders of magnitude at high diffusion times. The upturn of the low-noise curves ( στ ≤ 0.01 ) at high ∥k∥ is an edge effect at vanishing noise and does not affect the reverse trajectory (Appendix B.5). 9Preprint 
+
+Closed-form marginal likelihood for the NO term. Evaluating the NO score in (15) requires the marginal 
+
+p(uNO | uτ ), obtained by integrating out the unknown clean state. Recalling that X(k) = F(u)( k), Y (k) = 
+
+F(uτ )( k) and introducing Z(k) = F(uNO )( k), we compute the conditional mean and variance of Z(k)
+
+given Y (k) by propagating the LMMSE posterior through the per-mode spectral decomposition (16) . Since 
+
+Z(k) = H(k)X(k) + ˆ ηNO (k), with ˆηNO (k) uncorrelated with X(k) (by LMMSE definition of H) and independent of ˆητ , standard second-order calculations give 
+
+EL[Z(k) | Y (k)] = H(k) α(k) Y (k), (20) 
+
+λτ (k) := E|Z(k) − EL[Z(k) | Y (k)] |2 = |H(k)|2 σ2
+
+> L
+
+(k) + σ2NO (k). (21) Both moments are exact : they follow from independence and second-order statistics alone, with no distribu-tional assumption on X. We approximate the full marginal by the complex normal distribution matching these moments: 
+
+p(F(uNO )( k) | uτ ) ≈ CN (H(k) α(k) F(uτ )( k), λτ (k)) , (22) with the joint distribution factorizing as a product of scalar complex Gaussians over all modes and channels. 
+
+NO likelihood score. Since the marginal mean in (22) is linear in uτ in the Fourier domain, the likelihood score admits a closed-form expression requiring no backpropagation through the denoiser. Defining the spectral residual r(k) := F(uNO )( k) − H(k) α(k) F(uτ )( k), the score is 
+
+∇uτ log p(uNO | uτ ) = F−1˜λτ ⊙ r
+
+
+
+, (23) with the spectral weighting filter 
+
+˜λτ (k) := 2 H(k) α(k)
+
+λτ (k) = 2 H(k) Pu(k)(σ2 
+
+> τ
+
++ Pu(k)) σ2NO (k) + σ2 
+
+> τ
+
+|H(k)|2 Pu(k) . (24) This is the LMMSE approximation of an exact, distribution-free score identity that we establish below (Prop. 1). We note that Proposition 1 and the error analysis of Sec. 4.4 are stated in terms of the per-mode Wirtinger derivative ∇Y ∗ log p(Z | Y ) = H∗α r/λ τ , whereas the real-space gradient driving the sampler in (23) is 
+
+∇uτ = F−1 2 H∗α r/λ τ
+
+. The two differ by the global factor 2 arising from d|r|2 = 2 Re[¯ r dr ]; this constant is immaterial to the relative-error bounds and is in practice absorbed into a constant. The weight ˜λτ (k) is large at low frequencies, where the NO is faithful and the signal is strong, and vanishes at high frequencies through both the Wiener suppression α(k) → 0 in the numerator and the bounded posterior variance σ2
+
+> L
+
+(k) ≤ Pu(k) in the denominator. Evaluation requires only two fast Fourier transforms (FFTs) and elementwise operations with the precomputed quantities, making the cost negligible relative to the denoiser forward pass. The full gradient derivation is given in Appendix E. 
+
+Combined posterior score. Substituting the prior score (9) , the sensor score (12) , and the NO score (23) into (15), the full posterior score driving the reverse-time ODE is 
+
+∇uτ log pτ (uτ | y, uNO ) = ¯u0 − uτ
+
+σ2
+
+> τ
+
+| {z }
+
+> (i) prior
+
++ F−1˜λτ ⊙ r
+
+| {z }
+
+> (ii) NO guidance
+
+− 1
+
+σ2
+
+> y
+
+ ∂ ¯u0
+
+∂uτ
+
+⊤
+
+M†S (MS (¯ u0) − y)
+
+| {z }
+
+> (iii) sensor guidance
+
+. (25) The two guidance terms play complementary roles: the NO term operates in the Fourier domain with principled spectral weighting, supplying global structural information with τ -dependent annealing; the sensor term operates in the spatial domain through the denoiser Jacobian, enforcing sharp pointwise consistency at the observed locations. At each reverse-diffusion step, the computational cost comprises one denoiser forward pass (shared by terms (i) and (iii)), one vector-Jacobian product through the denoiser (term (iii)), and two FFTs with elementwise operations (term (ii), negligible). The full sampling procedure is detailed in Algorithm 1 (Appendix F). 
+
+4.4 Exact score identity and approximation error 
+
+In practice, the spectral NO score in (23) replaces the true marginal likelihood with a moment-matched Gaussian. To characterize the error introduced by this approximation, we first establish an exact expression for the NO likelihood score that holds without any distributional assumption. 10 Preprint 
+
+Proposition 1 (Exact NO likelihood score) . At each Fourier mode k, let X = F(u)( k), Y = F(uτ )( k), and 
+
+Z = F(uNO )( k) under the per-mode models Y = X + ˆ ητ and Z = HX + ˆ ηNO , with ˆηNO zero-mean with variance σ2NO but otherwise unrestricted. Then: 
+
+∇Y ∗ log p(Z | Y ) = E[X | Y, Z ] − E[X | Y ]
+
+σ2
+
+> τ
+
+. (26) The proof proceeds by differentiating the marginal p(Z | Y ) = R p(Z | X) p(X | Y ) dX with respect to Y ∗,applying Bayes’ rule to identify p(X | Y, Z ) in the resulting integral, and recognizing the Tweedie score of the diffusion channel; the full derivation is given in Appendix D.2. The identity has a clear interpretation: the NO likelihood score measures how much the optimal estimate of the clean Fourier coefficient X shifts when we additionally condition on the surrogate observation Z, normalized by the diffusion noise variance. Where Z is uninformative given Y , the shift vanishes and the score is zero; where Z provides strong additional information, the shift is large and the score steers the reverse diffusion accordingly. 
+
+Score error under the Gaussian approximation. Our score formulation (23) replaces both conditional expectations in (26) with their LMMSE counterparts: E[X | Y ] ≈ αY and E[X | Y, Z ] ≈ αY +( H∗σ2
+
+> L
+
+/λ τ ) r.The resulting score decomposes as 
+
+ϵ = 1
+
+σ2
+
+> τ
+
+h E[X | Y, Z ] − EL[X | Y, Z ]| {z }
+
+> δpost
+
+−  E[X | Y ] − αY | {z }
+
+> δprior
+
+i
+
+, (27) where both δprior and δpost are MMSE-LMMSE gaps: the difference between the optimal nonlinear estimator and the optimal linear estimator of X. If X were Gaussian and ˆηNO were Gaussian, both gaps would vanish identically and the approximation would be exact. The score error is therefore driven entirely by the non-Gaussianity of the clean Fourier coefficients and the NO residual. By the Pythagorean property of MMSE estimation, the mean-squared gaps are bounded by the corresponding LMMSE errors 
+
+E[|δprior |2] ≤ σ2 
+
+> L
+
+; E[|δpost |2] ≤ σ2 
+
+> L,Y Z
+
+(28) both computable from the calibrated second-order statistics alone (Appendix D.3). These bounds are 
+
+distribution-agnostic : they require no assumption on the form of p(X) or p(ˆ ηNO ) beyond the calibrated moments H(k), σ2NO (k), and Pu(k).
+
+## 5 Results 
+
+We evaluate the spectral guidance framework on three-dimensional elastic wavefield prediction from the HEMEW S-3D database, providing ablation studies of the components in our method. 
+
+5.1 Experimental setup 
+
+We evaluate all methods on a held-out test set of N = 1 ,000 SEM simulations drawn from the HEMEW S-3D database (Sec. 3.1), with geologies and source configurations unseen during training. The HEMEW S-3D database is partitioned into three disjoint splits: 27 ,000 samples for training the diffusion prior, 2,000 for the spectral calibration and hyperparameter selection, and 1,000 samples for all reported test metrics. For each test sample, sparse observations are generated by selecting a random subset of the 32 × 32 surface grid uniformly at random; the same spatial mask is applied to all three velocity components and retained across all time steps. We report results at sensor densities ρ = 5% (|S| = 51 ) and ρ = 2% (|S| = 20 ). Posterior samples are generated by solving the probability-flow ODE [Karras et al., 2022] with 64 steps using the explicit Euler integrator. Five configurations are compared, summarized in Table 1: • MIFNO is the frozen deterministic surrogate (Sec. 3.2), using no diffusion and no sensor data. • DPS applies standard diffusion posterior sampling (12) conditioned on sparse measurements alone. • DPS + NO (iso) adds neural-operator guidance with isotropic treatment ( H(k) = 1 , σ2NO (k) = 
+
+σ2NO ,iso ), routing both terms through the denoiser Jacobian. 11 Preprint 
+
+Table 1: Quantitative comparison across sensor densities and ablations. MIFNO is sensor-independent; all other methods use the same unconditional diffusion prior. DPS + NO (iso) treats the surrogate isotropically; FreqNO-DPS ( α = 1 ) uses the calibrated spectral model but disables the LMMSE Wiener filter; FreqNO-DPS is the full method. Mean ± std over 1,000 test samples. rMAE ↓ rRMSE ↓ rFFT low → 0 rFFT mid → 0 rFFT high → 0 SD 5–95 ↓                                                                                                                                                                          
+
+> Sensor-independent
+> MIFNO 0.133 ±0.052 0.224 ±0.085 −0.075 ±0.173 −0.137 ±0.180 −0.239 ±0.207 0.581 ±0.356
+> ρ= 5% (|S| = 51 )
+> DPS 0.113 ±0.050 0.217 ±0.082 −0.088 ±0.093 −0.163 ±0.122 −0.232 ±0.124 0.148 ±0.160
+> DPS + NO (iso) 0.099 ±0.043 0.180 ±0.071 −0.060 ±0.102 −0.117 ±0.125 −0.210 ±0.156 0.225 ±0.165
+> FreqNO-DPS ( α= 1 )0.110 ±0.046 0.223 ±0.085 −0.001 ±0.052 −0.048 ±0.068 −0.066 ±0.111 0.097 ±0.076
+> FreqNO-DPS 0.100 ±0.045 0.200 ±0.084 0.009 ±0.036 −0.015 ±0.054 0.002 ±0.097 0.118 ±0.082
+> ρ= 2% (|S| = 20 )
+> DPS 0.168 ±0.053 0.280 ±0.070 −0.418 ±0.147 −0.506 ±0.134 −0.557 ±0.121 0.617 ±0.355
+> DPS + NO (iso) 0.119 ±0.047 0.203 ±0.075 −0.090 ±0.141 −0.153 ±0.160 −0.253 ±0.186 0.350 ±0.276
+> FreqNO-DPS ( α= 1 )0.132 ±0.053 0.232 ±0.083 −0.118 ±0.106 −0.192 ±0.126 −0.250 ±0.156 0.150 ±0.127
+> FreqNO-DPS 0.125 ±0.050 0.235 ±0.083 0.011 ±0.087 −0.006 ±0.120 0.047 ±0.191 0.286 ±0.157
+
+• FreqNO-DPS ( α = 1 ) uses the calibrated spectral observation model ( H(k), σ2NO (k)) but disables the LMMSE Wiener filter ( α(k) = 1 ). • FreqNO-DPS is the full spectrally shaped method (25) , with calibrated H(k), σ2NO (k), and LMMSE Wiener filter α(k).All diffusion-based methods share the same unconditional prior and sampling configuration. Reconstruction quality is assessed through different metrics. Pointwise accuracy is measured by the relative mean absolute error (rMAE) and relative root mean squared error (rRMSE), computed per sensor location over the temporal axis and averaged over all locations, components, and samples. Spectral fidelity is measured by the banded relative FFT bias (rFFT) in three frequency ranges, low ( 0–1 Hz), mid ( 1–2 Hz), and high ( 2–5 Hz), where negative values indicate systematic spectral underestimation and zero indicates unbiased reproduction. We additionally report the significant-duration error SD 5–95 , which captures mismatches in the temporal energy distribution. Full metric definitions are given in Appendix G. 
+
+5.2 Quantitative comparison Sensor-only DPS fails spectrally. At ρ = 5% , DPS provides essentially no spectral improvement over the deterministic surrogate: rFFT high is −0.232 compared to MIFNO’s −0.239 . Despite access to ground-truth observations at 51 locations, the likelihood gradient constrains too few spatial degrees of freedom to steer the diffusion prior toward the correct high-frequency content. The failure is far more severe at ρ = 2% , where DPS degrades below the surrogate on all metrics (rMAE of 0.168 vs. 0.133 ; rFFT high of −0.557 ), losing over half the high-frequency spectral content. With only 20 sensors constraining 1,024 spatial locations, the sparse likelihood becomes too weak to guide the reverse diffusion. 
+
+Isotropic NO guidance reimports spectral bias. DPS + NO (iso), which treats the surrogate prediction as an isotropic Gaussian observation, demonstrates that the surrogate’s structural information is genuinely useful: at ρ = 5% it substantially improves pointwise accuracy over sensor-only DPS (rMAE of 0.099 vs. 
+
+0.113 ; rRMSE of 0.180 vs. 0.217 ), and at ρ = 2% it recovers from the collapse of sensor-only DPS (rMAE of 
+
+0.119 vs. 0.168 ). However, uniform spectral weighting carries the surrogate’s bias into the posterior nearly intact: rFFT high is −0.210 at ρ = 5% and −0.253 at ρ = 2% , barely improved from MIFNO’s −0.239 . This confirms that without spectrally shaped calibration, NO guidance does reimpose spectral bias at both sensor densities. 
+
+Spectral shaping resolves the trade-off. FreqNO-DPS achieves near-zero spectral bias at both sensor densities: rFFT high of +0 .002 at ρ = 5% and +0 .047 at ρ = 2% . At ρ = 5% this is two orders of magnitude smaller in absolute value than DPS + NO (iso) ( +0 .002 vs. −0.210 ); at ρ = 2% it is roughly 
+
+5× smaller ( +0 .047 vs. −0.253 ). At ρ = 5% , this spectral correction comes at no pointwise cost: rMAE matches DPS + NO (iso) within one standard error of the mean ( 0.100 vs. 0.099 ; standard error ≈ 0.0014 at 12 Preprint 
+
+Table 2: Posterior stability and calibration at ρ = 5% under SDE sampling ( M = 20 realizations, 100 test samples). Coverage : fraction of ground-truth values within the pointwise ±2ˆ σ interval across realizations (nominal 0.954 ); bold marks the value closest to nominal. CI width : mean pointwise interval width 4ˆ σ
+
+normalized by the per-sample trace amplitude. Posterior std : mean across-realization standard deviation in z-score normalized space. rMAE : mean ± std across the M realizations. CI width, posterior std, and rMAE are reported without a best-direction highlight, as smaller interval widths are only desirable when coverage is maintained.                            
+
+> Coverage CI width Posterior std rMAE DPS 0.842 0.022 1.6×10 −30.134 ±0.009
+> DPS + NO (iso) 0.769 0.015 1.1×10 −30.110 ±0.004
+> FreqNO-DPS 0.854 0.018 1.4×10 −30.112 ±0.001
+
+N = 1 ,000 ), so the two methods are statistically indistinguishable on pointwise accuracy while differing by two orders of magnitude on spectral fidelity. At ρ = 2% , the spectral correction incurs a modest pointwise cost (rMAE 0.125 vs. 0.119 , ≈ 5% relative; statistically significant at N = 1 ,000 ), reflecting the stronger regularization required when sensor anchoring is weakest. The spectrally calibrated guidance channels the surrogate’s information at frequencies where it is reliable ( |H(k)| ≈ 1, γ(k) ≪ 1) and vanishes where it is not, so that the diffusion prior is free to generate high-frequency detail uncorrupted by the surrogate’s bias. A sensitivity analysis over two orders of magnitude of λNO (Appendix H) confirms that the calibrated value sits at the natural zero-crossing of the spectral correction, with pointwise accuracy essentially flat across a 20 ×
+
+range of λNO around it. 
+
+LMMSE provides the final spectral correction. The FreqNO-DPS ( α = 1 ) ablation retains the calibrated spectral model, H(k) and σ2NO (k), but replaces the LMMSE Wiener filter with the isotropic posterior approximation ( α(k) = 1 ). At ρ = 5% , this alone brings rFFT high from −0.210 (DPS + NO (iso)) to −0.066 :the frequency-dependent observation model accounts for most of the spectral correction. The LMMSE layer pushes rFFT high to +0 .002 , eliminating the residual bias. At ρ = 2% , however, the α = 1 ablation shows rFFT high of −0.250 , nearly identical to DPS + NO (iso), indicating that the spectral observation model alone is insufficient at extreme sparsity and the LMMSE correction becomes essential to achieve the full spectral correction (rFFT high of +0 .047 ). 
+
+5.3 Posterior stability and calibration 
+
+The main reconstruction results in Section 5.2 are generated with the probability-flow ODE, which is the effi-cient choice for point-estimate evaluation. For calibration analysis, however, an ODE sampler is inappropriate: the integrator is deterministic given the initial noise and produces an artificially narrow empirical distribution that underestimates posterior uncertainty. We therefore switch to an SDE sampler for the experiments in this section, which preserves stochasticity throughout the reverse trajectory. We generate M = 20 posterior samples for 100 test cases at ρ = 5% , each sharing the same sensor mask and MIFNO prediction but initialized with independent noise draws. Table 2 compares FreqNO-DPS with sensor-only DPS and DPS + NO (iso) under SDE sampling. FreqNO-DPS exhibits the lowest inter-realization variability of the three methods: the rMAE standard deviation is 0.001 on a mean of 0.112 , a coefficient of variation of roughly 1% . Sensor-only DPS is more than five times more variable (rMAE std of 0.009 on a mean of 0.134 ; CoV ≈ 7.5% ), and DPS + NO (iso) sits in between (std of 0.004 , CoV ≈ 4% ). The spectrally calibrated guidance therefore not only improves the spectral profile of individual reconstructions (Table 1) but also stabilizes the reconstruction trajectory across stochastic initializations. The gap between methods remains the dominant source of variation: under SDE sampling (Table 2), the rMAE difference between sensor-only DPS and FreqNO-DPS ( 0.134 vs. 0.112 , a gap of 0.022 ) is more than 20 × the inter-realization spread of FreqNO-DPS ( 0.001 ). 
+
+Posterior concentration. FreqNO-DPS achieves the highest empirical coverage of the three methods ( 85 .4% 
+
+vs. 84 .2% for sensor-only DPS and 76 .9% for DPS + NO (iso)), while simultaneously producing narrower credible intervals than sensor-only DPS (CI width of 0.018 vs. 0.022 ). The combination is informative because coverage can be trivially inflated by widening the intervals. FreqNO-DPS instead achieves higher coverage with a tighter posterior, so the spectral guidance is producing a posterior that is both better calibrated and more concentrated than the alternatives. 13 Preprint 0                    
+
+> 2
+> 4
+> 6
+> 8
+> y (km)
+> Reference simulation DPS-NO iso ( = 5%) FreqNO-DPS ( = 5%)
+> 02468
+> x (km)
+> 0
+> 2
+> 4
+> 6
+> 8
+> y (km)
+> MIFNO
+> 02468
+> x (km)
+> DPS-NO iso ( = 2%)
+> 02468
+> x (km)
+> FreqNO-DPS ( = 2%)
+> 30
+> 20
+> 10
+> 0
+> 10
+> 20
+> 30
+> vE (cm/s)
+> 30
+> 20
+> 10
+> 0
+> 10
+> 20
+> 30
+> vE (cm/s)
+> Velocity at t= 2.32 s (E W component)
+
+Figure 3: East–west velocity at t = 2 .32 s for a representative test sample. Left column: sensor-independent references (top: SEM simulation, bottom: MIFNO surrogate). Middle column: DPS + NO (iso) at ρ = 5% 
+
+(top) and ρ = 2% (bottom). Right column: FreqNO-DPS at ρ = 5% (top) and ρ = 2% (bottom). Yellow star: source location; white triangles: sensor positions. DPS + NO (iso) shows the opposite pattern: it has the narrowest intervals (CI width 0.015 ) and the lowest posterior standard deviation, but also the worst coverage. The isotropic surrogate guidance pulls every spatiotemporal point toward the MIFNO prediction, contracting the empirical distribution around a biased mean and leaving more ground-truth values outside the ±2ˆ σ band. This mirrors the spectral-bias finding from Section 5.2: uniform spectral weighting carries the surrogate’s deficiencies into the posterior, here manifesting as miscalibration rather than as attenuated frequencies. 
+
+Residual gap to nominal coverage. All three methods fall below the nominal 95% coverage of a correctly calibrated ±2ˆ σ band. The residual gap of roughly 10 percentage points for FreqNO-DPS is consistent across nominal levels: the 1σ coverage is 58 .2% versus nominal 68 .3% , a gap of 10 .1 points nearly identical to the 2σ gap. This consistency suggests a uniform underdispersion of the credible intervals rather than a tail-specific miscalibration, compatible with the moment-matching Gaussian approximation in the NO likelihood (Section 4.3) being mildly too light-tailed at all scales. Closing this gap would require either a refined moment model that captures the heavy-tailed behaviour of the underlying distribution, larger ensembles for tail estimation, or both; we leave a systematic study of calibrated credible intervals to future work. 
+
+5.4 Wavefield reconstruction quality 
+
+Figure 3 shows velocity maps for a representative test sample at ρ = 5% . The MIFNO prediction reproduces the large-scale wavefront geometry but exhibits the characteristic oversmoothing induced by spectral bias, with attenuated amplitudes and blurred wavefronts. DPS-NO (iso) alone recovers the overall structure of the field but lacks spectral consistency. The FreqNO-DPS combines the global structural prior from the calibrated neural operator with the local truth anchoring from the sensors, producing reconstructions that are visually closest to the ground truth across the entire spatial domain. Figure 4 compares the vertical velocity time histories at the sensor recording the highest peak ground velocity. The MIFNO trace captures the dominant arrival but underestimates peak amplitudes and lacks small-amplitude oscillations. The FreqNO-DPS tracks the ground-truth waveform more closely in both phase and amplitude. 14 Preprint 0 1 2 3 4 5 6Time (s) 64202468       
+
+> vZ (cm/s) Reference simulation MIFNO Full method
+> 01234567
+
+Frequency (Hz) 10 210 110 010 110 2Amplitude 
+
+> Reference simulation MIFNO Full method 5 7 Hz
+> FreqNO-DPS FreqNO-DPS
+
+Figure 4: Vertical component velocity time histories at a sensor location ( ρ = 5% ) and the corresponding spectrum. Black dashed: reference simulation; red: MIFNO; blue FreqNO-DPS. 0 1 2 3 4 5
+
+Frequency (Hz)  
+
+> 10 0
+> Mean spectral amplitude  Reference
+> MIFNO
+> FreqNO-DPS ( = 1)
+> DPS + NO (iso)
+> FreqNO-DPS
+
+Figure 5: Ensemble-averaged frequency spectrum at ρ = 5% . For each method, |F (u)( f )| is computed per spatial location along the temporal axis and averaged over all locations, velocity components, and 1,000 
+
+test samples. Black dashed: reference simulation; red: MIFNO; green: DPS + NO (iso); orange: FreqNO-DPS ( α = 1 ); blue: FreqNO-DPS. Shaded bands correspond to the low, mid, and high rFFT ranges in Table 1. Figure 5 shows the ensemble-averaged frequency spectrum at ρ = 5% , computed along the temporal axis at each spatial location and averaged over all locations, components, and 1,000 test samples. MIFNO and DPS + NO (iso) both attenuate spectral content above ∼1 Hz, with their curves peeling away from the reference at progressively higher frequencies. FreqNO-DPS ( α = 1 ) partially recovers high-frequency content but still underestimates the overall spectrum. FreqNO-DPS tracks the reference spectrum across the full frequency range, consistent with the near-zero rFFT values in Table 1. 
+
+## 6 Discussion 
+
+The experiments of Section 5 show that spectral shaping is what separates effective neural operator guidance from a faithful reimport of the surrogate’s bias. We now examine why the moment-matched approximation underlying that guidance is well-behaved, and delineate the conditions under which the approach applies. Section 6.1 characterizes the approximation error of the spectral NO score across the wavenumber–diffusion-time plane, building on the exact score identity and distribution-free bounds established in Section 4.4; Section 6.2 discusses the scope of the spectral observation model, calibration under distribution shift, and sampling cost. 
+
+6.1 Regime analysis 
+
+We write sapprox for the moment-matched NO score (23) and ϵ := sexact − sapprox (27) for its error; the regime statements below concern their expected squared magnitudes E[|sapprox |2] and E[|ϵ|2], tabulated in Table 3. These bounds depend on the diffusion noise level στ and the mode-dependent NO accuracy through 15 Preprint                                    
+
+> Regime Condition E[|ϵ|2]E[|ϵ|2]
+> E[|sapprox |2]Mechanism
+> Iν≫1O(ν−2)O(1) Score & error vanish II ν≪1,ζ≪1O(1 /(P ν )) O(γ/ν )Profile preserved III ν≪1,ζ≫1O(1 /(P ν )) O(1) NO precision IV ν∼1O(1 /P )O(1) Transient
+
+Table 3: Scaling of the score error ϵ across the four identified regimes. All bounds are distribution-free, requiring only the calibrated second-order statistics. two dimensionless parameters: the inverse per-mode diffusion SNR ν(k, τ ) := σ2 
+
+> τ
+
+/P u(k) and the relative NO error γ(k) := σ2NO (k)/(|H(k)|2Pu(k)) . A third quantity, the smoothing ratio ζ(k, τ ) := |H|2σ2
+
+> L
+
+/σ 2NO =
+
+ν/ [γ(1 + ν)] , controls the relative contribution of the marginalization uncertainty to the innovation variance. Note that ν and ζ depend on both the wavenumber k and the diffusion time τ , while γ depends on k alone; we suppress these arguments hereafter for readability. Together, ν and γ partition the wavenumber–diffusion-noise plane into four regimes (Fig. 6, Table 3), in each of which the score error is controlled by the calibrated second-order statistics alone. The detailed per-regime derivations, including all asymptotic expansions, are provided in Appendix D.4. 
+
+Regime I ( ν ≫ 1): noise-dominated. This arises at early diffusion times or for high-frequency modes where the spectral amplitude is smaller than the diffusion noise, i.e., Pu(k) ≪ σ2 
+
+> τ
+
+. Both E[|sapprox |2] and 
+
+E[|ϵ|2] are O(ν−2) and vanish: the reverse diffusion is driven entirely by the unconditional prior. 
+
+Regime II ( ν ≪ 1, ζ ≪ 1): active guidance, spectral shape preserved. This is the operating regime where the NO guidance is the strongest. The absolute score-error bound is finite, but the relative bound O(γ/ν ) is not controlled by the analysis alone. The triangle inequality applied to (27) discards the partial cancellation between δpost and δprior that arises when the surrogate observation adds little information about the clean Fourier coefficient beyond what the noisy diffusion state already provides. The spectral weighting filter ˜λτ (k)
+
+that sets how strongly the guidance acts at each frequency is still distribution-agnostic in shape: its variation across wavenumbers is determined by the calibrated quantities H(k), σ2NO (k), and Pu(k), and non-Gaussianity can only rescale how much guidance each mode receives, not shift guidance from one frequency to another. Any such rescaling is absorbed into the empirical hyperparameter λNO . This prediction is verified empirically in Appendix H: pointwise accuracy is essentially flat over a 20 × range of λNO , consistent with a scalar-only rescaling of the per-mode score magnitudes. 
+
+Regime III ( ν ≪ 1, ζ ≫ 1): NO very precise. This requires γ ≪ ν ≪ 1: the surrogate is extremely accurate at this mode. The posterior gap is bounded by δpost ≤ γP u, independent of στ , and the relative score error is bounded by a constant ( ≤ 2γ/ν + 2 ). One cannot enter Regime III without simultaneously providing the bound that controls the error. 
+
+Regime IV ( ν ∼ 1): crossover. All quantities are finite and the distribution-agnostic bounds yield com-putable constants depending on γ and |H|2. No singularity occurs at the transition boundary. Remarkably, the Gaussian moment-matching approximation is benign in all four regimes: where the guidance matters (Regimes II and III), the spectral profile of ˜λτ (k) is preserved regardless of distributional assumptions, and where the approximation error is least controlled in relative terms (Regime II), the residual is absorbed by a single scalar hyperparameter. 
+
+6.2 Limitations and future work Out-of-distribution calibration. The spectral quantities H(k), σ2NO (k), and Pu(k) are estimated from a held-out split that shares the same geological and source distributions as the training data. Out-of-distribution geological structures could shift the γ(k) = 1 crossover that separates guidance-active from guidance-suppressed frequencies, degrading the spectral calibration precisely in the Regime II–III transition where the guidance is most consequential. The sensor term provides a partial safeguard by anchoring the reconstruction at observed locations, but it cannot compensate for systematic miscalibration of the spectral model in unobserved 16 Preprint ζ = 1 ⇔ στ = σN O (k)
+
+> |H(k)|
+
+Wavenumber ∥k∥  
+
+> Diffusion noise  στ (log scale)
+> 0.002
+> 0.01
+> 0.1
+> 1
+> 10
+> 80
+> ∥k∥∗:γ(k∗) = 1
+
+# Iν ≫ 1Score and error O(ν−2)
+
+# IV ν = 1 ⇔ στ = √Pu(k)Bounded crossover 
+
+# III     
+
+> γ≪ν≪1NO precision
+
+# II                 
+
+> ν≪1, ζ ≪1Profile preserved
+> ˜Λτ(k)large ˜Λτ(k)→0
+> NO guidance ( γ < 1) Sensors + prior ( γ > 1) Prior only ( ν≫1)
+
+Figure 6: Regime decomposition of the wavenumber–diffusion-noise plane. The Gaussian moment-matching approximation is partitioned into four regimes by three boundaries derived from the calibrated spectral quantities: ν = 1 ⇔ στ = pPu(k), ζ = 1 ⇔ στ = σNO (k)/|H(k)|, and γ(k∗) = 1 , marking the wavenumber above which the surrogate residual dominates the signal and the spectral weight ˜λτ (k) tends to 0. Scaling of the score errors across regimes is summarized in Table 3; see Sec. 6.1 for the per-regime analysis. regions. Monitoring the spectral residual statistics at test time and flagging samples whose empirical γ(k)
+
+profile deviates from the calibration tables is a natural diagnostic that we leave to future work. 
+
+Scope of the spectral observation model. The spectral calibration requires the surrogate residual is approximately wide-sense stationary in the Fourier basis, characterized by mode-dependent variance σ2NO (k)
+
+and a real-valued transfer function H(k). This structure is empirically well-justified for the FNO family surrogate used here (Appendix B.5), where the dominant error mechanism, spectral truncation, is a shift-invariant global filter by construction. Surrogates with qualitatively different error structure (e.g., transformer-based operators with localized attention errors, or graph-based operators on irregular meshes) may require a different observation model. The same LMMSE framework applies whenever an approximately diagonal residual covariance can be estimated, but verifying this assumption for a new surrogate is a prerequisite to using the calibrated guidance. 
+
+Sampling cost. Iterative diffusion sampling is substantially slower than a single surrogate forward pass: generating one posterior sample requires 64 sequential denoiser evaluations, each involving a forward and backward pass through the network. The spectral NO score itself is negligible in cost (two FFTs per step), so the bottleneck is entirely the denoiser and the sensor-term VJP. For applications requiring real-time predictions, consistency distillation or few-step amortized samplers that reduce the number of denoiser calls are promising directions; the closed-form spectral score would transfer directly to any such accelerated sampler since it does not depend on the denoiser architecture. 17 Preprint 
+
+Synthetic sensor data. Most significantly for practical deployment, the current method uses sensor observa-tions generated from SEM simulations rather than physical instruments. In a real-world scenario, sensor data would introduce distribution shifts between the synthetic training distribution and the actual measurements that are not captured by the isotropic noise model ε ∼ N (0, σ 2 
+
+> y
+
+I). The present work establishes the method-ological foundation under controlled conditions; extending the framework to real sensor data, by incorporating structured observation noise models or domain adaptation from synthetic to real distributions, is the most important next step toward operational deployment. 
+
+## 7 Conclusion 
+
+We introduced a spectrally shaped likelihood for integrating neural operator predictions into diffusion posterior sampling, derived from LMMSE marginalization over the clean Fourier coefficients. The resulting guidance score admits a closed form expression that accounts for the accuracy of the surrogate, requires only two FFTs per reverse diffusion step, and involves no backpropagation through the denoiser. An exact score identity (Proposition 1) reveals that the NO likelihood score measures the shift in the optimal clean state estimate upon conditioning on the surrogate observation, and a distribution-free regime analysis shows that frequency dependence of the guidance is preserved regardless of distributional assumptions on the clean signal or the surrogate residual. On three-dimensional elastic wavefield reconstruction, the method achieves near-zero spectral bias at both 5% and 2% sensor coverage, where isotropic surrogate guidance reimports the surrogate’s spectral bias nearly intact which confirms that frequency-dependent calibration is essential, not merely beneficial. The conditions under which the method applies are precisely characterized: any surrogate whose residual covariance is approximately diagonal in the Fourier basis admits the calibrated guidance score, and the empirical coherence diagnostic of Appendix B.6 provides a prerequisite check for new surrogates. The same approach therefore applies in principle whenever a fast surrogate exhibits structured spectral error that can be calibrated against high-fidelity reference data, a setting common to FNO-family surrogates across wave propagation, fluid dynamics, and other PDE applications. 
+
+## Acknowledgments 
+
+This research was supported by the NVIDIA Academic Grant Program using A100 GPU-Hours (project NEUROELASTOSIM). This work was granted access to the HPC resources of IDRIS under the allocations 2026-AD011017607, 2026-AD011017530R1, 2025-AD011015929, made by GENCI. This work was per-formed using computational resources from the “Mésocentre” computing center of Université Paris-Saclay, CentraleSupélec and École Normale Supérieure Paris-Saclay supported by CNRS and Région Île-de-France (https://mesocentre.universite-paris-saclay.fr/ ). Contributions of Fanny Lehmann were pri-marily supported by the ETH AI Center through their postdoctoral fellowship. 
+
+## References 
+
+Marc Amorós-Trepat, Luis Medrano-Navarro, Qiang Liu, Luca Guastoni, and Nils Thuerey. Guiding diffusion models to reconstruct flow fields from sparse data. (arXiv:2510.19971), October 2025. doi: 10.48550/arXiv. 2510.19971. URL http://arxiv.org/abs/2510.19971 . arXiv:2510.19971 [physics]. Jan-Hendrik Bastek, WaiChing Sun, and Dennis M Kochmann. Physics-informed diffusion models. arXiv preprint arXiv:2403.14404 , 2024. Patrick Billingsley. Probability and measure, john wiley & sons. New York , 1995. Thomas Bolton and Laure Zanna. Applications of deep learning to ocean data inference and subgrid parame-terization. Journal of Advances in Modeling Earth Systems , 11(1):376–399, 2019. Shuhao Cao, Francesco Brarda, Ruipeng Li, and Yuanzhe Xi. Spectral-refiner: Fine-tuning of accurate spatiotemporal neural operator for turbulent flows. arXiv preprint arXiv:2405.17211 , 2024. Hyungjin Chung, Jeongsol Kim, Michael T Mccann, Marc L Klasky, and Jong Chul Ye. Diffusion posterior sampling for general noisy inverse problems. arXiv preprint arXiv:2209.14687 , 2022. Tim De Ryck and Siddhartha Mishra. Numerical analysis of physics-informed neural networks and related models in physics-informed machine learning. Acta Numerica , 33:633–713, 2024. 18 Preprint 
+
+Bradley Efron. Tweedie’s formula and selection bias. Journal of the American Statistical Association , 106 (496):1602–1614, 2011. Charles R Farrar and Keith Worden. An introduction to structural health monitoring. Philosophical Trans-actions of the Royal Society A: Mathematical, Physical and Engineering Sciences , 365(1851):303–315, 2007. Eugenia Kalnay. Atmospheric modeling, data assimilation and predictability . Cambridge university press, 2003. Tero Karras, Miika Aittala, Timo Aila, and Samuli Laine. Elucidating the design space of diffusion-based generative models. Advances in neural information processing systems , 35:26565–26577, 2022. Siavash Khodakarami, Vivek Oommen, Aniruddha Bora, and George Em Karniadakis. Mitigating spectral bias in neural operators via high-frequency scaling for physical systems. Neural Networks , page 108027, 2025. Siavash Khodakarami, Vivek Oommen, Nazanin Ahmadi Daryakenari, Maxim Beekenkamp, and George Em Karniadakis. Spectral bias in physics-informed and operator learning: Analysis and mitigation guidelines. 
+
+arXiv preprint arXiv:2602.19265 , 2026. Qingkai Kong, Caifeng Zou, Youngsoo Choi, Eric M Matzel, Kamyar Azizzadenesheli, Zachary E Ross, Arthur J Rodgers, and Robert W Clayton. Reducing frequency bias of fourier neural operators in 3d seismic wavefield simulations through multistage training. Seismological Research Letters , 97(1):272–282, 2026. Nikola Kovachki, Zongyi Li, Burigede Liu, Kamyar Azizzadenesheli, Kaushik Bhattacharya, Andrew Stuart, and Anima Anandkumar. Neural operator: Learning maps between function spaces with applications to pdes. Journal of Machine Learning Research , 24(89):1–97, 2023. Fanny Lehmann, Filippo Gatti, Michaël Bertin, and Didier Clouteau. Synthetic ground motions in hetero-geneous geologies from various sources: the hemew s-3d database. Earth System Science Data , 16(9): 3949–3972, 2024. Fanny Lehmann, Filippo Gatti, and Didier Clouteau. Multiple-input fourier neural operator (mifno) for source-dependent 3d elastodynamics. Journal of Computational Physics , 527:113813, 2025. Zongyi Li, Nikola Kovachki, Kamyar Azizzadenesheli, Burigede Liu, Kaushik Bhattacharya, Andrew Stuart, and Anima Anandkumar. Fourier neural operator for parametric partial differential equations. arXiv preprint arXiv:2010.08895 , 2020. Thomas YL Lin, Jiachen Yao, Lufang Chiang, Julius Berner, and Anima Anandkumar. Decoupled diffusion sampling for inverse problems on function spaces. arXiv preprint arXiv:2601.23280 , 2026. Phillip Lippe, S Veeling Bastiaan, Paris Perdikaris, Richard E Turner, and Johannes Brandstetter. Pde-refiner: Achieving accurate long rollouts with neural pde solvers, 2023. URL https://arxiv. org/abs/2308.05732 ,2023. Xin-Yang Liu, Meet Hemant Parikh, Xiantao Fan, Pan Du, Qing Wang, Yi-Fan Chen, and Jian-Xun Wang. Confild-inlet: Synthetic turbulence inflow using generative latent diffusion models with neural fields. 
+
+Physical Review Fluids , 10(5):054901, 2025. Krithika Manohar, Bingni W Brunton, J Nathan Kutz, and Steven L Brunton. Data-driven sparse sensor placement for reconstruction: Demonstrating the benefits of exploiting known patterns. IEEE Control Systems Magazine , 38(3):63–86, 2018. Roberto Molinaro, Samuel Lanthaler, Bogdan Raoni´ c, Tobias Rohner, Victor Armegioiu, Stephan Simonis, Dana Grund, Yannick Ramic, Zhong Yi Wan, Fei Sha, et al. Generative ai for fast and accurate statistical computation of fluids. arXiv preprint arXiv:2409.18359 , 2024. Vivek Oommen, Aniruddha Bora, Zhen Zhang, and George Em Karniadakis. Integrating neural operators with diffusion models improves spectral representation in turbulence modeling. arXiv preprint arXiv:2409.08477 ,2024. Niccolò Perrone, Fanny Lehmann, Hugo Gabrielidis, Stefania Fresca, and Filippo Gatti. Integrating fourier neural operators with diffusion models to improve spectral representation of synthetic earthquake ground motion response. arXiv preprint arXiv:2504.00757 , 2025. 19 Preprint 
+
+Shaoxiang Qin, Fuyuan Lyu, Wenhui Peng, Dingyang Geng, Ju Wang, Xing Tang, Sylvie Leroyer, Naiping Gao, Xue Liu, and Liangzhu Leon Wang. Toward a better understanding of fourier neural operators from a spectral perspective. arXiv preprint arXiv:2404.07200 , 2024. Nasim Rahaman, Aristide Baratin, Devansh Arpit, Felix Draxler, Min Lin, Fred A Hamprecht, Yoshua Bengio, and Aaron Courville. On the spectral bias of neural networks. In International Conference on Machine Learning , pages 5301–5310, 2019. Pu Ren, Rie Nakata, Maxime Lacour, Ilan Naiman, Nori Nakata, Jialin Song, Zhengfa Bi, Osman Asif Malik, Dmitriy Morozov, Omri Azencot, et al. Learning earthquake ground motions via conditional generative modeling. Nature Communications , 17(1):4021, 2026. Yang Song, Jascha Sohl-Dickstein, Diederik P Kingma, Abhishek Kumar, Stefano Ermon, and Ben Poole. Score-based generative modeling through stochastic differential equations. arXiv preprint arXiv:2011.13456 ,2020. Sara Touhami, Filippo Gatti, Fernando Lopez-Caballero, Régis Cottereau, Lúcio de Abreu Corrêa, Ludovic Aubry, and Didier Clouteau. Sem3d: A 3d high-fidelity numerical earthquake simulator for broadband (0–10 hz) seismic response prediction at a regional scale. Geosciences , 12(3):112, March 2022. ISSN 2076-3263. doi: 10.3390/geosciences12030112. URL https://www.mdpi.com/2076-3263/12/3/112 .Alasdair Tran, Alexander Mathews, Lexing Xie, and Cheng Soon Ong. Factorized fourier neural operators. 
+
+arXiv preprint arXiv:2111.13802 , 2021. Jorge F Urbán and José A Pons. An approximate riemann solver approach in physics-informed neural networks for hyperbolic conservation laws. Physics of Fluids , 37(9), 2025. Zhi-Qin John Xu, Yaoyu Zhang, Tao Luo, Yanyang Xiao, and Zheng Ma. Frequency principle: Fourier analysis sheds light on deep neural networks. arXiv preprint arXiv:1901.06523 , 2019. Jiachen Yao, Abbas Mammadov, Julius Berner, Gavin Kerrigan, Jong Chul Ye, Kamyar Azizzadenesheli, and Anima Anandkumar. Guided diffusion sampling on function spaces with applications to pdes. arXiv preprint arXiv:2505.17004 , 2025. Zhilin You, Zhenli Xu, and Wei Cai. Mscalefno: Multi-scale fourier neural operator learning for oscillatory function spaces. arXiv preprint arXiv:2412.20183 , 2024. Caifeng Zou, Kamyar Azizzadenesheli, Zachary E Ross, and Robert W Clayton. Deep neural helmholtz operators for 3-d elastic wave propagation and inversion. Geophysical Journal International , 239(3): 1469–1484, 2024. Yicheng Zou, Samuel Lanthaler, and Hossein Salahshoor. A probabilistic framework for solving high-frequency helmholtz equations via diffusion models. arXiv preprint arXiv:2602.04082 , 2026. 
+
+## A Score factorization at the noisy state 
+
+This appendix provides the full derivation of the approximate posterior score decomposition (15) used in the main text. We first establish the conditional independence of the observation channels at the clean wavefield (App. A.1), then derive the exact joint score at the noisy state (App. A.2), and finally state the modeling choice (14) that yields the three-term decomposition (App. A.3). 
+
+A.1 Conditional independence of the observation channels 
+
+We prove the factorization (13) used in the main text. Let ξ = ( a, xs, θs) collect all geological and source parameters, and write the generative model as ξ PDE 
+
+−−→ u MS +ε
+
+−−−−→ y and ξ Gϕ
+
+−−→ uNO . By the chain rule, 
+
+p(y, uNO | u) = 
+
+Z
+
+p(y | uNO , ξ, u) p(uNO | ξ, u) p(ξ | u) dξ. (29) Two observations simplify this expression: 20 Preprint 
+
+1. p(y | uNO , ξ, u) = p(y | u), because y = MS (u) + ε and the instrument noise ε is independent of 
+
+(ξ, uNO ).2. p(uNO | ξ, u) = p(uNO | ξ), because uNO = Gϕ(ξ) is a deterministic function of ξ alone. Substituting and pulling the ξ-independent factor out of the integral: 
+
+p(y, uNO | u) = p(y | u)
+
+Z
+
+p(uNO | ξ) p(ξ | u) dξ = p(y | u) p(uNO | u). (30) Note that the inverse problem u 7 → ξ may be ill-posed (many parameter configurations can produce the same wavefield), so p(uNO | u) is a non-trivial distribution; the factorization holds nonetheless because the instrument noise ε carries no information about which ξ generated u.
+
+A.2 Exact joint score at the noisy state 
+
+We seek to sample from pτ (uτ | y, uNO ). By Bayes’ rule, 
+
+pτ (uτ | y, uNO ) ∝ pτ (uτ ) p(y, uNO | uτ ), (31) so the posterior score decomposes as 
+
+∇uτ log pτ (uτ | y, uNO ) = ∇uτ log pτ (uτ ) + ∇uτ log p(y, uNO | uτ ). (32) The sparse observation model (Sec. 3.3) specifies p(y | u) for the clean wavefield only. Since the measurement and NO likelihoods are defined for the clean wavefield u, and (y, uNO ) ⊥ uτ | u (the diffusion noise ητ is independent of both observation channels), the joint likelihood at the noisy state is obtained by marginalizing over u:
+
+p(y, uNO | uτ ) = 
+
+Z
+
+p(y, uNO | u) p(u | uτ ) du. (33) Substituting the conditional independence assumption (13): 
+
+p(y, uNO | uτ ) = 
+
+Z
+
+p(y | u) pNO (uNO | u) p(u | uτ ) du. (34) Although y ⊥ uNO | u, conditioning on the noisy state uτ leaves residual uncertainty about u, through which 
+
+y and uNO remain coupled. Consequently, the integral in (34) does not factorize into a product of marginals over the noisy state, and the exact joint likelihood score reads 
+
+∇uτ log p(y, uNO | uτ ) = ∇uτ log p(y | uτ ) + ∇uτ log p(uNO | y, uτ ), (35) where the second term conditions on y.
+
+A.3 Modeling choice 
+
+The exact joint score (35) requires evaluating ∇uτ log p(uNO | y, uτ ), the surrogate likelihood score condi-tioned on the sensor observations. This quantity has no closed form: it depends on the data prior through the noisy-state posterior p(u | uτ , y), which is precisely what diffusion posterior sampling is approximating in the first place. We therefore adopt the structural modeling choice 
+
+p(uNO | y, uτ ) ≈ p(uNO | uτ ), (36) which, combined with (35) and (32), yields the three-term decomposition (15) of the main text. The choice is consistent with the approximation that DPS itself already makes. Standard DPS replaces the noisy-state posterior with a point mass at the Tweedie estimate, p(u | uτ ) ≈ δ(u − ¯u0(uτ )) . Under this collapse, both likelihoods depend on uτ only through the deterministic point estimate ¯u0(uτ , τ ), and (36) holds exactly: conditioning on y provides no additional information about uNO beyond what ¯u0 already determines. Our use of an LMMSE refinement in the NO channel (Sec. 4.3) sharpens the per-mode posterior variance but acts within the NO channel alone, introducing no coupling to the sensor channel at the noisy state. The factorization (36) is thus the same mild modeling assumption that DPS already relies on, applied independently to each observation channel. 
+
+## B Spectral observation model: notation and estimation 
+
+This appendix provides the full notation for the spectral observation model introduced in Sec. 4.3, the nonparametric estimators used to calibrate the mode-dependent quantities. 21 Preprint 
+
+B.1 Fourier-domain notation 
+
+Let F denote the unitary discrete Fourier transform applied jointly over the spatial and temporal axes 
+
+(Nx, N y , T ), independently per channel: 
+
+F : RC×Nx×Ny ×T → CC×Nx×Ny ×T , (37) with unitarity ensuring F† = F−1 and ∥F (u)∥ = ∥u∥. We index frequency modes by the multi-index 
+
+k = ( kx, k y , k t) ∈ K := ZNx × ZNy × ZT . Throughout, we use ˆ· to denote Fourier-domain quantities: 
+
+ˆv := F(v) and ˆv(k) := F(v)( k) for the coefficient at mode k.Since the spectral observation model and all subsequent derivations operate independently at each mode k, the analysis is identical to the one-dimensional case; no structure specific to the three-dimensional grid is required beyond the definition of K.
+
+B.2 Per-mode observation model 
+
+We model the spectral relationship between the neural operator prediction and the ground truth via a channel-and mode-dependent transfer function H : {1, . . . , C } × K → R, acting element-wise in Fourier space. For clarity, we present the model for a single channel; the extension to C channels is immediate since all quantities factorize independently across channels. At each frequency mode k, the NO prediction is modeled as 
+
+F(uNO )( k) = H(k) F(u)( k) + ˆ ηNO (k), (38) where H(k) absorbs all systematic errors of the neural operator at mode k so that the residual ˆηNO (k) captures only the remaining stochastic fluctuations, modeled as zero-mean with variance σ2NO (k); no assumption is made on the distributional form of ˆηNO .
+
+B.3 Wide-sense stationarity assumption 
+
+We assume the spatio-temporal residual error field ηN O := uNO − F −1(H ⊙ F (u)) is wide-sense stationary (WSS) in (x, y, t ) over the training ensemble of geologies and source locations. While an individual elastody-namic wavefield is transient and spatially localized, averaging over uniformly distributed source locations and varied heterogeneous geologies yields an ensemble error field that is approximately translation-invariant. This is further supported by the FNO architecture, whose dominant error mechanism (spectral truncation at high wavenumbers) is a shift-invariant global filter by construction. By the Wiener–Khinchin theorem, WSS implies that distinct Fourier modes of the residual error are uncorre-lated: 
+
+E
+
+h
+
+ˆηN O (k) ˆ ηN O (k′)
+
+i
+
+= σ2NO (k) δkk ′ , (39) where each channel is allowed its own variance profile, while cross-channel residuals remain uncorrelated. The covariance ΣNO is therefore diagonal in the Fourier basis, with entries σ2NO (k) ∈ R>0.The residual is therefore characterized by 
+
+E[ˆ ηNO (k)] = 0 , E|ˆηNO (k)|2 = σ2NO (k), (40) with no further distributional assumption. The conditional first two moments of the NO prediction at each mode are 
+
+E[F(uNO )( k) | F (u)( k)] = H(k) F(u)( k), Var[ F(uNO )( k) | F (u)( k)] = σ2NO (k). (41) The joint distribution over all modes and channels factorizes as a product of scalar complex Gaussians. 
+
+B.4 Estimation of spectral quantities 
+
+The spectral model introduces three mode-dependent quantities that must be estimated before inference. We compute all of them from N paired ground-truth/MIFNO samples on a held-out calibration split and freeze them as lookup tables over {1, . . . , C } × K.
+
+Signal power spectrum. The ensemble-averaged signal power at each channel and mode is 
+
+Pu(k) = 1
+
+N
+
+> N
+
+X
+
+> n=1
+
+F(u(n))( k) 2
+
+. (42) 22 Preprint 
+
+Transfer function. The transfer function H(k) is identified as the minimum mean-square-error linear predictor of F(uNO )( k) from F(u)( k), giving the cross-spectral estimator 
+
+˜H(k) = 1
+
+N
+
+> N
+
+X
+
+> n=1
+
+F(uNO (n))( k) F(u(n))( k)
+
+Pu(k) ∈ C. (43) We empirically observe | arg ˜H(k)| ≪ 1 across the full spectrum (Fig. 7), consistent with the shift-invariant low-pass nature of FNO truncation errors, and accordingly take H(k) := Re ˜H(k) in all subsequent expres-sions. 
+
+Residual variance. The residual variance at each channel and mode is estimated as 
+
+σ2NO (k) = 1
+
+N
+
+> N
+
+X
+
+> n=1
+
+F(uNO (n))( k) − H(k) F(u(n))( k) 2
+
+. (44) 
+
+Relative error power ratio. For reference, we define the dimensionless noise-to-signal ratio 
+
+γ(k) := σ2NO (k)
+
+|H(k)|2 Pu(k) , (45) which captures the relative accuracy of the NO at each frequency, independent of the absolute signal amplitude. This quantity governs the regime analysis of the Gaussian marginal approximation (Appendix D). 
+
+B.5 Empirical validation 
+
+Figure 7 shows the transfer function ˜H(k) estimated from N = 2 ,000 paired ground-truth/MIFNO samples on the held-out calibration split. The magnitude | ˜H(k)| (left) confirms the expected spectral-bias profile: 
+
+|H| ≈ 0.9 at low wavenumbers and decreasing monotonically toward zero at high ∥k∥, with all three components behaving similarly. The phase arg ˜H(k) (right) remains bounded within ±0.5 rad across the spectrum where |H(k)| is non-negligible, justifying the real-valued reduction H = Re ˜H used in all subsequent expressions. 0.0 0.2 0.4 0.6 0.8        
+
+> k
+> 0.0
+> 0.2
+> 0.4
+> 0.6
+> 0.8
+> 1.0
+> |H(k)|
+> Transfer function magnitude
+> E W
+> N S
+> Z
+> 0.0 0.1 0.2 0.3 0.4 0.5 0.6 0.7
+> k
+> 1.0
+> 0.5
+> 0.0
+> 0.5
+> 1.0
+> arg  H(k) [rad]
+> Transfer function phase
+> E W
+> N S
+> Z
+
+Figure 7: Transfer function ˜H(k) estimated from the calibration split, radially binned over ∥k∥. Left: magnitude | ˜H(k)| decreases from ≈ 0.9 at low ∥k∥ to near zero at high ∥k∥, confirming the expected spectral-bias profile. Right: phase arg ˜H(k) (median and 5th–95th percentile band), shown only for modes with 
+
+|H(k)| > 0.01 . The phase is bounded within ±0.5 rad, justifying the real-valued reduction H = Re ˜H.Figure 8 shows the NO error landscape that motivates the spectral shaping. The residual variance σ2NO (k)
+
+and signal power Pu(k) both decay with ∥k∥, but at different rates: the signal power spans approximately seven orders of magnitude, while the residual variance spans eight. Their ratio, the relative NO error 
+
+γ(k) = σ2NO (k)/(|H(k)|2Pu(k)) , crosses unity near ∥k∥ ≈ 0.2; below this threshold the NO prediction is more accurate than the prior ( γ < 1), while above it the NO residual dominates the signal ( γ ≫ 1). This crossover determines the spectral boundary beyond which NO guidance should be suppressed. 23 Preprint 0.0 0.2 0.4 0.6 0.8 
+
+k   
+
+> 10 6
+> 10 4
+> 10 2
+> 10 0
+> 10 2
+> 2NO (k)
+
+NO residual variance     
+
+> E W
+> N S
+> Z
+> 0.0 0.2 0.4 0.6 0.8
+
+k  
+
+> 10 3
+> 10 1
+> 10 1
+> 10 3
+> Pu(k)
+
+Signal power spectrum     
+
+> E W
+> N S
+> Z
+> 0.0 0.2 0.4 0.6 0.8
+
+k 
+
+> 10 1
+> 10 0
+> 10 1
+> 10 2
+> 10 3
+> 10 4
+> 10 5
+> (k)
+
+Relative NO error 
+
+> E W
+> N S
+> Z
+
+Figure 8: NO error profile estimated from the calibration split ( N = 2 ,000 paired samples), radially binned over ∥k∥. From left to right: NO residual variance σ2NO (k), signal power spectrum Pu(k), and relative NO error γ(k) = σ2NO (k)/(|H(k)|2Pu(k)) . The crossover γ = 1 (dashed grey) occurs near ∥k∥ ≈ 0.2; below it the NO is more accurate than the prior, above it the residual dominates. The expected NO guidance magnitudes shown in Fig. 2 are derived as follows. For the spectrally shaped score, the expected squared magnitude at each mode is 
+
+E
+
+h
+
+|˜λτ (k) · r(k)|2i
+
+= 4 |H(k)|2 α(k)2
+
+λτ (k) , (46) where λτ (k) = σ2NO (k) + |H(k)|2σ2 
+
+> τ
+
+α(k). For the isotropic baseline ( H(k) = 1 , σ2NO (k) = σ2NO ,iso ,
+
+α(k) = 1 ), this reduces to 4/(σ2NO ,iso + σ2 
+
+> τ
+
+). The upturn of the spectrally shaped curves at high ∥k∥ for 
+
+στ ≤ 0.01 is not consequential: the ODE drift coefficient c(τ ) = s2σ2( ˙ σ/σ ) vanishes as στ → 0, so the NO guidance contribution to the reverse trajectory is negligible at the final steps regardless of the score magnitude. 
+
+B.6 Empirical assessment of the diagonal-covariance approximation 
+
+The spectral observation model treats the residual covariance as diagonal in the Fourier basis (Sec. B.3). Strict WSS would imply exact diagonality; we expect only an approximate version to hold on a finite, transient wavefield, and we quantify the departure empirically. We verify this empirically by estimating the off-diagonal cross-spectral coherence from the same N = 2 ,000 -sample calibration split used for the spectral model. 
+
+Test statistic. For a pair of distinct modes (k, k ′) with k̸ = k′, the sample cross-spectrum is 
+
+ˆC(k, k ′) := 1
+
+N
+
+> N
+
+X
+
+> n=1
+
+ˆη(n)NO (k) ˆ η(n)NO (k′), (47) where ˆη(n)NO (k) = F(u(n)NO )( k) − H(k) F(u(n))( k) is the Fourier-domain residual at mode k for sample n. We normalize this into a dimensionless coherence 
+
+coh( k, k ′) := | ˆC(k, k ′)|
+
+pσ2NO (k) σ2NO (k′) , (48) which lies in [0 , 1] : zero indicates uncorrelated modes (WSS satisfied) and unity indicates perfect correlation (WSS violated). Under the null hypothesis of exact WSS, the expected coherence from finite-sample noise is 
+
+E[coh] ≈ pπ/ (4 N ) ≈ 0.02 for N = 2 ,000 .
+
+Sampling procedure. The full cross-spectral matrix has ∼ 1.6 × 10 5 modes per channel, making exhaustive computation infeasible. We instead draw P = 400 ,000 random pairs of distinct mode indices from the rFFT grid (Nx × Ny × Nf ) = (32 × 32 × 161) and compute (47) via a streaming pass over the calibration set. For each pair, we record the mode separation ∥k − k′∥ in normalised frequency units. To assess whether any departures concentrate in specific spectral regions, we additionally stratify the pairs by the wavenumber magnitude of both modes: high–high (both ∥k∥ ≥ 0.15 ) and mixed (one below, one above the threshold), where ∥k∥ = 0 .15 corresponds approximately to the crossover γ(k) ≈ 1 (Fig. 8, right). 24 Preprint 
+
+Results. Figure 9 (left) shows the mean and 95th percentile of the coherence as a function of mode separation, pooled over all pairs. For separations ∥k − k′∥ > 0.2, the mean coherence stabilizes at ≈ 0.06 –0.10 , roughly 
+
+3–4× the finite-sample noise floor. A narrow spike of elevated coherence appears at ∥k − k′∥ < 0.1, indicating that immediately neighboring Fourier modes are moderately correlated; this is consistent with spectral leakage on the finite discrete grid and/or residual non-stationarity from the transient, finite-support nature of individual wavefields. Figure 9 (right) isolates the mixed stratum (one low-frequency mode, one high-frequency mode). The mean coherence drops to ≈ 0.03 –0.05 , close to the noise floor. This confirms that cross-regime coupling, between the frequencies where NO guidance is active ( ∥k∥ small, γ < 1) and those where it is suppressed ( ∥k∥ large, 
+
+γ ≫ 1), is negligible. 
+
+Implications for the spectral guidance. The residual exhibits moderate near-diagonal correlation (coherence 
+
+∼ 0.06 –0.10 at small mode separations, decaying to the permutation-test noise floor at separations ∥k − k′∥ >
+
+0.2). This means the residual covariance is approximately, but not exactly, diagonal: WSS holds in a weak sense, with a correlation length ℓc ≲ 0.1 in normalized frequency. This residual structure does not compromise the per-mode factorization used in the guidance score, for two reasons. First, the spectral weight ˜λτ (k) varies smoothly over ∥k∥ on scales much larger than the correlation length of the residual ( ≲ 0.1 in normalized frequency). When the weight is approximately constant over the correlation bandwidth, treating correlated neighbors as independent produces the same integrated guidance as a properly banded covariance treatment: the per-mode errors are absorbed in aggregate, and the spectral profile 
+
+of the guidance, the property that distinguishes our method from isotropic alternatives, is preserved. Second, 
+
+cross-regime coupling between guidance-active modes ( γ < 1) and guidance-suppressed modes ( γ ≫ 1) is negligible (Fig. 9, right), so the residual diagonal structure is preserved precisely in the spectral region where the LMMSE shaping is most consequential. 0.0 0.2 0.4 0.6 0.8 1.0 1.2 1.4              
+
+> Mode separation kk′
+> 0.0
+> 0.2
+> 0.4
+> 0.6
+> 0.8
+> 1.0
+> Coherence
+> All pairs (E W component)
+> Mean coherence
+> 95th percentile
+> 1/ N= 0.022
+> 0.2 0.4 0.6 0.8
+> Mode separation kk′
+> 0.00
+> 0.02
+> 0.04
+> 0.06
+> 0.08
+> 0.10
+> 0.12
+> Coherence
+> Mixed pairs ( k0.15) (E W component)
+> Mean coherence
+> 95th percentile
+> 1/ N= 0.022
+
+Figure 9: Off-diagonal cross-spectral coherence of the NO residual (E–W component), estimated from 400 ,000 
+
+random mode pairs on the calibration split ( N = 2 ,000 ). Left: all pairs, binned by mode separation ∥k − k′∥.The mean coherence (solid) settles at 3-4× the finite-sample noise floor 1/√N ≈ 0.022 (dotted) beyond 
+
+∥k − k′∥ > 0.2; the near-diagonal spike is consistent with spectral leakage on the finite grid. Right: mixed pairs (one mode with ∥k∥ < 0.15 , one with ∥k∥ ≥ 0.15 ). Cross-regime coherence is close to the noise floor, confirming that the per-mode factorization is well-justified in the frequency range where the NO guidance is active. 
+
+## C LMMSE derivation and properties 
+
+This appendix provides the full derivation of the spectrally shaped diffusion posterior used in Sec. 4.3, along with its optimality properties, connection to the neural denoiser, and equivalence with the Bayesian posterior under stronger hypotheses. 25 Preprint 
+
+C.1 Per-mode LMMSE estimator 
+
+The forward diffusion gives, at each mode k,
+
+Y (k) := F(uτ )( k) = X(k) + ˆ ητ (k), ˆητ (k) ∼ CN (0 , σ 2 
+
+> τ
+
+), (49) where X(k) := F(u)( k) and unitarity of F preserves the noise variance. We seek the best linear estimator of 
+
+X from Y . The only required properties of X:1. E[X(k)] = 0 , which follows from z-score normalization of the training data ( En[u(n)] = 0, hence 
+
+En[F(u(n))( k)] = 0 by linearity of F); 2. E[|X(k)|2] = Pu(k), the signal power spectrum estimated from training data via (42). No assumption is made on the distributional form of X.The linear minimum mean-squared-error (LMMSE) estimator of X given Y = X + ˆ ητ is the solution to 
+
+ˆXL := arg min  
+
+> ˆX=aY +b
+
+E
+
+h
+
+|X − ˆX|2i
+
+. (50) By the orthogonality principle, the optimal coefficients satisfy E[( X − ˆXL) Y ∗] = 0 and E[X − ˆXL] = 0 .Computing the required second-order statistics, Var[ Y ] = Pu + σ2 
+
+> τ
+
+and Cov[ X, Y ] = Pu (by independence of X and ˆητ ), yields: 
+
+ˆXL(k) = α(k) Y (k), α(k) := Pu(k)
+
+σ2 
+
+> τ
+
++ Pu(k) . (51) The coefficient α(k) contracts the noisy observation toward zero (the prior mean) with strength determined by the noise-to-signal ratio σ2 
+
+> τ
+
+/P u(k).The associated LMMSE error is: 
+
+σ2
+
+> L
+
+(k) := E
+
+h
+
+|X − ˆXL|2i
+
+= σ2 
+
+> τ
+
+Pu(k)
+
+σ2 
+
+> τ
+
++ Pu(k) = σ2 
+
+> τ
+
+α(k). (52) 
+
+C.2 Limiting behaviour 
+
+At low frequencies where Pu(k) ≫ σ2 
+
+> τ
+
+: α(k) → 1 and σ2
+
+> L
+
+(k) → σ2 
+
+> τ
+
+, recovering the standard DPS isotropic posterior. At high frequencies where Pu(k) ≪ σ2 
+
+> τ
+
+: α(k) → Pu(k)/σ 2 
+
+> τ
+
+→ 0 and σ2
+
+> L
+
+(k) → Pu(k).The estimation error is bounded by the signal power at each mode: 
+
+σ2
+
+> L
+
+(k) ≤ min  Pu(k), σ 2
+
+> τ
+
+, (53) reflecting the elementary fact that one cannot be wrong about signal content that was never present. This bound holds for any distribution of X with the specified mean and variance; it does not require Gaussianity. 
+
+## D Marginal likelihood derivation and Gaussian approximation 
+
+This appendix derives the moment-matched Gaussian marginal likelihood (22) used in the main text, establishes an exact identity for the NO likelihood score (Proposition 1), decomposes the score error introduced by the Gaussian approximation, and characterizes the resulting score error across the frequency–diffusion-time plane via a distribution-free regime analysis. 
+
+D.1 Closed-form marginal moments 
+
+Fix a channel c and mode k, and write X := F(u)( k), Y := F(uτ )( k), Z := F(uNO )( k). We seek the first two moments of Z given Y , obtained by marginalizing over X.Since Z(k) = H(k) X(k) + ˆ ηNO (k) is affine in X, and ˆηNO is (i) uncorrelated with X by construction of H
+
+as the LMMSE coefficient, and (ii) independent of the diffusion noise ˆητ (the diffusion process and the NO evaluation are produced by independent mechanisms), the LMMSE framework gives the best linear predictor of Z from Y , namely ˆZL, and the associated prediction error directly. Computing Cov[ Z, Y ] = H P u (the 26 Preprint 
+
+cross-term E[ˆ ηNO (k) X(k)] vanishes by orthogonality, and E[ˆ ηNO (k) ˆ ητ (k)] vanishes by independence of the two noise sources) and Var[ Y ] = Pu + σ2 
+
+> τ
+
+, the orthogonality principle yields the LMMSE estimator ˆZL and the associated mean square error λτ , that is: 
+
+ˆZL = Cov[ Z, Y ]Var[ Y ] Y = H(k) α(k) Y, (54) 
+
+λτ (k) := E
+
+h
+
+|Z − ˆZL|2i
+
+= |H(k)|2 σ2
+
+> L
+
+(k) + σ2NO (k), (55) where the cross-term in the variance expansion vanishes because (X − αY ) depends only on (X, ˆητ ) while 
+
+ˆηNO is uncorrelated with X (by LMMSE definition of H) and independent of ˆητ .Approximating the marginal distribution of Z given Y as the Gaussian matching these moments, one obtains: 
+
+p(F(uNO )( k) | uτ ) ≈ CN (H(k) α(k) F(uτ )( k), λτ (k)) , (56) with the marginalized variance 
+
+λτ (k) = σ2NO (k) + |H(k)|2 σ2 
+
+> τ
+
+Pu(k)
+
+σ2 
+
+> τ
+
++ Pu(k) . (57) The joint distribution over all modes and channels factorizes as a product of these univariate complex Gaussians. 
+
+Comparison with standard DPS. The standard DPS marginalized variance is λDPS  
+
+> τ
+
+(k) = σ2NO (k) + 
+
+σ2 
+
+> τ
+
+|H(k)|2, obtained by replacing σ2
+
+> L
+
+(k) with σ2 
+
+> τ
+
+. At low frequencies where Pu(k) ≫ σ2 
+
+> τ
+
+, the two agree. At high frequencies where Pu(k) ≪ σ2 
+
+> τ
+
+, σ2
+
+> L
+
+(k) → Pu(k) ≪ σ2 
+
+> τ
+
+and the corrected variance is significantly smaller. However, this reduction is offset by the factor α(k) → 0 in the score numerator (derived below), which suppresses the guidance at precisely these frequencies. The net effect is a spectral weight that decreases with ∥k∥, correctly reflecting the NO’s decreasing reliability at high frequencies. 
+
+D.2 Proof of Proposition 1 
+
+We recall the two observation channels at a single mode k (suppressing channel and mode indices when unambiguous): Diffusion channel: Y = X + ˆ ητ , ˆητ ∼ CN (0 , σ 2 
+
+> τ
+
+), (58) NO channel: Z = H X + ˆ ηNO , (59) where ˆητ is Gaussian (by construction of the forward diffusion) and ˆηNO has zero mean and variance σ2NO but is otherwise unrestricted in distributional form. Both noise terms are mutually independent and independent of 
+
+X. The only assumptions on X are E[X] = 0 and E[|X|2] = P where P = Pu(k).
+
+Proof. The conditional density of Z given Y is obtained by marginalizing over X:
+
+p(Z | Y ) = 
+
+Z
+
+p(Z | X) p(X | Y ) dX, (60) where p(Z | X) = CN (Z; HX, σ 2NO ) does not depend on Y (by conditional independence Z ⊥ Y | X). 
+
+Step (a): Differentiate under the integral. Under the usual regularity assumptions[Billingsley, 1995], one can take the derivative ∇Y ∗ of both sides: 
+
+∇Y ∗ p(Z | Y ) = 
+
+Z
+
+p(Z | X) ∇Y ∗ p(X | Y ) dX. (61) Rewriting ∇Y ∗ p = p ∇Y ∗ log p:
+
+∇Y ∗ p(Z | Y ) = 
+
+Z
+
+p(Z | X) p(X | Y ) ∇Y ∗ log p(X | Y ) dX. (62) 
+
+Step (b): Compute ∇Y ∗ log p(X | Y ). By Bayes’ rule, p(X | Y ) ∝ p(Y | X) pX (X), where p(Y | X) = 
+
+CN (Y ; X, σ 2 
+
+> τ
+
+). The gradient reads: 
+
+∇Y ∗ log p(X | Y ) = ∇Y ∗ log p(Y | X) − ∇ Y ∗ log pY (Y ). (63) 27 Preprint 
+
+The Gaussian channel gives ∇Y ∗ log p(Y | X) = ( X − Y )/σ 2 
+
+> τ
+
+, and the complex-value Tweedie formula provides the score of the marginal over Y , namely ∇Y ∗ log pY (Y ) = ( E[X | Y ] − Y )/σ 2 
+
+> τ
+
+. Finally: 
+
+∇Y ∗ log p(X | Y ) = X − E[X | Y ]
+
+σ2
+
+> τ
+
+. (64) 
+
+Step (c): Assemble. Substituting (64) and dividing both sides by p(Z | Y ):
+
+∇Y ∗ log p(Z | Y ) = 1
+
+σ2
+
+> τ
+
+Z p(Z | X) p(X | Y )
+
+p(Z | Y )
+
+ X − E[X | Y ] dX. (65) By Bayes’ rule: p(Z | X) p(X | Y )/p (Z | Y ) = p(X | Y, Z ), so the integral gives E[X | Y, Z ] − E[X | Y ],completing the proof. 
+
+D.3 Score error decomposition 
+
+This section derives the score error decomposition (27) stated in Sec. 4.4 and establishes the distribution-free bounds on each term. Our Gaussian approximation replaces both conditional expectations in (26) by their LMMSE counterparts. 
+
+Linear estimates. From Appendix C, the LMMSE estimate of X from Y alone is EL[X | Y ] = α Y with error ˜X := X − αY of variance σ2
+
+> L
+
+.For the joint estimate from (Y, Z ), we apply a sequential LMMSE update: the refined estimate takes the form 
+
+EL[X | Y, Z ] = αY + β r , where 
+
+r := Z − HαY (66) is the innovation , the component of Z not predicted by the first-stage estimate. Substituting Z = HX + ˆ ηNO :
+
+r = H(X − αY ) + ˆ ηNO = H ˜X + ˆ ηNO . (67) By the orthogonality principle, the optimal coefficient β satisfies β = Cov[ ˜X, r ] / Var[ r]. For the numerator, since ˆηNO is uncorrelated with ˜X:
+
+Cov[ ˜X, r ] = Cov[ ˜X, H ˜X] = E[ ˜X (H ˜X)∗] = H∗ σ2
+
+> L
+
+. (68) For the denominator, by independence of ˆηNO from ˆητ and orthogonality of ˆηNO to X (for ˆηNO ⊥ ˜X at second order, since ˜X = X − αY is a linear combination of X and ˆητ ): 
+
+Var[ r] = |H|2 σ2 
+
+> L
+
++ σ2NO =: λτ . (69) The LMMSE update is therefore 
+
+EL[X | Y, Z ] = αY + H∗ σ2
+
+> L
+
+λτ
+
+r. (70) The correction is large when the innovation is informative about the first-stage error (strong correlation between 
+
+˜X and r) and small when the innovation is dominated by the NO residual noise ( λτ large). The joint LMMSE error follows from the variance reduction formula: 
+
+σ2 
+
+> L,Y Z
+
+= σ2 
+
+> L
+
+− |Cov[ ˜X, r ]|2
+
+Var[ r] = σ2 
+
+> L
+
+− |H|2 σ4
+
+> L
+
+λτ
+
+= σ2 
+
+> L
+
+σ2NO 
+
+λτ
+
+. (71) Substituting the linear estimates into (26): 
+
+sapprox = EL[X | Y, Z ] − EL[X | Y ]
+
+σ2
+
+> τ
+
+= H∗ αλτ
+
+r. (72) 28 Preprint 
+
+Score error. Subtracting from the exact score: 
+
+ϵ := sexact − sapprox = 1
+
+σ2
+
+> τ
+
+h E[X | Y, Z ] − EL[X | Y, Z ]| {z } 
+
+> =: δpost
+
+−  E[X | Y ] − αY | {z } 
+
+> =: δprior
+
+i
+
+. (73) Both δprior and δpost are MMSE–LMMSE gaps : the difference between the optimal nonlinear estimator and the optimal linear estimator of X. If X were Gaussian and ˆηNO were Gaussian, both gaps would vanish identically and the approximation would be exact. The score error is therefore driven by the non-Gaussianity of both the clean Fourier coefficients and the NO residual. By the Pythagorean theorem in L2:
+
+∆prior := E[|δprior |2] = σ2 
+
+> L
+
+− mmse( X | Y ) ≤ σ2
+
+> L
+
+, (74) 
+
+∆post := E[|δpost |2] = σ2 
+
+> L,Y Z
+
+− mmse( X | Y, Z ) ≤ σ2 
+
+> L,Y Z
+
+. (75) 
+
+D.4 Regime analysis: detailed bounds 
+
+This section provides the asymptotic expansions and explicit bounds supporting the regime summary in Sec. 6.1. We use the dimensionless parameters ν, γ, and ζ defined therein, and write h := |H|2 and 
+
+P := Pu(k) throughout. 
+
+Derived quantities in terms of (ν, γ ). For reference: 
+
+α = 11 + ν , σ2 
+
+> L
+
+= P ν 
+
+1 + ν ,λτ = hP 
+
+
+
+γ + ν
+
+1 + ν
+
+
+
+, σ2 
+
+> L,Y Z
+
+= P ν γ 
+
+(1 + ν)γ + ν ,ζ = νγ(1 + ν) .
+
+(76) All bounds below use only the distribution-free inequalities ∆prior ≤ σ2 
+
+> L
+
+and ∆post ≤ σ2 
+
+> L,Y Z
+
+from (74) –(75) .
+
+D.4.1 Regime I ( ν ≫ 1)
+
+Expanding for ν ≫ 1: α = O(ν−1), σ2 
+
+> L
+
+→ P , λτ = hP (γ + 1) + O(ν−1).
+
+Score magnitude: E[|sapprox |2] = hα 2/λ τ = O(ν−2) → 0.
+
+Score error: 
+
+E[|ϵ|2] ≤ 2(∆ post + ∆ prior )
+
+σ4
+
+> τ
+
+≤ 4Pσ4
+
+> τ
+
+= 4
+
+P ν 2 → 0. (77) 
+
+D.4.2 Regime II ( ν ≪ 1, ζ ≪ 1)
+
+Asymptotics: α → 1, λτ → σ2NO , E[|sapprox |2] = O(1 /(P γ )) , σ2 
+
+> L,Y Z
+
+≈ σ2 
+
+> L
+
+when ζ ≪ 1.
+
+Absolute score error: 
+
+E[|ϵ|2] ≤ 2( σ2 
+
+> L,Y Z
+
++ σ2
+
+> L
+
+)
+
+σ4
+
+> τ
+
+≈ 4σ2
+
+> L
+
+σ4
+
+> τ
+
+= 4
+
+P ν . (78) 
+
+Relative score error: E[|ϵ|2]/E[|sapprox |2] = O(γ/ν ).The bound is not parametrically small because the triangle inequality discards the partial cancellation between 
+
+δpost and δprior that arises when Z provides limited additional information beyond Y ; quantifying this cancellation would require higher-order control of ˆηNO , which we do not assume. 
+
+Spectral profile preservation. The weight ˜λτ (k) is determined by the calibrated quantities H(k), σ2NO (k),and Pu(k). Non-Gaussianity may rescale the per-mode score magnitude but cannot redistribute guidance across modes; any such rescaling is absorbed into λNO .29 Preprint 
+
+D.4.3 Regime III ( ν ≪ 1, ζ ≫ 1)
+
+Requires γ ≪ ν ≪ 1. Expanding: α ≈ 1, σ2 
+
+> L
+
+≈ σ2 
+
+> τ
+
+, λτ ≈ hσ 2 
+
+> τ
+
+.
+
+Score magnitude: E[|sapprox |2] ≈ 1/σ 2 
+
+> τ
+
+.
+
+Posterior gap: From (71): 
+
+σ2 
+
+> L,Y Z
+
+≈ σ2 
+
+> τ
+
+· σ2NO 
+
+hσ 2
+
+> τ
+
+= σ2NO 
+
+h = γ P. (79) 
+
+Score error: 
+
+E[|ϵ|2] ≤ 2( γP + P ν )
+
+σ4
+
+> τ
+
+= 2γP ν 2 + 2
+
+P ν = O
+
+ 1
+
+P ν 
+
+
+
+, (80) since γ ≪ ν in this regime makes the second term dominant. The absolute error scaling thus coincides with Regime II; the regimes are distinguished by the relative error, which is O(γ/ν ) in Regime II but O(1) here. 
+
+Relative error: 
+
+E[|ϵ|2]
+
+E[|sapprox |2] ≤ 2γν + 2 . (81) Since γ ≪ ν defines this regime, 2γ/ν ≪ 1 and the relative error is bounded by a constant. The key mechanism is that the accuracy of the NO ( γ ≪ ν) constrains the posterior gap ∆post ≤ γP independently of 
+
+στ : one cannot enter Regime III without simultaneously providing the bound that controls the error. 
+
+D.4.4 Regime IV ( ν ∼ 1)
+
+At ν = 1 : α = 1 /2, σ2 
+
+> L
+
+= P/ 2, σ2 
+
+> L,Y Z
+
+= P γ/ (2 γ + 1) .All quantities are finite and the distribution-free bounds yield computable constants depending on γ and h.The regime contributes a bounded amount to the integrated score error over the diffusion trajectory. 
+
+D.4.5 Summary 
+
+The analysis is distribution-free in all four regimes. In Regimes I, III, and IV the relative score error is bounded by a parametrically small or O(1) constant. In Regime II the relative-error bound is O(γ/ν ) and is therefore not controlled by the analysis alone; what is controlled, distribution-freely, is the spectral profile of the guidance, since the moment-matching cannot redistribute weight across modes (only rescale per-mode magnitudes by a multiplicative factor absorbed into λNO ). 
+
+## E NO likelihood score: gradient derivation 
+
+This appendix provides the full derivation of the closed-form NO likelihood score (23) stated in the main text. 
+
+E.1 Energy function 
+
+Taking the negative logarithm of the moment-matched Gaussian marginal (56) and dropping all the constants, one obtains the energy function 
+
+J(uτ ) = X
+
+> c,k
+
+|r(c, k )|2
+
+λτ (c, k ) , (82) with the spectral residual 
+
+r(c, k ) := F(uNO )( c, k ) − H(c, k ) α(c, k ) F(uτ )( c, k ). (83) Note that this residual is computed against the marginalized mean H(k) α(k) F(uτ )( k) from (56) ; the factor 
+
+α(k) enters through the LMMSE model, not through any approximation of the denoiser Jacobian. In compact notation, J = r†λ−1 
+
+> τ
+
+r, where λ−1 
+
+> τ
+
+is diagonal in the Fourier basis with entries 1/λ τ (c, k ).30 Preprint 
+
+E.2 Gradient computation 
+
+A perturbation duτ induces dr(c, k ) = −H(c, k ) α(c, k ) F(duτ )( c, k ). The differential of the quadratic form is 
+
+dJ = 2 Re r†λ−1 
+
+> τ
+
+dr = −2 Re r†λ−1
+
+> τ
+
+ (H α ) ⊙ F (duτ ) , (84) where (H α )( c, k ) := H(c, k ) α(c, k ).Using the adjoint identity ⟨a, F(b)⟩ = ⟨F †(a), b⟩:
+
+dJ = −2 Re 
+
+h F† H∗α ⊙ λ−1 
+
+> τ
+
+r † duτ
+
+i
+
+. (85) By the standard identification dJ = ( ∇uτ J)⊤duτ , and noting that for real-valued uτ the inverse transform of a Hermitian-symmetric spectrum is real (so Re[ ·] can be dropped): 
+
+∇uτ J = −2 F−1 H∗α ⊙ λ−1 
+
+> τ
+
+r . (86) 
+
+E.3 Likelihood score 
+
+The likelihood score is ∇uτ log p(uNO | uτ ) = −∇ uτ J, giving: 
+
+∇uτ log p(uNO | uτ ) = F−1˜λτ ⊙ r
+
+
+
+, (87) with the spectral weighting filter 
+
+˜λτ (c, k ) := 2 H∗(c, k ) α(c, k )
+
+λτ (c, k ) = 2 H∗(c, k ) Pu(c, k )(σ2 
+
+> τ
+
++ Pu(c, k )) σ2NO (c, k ) + σ2 
+
+> τ
+
+|H(c, k )|2 Pu(c, k ) . (88) 
+
+Remark. Since H(k) ∈ R (Sec. 4.3), H∗(k) = H(k) throughout; we retain the conjugate notation for generality. 
+
+## F Sampling algorithm 
+
+Algorithm 1 details the full posterior sampling procedure combining the unconditional diffusion prior, sparse sensor guidance, and spectral NO guidance as described in Sec. 4.3. 
+
+Implementation notes. Under the VE schedule ( sτ = 1 throughout), the scaling by s and 1/s in the algorithm reduces to identity and can be omitted. The spectral quantities α(c, k ), λτ (c, k ), and ˜λτ (c, k )
+
+depend on στi and must be recomputed at each step; since they involve only elementwise operations on the precomputed lookup tables, this cost is negligible. The FFT of the NO prediction ˆuNO is computed once and reused across all steps. The dominant per-step cost is the denoiser forward pass (shared by terms (i) and (iii)) and the VJP backward pass (term (iii) only). 
+
+## G Experimental details 
+
+G.1 Denoiser architecture and training 
+
+The unconditional diffusion prior uses the GenCFD architecture [Molinaro et al., 2024], a 3D preconditioned denoiser based on a U-Net backbone with channel widths (64 , 128 , 256) , downsample ratios (2 , 2, 2) , 4
+
+attention blocks with 8 heads, and noise embedding dimension 128 . The model is trained under the variance-exploding (VE) diffusion scheme with an exponential noise schedule spanning σmin = 0 .002 to σmax = 80 ,using EDM-style weighting [Karras et al., 2022] and log-uniform noise sampling. Training uses Adam with peak learning rate 3 × 10 −4 and weight decay 0.01 , run for 430 ,000 steps with a total batch size of 32 (4 per GPU × 8 NVIDIA A100 80 GB GPUs). An exponential moving average of parameters with decay 0.999 is maintained and used for all inference. 
+
+Data normalization. The training targets are surface velocity wavefields u ∈ R3×32 ×32 ×320 . Each sample is first scaled by a physics-based normalization constant that accounts for source–receiver distance and local S-wave velocity (following the MIFNO convention of [Lehmann et al., 2025]), then z-score normalized per channel using global statistics (mean and standard deviation) computed over the 27 ,000 -sample training set. The same two-stage normalization is applied to MIFNO predictions at inference time to ensure both the diffusion prior and the NO guidance operate in a common normalized space. 31 Preprint 
+
+Algorithm 1 Neural operator-guided diffusion posterior sampling 
+
+Require: Denoiser Dθ ; diffusion schedule {(στi , s τi )}Nsteps  
+
+> i=0
+
+; spectral tables H(c, k ), σ2NO (c, k ), Pu(c, k );NO prediction uNO ; sparse observations y; sensor operator MS ; hyperparameters λs, λNO 
+
+Ensure: Posterior sample u0 
+
+> 1:
+
+Precompute (once):  
+
+> 2:
+
+ˆuNO ← F (uNO ) ▷ FFT of NO prediction  
+
+> 3:
+
+Initialise:  
+
+> 4:
+
+uτ0 ∼ N (0, σ 2 
+
+> τ0
+
+s2 
+
+> τ0
+
+I) 
+
+> 5:
+
+for i = 0 , . . . , N steps − 1 do  
+
+> 6:
+
+σ ← στi , s ← sτi , ∆τ ← τi+1 − τi 
+
+> 7:
+
+// (i) Prior score via denoiser  
+
+> 8:
+
+ureq  
+
+> τi
+
+← uτi with gradients enabled  
+
+> 9:
+
+¯u0 ← Dθ (ureq  
+
+> τi
+
+/s, σ ) ▷ denoised estimate  
+
+> 10:
+
+dprior ←
+
+ ˙σσ + ˙ss
+
+
+
+uτi − ˙σσ s ¯u0 
+
+> 11:
+
+// (ii) NO guidance (spectral, no backprop)  
+
+> 12:
+
+α(c, k ) ← Pu(c, k ) / (σ2 + Pu(c, k ))  
+
+> 13:
+
+λτ (c, k ) ← σ2NO (c, k ) + |H(c, k )|2 σ2 α(c, k ) 
+
+> 14:
+
+˜λτ (c, k ) ← 2 H∗(c, k ) α(c, k ) / λ τ (c, k ) 
+
+> 15:
+
+r(c, k ) ← ˆuNO (c, k ) − H(c, k ) α(c, k ) F(uτi /s )( c, k ) 
+
+> 16:
+
+gNO ← F −1
+
+˜λτ ⊙ r
+
+ 
+
+> 17:
+
+cτ ← s2 σ ˙σ 
+
+> 18:
+
+dNO ← cτ λNO gNO / s  
+
+> 19:
+
+// (iii) Sensor guidance (DPS, with backprop)  
+
+> 20:
+
+gsensor ← M †S (y − M S (s ¯u0))  
+
+> 21:
+
+robs ← ∥M S (s ¯u0) − y∥ 
+
+> 22:
+
+gvjp ← VJP  ureq  
+
+> τi
+
+7 → s ¯u0; gsensor 
+
+ ▷ backprop through denoiser  
+
+> 23:
+
+dsensor ← λs gvjp / r obs  
+
+> 24:
+
+// Euler step  
+
+> 25:
+
+uτi+1 ← uτi + ( dprior − dNO − dsensor ) ∆ τ 
+
+> 26:
+
+end for  
+
+> 27:
+
+// Final denoising  
+
+> 28:
+
+u0 ← Dθ (uτNsteps /s τNsteps , σ τNsteps ) 
+
+> 29:
+
+return u0
+
+G.2 MIFNO surrogate 
+
+We use the pretrained MIFNO model of Lehmann et al. [2025], frozen throughout our pipeline and used without modification. The model uses L = 16 factorized Fourier layers with channel width dv = 16 , retaining 
+
+16 Fourier modes along each spatial axis and 32 along the temporal/depth axis (except the first layer, which uses 16 ). The source branch consists of a two-layer perceptron ( 128 hidden units) followed by two 2D convolutional layers. The model totals approximately 3.4 M parameters and was trained for 600 epochs on the 
+
+27 ,000 -sample training split. 
+
+G.3 Spectral calibration 
+
+The three spectral quantities, H(c, k ), σ2NO (c, k ), and Pu(c, k ), are estimated from N = 2 ,000 paired ground-truth/MIFNO samples on a dedicated calibration split, disjoint from both the training and test sets. Estimator formulas are given in Appendix B.4. The resulting lookup tables are stored as a single .pt checkpoint and loaded at inference time. 32 Preprint 
+
+G.4 Guidance hyperparameters 
+
+The posterior sampling ODE (Algorithm 1) involves two scalar hyperparameters: λs for the sensor guidance and λNO for the NO guidance. The DPS sensor term uses the step-size convention λs/∥M S (¯ u0) − y∥, which absorbs the observation noise variance σ2 
+
+> y
+
+. Table 4 reports the values used for each method and sensor density. Table 4: Guidance hyperparameters for each method and sensor density. λs: sensor guidance step size; λNO :NO guidance weight. A dash indicates the term is absent.                        
+
+> ρ= 5% ρ= 2%
+> λsλNO λsλNO
+> DPS 23 ,000 —23 ,000 —DPS + NO (iso) 23 ,000 10 ,000 23 ,000 10 ,000
+> FreqNO-DPS ( α= 1 )23 ,000 0.110 ,000 0.1
+> FreqNO-DPS 23 ,000 0.35 23 ,000 0.35
+
+The hyperparameters λs and λNO were selected on the same 2,000 sample split used for spectral calibration (App. G.3), disjoint from both the 27 ,000 sample training set and the 1,000 sample test set used for all reported results. The sensitivity analysis in Appendix H reports the response of the test set metrics to λNO post hoc, to characterize the curvature of the objective around the selected operating point and verify that it coincides with the zero-crossing of rFFT high . It is not used for selection. 
+
+Remark. The large numerical value of λs reflects the DPS residual-norm normalization: the measurement residual ∥M S ¯u0) − y∥ is small in z-score normalized space, so the step size must compensate. The NO weight differs by four orders of magnitude between DPS + NO (iso) ( λNO = 10 ,000 ) and FreqNO-DPS (λNO = 0 .35 ) because the two methods route the guidance differently: in DPS + NO (iso), λNO multiplies the VJP through the denoiser (analogous to λs), whereas in FreqNO-DPS it scales the closed-form spectral score whose magnitude is set by the calibrated ˜λτ (k). The near-unity value of λNO for FreqNO-DPS is consistent with the principled spectral calibration: the likelihood score is already correctly scaled, and λNO serves only as a fine adjustment. 
+
+G.5 Sensor mask generation 
+
+For each test sample, the sensor subset S ⊂ { 1, . . . , N x} × { 1, . . . , N y } is generated by drawing |S| =
+
+⌊ρ · NxNy ⌋ locations uniformly at random without replacement. The random seed is fixed per sample index to ensure that all methods are evaluated on identical sensor configurations. At ρ = 5% this yields |S| = 51 
+
+sensors; at ρ = 2% , |S| = 20 . No spatial regularity or optimization of the sensor layout is imposed. 
+
+G.6 Sampling configuration 
+
+Posterior samples are generated by solving the probability-flow ODE using the explicit Euler integrator with 
+
+64 time steps following the EDM noise decay schedule [Karras et al., 2022]. A final denoising step is applied at the terminal noise level. We observed that increasing the number of steps beyond 64 yields negligible improvement in reconstruction quality, while reducing below ∼48 steps leads to noticeable degradation. All reported results use the ODE formulation; the SDE variant was also implemented but not used in the final experiments. 
+
+G.7 Pointwise accuracy 
+
+Following Lehmann et al. [2025], the pointwise metrics are computed per sensor location (x, y ) over the temporal axis, then averaged over all sensors, channels, and samples. 
+
+Relative Root Mean Squared Error (rRMSE). 
+
+rRMSE( x, y ) := 
+
+vuut 1
+
+NtNtX
+
+> k=1
+
+ ˆu(x, y, t k) − u(x, y, t k)2
+
+u(x, y, t k)2 + ϵ2 , (89) with ϵ = 0 .01 .33 Preprint 
+
+Relative Mean Absolute Error (rMAE). 
+
+rMAE( x, y ) := 1
+
+NtNtX
+
+> k=1
+
+ˆu(x, y, t k) − u(x, y, t k)
+
+u(x, y, t k) + ϵ . (90) Both metrics are averaged over all sensors (x, y ) ∈ G , velocity components c ∈ { E, N, Z }, and test samples. 
+
+G.8 Spectral fidelity 
+
+Following Lehmann et al. [2025], the frequency content is assessed via banded relative spectral biases. For each sensor (x, y ), let F(u(x, y ))( f ) denote the temporal Fourier transform at frequency f (∆t = 0 .02 s, 
+
+fNyq = 25 Hz). Define the band-averaged spectral magnitude 
+
+F(u(x, y )) B := 1
+
+Nf
+
+X 
+
+> f∈B
+
+F(u(x, y ))( f ) , (91) where Nf is the number of frequency bins in band B. The banded relative FFT bias is then 
+
+rFFT B(x, y ) := F(ˆ u(x, y )) B − F (u(x, y )) B
+
+F(u(x, y )) B
+
+, (92) averaged over all sensors, channels, and samples. Three bands are reported: rFFT low (0–1 Hz), rFFT mid 
+
+(1–2 Hz), and rFFT high (2–5 Hz). Negative values indicate systematic spectral underestimation (attenuation); positive values indicate overestimation; zero indicates unbiased spectral reproduction. 
+
+G.9 Significant duration 
+
+The significant duration D5–95 quantifies the time window containing the central 90% of the seismic energy at each spatial location, based on the Arias intensity. For each grid point (x, y ), the cumulative Arias intensity is 
+
+IA(x, y, t ) = ∆ t
+
+> ⌊t/ ∆t⌋
+
+X
+
+> k=1
+> C
+
+X
+
+> c=1
+
+vc(x, y, t k)2, (93) and the bounding times t5, t95 are the earliest instants at which IA reaches 5% and 95% of the total 
+
+IA(x, y, T ), respectively, with linear interpolation between discrete time steps. The significant duration is then D5–95 (x, y ) = t95 (x, y ) − t5(x, y ). Grid points with zero total energy are excluded. We report the absolute error |Dpred 5–95 − Dtrue 5–95 | averaged over all grid locations (x, y ) ∈ G and test samples. This metric is sensitive to temporal energy distribution: oversmoothed predictions spread energy over a wider window (overestimating D5–95 ), while methods that miss late-arriving scattered phases produce shorter durations. 
+
+## H Sensitivity to the NO guidance weight 
+
+The closed-form NO score (23) is scaled by a single scalar hyperparameter λNO in the sampler (Algorithm 1). The regime analysis of Section 6.1 predicts that, in the operating regime (Regime II), the spectral profile of the guidance is preserved regardless of distributional assumptions while per-mode magnitude rescaling is absorbed into λNO .We sweep λNO across two orders of magnitude on the 1,000 test samples set at ρ = 5% , with all other hyperparameters fixed. We emphasize that λNO = 0 .35 was selected on the validation/calibration split (App. G.4) prior to any test set evaluation; the sweep below reports the test-set response post hoc to characterize sensitivity, not to select the operating point. 
+
+Pointwise stability. The relative MAE varies by less than 8% over the range λNO ∈ [0 .035 , 0.70] , a 20 ×
+
+span. Only for λNO ≥ 1.5 does the surrogate guidance begin to dominate the prior, producing measurable degradation in both rMAE and rRMSE. The pointwise insensitivity to λNO within an order of magnitude of the calibrated value is a direct empirical realization of the Regime II claim that non-Gaussianity can rescale the per-mode guidance magnitude but cannot redistribute it across modes: a multiplicative correction is absorbed by a scalar without affecting the reconstruction’s spatial structure. 34 Preprint 
+
+Table 5: Sensitivity of pointwise and spectral metrics to the NO guidance weight λNO at ρ = 5% . Calibrated operating point λNO = 0 .35 ) shown in bold. Mean over 1,000 test samples. 
+
+λNO rMAE rRMSE rFFT low rFFT mid rFFT high 
+
+0.035 0.108 0.207 −0.062 −0.126 −0.189 0.10 0.103 0.198 −0.028 −0.075 −0.122 0.20 0.101 0.195 −0.007 −0.043 −0.063 
+
+0.35 0.100 0.200 +0 .009 −0.015 +0.002 
+
+0.70 0.103 0.222 +0 .035 +0 .027 +0 .121 1.50 0.115 0.275 +0 .067 +0 .081 +0 .313 3.50 0.132 0.325 +0 .085 +0 .105 +0 .457 
+
+Monotone spectral correction and natural operating point. The banded spectral bias rFFT B varies monotonically with λNO in all three bands, passing from systematic under-correction at small λNO (rFFT high 
+
+= −0.189 at λNO = 0 .035 , close to the MIFNO baseline of −0.239 ) to systematic over-correction at large 
+
+λNO (rFFT high = +0 .457 at λNO = 3 .5). The zero-crossing in the high band occurs essentially at the calibrated operating point λNO = 0 .35 (rFFT high = +0 .002 ). The calibrated value, determined from the spectral statistics 
+
+H(k), σ2NO (k), and Pu(k) without reference to the test set, therefore sits at the principled zero-crossing of the spectral correction, not at an empirically tuned local optimum. 0.035 0.1 0.2 0.35 0.7 1.5 3.5           
+
+> NO
+> 0.10
+> 0.15
+> 0.20
+> 0.25
+> 0.30
+> Pointwise error
+> NO = 0.35
+> Pointwise stability
+> flat region
+> rMAE
+> rRMSE
+> 0.035 0.1 0.2 0.35 0.7 1.5 3.5
+> NO
+> 0.2
+> 0.1
+> 0.0
+> 0.1
+> 0.2
+> 0.3
+> 0.4
+> Banded spectral bias
+> Spectral fidelity
+> rFFT low (0-1 Hz)
+> rFFT mid (1-2 Hz)
+> rFFT high (2-5 Hz)
+
+Figure 10: Sensitivity to λNO at ρ = 5% . Vertical dashed line: calibrated operating point λNO = 0 .35 . Left: pointwise metrics (rMAE, rRMSE) are flat across the shaded region λNO ∈ [0 .1, 0.7] . Right: banded spectral biases vary monotonically and cross zero near the calibrated value, with rFFT high spanning −0.189 to +0 .457 
+
+across the sweep. 35
