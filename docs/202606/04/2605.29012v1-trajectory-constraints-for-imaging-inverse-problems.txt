@@ -1,0 +1,661 @@
+Title: Trajectory Constraints for Imaging Inverse Problems
+
+URL Source: https://arxiv.org/pdf/2605.29012v1
+
+Published Time: Fri, 29 May 2026 00:13:57 GMT
+
+Number of Pages: 20
+
+Markdown Content:
+# Trajectory Constraints for Imaging Inverse Problems 
+
+Chaoyan Huang 1,2 , Haijie Yuan 1, Saiprasad Ravishankar 1,3 1Department of Computational Mathematics, Science, & Engineering, Michigan State University 
+
+> 2
+
+Department of Electrical Engineering and Computer Science, University of Michigan 
+
+> 3
+
+Department of Biomedical Engineering, Michigan State University 
+
+{huang345, yuanhai1, ravisha3}@msu.edu, {chaoyanh}@umich.edu 
+
+## Abstract 
+
+Diffusion-based and iterative methods have become effective tools for solving imag-ing inverse problems. Their reconstruction process naturally forms a trajectory of intermediate estimates. Although these intermediate estimates define a reconstruc-tion trajectory, most methods do not explicitly regularize the transitions between consecutive states. To address this limitation, we introduce TRACE, a training-free 
+
+TRA jectory-Constrained r Econstruction framework that stabilizes the reconstruc-tion path by coupling adjacent states along the trajectory. This gives a trajectory-level model that can be interpreted as a sequence of proximal updates. Since the exact proximal update is generally intractable, we approximate it with a neural mapping. This yields a diffusion-like reconstruction process with an explicit coupling between neighboring states. We provide a stability analysis showing that temporal coupling bounds trajectory variation and that this control is preserved under untrained net-work updates. Experiments on linear and nonlinear image reconstruction tasks show that TRACE improves reconstruction quality. Trajectory-level analyses and ablations confirm that temporal coupling directly affects state transitions along the reconstruction path. 
+
+# 1. Introduction 
+
+Many imaging tasks can be formulated as inverse problems, where the goal is to recover an unknown signal from incomplete, corrupted, or indirect measurements. Diffusion-based generative models have recently provided powerful priors for imaging inverse problems [ 1, 2 ]. While diffusion-based solvers can achieve strong performance by combining learned generative priors with measurement consistency, many of them rely on domain-matched pretrained diffusion models [ 3, 4]. Recent consistency-based solvers such as SITCOM [ 5] further improve the sampling process for inverse prob-lems, but still build on pretrained diffusion priors. The need to handle diverse imaging modalities, image distributions, and corruptions without expensive training or fine-tuning motivates training-free reconstruction methods, which adapt directly to the given measurements without external training data. Deep Image Prior (DIP) was proposed to exploit the implicit bias of untrained convo-lutional networks for inverse problems [ 6]. Subsequent DIP-based methods improve this paradigm through sequential input updates [ 7], self-guidance [ 8], or transferable weights [ 9]. Recent methods further combine untrained neural priors with diffusion-based reconstruction. SDI [ 10 ] replaces the pretrained score model with an untrained neural network and alternates between noising and denoising steps. uDiG-DIP [ 11 ] uses a pretrained diffusion model to guide the network input in a sequential DIP reconstruction. Most of the aforementioned methods refine an initial estimate through a sequence of intermediate reconstructions. Thus, the final result is influenced not only by the data-consistency term and the implicit or learned prior, but also by how the intermediate estimates evolve. However, this evolution 
+
+> arXiv:2605.29012v1 [cs.CV] 27 May 2026
+
+is considered only indirectly through the update rule [ 7] or reuse weights [ 9, 10 ], without imposing an explicit constraint on transitions between consecutive states. This motivates a trajectory-level perspective on image reconstruction. Rather than focusing only on the final estimate, we formulate reconstruction as a sequence of coupled intermediate states and constrain the transitions between consecutive states. In this work, we introduce TRACE, a training-free tra jectory-constrained r econstruction framework for imaging inverse problems. TRACE models reconstruction as a sequence of coupled states and explicitly constrains transitions between consecutive estimates through a temporal coupling term. The resulting objective function admits a natural proximal interpretation. After fixing one state, updating its predecessor corresponds to a proximal step involving the data term, the implicit prior, and a quadratic coupling to the next state. Since this proximal step is generally intractable, we approximate it using a neural mapping. The resulting procedure resembles a diffusion-like reconstruction process, but differs from existing methods by explicitly controlling the variation between adjacent states along the trajectory. We provide a stability analysis showing that temporal coupling bounds the variation between con-secutive states and that this control is preserved under approximate neural updates. Empirically, we evaluate final reconstruction quality under several imaging inverse problems together with trajectory-level behavior, coupling-strength ablations, and transferability to diffusion-style solvers. Across imaging inverse problems, TRACE improves reconstruction quality and produces reconstruction trajectories with more controlled state transitions. Our contributions are as follows. 
+
+• We highlight trajectory constraints as an overlooked design principle for diffusion-based and iterative inverse problem solvers. 
+
+• We propose TRACE, a training-free tra jectory-constrained r econstruction (TRACE) frame-work that constrains transitions between intermediate reconstruction states. 
+
+• We derive a proximal interpretation and stability bounds showing how temporal coupling controls state transitions under approximate neural updates. 
+
+• We demonstrate improved reconstruction quality across imaging inverse problems and provide trajectory-level analyses that connect these improvements to the proposed temporal coupling. 
+
+# 2. Method 
+
+We consider an inverse problem of the form y = Ax + e, where A denotes the forward operator, y
+
+are the observed measurements, e denotes measurement noise, and x is the unknown signal to be reconstructed. As discussed in the introduction, many reconstruction methods produce a sequence of intermediate estimates. We therefore denote the reconstruction process as an evolving trajectory 
+
+{xt}Tt=0 in the solution space, where xT denotes an initial reconstruction state and x0 denotes the final output with a backward index convention. In existing methods, the transition from xt+1 to xt
+
+is usually determined by the chosen reconstruction step itself, without an explicit penalty on the change between the two states. TRACE instead regularizes this change directly. Following this trajectory-level perspective, we formulate reconstruction as a sequence of coupled states, where transitions between consecutive estimates are regularized by a temporal coupling term. This gives the following objective function 
+
+min 
+
+> {xt}Tt=0
+> T
+
+X
+
+> t=0
+
+(f (xt) + λtR(xt)) +  
+
+> T−1
+
+X
+
+> t=0
+
+βt
+
+2 ∥xt − xt+1 ∥22, (1) where f (x) = 12 ∥A x − y∥22 enforces data consistency, R(·) denotes the regularization, and λt are positive parameters. The temporal coupling term penalizes large changes between adjacent states along this trajectory, and the parameters βt control the strength of this coupling. We do not solve (1) as a full joint optimization problem over all states. Instead, TRACE uses a backward one-step approximation induced by this trajectory energy. The algorithm starts from an initial state xT without 2Algorithm 1 TRACE: TRA jectory-Constrained r Econstruction framework  
+
+> 1:
+
+Input: y, xT , θKT , trajectory steps T , inner network iterations K, forward operator A, perturbation 
+
+{σt}T −1 
+
+> t=0
+
+, coupling parameters {βt}T −1 
+
+> t=0
+
+. 
+
+> 2:
+
+for t = T − 1, . . . , 0 do  
+
+> 3:
+
+Sample ϵt ∼ N (0 , I ), ut = xt+1 + σtϵt. 
+
+> 4:
+
+Initialize θ0 
+
+> t
+
+= θKt+1 . 
+
+> 5:
+
+for k = 1 , . . . , K do  
+
+> 6:
+
+Update θkt from θk−1 
+
+> t
+
+by one optimizer step on Lθt in (6).  
+
+> 7:
+
+end for  
+
+> 8:
+
+Set xt = DθKt (ut). 
+
+> 9:
+
+end for  
+
+> 10:
+
+return x0
+
+coupling and then updates the trajectory backward from t = T − 1 to t = 0 . At each step, the current state xt is coupled to the already available neighboring state xt+1 . Hence, fixing xt+1 , the update of 
+
+xt is given by 
+
+xt = arg min  
+
+> x
+
+f (x) + λtR(x) + βt
+
+2 ∥x − xt+1 ∥22. (2) Let Ft(x) = f (x) + λtR(x), then we can interpret (2) as a proximal update 
+
+xt := Pt(xt+1 ) := prox 1  
+
+> βtFt
+
+(xt+1 ). (3) Since the prior R(·) is implicit, the proximal operator in (3) does not have a closed-form solution. Motivated by deep plug-and-play methods, where proximal operators are often replaced by deep neural networks [ 12 – 14 ], we approximate this implicit proximal step using an untrained neural mapping 
+
+xt ≈ Dθt (xt+1 ), (4) where Dθt is optimized at step t. In this case, the role of the prior R(·) is represented implicitly by the network architecture and optimization updates, rather than by an explicit regularization term. Unlike standard plug-and-play methods that use a fixed pretrained denoiser, Dθt is optimized at each step for the current measurement and acts as a training-free implicit neural prior. Besides, inspired by the diffusion models [15, 16], we perturb the available state before applying the neural mapping. Specifically, at step t, let 
+
+ut = xt+1 + σtϵt, ϵt ∼ N (0 , I ), (5) where σt controls the perturbation level. Substituting the parameterization x = Dθt (ut) into the local proximal objective in (2) gives the network training loss 
+
+Lθt = 12 ∥A Dθt (ut) − y∥22 + βt
+
+2 ∥Dθt (ut) − xt+1 ∥22. (6) The data-consistency term keeps the network output compatible with the measurements, while the coupling term keeps the update close to the available state xt+1 . Thus, each update is guided by the measurement while remaining constrained by its neighboring state. The overall algorithm is summarized in Algorithm 1. We use the superscript k to index the inner network optimization iterations: θ0 
+
+> t
+
+denotes the initial weights at trajectory step t, and θKt denotes the weights after K
+
+optimizer steps. Given a random noise input z, we first obtain the initial trajectory state xT through an uncoupled DIP optimization. The network weights θ0 
+
+> T
+
+are initialized using the standard random initialization used in DIP [6], and then optimized for K steps 
+
+θKT ≈ arg min 
+
+> θ
+
+12 ∥A Dθ (z) − y∥22, xT = DθKT (z). (7) Starting from xT , TRACE proceeds backward over t = T − 1, . . . , 0. For each coupled step, the network is warm-started from the optimized weights of the previous trajectory state, i.e., θ0 
+
+> t
+
+← θKt+1 .At each step, the network is optimized with the loss in (6) , and the next reconstruction state is obtained by evaluating the optimized network as xt = DθKt (ut).33. Theoretical Analysis 
+
+We analyze TRACE from the perspective of trajectory stability. Our goal is to characterize how the temporal coupling term controls transitions between consecutive reconstruction states. For the update in Algorithm 1, we study how far the updated state xt is from xt+1 . We first give a standard assumption in proximal analysis as follows. 
+
+Assumption 3.1. For each t, Ft is proper, lower semi-continuous, bounded below. The local subproblem in 
+
+(2) admits at least one global minimizer x⋆t = Pt(xt+1 ). The subgradient is bounded by Mt, i.e., there exists 
+
+g⋆t ∈ ∂F t(x⋆t ), s.t., ∥g⋆t ∥2 ≤ Mt.
+
+Assumption 3.2. The neural approximation error is bounded by a positive constant δt
+
+E∥DθKt (ut) − x⋆t ∥2 ≤ δt, (8) All expectations are taken with respect to the random perturbation used to form ut.
+
+Theorem 3.3. Under Assumptions 3.1 and 3.2, the implemented update satisfies 
+
+E∥xt − xt+1 ∥2 ≤ Mt
+
+βt
+
++ δt. (9) The proof is given in Appendix A.1. This result shows that the transition from xt+1 to xt is explicitly controlled by βt, up to the neural approximation error δt. This matters because the final reconstruction is produced by a sequence of network updates. Large intermediate jumps can make the path sensitive to perturbations and optimization artifacts, while a controlled trajectory yields a more stable reconstruction process. 
+
+Remark 3.4. The transition bound in Theorem 3.3 requires βt > 0. When βt = 0 , the local objective contains no term penalizing ∥xt − xt+1 ∥2, and no analogous transition bound relative to xt+1 follows from the local optimality condition alone. 
+
+Theorem 3.5. Let {˜xt}Tt=0 be the ideal proximal trajectory initialized from the same state as TRACE, i.e., 
+
+˜xT = xT , ˜xt = Pt(˜ xt+1 ), t = T − 1, . . . , 0. (10) 
+
+Let {xt}Tt=0 be the implemented TRACE trajectory with 
+
+xT = xT , xt = DθKt (ut), t = T − 1, . . . , 0. (11) 
+
+Assume Assumptions 3.1 and 3.2 hold, and assume that Ft is ρt-weakly convex and βt > ρ t for each t, then the final reconstruction error satisfies 
+
+E∥x0 − ˜x0∥2 ≤ 
+
+> T−1
+
+X
+
+> s=0
+
+δss−1Y
+
+> i=0
+
+βi
+
+βi − ρi
+
+, (12) 
+
+where the empty product is defined as 1. More generally, for any intermediate state, 
+
+E∥xt − ˜xt∥2 ≤ 
+
+> T−1
+
+X
+
+> s=t
+
+δss−1Y
+
+> i=t
+
+βi
+
+βi − ρi
+
+, (13) The proof is given in Appendix A.2. Theorem 3.5 compares the implemented TRACE trajectory with the ideal proximal trajectory. It shows that the error introduced at each neural update is propagated through the factors βt 
+
+> βt−ρt
+
+. When Ft is convex, we have ρt = 0 , and these factors reduce to one. In this case, the trajectory error accumulates additively. The weak convexity assumption is imposed only on the ideal image-domain surrogate Ft, not on the nonconvex neural parameterization. It can be viewed as a local bounded-negative-curvature condition along the reconstruction trajectory. The neural network is treated as an approximate solver for the ideal proximal step, and its deviation is captured by δt.4Corollary 3.5.1. Suppose that, in addition to the assumptions of Theorem 3.5, Ft is locally μt-strongly convex along the reconstruction trajectory, with μt > 0. Then the ideal proximal map satisfies 
+
+∥Pt(a) − Pt(b)∥2 ≤ qt∥a − b∥2, qt = βt
+
+βt + μt
+
+< 1. (14) 
+
+Consequently, 
+
+E∥xt − ˜xt∥2 ≤ 
+
+> T−1
+
+X
+
+> s=t
+
+δss−1Y
+
+> i=t
+
+qi. (15) 
+
+In particular, if qi ≤ q < 1 and δi ≤ δ, then 
+
+E∥x0 − ˜x0∥2 ≤ δ 1 − qT
+
+1 − q . (16) Corollary 3.5.1 describes a favorable case in which the ideal proximal update is contractive. In this regime, errors from earlier neural updates are damped by later proximal steps instead of being only accumulated. Thus, Theorem 3.5 gives a general weakly convex stability bound, while Corollary 3.5.1 shows that stronger local curvature can further suppress error propagation. 
+
+# 4. Experiments 
+
+We evaluate TRACE on a range of inverse problems to test whether explicitly modeling the reconstruc-tion trajectory leads to more stable and reliable reconstructions. The experiments cover natural-image restoration tasks, including inpainting, super-resolution, and deblurring, as well as X-ray computed tomography (CT) reconstruction under sparse-view and limited-angle settings. These problems differ in the type and severity of information loss, allowing us to examine the behavior of TRACE across both standard image restoration settings and highly ill-posed medical imaging problems. Our evaluation is organized around three questions. First, we compare TRACE with representative untrained, self-guided, and diffusion-based inverse solvers in terms of reconstruction quality. Second, we analyze the reconstruction trajectory itself to verify whether the proposed temporal coupling indeed controls the evolution between adjacent states. Third, we conduct ablation and sensitivity studies to understand the roles of temporal coupling. We also test whether the same trajectory regularization can be added to an existing diffusion-based inverse solver. Additional results are provided in the appendix, including extended qualitative comparisons, CT results under both sparse-view and limited-angle settings, ablation study of temporal coupling, stochastic perturbation, weight inheritance, sensitivity to the numbers of outer and inner iterations, and experiments with pretrained initialization. 
+
+## 4.1. Experimental Setup 
+
+Tasks. We consider four representative classes of inverse problems. For image inpainting, we use random masks with 50% and 70% missing pixels. For image super-resolution, we evaluate ×2 and 
+
+×4 downsampling. For image deblurring, we consider both motion blur and nonlinear blur. For CT reconstruction, we evaluate sparse-view and limited-angle tomography. In the sparse-view setting, projections are taken over the full angular range with a limited number of views, while in the limited-angle setting, measurements are restricted to a contiguous angular range. 
+
+Baselines. We compare TRACE with representative inverse solvers from several categories: DIP [ 6 ], ASeqDIP [ 7 ], Self-Guided DIP [ 8 ], SDI [ 10 ], and UGoDIT [ 9]. For CT reconstruction, we additionally include uDiG-DIP [ 11 ], which uses a pretrained diffusion prior. To examine whether the proposed trajectory regularization is tied to our specific implementation, we also add the same temporal coupling term to SITCOM [5], a pretrained diffusion-based inverse solver. 5Table 1: Average results on natural-image inverse problems. Best and second-best values in each row are shown in bold and underlined, respectively. Higher is better for PSNR and SSIM, while lower is better for LPIPS. UGoDIT ∗ uses transferable weights learned from unsupervised group training.                                                                                                                     
+
+> Tasks Setting Metric UGoDIT ∗Self-Guided DIP ASeqDIP DIP SDI TRACE
+> Inpainting Missing 50% PSNR 30.93 33.91 31.84 29.08 32.53 33.77 SSIM 0.894 0.951 0.919 0.832 0.938 0.948 LPIPS 0.0778 0.0337 0.0773 0.2299 0.0315 0.0316 Missing 70% PSNR 28.96 30.61 29.14 27.94 29.27 30.68
+> SSIM 0.864 0.909 0.871 0.805 0.886 0.903 LPIPS 0.0938 0.0787 0.1166 0.2499 0.0600 0.0553
+> SR
+> ×2
+> PSNR 29.63 28.42 28.51 26.98 31.28 32.01
+> SSIM 0.872 0.777 0.827 0.748 0.920 0.931
+> LPIPS 0.0926 0.1374 0.2519 0.3285 0.0772 0.0755
+> ×4
+> PSNR 25.91 22.26 25.88 26.11 26.32 27.47
+> SSIM 0.755 0.478 0.744 0.723 0.783 0.817
+> LPIPS 0.2373 0.5732 0.3500 0.3828 0.2713 0.2484 Deblurring Motion PSNR 25.24 29.21 24.58 24.36 29.25 29.94
+> SSIM 0.696 0.829 0.654 0.652 0.832 0.863
+> LPIPS 0.2968 0.1760 0.4140 0.4522 0.1899 0.1840 Nonlinear PSNR 23.29 23.11 22.85 23.59 24.69 25.52
+> SSIM 0.600 0.492 0.569 0.612 0.665 0.708
+> LPIPS 0.4323 0.5298 0.4977 0.5192 0.4156 0.3986
+
+Implementation details. For each task, all methods are evaluated using the same measurements, forward operators, and degradation settings. We use the same or comparable optimization budgets whenever the formulations are comparable. For TRACE, T denotes the number of trajectory states, and K denotes the number of inner optimization steps used at each state. Unless otherwise specified, TRACE uses T = 40 and K = 150 . Additional details, including network architectures, optimizer settings, learning rates, schedules for temporal coupling {βt} and stochastic perturbation {σt},runtime information, and baseline configurations, are provided in Appendix B. 
+
+## 4.2. Natural-Image Inverse Problems 
+
+We first evaluate TRACE on natural-image inverse problems, including inpainting, super-resolution, and deblurring. These tasks represent different forms of information loss: missing pixels, reduced spatial resolution, and blur-induced loss of high-frequency content. We randomly test 10 images from dataset BSDS68 and 4 images from dataset Set14. Table 1 reports the average PSNR, SSIM, and LPIPS results. Overall, TRACE performs consistently well across these restoration tasks. It is ranked first or second in all reported settings, with especially clear gains in the more challenging regimes, such as 70% 
+
+missing inpainting, ×4 super-resolution, and nonlinear deblurring. These results suggest that trajectory-constrained reconstruction is most beneficial when the inverse problem becomes more ill-posed and unconstrained optimization is more likely to produce unstable artifacts. 
+
+Image inpainting. For image inpainting, we evaluate random masking with 50% and 70% missing pixels. Under the moderate 50% missing setting, TRACE remains highly competitive and achieves results close to the best-performing method across all metrics. Under the more severe 70% missing setting, TRACE shows a clearer advantage, achieving the best PSNR and LPIPS and the second-best SSIM. As shown in Table 1, TRACE improves PSNR from 29.27 dB with SDI to 30.68 dB and reduces LPIPS from 0.0600 to 0.0553. These results suggest that explicitly controlling the reconstruction trajectory is particularly useful when large image regions are unobserved. Additional qualitative comparisons are provided in Appendix C.1. 6(a) GT (b) Observation 21.42 / 0.732 / 0.3768      
+
+> (c) DIP 27.15 / 0.759 / 0.3633
+> (d) ASeqDIP 26.59 / 0.730 / 0.3842
+> (e) Self-Guided DIP 31.01 / 0.858 / 0.1453
+> (f) UGoDIT 28.39 / 0.796 / 0.2576
+> (g) SDI 31.22 / 0.867 / 0.1843
+> (h) TRACE 32.68 /0.900 / 0.1541
+
+Figure 1: Representative motion deblurring result. The numbers below each image denote PSNR ↑ /SSIM ↑ / LPIPS ↓. TRACE achieves the highest PSNR and SSIM on this example, showing stronger structural recovery under motion blur. 
+
+Super-resolution. For image super-resolution, we evaluate ×2 and ×4 downsampling. Table 1 shows that TRACE achieves the best PSNR and SSIM under both scaling factors. The improvement is especially clear for ×4 super-resolution, where TRACE improves PSNR from 26.32 dB to 27.47 dB and SSIM from 0.783 to 0.817 over the strongest baseline. TRACE also achieves the best LPIPS under ×2 and the second-best LPIPS under ×4. These results indicate that trajectory-constrained reconstruction is effective for recovering structures from low-resolution observations. Additional qualitative comparisons are provided in Appendix C.2. 
+
+Image deblurring. For image deblurring, we evaluate both motion blur and nonlinear blur. Table 1 shows that TRACE achieves the best PSNR and SSIM under motion blur, improving PSNR from 29.25 dB with SDI to 29.94 dB and SSIM from 0.832 to 0.863. Although Self-Guided DIP obtains the lowest LPIPS in this setting, TRACE achieves the second-best LPIPS while providing the best distortion-based reconstruction quality. Under nonlinear blur, TRACE achieves the best performance across all three metrics, improving PSNR from 24.69 dB to 25.52 dB and SSIM from 0.665 to 0.708 over the strongest baseline. Figure 1 shows a representative motion deblurring example. Compared with DIP and ASeqDIP, TRACE produces sharper structures and fewer blur-related artifacts. Compared with stronger baselines such as Self-Guided DIP and SDI, TRACE better preserves structural details and avoids unstable high-frequency artifacts. This supports the role of trajectory regularization in ill-conditioned restoration problems, where direct optimization can easily lead to ringing or overfitting artifacts. Additional qualitative comparisons for motion deblurring are provided in Appendix C.3. 
+
+## 4.3. CT Reconstruction 
+
+We further evaluate TRACE on sparse-view and limited-angle CT reconstruction, where the projection data are highly incomplete and the inverse problem is severely ill-posed. This setting is particularly useful for testing whether trajectory-constrained reconstruction can remain stable under strong measurement deficiency. The detailed settings are given in Appendix C.4. Table 2 reports the average quantitative results. TRACE achieves the best PSNR and SSIM in both CT settings. For sparse-view CT, TRACE improves PSNR from 27.79 dB, achieved by the second-best method uDiG-DIP, to 29.55 dB, and improves SSIM from 0.822 to 0.894. For limited-angle CT, TRACE improves PSNR from 26.33 dB to 27.21 dB and SSIM from 0.782 to 0.823 over the strongest baseline. These gains are larger than those observed in many natural-image settings, suggesting that trajectory control is especially helpful when the measurement model is highly underdetermined. 7Table 2: Average results on CT reconstruction tasks. Best and second-best values in each row are shown in bold and underlined, respectively. Higher is better for both PSNR and SSIM. uDiG-DIP †
+
+uses a pretrained diffusion prior. 
+
+Setting Metric Self-Guided DIP ASeqDIP DIP SDI uDiG-DIP † TRACE 
+
+Sparse-view PSNR 27.43 27.15 25.25 24.36 27.79 29.55 
+
+SSIM 0.809 0.822 0.691 0.789 0.807 0.894 
+
+Limited-angle PSNR 26.33 25.64 23.36 25.36 25.12 27.21 
+
+SSIM 0.782 0.760 0.626 0.768 0.733 0.823 
+
+Sparse-view CT    
+
+> GT DIP 25.89 / 0.671
+> ASeqDIP 28.92 / 0.861
+> Self-Guided DIP 30.11 / 0.848
+> SDI 29.71 / 0.862
+> uDiG-DIP 28.35 / 0.820
+> TRACE 32.01 /0.922
+
+Limited-angle CT    
+
+> GT DIP 21.51 / 0.573
+> ASeqDIP 22.25 / 0.657
+> Self-Guided DIP 24.58 / 0.730
+> SDI 23.41 / 0.698
+> uDiG-DIP 24.47 / 0.687
+> TRACE 25.75 /0.824
+
+Figure 2: Representative CT reconstruction results under sparse-view and limited-angle sampling. The numbers below each reconstruction denote PSNR ↑ / SSIM ↑. TRACE achieves the highest PSNR and SSIM in both examples, showing stronger suppression of streak artifacts and more coherent structural recovery under severe measurement deficiency. Figure 2 shows representative CT reconstructions. In both sparse-view and limited-angle cases, baseline methods suffer from visible streak artifacts, blurred structures, or unstable local textures caused by missing projection data. TRACE suppresses these artifacts more effectively and recovers more coherent anatomical structures. In the displayed sparse-view case, TRACE achieves 32.01 dB PSNR and 0.922 SSIM, clearly outperforming all baselines. In the limited-angle case, TRACE also achieves the highest PSNR and SSIM, showing stronger robustness to missing angular measurements. These visual results are consistent with the average improvements in Table 2. Additional CT visual comparisons and experimental details are provided in Appendix C.4. 
+
+## 4.4. Trajectory Stability 
+
+Beyond final reconstruction quality, we further examine the stability of the reconstruction trajectory. Since TRACE explicitly constrains the evolution between adjacent reconstruction states, we measure the state variation 
+
+∆t = ∥xt − xt+1 ∥2 (17) along the reconstruction process. We also report the weighted transition term βt∆t, which directly corresponds to the temporal coupling term in our objective. Figure 3 shows the evolution of the reconstruction trajectory. The state variation ∆t decreases smoothly over the trajectory, indicating that adjacent reconstruction states become progressively more consistent. The weighted transition term βt∆t also remains bounded and gradually decays, which is consistent with the role of temporal coupling in controlling state transitions. 8(a) ∆t = ∥xt − xt+1 ∥2 (b) βt∆t 
+
+> (c) PSNR (d) SSIM
+
+Figure 3: Trajectory stability analysis. TRACE produces smoothly decaying state transitions while PSNR and SSIM steadily improve, indicating stable reconstruction dynamics without abrupt state changes. At the same time, the PSNR and SSIM curves increase steadily along the trajectory. This suggests that TRACE does not stabilize the trajectory by simply freezing the reconstruction; instead, it maintains a stable evolution while continuing to improve reconstruction quality. These results empirically support our central claim that explicitly modeling the reconstruction trajectory leads to a more stable and reliable inverse solver. 
+
+## 4.5. Effect of Temporal Coupling 
+
+Table 3: Effect of the temporal coupling schedule.                                                                    
+
+> 10 3βt
+> SR Deblur PSNR ↑SSIM ↑LPIPS ↓PSNR ↑SSIM ↑LPIPS ↓
+> 027.67 0.891 0.0889 27.26 0.836 0.1757
+> [1 ,0.1] 27.85 0.892 0.0803 27.15 0.832 0.1828
+> [2 ,0.2] 27.68 0.890 0.0826 27.30 0.837 0.1810
+> [3 ,0.3] 27.92 0.896 0.0852 27.19 0.833 0.1755
+> [4 ,0.4] 28.18 0.898 0.0768 27.31 0.838 0.1653
+> [5 ,0.5] 28.23 0.898 0.0834 27.49 0.846 0.1686
+> [6 ,0.6] 27.69 0.891 0.0898 27.05 0.828 0.1843
+> [7 ,0.7] 27.99 0.897 0.0832 27.28 0.839 0.1765
+
+We study how the temporal coupling strength affects the final reconstruc-tion. The parameter βt controls how strongly adjacent reconstruction states are coupled, and therefore determines the trade-off between trajectory stabil-ity and local refinement. We use an annealed schedule and vary its overall magnitude. We test 3 images from ImageNet Large Scale Visual Recognition Challenge (ILSVRC). Table 3 shows that moderate temporal coupling gives the best reconstruction quality. The schedule [5 , 0.5] × 10 −3 achieves the best PSNR for both super-resolution and deblurring, improving over the uncoupled case ( βt = 0 )by 0.56 dB and 0.23 dB, respectively. Very weak coupling provides insufficient trajectory control, while overly strong coupling may restrict final refinement. Additional ablations are provided in Appendix D and Appendix E. 
+
+## 4.6. Transferability of Trajectory Regularization 
+
+9Table 4: Effect of adding temporal cou-pling to SITCOM.             
+
+> Method PSNR ↑SSIM ↑LPIPS ↓
+> SITCOM 31.27 0.885 0.0977 SITCOM + TC 31.41 0.884 0.0952
+
+We further test whether the proposed temporal coupling is specific to TRACE or can also be used in other diffusion-style inverse solvers. To this end, we add the same state-transition penalty to SITCOM, a representative pretrained diffusion-based inverse solver, while keeping the rest of the reconstruction pipeline unchanged. We test 3 images from CBSD68 for the non-linear blur task. Table 4 shows that adding temporal coupling slightly improves PSNR from 31.27 dB to 31.41 dB and reduces LPIPS from 0.0977 to 0.0952, while maintaining comparable SSIM. Although the gain is modest, this suggests that trajectory regularization is not tied to the specific TRACE implementation and can be incorporated into existing diffusion-style inverse solvers. Appendix F further studies TRACE with pretrained initialization, where pretraining is used only to initialize the network parameters. 
+
+# 5. Conclusion 
+
+We introduced TRACE, a trajectory-based framework for inverse problems that models reconstruction as a sequence of intermediate states. Instead of optimizing only a single final estimate, TRACE explic-itly regularizes the transitions between consecutive states, leading to a more controlled reconstruction process. Our analysis shows that temporal coupling helps bound the evolution of the trajectory, and our experiments demonstrate that this control translates into improved reconstruction quality and more stable behavior across natural-image restoration and CT reconstruction tasks. The empirical results also highlight the importance of the individual design components. Temporal coupling stabi-lizes adjacent states, stochastic perturbation improves exploration, and weight inheritance preserves optimization continuity along the trajectory. In addition, the transferability study suggests that the same trajectory regularization principle can be incorporated into other diffusion-style inverse solvers. Overall, these findings suggest that modeling the reconstruction path, rather than only the endpoint, provides a useful way to understand and design stable iterative methods for inverse problems. 
+
+# 6. Acknowledgments 
+
+This work was supported in part by the National Science Foundation (NSF) grants CCF-2212065, ECCS-2436945, and NSF CAREER CCF-2442240. 
+
+# References 
+
+[1] Yang Song, Jascha Sohl-Dickstein, Diederik P. Kingma, Abhishek Kumar, Stefano Ermon, and Ben Poole. Score-based generative modeling through stochastic differential equations. In 
+
+International Conference on Learning Representations , 2021. [2] Yang Song, Liyue Shen, Lei Xing, and Stefano Ermon. Solving inverse problems in medical imag-ing with score-based generative models. In International Conference on Learning Representations ,2022. [3] Yinhuai Wang, Jiwen Yu, and Jian Zhang. Zero-shot image restoration using denoising diffusion null-space model. In International Conference on Learning Representations , 2023. [4] Bahjat Kawar, Michael Elad, Stefano Ermon, and Jiaming Song. Denoising diffusion restoration models. In Advances in Neural Information Processing Systems , volume 35, 2022. [5] Ismail Alkhouri, Shijun Liang, Cheng-Han Huang, Jimmy Dai, Qing Qu, Saiprasad Ravis-hankar, and Rongrong Wang. Sitcom: Step-wise triple-consistent diffusion sampling for inverse problems. In International Conference on Machine Learning , pages 1128–1158. PMLR, 2025. [6] Dmitry Ulyanov, Andrea Vedaldi, and Victor Lempitsky. Deep image prior. In Proceedings of the IEEE Conference on Computer Vision and Pattern Recognition , pages 9446–9454, 2018. 10 [7] Ismail R Alkhouri, Shijun Liang, Evan Bell, Qing Qu, Rongrong Wang, and Saiprasad Ravis-hankar. Image reconstruction via autoencoding sequential deep image prior. Advances in Neural Information Processing Systems , 37:18988–19012, 2024. [8] Shijun Liang, Evan Bell, Qing Qu, Rongrong Wang, and Saiprasad Ravishankar. Analysis of deep image prior and exploiting self-guidance for image reconstruction. IEEE Transactions on Computational Imaging , 2025. [9] Shijun Liang, Ismail Alkhouri, Siddhant Gautam, Qing Qu, and Saiprasad Ravishankar. Ugodit: Unsupervised group deep image prior via transferable weights. Advances in Neural Information Processing Systems , 2025. [10] Guanxiong Luo, Shoujin Huang, and Yanlong Yang. Self-diffusion for solving inverse problems. In Advances in Neural Information Processing Systems , 2026. [11] Shijun Liang, Ismail Alkhouri, Qing Qu, Rongrong Wang, and Saiprasad Ravishankar. Sequen-tial diffusion-guided deep image prior for medical image reconstruction. In ICASSP 2025-2025 IEEE International Conference on Acoustics, Speech and Signal Processing (ICASSP) , pages 1–5. IEEE, 2025. [12] Kai Zhang, Yawei Li, Wangmeng Zuo, Lei Zhang, Luc Van Gool, and Radu Timofte. Plug-and-play image restoration with deep denoiser prior. IEEE Transactions on Pattern Analysis and Machine Intelligence , 44(10):6360–6376, 2021. [13] Zhongming Wu, Chaoyan Huang, and Tieyong Zeng. Extrapolated plug-and-play three-operator splitting methods for nonconvex optimization with applications to image restoration. 
+
+SIAM Journal on Imaging Sciences , 17(2):1145–1181, 2024. [14] Chaoyan Huang, Zhongming Wu, Yanqi Cheng, Tieyong Zeng, Carola-Bibiane Schönlieb, and Angelica I Aviles-Rivero. Deep block proximal linearized minimization algorithm for nonconvex inverse problems. SIAM Journal on Mathematics of Data Science , 7(4):1729–1754, 2025. [15] Chicago Y. Park, Shirin Shoushtari, Hongyu An, and Ulugbek S. Kamilov. Measurement score-based diffusion model. In The Fourteenth International Conference on Learning Representations ,2026. URL https://openreview.net/forum?id=pFByPVh6bd .[16] Hyungjin Chung, Jeongsol Kim, Michael T. Mccann, Marc L. Klasky, and Jong Chul Ye. Diffusion posterior sampling for general noisy inverse problems. In International Conference on Learning Representations , 2023. [17] OpenAI. guided-diffusion. https://github.com/openai/guided-diffusion , 2021. GitHub repository. Accessed: 2026-05-07. 11 Appendix A. Detailed Proofs 
+
+We provide proofs of the theoretical results stated in the main paper. 
+
+## A.1. Proof of Theorem 3.3 
+
+Proof. By the optimality condition of the ideal local subproblem in (2), we have 
+
+0 ∈ ∂F t(x⋆t ) + βt(x⋆t − xt+1 ). (18) Therefore, there exists g⋆t ∈ ∂F t(x⋆t ) such that 
+
+g⋆t + βt(x⋆t − xt+1 ) = 0 . (19) Rearranging gives 
+
+x⋆t − xt+1 = − 1
+
+βt
+
+g⋆t . (20) Taking norms and using Assumption 3.1, we obtain 
+
+∥x⋆t − xt+1 ∥2 ≤ Mt
+
+βt
+
+, (21) where Mt is the bound of the subgradient. Since the implemented update is xt = DθKt (ut), the triangle inequality yields 
+
+∥xt − xt+1 ∥2 = ∥DθKt (ut) − xt+1 ∥2
+
+≤ ∥ DθKt (ut) − x⋆t ∥2 + ∥x⋆t − xt+1 ∥2. (22) Taking expectations on both sides and applying Assumption 3.2 together with (21), we obtain 
+
+E∥xt − xt+1 ∥2 ≤ δt + Mt
+
+βt
+
+. (23) This proves the claim. 
+
+## A.2. Proof of Theorem 3.5 
+
+Proof. For each t = T − 1, . . . , 0, we have 
+
+∥xt − ˜xt∥2 = ∥DθKt (ut) − Pt(˜ xt+1 )∥2
+
+≤ ∥ DθKt (ut) − Pt(xt+1 )∥2 + ∥Pt(xt+1 ) − Pt(˜ xt+1 )∥2. (24) Since Ft is ρt-weakly convex, we have 
+
+∥Pt(xt+1 ) − Pt(˜ xt+1 )∥2 ≤ βt
+
+βt − ρt
+
+∥xt+1 − ˜xt+1 ∥2. (25) On the other hand, by the definition of the exact local subproblem minimizer x⋆t = Pt(xt+1 ), we know that 
+
+∥DθKt (ut) − Pt(xt+1 )∥2 = ∥DθKt (ut) − x⋆t ∥2. (26) Combining (24), (25), and (26), and taking expectations, and applying Assumption 3.2, we obtain 
+
+E∥xt − ˜xt∥2 ≤ δt + βt
+
+βt − ρt
+
+E∥xt+1 − ˜xt+1 ∥2. (27) 12 Since ˜xT = xT , E∥xT − ˜xT ∥2 = 0 . Applying (27) repeatedly from T − 1 to t gives 
+
+E∥xt − ˜xt∥2 ≤ 
+
+> T−1
+
+X
+
+> s=t
+
+δss−1Y
+
+> i=t
+
+βi
+
+βi − ρi
+
+, (28) where the empty product is defined as 1. In particular, 
+
+E∥x0 − ˜x0∥2 ≤ 
+
+> T−1
+
+X
+
+> s=0
+
+δss−1Y
+
+> i=0
+
+βi
+
+βi − ρi
+
+. (29) 
+
+# B. Algorithmic Details 
+
+In this appendix, we summarize the implementation details of all methods and the optimization settings used throughout our benchmark. 
+
+Unified evaluation protocol. All methods are evaluated under the same protocol described in Sec. 4.1, using identical forward operators, measurements, and degradation models for each task. The benchmark includes random inpainting with 50% and 70% missing pixels, bicubic super-resolution with scaling factors of ×2 and ×4, motion deblurring, nonlinear deblurring, and CT reconstruction under sparse-view and limited-angle settings. Unless otherwise specified, natural images are resized to 256 × 256 , and all optimization procedures are performed using Adam. We report PSNR and SSIM for all tasks, and additionally report LPIPS for RGB natural-image tasks when ground-truth images are available. For CT reconstruction, all methods are evaluated on normalized slices under matched measurement settings. 
+
+Hardware and software. All experiments are implemented in PyTorch and conducted on servers equipped with NVIDIA RTX PRO 6000 Blackwell Server Edition GPUs. Whenever applicable, random seeds are fixed to improve reproducibility. 
+
+## B.1. TRACE 
+
+TRACE alternates between trajectory-state updates and inner neural optimization. Unless otherwise specified, we use T = 40 outer trajectory states ( –steps 40 ) and K = 150 inner optimization steps per state ( –iter 150 ), with a learning rate of 1 × 10 −3 (–learning_rate 0.001 ). The default backbone is deepunet , while dip_skip is also supported as an alternative. We adopt a DDPM-style diffusion schedule, with beta_start set to 10 −4 and beta_end set to 10 −2. The temporal coupling coefficients {βt} are linearly annealed from 5 × 10 −3 to 5 × 10 −4, unless otherwise stated, and the stochastic perturbation schedule {σt} is controlled by noise_eta_scale . All ablation studies are performed within the same implementation by enabling or disabling components through switches such as disable_temporal_coupling , disable_stochastic_perturbation , and the option that removes weight inheritance across trajectory states. 
+
+## B.2. Compared Methods 
+
+We compare TRACE against representative untrained, iterative, and diffusion-based inverse solvers, including DIP, ASeqDIP, Self-Guided DIP, SDI, UGoDIT, and uDiG-DIP when applicable. In addi-tion, we include SITCOM as a representative pretrained diffusion-based inverse solver in order to examine whether the proposed temporal coupling mechanism can be transferred beyond the TRACE framework. With the exception of the parameters specifically noted below, all other settings remain consistent with their original paper. 
+
+DIP [ 6]. For DIP, we use 3000 optimization iterations with a learning rate of 1 × 10 −2. The recon-struction network is the standard skip-network DIP architecture, and the input regularization noise is set to reg_noise_std = 1 /30 .13 ASeqDIP [ 7]. For natural-image tasks, ASeqDIP is evaluated with T = 300 , K = 2 , a learning rate of 3 × 10 −4, and a regularization weight of 1.0. For CT reconstruction tasks, we follow a longer optimization schedule with T = 1200 , K = 5 , a learning rate of 2 × 10 −4, and a regularization weight of 0.0 (AseqDIP without regularization). The backbone architecture follows the task-dependent UNet variants used in the original method. 
+
+Self-Guided DIP [ 8 ]. Self-Guided DIP is run for 4000 iterations. The learning rate for the network parameters is set to 3 × 10 −4, while the reference variable is optimized with a learning rate of 1 × 10 −1.We use a guidance weight of α = 2 .0, 3 smoothing samples. The backbone is an extra-deep UNet. 
+
+SDI [ 10 ]. For SDI, we use T = 40 outer diffusion steps and K = 150 inner optimization steps, with a learning rate of 1 × 10 −3. The backbone is a deep UNet with filter_number = 16 , and the diffusion process follows a DDPM-style schedule. 
+
+UGoDIT [ 9]. For natural-image tasks, UGoDIT is evaluated with T = 300 , K = 2 , and a learning rate of 1 × 10 −2. For CT tasks, we use T = 1200 , K = 5 , and a learning rate of 2 × 10 −4. When required by the method configuration, the pretrained encoder is frozen and only the decoder is optimized. The pretrained encoder is the original implementation from their paper. 
+
+uDiG-DIP [ 11 ]. When applicable to natural-image tasks, uDiG-DIP is evaluated with T = 300 ,
+
+K = 2 , and a learning rate of 3 × 10 −4. For CT reconstruction, we use T = 1200 , K = 5 , and a learning rate of 2 × 10 −4.
+
+SITCOM [ 5]. We use SITCOM as a representative pretrained diffusion-based inverse solver to assess whether temporal coupling remains effective beyond the TRACE implementation. In our pipeline, SITCOM follows its DDIM-style optimization setting, with n_step = 20 , num_steps = 30 , and a learning rate of 0.02 . The pre-trained models are downloaded from their repo. Temporal coupling is incorporated as an additional controllable state-transition penalty within the same reconstruction loop. 
+
+Fairness of optimization budgets. Across all methods, we use identical measurements, forward op-erators, and degradation settings for each task. Because the compared approaches differ substantially in their optimization structures, it is not always possible to match computational budgets exactly. Nevertheless, whenever the formulations are sufficiently comparable, we use the same or closely matched iteration budgets. For trajectory-based methods in particular, we explicitly report both the number of outer states T and the number of inner optimization steps K to make the optimization cost transparent. 
+
+# C. Additional Experimental Results 
+
+In this section, we provide additional qualitative results to complement the main experiments. These examples further illustrate the behavior of TRACE across different natural-image inverse problems, including image inpainting, super-resolution, and deblurring. For all visual comparisons, the numbers below each image denote PSNR ↑ / SSIM ↑ / LPIPS ↓.
+
+## C.1. Image Inpainting 
+
+We provide an additional qualitative comparison for image inpainting with 50% random masking. Inpainting removes a large portion of pixels and therefore requires the reconstruction method to infer missing structures from incomplete observations. This provides a complementary test to deblurring and super-resolution, where the measurements are corrupted but spatially complete. Figures 4 and 5 show that TRACE produces a visually consistent reconstruction in the missing regions. Compared with DIP and ASeqDIP, TRACE reduces artifacts caused by directly fitting the incomplete observation. Compared with stronger baselines such as Self-Guided DIP and SDI, TRACE achieves the highest PSNR on these examples while maintaining competitive structural and perceptual quality. 14 Additional Result: Inpainting with 50% Missing Pixels       
+
+> (a) GT (b) Observation 11.00 / 0.118 / 0.9134
+> (c) DIP 31.49 / 0.871 / 0.1762
+> (d) ASeqDIP 34.92 / 0.940 / 0.0347
+> (e) Self-Guided 36.31 / 0.967 /0.0161
+> (f) UGoDIT 34.15 / 0.927 / 0.0586
+> (g) SDI 36.02 / 0.965 / 0.0176
+> (h) TRACE 36.63 / 0.965 / 0.0248
+
+Figure 4: Additional qualitative result for image inpainting with 50% missing pixels. The numbers below each image denote PSNR ↑ / SSIM ↑ / LPIPS ↓. TRACE achieves the highest PSNR on this example and produces a visually consistent reconstruction in the missing regions.       
+
+> (a) GT (b) Observation 8.39 / 0.057 / 0.9367
+> (c) DIP 26.97 / 0.737 / 0.4258
+> (d) ASeqDIP 27.75 / 0.794 / 0.2269
+> (e) Self-Guided 29.06 / 0.881 / 0.0767
+> (f) UGoDIT 28.64 / 0.842 / 0.1393
+> (g) SDI 28.75 / 0.878 / 0.0818
+> (h) TRACE 29.88 /0.888 / 0.1026
+
+Figure 5: Representative image inpainting result under 70% missing pixels. The numbers below each image denote PSNR / SSIM / LPIPS. TRACE achieves the highest PSNR and SSIM on this challenging example, indicating improved pixel-level and structural fidelity. 
+
+## C.2. Image Super-Resolution 
+
+We further evaluate image super-resolution under ×2 and ×4 downsampling setting. Super-resolution requires recovering high-frequency details from a low-resolution observation, making it sensitive to over-smoothing and unstable texture generation. Figures 6 and 7 show additional SR examples. TRACE achieves the best PSNR and LPIPS among the compared methods and matches the best SSIM. This indicates that the proposed trajectory-constrained formulation improves pixel-level fidelity while preserving perceptual quality. The result further supports the conclusion in the main paper that TRACE is effective for recovering fine image structures under resolution loss. 15 Additional Result: Super-resolution ×2        
+
+> (a) GT (b) Observation 30.01 / 0.903 / 0.1573
+> (c) DIP 28.09 / 0.808 / 0.2740
+> (d) ASeqDIP 29.32 / 0.843 / 0.2079
+> (e) Self-Guided 28.29 / 0.752 / 0.1111
+> (f) UGoDIT 30.09 / 0.883 / 0.0836
+> (g) SDI 30.74 / 0.915 / 0.0853
+> (h) TRACE 30.82 /0.915 /0.0766
+
+Figure 6: Additional qualitative result for image super-resolution under ×2 downsampling. The numbers below each image denote PSNR ↑ / SSIM ↑ / LPIPS ↓. TRACE achieves the best PSNR and LPIPS and matches the best SSIM on this example.       
+
+> (a) GT (b) Observation 33.32 / 0.949 / 0.1936
+> (c) DIP 32.82 / 0.940 / 0.2224
+> (d) ASeqDIP 28.26 / 0.869 / 0.3694
+> (e) Self-Guided 25.08 / 0.454 / 0.7417
+> (f) UGoDIT 35.22 / 0.958 / 0.1041
+> (g) SDI 34.98 / 0.960 / 0.1384
+> (h) TRACE 35.75 /0.965 / 0.1275
+
+Figure 7: Representative super-resolution result under ×4 downsampling. The numbers below each image denote PSNR ↑ / SSIM ↑ / LPIPS ↓. TRACE achieves the highest PSNR and SSIM on this example, indicating improved pixel-level accuracy and structural fidelity under severe resolution loss. 
+
+## C.3. Image Deblurring 
+
+We provide an additional qualitative comparison for motion deblurring. Deblurring is highly ill-conditioned because high-frequency information is attenuated by the blur operator, and iterative reconstruction methods can easily introduce ringing or texture artifacts. For both deblurring settings, we synthesize the observation as y = A(xtrue ) without adding extra noise, where xtrue is the resized RGB image (default 256 × 256 ). The blur operator is implemented as channel-wise (depthwise) convolution with shared kernels across three channels and symmetric padding ( p = 10 , kernel size 21 × 21 ), outputs are clipped to [0 , 1] .
+
+Motion blur. We use a spatially invariant linear motion kernel of length 21 and direction 45 ◦. The kernel is constructed by drawing a line through the kernel center along the motion direction and normalizing it to unit sum. 16 Additional Result: Motion Deblurring       
+
+> (a) GT (b) Observation 18.85 / 0.581 / 0.4676
+> (c) DIP 22.11 / 0.643 / 0.4484
+> (d) ASeqDIP 23.39 / 0.687 / 0.3456
+> (e) Self-Guided 27.24 / 0.829 / 0.1555
+> (f) UGoDIT 24.23 / 0.727 / 0.2896
+> (g) SDI 28.65 / 0.872 / 0.1263
+> (h) TRACE 29.30 /0.878 /0.1062
+
+Figure 8: Additional qualitative result for motion deblurring. The numbers below each image denote PSNR ↑ / SSIM ↑ / LPIPS ↓. TRACE achieves the best PSNR, SSIM, and LPIPS on this example, indicating improved structural recovery and perceptual quality. 
+
+Nonlinear blur. We use an anisotropic Gaussian blur kernel (size 21 ×21 ) with σx = 3 .0, σy = 8 .0, and rotation angle 30 ◦, followed by unit-sum normalization. This setting introduces direction-dependent smoothing and is more challenging for recovering fine structures than isotropic blur. Figure 8 shows that TRACE achieves the best PSNR, SSIM, and LPIPS on the displayed example. Compared with DIP and ASeqDIP, TRACE recovers sharper structures and avoids severe blur-related artifacts. Compared with Self-Guided DIP, UGoDIT, and SDI, TRACE further improves both distortion-based metrics and perceptual quality. These additional results are consistent with the main-paper observation that trajectory regularization improves stability and reconstruction reliability in ill-conditioned inverse problems. 
+
+## C.4. Sparse-view and Limited-angle CT Reconstruction 
+
+We further evaluate CT reconstruction under two challenging tomographic settings: sparse-view and limited-angle imaging. Both settings are tested on anonymized abdominal CT scans from the AAPM dataset, using two representative cases, L067 and L109. We test 3 scans from L067 and 2 scans from L109. For sparse-view CT, projections are acquired over the full 0◦–180 ◦ angular range using only 60 views. This setting preserves angular coverage but severely reduces the number of measurements. For limited-angle CT, projections are acquired from 0◦ to 119 ◦ with a 1◦ increment, resulting in 120 contiguous views within a restricted angular range. This setting leads to missing-angle artifacts and stronger directional ambiguity. Figures 9 and 10 provide additional qualitative comparisons for sparse-view and limited-angle CT, respectively. Across both regimes, TRACE consistently achieves stronger reconstruction quality than the compared methods. In sparse-view CT, TRACE better suppresses streak artifacts caused by insufficient projec-tion views. In limited-angle CT, TRACE reduces missing-angle artifacts and preserves more coherent anatomical structures. These results further support the effectiveness of trajectory regularization for stabilizing highly ill-posed tomographic reconstruction. 17 CT Reconstruction: Sparse-view     
+
+> (a) GT (b) DIP 25.06 / 0.697
+> (c) ASeqDIP 24.96 / 0.803
+> (d) Self-Guided 26.21 / 0.792
+> (e) SDI 16.48 / 0.811
+> (f) uDiG-DIP 26.61 / 0.786
+> (g) TRACE 27.15 /0.859
+
+Figure 9: Additional qualitative results for sparse-view CT reconstruction. The comparison includes the ground truth and reconstructions from DIP, ASeqDIP, Self-Guided DIP, SDI, uDiG-DIP, and TRACE. The numbers below each reconstruction denote PSNR ↑ / SSIM ↑. TRACE achieves the highest PSNR and SSIM on this case, indicating improved artifact suppression and structural consistency under sparse-view sampling. Table 5: Ablation study on trajectory structure. The state variation is used as a diagnostic of trajectory behavior rather than a standalone objective, since overly small variation may limit reconstruction refinement. Variant PSNR ↑ SSIM ↑ LPIPS ↓
+
+TRACE w/o temporal coupling 32.31 0.950 0.0279 TRACE w/o stochastic perturbation 30.59 0.939 0.0395 TRACE w/o weight inheritance 26.01 0.784 0.2166 
+
+TRACE 32.77 0.953 0.0243 
+
+# D. Ablation Study 
+
+We study the contribution of the main components in the proposed trajectory formulation. Specifically, we consider three variants: (i) removing temporal coupling, (ii) removing stochastic perturbation, and (iii) removing weight inheritance across trajectory states. We test 3 images from Set14 for the inpainting task with a missing pixel of 50% . Table 5 reports the quantitative results. Removing temporal coupling degrades reconstruction quality, reducing PSNR from 32.77 dB to 32.31 dB. This confirms that explicitly coupling adjacent states is beneficial for reconstruction. Removing stochastic perturbation leads to significantly worsens PSNR, SSIM, and LPIPS. This suggests that overly restricting the trajectory can reduce the exploration ability of the solver and limit reconstruction refinement. Removing weight inheritance causes the largest performance dropindicating that optimization continuity across states is crucial for stable trajectory construction. Overall, the full TRACE model achieves the best reconstruction quality, showing that temporal coupling, stochastic perturbation, and weight inheritance play complementary roles. 18 CT Reconstruction: Limited-angle     
+
+> (a) GT (b) DIP 24.66 / 0.664
+> (c) ASeqDIP 28.66 / 0.852
+> (d) Self-Guided 28.81 / 0.850
+> (e) SDI 27.99 / 0.848
+> (f) uDiG-DIP 25.93 / 0.760
+> (g) TRACE 29.06 /0.862
+
+Figure 10: Additional qualitative result for limited-angle CT reconstruction. The comparison includes the ground truth and reconstructions from DIP, ASeqDIP, Self-Guided DIP, SDI, uDiG-DIP, and TRACE. The numbers below each reconstruction denote PSNR ↑ / SSIM ↑. TRACE achieves the highest PSNR and SSIM on this case, showing improved robustness to missing angular measurements and reduced limited-angle artifacts. Table 6: Ablation on the number of outer trajectory states T and inner optimization steps K. The total number of network updates is fixed as N = T K = 6000 . Moderate trajectory updates improve reconstruction quality, while too many outer states may leave insufficient optimization at each state. 
+
+T K PSNR ↑ SSIM ↑ LPIPS ↓
+
+10 600 31.65 0.946 0.0286 20 300 32.26 0.951 0.0252 
+
+30 200 31.92 0.946 0.0315 40 150 32.65 0.952 0.0259 50 120 32.43 0.948 0.0273 60 100 32.21 0.948 0.0323 
+
+# E. Effect of Inner and Outer Iterations 
+
+We study the effect of the number of outer trajectory states and inner optimization steps in TRACE. Specifically, we fix the total number of network updates as N = T K and vary the number of outer states T and the number of inner optimization steps K per state. This allows us to examine the trade-off between frequent trajectory updates and sufficient optimization at each trajectory state. We test 3 images from Set14 for the inpainting task with a missing pixel of 50% . Table 6 reports the results. Increasing T from 10 to 40 generally improves reconstruction quality, suggesting that more frequent trajectory updates help guide the reconstruction process and prevent over-optimizing a single state. The best performance is achieved at T = 40 and K = 150 , which provides a good balance between trajectory evolution and inner-state refinement. However, further increasing T to 50 or 60 reduces the number of inner optimization steps per state and leads to slightly degraded performance. This indicates that excessively frequent trajectory updates may limit the optimization accuracy of each state. Overall, these results support using a moderate number of trajectory states with sufficient inner optimization. 19 F. Effect of Pretrained Initialization 
+
+We further investigate whether the proposed trajectory formulation can benefit from pretrained initialization. Specifically, instead of training the neural mapping Dθt from a random initialization, we initialize the network parameters using the publicly released unconditional 256 ×256 Guided Diffusion checkpoint ( 256x256_diffusion_uncond.pt ) from OpenAI [ 17 ]. We then optimize the model within the same TRACE trajectory formulation. The temporal coupling, stochastic perturba-tion, and optimization procedure are kept unchanged. Thus, the pretrained model is used only as an initialization, rather than as a fixed external prior or an additional regularization module. Table 7 reports the average results of 3 images from Set14 for inpainting task. Pretrained initialization slightly improves PSNR and SSIM, increasing PSNR from 32.59 dB to 32.75 dB and SSIM from 0.949 to 0.952. Although LPIPS is slightly worse in this setting, the results indicate that TRACE can benefit from pretrained initialization while maintaining stable trajectory behavior. Table 7: Effect of pretrained initialization. The pretrained model is used only to initialize the network parameters before TRACE optimization; it is not used as a fixed external prior. Pretrained initialization improves PSNR and SSIM.             
+
+> Method PSNR ↑SSIM ↑LPIPS ↓
+> TRACE, random initialization 32.59 0.949 0.0279
+> TRACE, pretrained initialization 32.75 0.952 0.0301
+
+20

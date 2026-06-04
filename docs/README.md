@@ -6,71 +6,73 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-06-03
-- 运行时间：2026-06-03 22:38:47 UTC
+- 最新运行日期：2026-06-04
+- 运行时间：2026-06-04 22:13:43 UTC
 - 运行状态：成功
 - 本次总论文数：17
 - 精读区：6
 - 速读区：11
 
 ### 今日简报（AI）
-今日处理17篇论文，精读2篇最高分9.0。重点关注《Recursive Flow Matching》与《Model discovery for dynamical systems with complex-valued product units》两个方向。建议先精读这两篇高分论文，再速读扩散模型后验采样器的理论分析。
-- 详情：[/202606/03/README](/202606/03/README)
+今日精选17篇论文，精读2篇高分研究聚焦地球模型程序化生成与具身AI世界模型。  
+最值得关注两大方向：SubsurfaceGen用程序化生成解决野外尺度地球模型和地震数据稀缺问题，Physically Viable World Models提出查询条件化具身AI框架。  
+建议普通读者优先浏览精读论文，速读中学习马尾藻输运动力学和混沌代理建模的误差分析方法也可拓展视野。
+- 详情：[/202606/04/README](/202606/04/README)
 
 ### 精读区论文标签
-1. [Recursive Flow Matching](/202606/03/2605.26535v1-recursive-flow-matching)  
+1. [SubsurfaceGen: Procedural Generation of Field-Scale Earth Models and Seismic Data](/202606/04/2605.30541v1-subsurfacegen-procedural-generation-of-field-scale-earth-models-and-seismic-data)  
    标签：评分：9.0/10、query:geo-phys-ai
-   evidence：用于时空动力学的生成框架，具有物理准确性
-2. [Model discovery for dynamical systems with complex-valued product units](/202606/03/2605.27158v1-model-discovery-for-dynamical-systems-with-complex-valued-product-units)  
+   evidence：程序化生成现场尺度的3D地球模型和地震数据，用于机器学习全波形反演训练
+2. [Physically Viable World Models: A Case for Query-Conditioned Embodied AI](/202606/04/2605.30542v1-physically-viable-world-models-a-case-for-query-conditioned-embodied-ai)  
    标签：评分：9.0/10、query:geo-phys-ai
-   evidence：使用复数乘积单元网络从数据中发现动力系统控制方程
-3. [Sequential Physics-Constrained Neural Operator Forward Modeling for the $\textit{Norne}$ Reservoir System](/202606/03/2605.28909v1-sequential-physics-constrained-neural-operator-forward-modeling-for-the-textitnorne-reservoir-system)  
+   evidence：强调物理可行性的具身AI世界模型
+3. [Physical Object Understanding with a Physically Controllable World Model](/202606/04/2606.00439v1-physical-object-understanding-with-a-physically-controllable-world-model)  
    标签：评分：9.0/10、query:geo-phys-ai
-   evidence：神经算子FNO用于储层动态地下建模
-4. [GeoVolDiff: Taming 3D Geological Volumes with Latent Diffusion](/202606/03/2606.03572v1-geovoldiff-taming-3d-geological-volumes-with-latent-diffusion)  
+   evidence：具有物理可控性的概率世界模型，用于物体理解
+4. [Loss-Conditional PINNs for Parametric PDE Families](/202606/04/2606.04420v1-loss-conditional-pinns-for-parametric-pde-families)  
    标签：评分：9.0/10、query:geo-phys-ai
-   evidence：用于3D地质体生成的潜扩散模型
-5. [Correcting Neural Operator Spectral Bias via Diffusion Posterior Sampling with Sparse Observations](/202606/03/2606.03936v1-correcting-neural-operator-spectral-bias-via-diffusion-posterior-sampling-with-sparse-observations)  
+   evidence：损失条件PINN探索整个权重空间，超越固定约束平衡
+5. [The Right Measure for Physics-Constrained Generation: A Co-Area Correction for Posterior-Consistent PDE Inverse Problems](/202606/04/2606.04804v1-the-right-measure-for-physics-constrained-generation-a-co-area-correction-for-posterior-consistent-pde-inverse-problems)  
    标签：评分：9.0/10、query:geo-phys-ai
-   evidence：使用扩散后验采样纠正神经算子谱偏差；直接适用于稀疏观测下的地球物理反问题
-6. [Stage-wise Distortion-Perception Traversal in Zero-shot Inverse Problems with Diffusion Models](/202606/03/2605.28711v1-stage-wise-distortion-perception-traversal-in-zero-shot-inverse-problems-with-diffusion-models)  
+   evidence：扩散后验采样用于PDE逆问题的协面积修正
+6. [From Short Histories to Long Futures: Horizon-Aware Graph Neural Networks for Long Horizon Forecasting](/202606/04/2605.29952v1-from-short-histories-to-long-futures-horizon-aware-graph-neural-networks-for-long-horizon-forecasting)  
    标签：评分：8.0/10、query:geo-phys-ai
-   evidence：基于扩散模型的零样本逆问题失真-感知遍历阶段框架
+   evidence：利用图神经网络进行地球物理系统长期预测
 
 ### 速读区论文标签
-1. [Stage-wise Distortion-Perception Traversal in Zero-shot Inverse Problems with Diffusion Models](/202606/03/2605.28711v2-stage-wise-distortion-perception-traversal-in-zero-shot-inverse-problems-with-diffusion-models)  
+1. [Learning effective Sargassum transport dynamics from limited drifter observations](/202606/04/2605.30603v1-learning-effective-sargassum-transport-dynamics-from-limited-drifter-observations)  
    标签：评分：8.0/10、query:geo-phys-ai
-   evidence：用于零样本逆问题的阶段式扩散后验采样框架；可应用于地球物理反演
-2. [Stochastic Lifting for Generating Trajectories of Stochastic Physical Systems](/202606/03/2605.29194v1-stochastic-lifting-for-generating-trajectories-of-stochastic-physical-systems)  
+   evidence：从有限漂流观测学习传输动力学
+2. [A holomorphic neural network framework for 3D boundary value problems governed by harmonic potentials](/202606/04/2605.31231v1-a-holomorphic-neural-network-framework-for-3d-boundary-value-problems-governed-by-harmonic-potentials)  
    标签：评分：8.0/10、query:geo-phys-ai
-   evidence：生成随机物理系统的轨迹
-3. [When, why, and how do diffusion posterior samplers fail? A finite-sample lens](/202606/03/2605.30330v1-when-why-and-how-do-diffusion-posterior-samplers-fail-a-finite-sample-lens)  
+   evidence：全纯神经网络精确满足PDE
+3. [The Dynamic-Probabilistic Consistency Gap in Chaotic Surrogate Modeling](/202606/04/2605.31547v1-the-dynamic-probabilistic-consistency-gap-in-chaotic-surrogate-modeling)  
    标签：评分：8.0/10、query:geo-phys-ai
-   evidence：面向成像反问题的扩散后验采样器分析
-4. [Clustering Guided Domain-Specific Pretrained Foundation Model Very High-Resolution Arctic Remote Sensing](/202606/03/2605.30467v1-clustering-guided-domain-specific-pretrained-foundation-model-very-high-resolution-arctic-remote-sensing)  
+   evidence：动态系统重建中的代理模型不确定性一致性问题
+4. [Physics-Guided Recurrent State-Space Neural Networks for Multi-Step Prediction](/202606/04/2606.02278v1-physics-guided-recurrent-state-space-neural-networks-for-multi-step-prediction)  
    标签：评分：8.0/10、query:geo-phys-ai
-   evidence：通过MAE在北极遥感数据上预训练的领域基础模型
-5. [Predictive Moving Sample Method for Physics-Informed Neural Solvers of Time-Dependent PDEs](/202606/03/2605.26745v1-predictive-moving-sample-method-for-physics-informed-neural-solvers-of-time-dependent-pdes)  
+   evidence：物理引导的递归状态空间多步预测
+5. [Riemannian Diffusion Models on General Manifolds via Physics-Informed Neural Networks](/202606/04/2605.31106v1-riemannian-diffusion-models-on-general-manifolds-via-physics-informed-neural-networks)  
    标签：评分：7.0/10、query:geo-phys-ai
-   evidence：针对时变PDE的物理信息神经求解器的预测移动采样方法
-6. [Adaptive Reservoir Computing for Multi-Scenario Chaotic System Forecasting](/202606/03/2605.28145v1-adaptive-reservoir-computing-for-multi-scenario-chaotic-system-forecasting)  
+   evidence：通过PINN在流形上进行扩散后验采样
+6. [(HB-ARFM) History-Bootstrapped Flow Matching for Inverse Boiling Reconstruction](/202606/04/2606.00349v1-hb-arfm-history-bootstrapped-flow-matching-for-inverse-boiling-reconstruction)  
    标签：评分：7.0/10、query:geo-phys-ai
-   evidence：自适应储备池计算用于多场景混沌系统预测并支持少样本学习
-7. [FLORO: A Multimodal Geospatial Foundation Model for Ecological Remote Sensing Across Sensors and Scales](/202606/03/2605.28174v1-floro-a-multimodal-geospatial-foundation-model-for-ecological-remote-sensing-across-sensors-and-scales)  
+   evidence：流匹配用于时空逆重建；部分观测
+7. [Continuous Data Assimilation with Learned Surrogate Dynamics](/202606/04/2606.00480v1-continuous-data-assimilation-with-learned-surrogate-dynamics)  
    标签：评分：7.0/10、query:geo-phys-ai
-   evidence：多模态地理空间基础模型，预训练于遥感数据
-8. [Parameter-Efficient Generative Modeling with Controlled Vector Fields](/202606/03/2605.28267v1-parameter-efficient-generative-modeling-with-controlled-vector-fields)  
+   evidence：学习代理动力学用于数据同化
+8. [Limits of Resolution Equivariance in Fourier Neural Operators](/202606/04/2606.00677v1-limits-of-resolution-equivariance-in-fourier-neural-operators)  
    标签：评分：7.0/10、query:geo-phys-ai
-   evidence：基于受控向量场的生成建模，适用于物理世界动力学
-9. [Sampling Data with Chains of Forward-Backward Diffusion Steps](/202606/03/2605.27006v1-sampling-data-with-chains-of-forward-backward-diffusion-steps)  
+   evidence：傅里叶神经算子分辨率等变性分析，应用于达西流，与地下建模相关
+9. [Trajectory Constraints for Imaging Inverse Problems](/202606/04/2605.29012v1-trajectory-constraints-for-imaging-inverse-problems)  
    标签：评分：6.0/10、query:geo-phys-ai
-   evidence：提出使用前向-后向扩散步骤的U-turn链从高维分布采样
-10. [Sparse POD Mode Selection and Manifold Dimensionality Reduction with Neural Networks](/202606/03/2605.27756v1-sparse-pod-mode-selection-and-manifold-dimensionality-reduction-with-neural-networks)  
+   evidence：轨迹约束的扩散逆问题重建
+10. [DisjunctiveNet: Neural Symbolic Learning via Differentiable Convexified Optimization Layers](/202606/04/2605.30456v1-disjunctivenet-neural-symbolic-learning-via-differentiable-convexified-optimization-layers)  
    标签：评分：6.0/10、query:geo-phys-ai
-   evidence：高维物理系统的模型降阶
-11. [Conservative neural posterior estimation via distributionally robust training](/202606/03/2605.28516v1-conservative-neural-posterior-estimation-via-distributionally-robust-training)  
+   evidence：利用可微优化层实现神经符号学习，将领域知识作为约束嵌入网络
+11. [Zeroth-Order Non-Log-Concave Sampling with Variance Reduction and Applications to Inverse Problems](/202606/04/2605.30573v1-zeroth-order-non-log-concave-sampling-with-variance-reduction-and-applications-to-inverse-problems)  
    标签：评分：6.0/10、query:geo-phys-ai
-   evidence：分布鲁棒神经后验估计改善了覆盖率和校准性，可应用于地球物理反问题
+   evidence：零阶朗之万采样方法，用于非对数凹逆问题
 
 
 <div class="dpr-home-promo-card">

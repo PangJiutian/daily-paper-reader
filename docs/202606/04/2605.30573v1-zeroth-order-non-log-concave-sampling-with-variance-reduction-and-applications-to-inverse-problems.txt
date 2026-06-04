@@ -1,0 +1,5528 @@
+Title: Zeroth-Order Non-Log-Concave Sampling with Variance Reduction and Applications to Inverse Problems
+
+URL Source: https://arxiv.org/pdf/2605.30573v1
+
+Published Time: Mon, 01 Jun 2026 00:20:12 GMT
+
+Number of Pages: 42
+
+Markdown Content:
+# Zeroth-Order Non-Log-Concave Sampling with Variance Reduction and Applications to Inverse Problems 
+
+M. Berk Sahin 1 Behzad Sharif 1 2 Abolfazl Hashemi 1
+
+## Abstract 
+
+Sampling from high-dimensional, non-log-concave distributions with unnormalized densi-ties remains a fundamental challenge in machine learning, particularly in black-box settings where gradient information is inaccessible or compu-tationally prohibitive. While Langevin dynam-ics provides a principled framework for sampling when gradients are accessible, its extension to the black-box settings suffers from high variance and lacks non-asymptotic convergence guaran-tees for non-log-concave sampling. To address these limitations, we propose a variance-reduced zeroth-order Langevin sampling method. Our method employs a gradient estimator that substan-tially reduces the variance of the classical batched zeroth-order estimator and eliminates the unfavor-able dimensional dependence of the batch size re-quired for accurate estimation, enabling practical and stable sampling. We establish the first non-asymptotic convergence guarantees for zeroth-order non-log-concave sampling in terms of ε-relative Fisher information, and, under a Poincar ´einequality assumption, squared total variation dis-tance. We further propose ZO-APMC, a pos-terior sampling algorithm for black-box inverse problems with pre-trained score-based generative priors, establishing the first non-asymptotic con-vergence guarantees for such methods. We val-idate our theory through synthetic experiments and demonstrate strong empirical performance on practical linear and nonlinear inverse problems. 
+
+## 1. Introduction 
+
+We study the problem of sampling from a distribution 
+
+π ∝ exp( −f ) with potential function f : Rd → R when we 
+
+> 1
+
+Elmore School of Electrical and Computer Engineering, Pur-due University, West Lafayette, USA 2Weldon School of Biomedi-cal Engineering, Purdue University, West Lafayette, USA. Corre-spondence to: M. Berk Sahin <sahinm@purdue.edu >.
+
+only have access to zeroth-order (ZO) evaluations of the po-tential function. This problem is of fundamental importance when gradients are unavailable or prohibitively expensive, and has been investigated by several recent works (Liu & Wang, 2020; Roy et al., 2022; He et al., 2024). In the spe-cial case where f is strongly log-concave and has Lipschitz continuous gradient, this problem is well understood; for in-stance, Roy et al. (2022) establish non-asymptotic complex-ity bounds for Langevin Monte Carlo (LMC) sampling. In contrast, to the best of our knowledge, the non-log-concave setting remains largely unexplored. Our first main contri-bution is to take an initial step toward a theory of non-log-concave ZO sampling by proposing a novel ZO estimator that enables sampling from non-log-concave distributions. The main challenge is that standard ZO estimators based on finite-difference evaluations along random Gaussian direc-tions exhibit high variance. Controlling this variance typi-cally requires batch size scaling as O(d) with the dimension 
+
+d of the sampling variable, leading to substantial function evaluations and memory costs in high-dimensional settings. To mitigate this issue, we propose a novel variance-reduced ZO estimator that uses only O(1) number of function evalu-ations per iteration, making the batch size independent of the ambient dimension and substantially reducing the associated memory costs. Our theoretical analysis builds on the LMC framework with gradient access developed by Balasubrama-nian et al. (2022), and is based on a sampling analogue of 
+
+stationary point analysis , a technique that has shown to be highly effective in non-convex optimization (Nesterov et al., 2018). Beyond the foundational sampling setting, we further ex-tend our method and theoretical analysis to posterior sam-pling for solving ill-posed inverse problems using score-based generative model (SGM) priors in black-box settings, where privileged information about the forward model such as its derivative, pseudo-inverse (Song et al., 2023), or its parametrization (Chung et al., 2023a) is unavailable or com-putationally prohibitive. Such scenarios arise in a wide range of applications: the forward operator may be de-fined through large PDE-based simulators whose derivatives or pseudo-inverses are typically inaccessible or undefined (Evensen & Van Leeuwen, 1996; Oliver et al., 2008; Igle-sias et al., 2013); simulators may rely on legacy code that 1
+
+> arXiv:2605.30573v1 [cs.LG] 28 May 2026 Zeroth-Order Non-Log-Concave Sampling with Variance Reduction and Applications to Inverse Problems
+
+cannot be adapted to modern auto-differentiation frame-works (Harbaugh et al., 2000); the forward model may be a proprietary system (closed-source), as in commercial MRI scanners (Karakuzu et al., 2025); the underlying physics may involve discontinuities (Mo ¨es et al., 1999; Tan et al., 2018; Lopez-Gomez et al., 2022); or the forward model may be implemented as a rule-based expert system (Rotshtein & Rakytyanska, 2012; Huang et al., 2024; Gong et al., 2025). In such ill-posed inverse problem settings, the choice of a flexible and expressive prior is crucial. SGMs have re-cently emerged as powerful plug-and-play priors due to their ability to model high-dimensional non-log-concave data distributions, while remaining applicable across a wide range of inverse problems without re-training. They have demonstrated a strong empirical performance across a wide range of applications, including image restoration (Wang et al., 2023; Rout et al., 2023), medical imaging (Song et al., 2022; Sun et al., 2024), and music generation (Rout et al., 2025), where access to gradients of the forward operator is typically assumed. More recently, SGMs have been adopted to develop black-box posterior sampling methods for inverse problems where access to the likelihood score is unavail-able, showing promising empirical performance (Tang et al., 2024; Huang et al., 2024; Zheng et al., 2025a). However, these approaches rely on heuristic approximations and cur-rently lack rigorous convergence guarantees to the target posterior under standard probabilistic discrepancy measures such as Fisher information (FI) or total variation (TV) dis-tance. In fact, rigorous guarantees remain rare even for posterior sampling methods with access to the likelihood score; when available, they typically rely on restrictive as-sumptions such as linear forward operators, which are often violated in practice (Daras et al., 2024). A more detailed discussion of both gradient-based and black-box posterior sampling methods is provided in Appendix A, along with a complementary comparison to the proposed approach in Table 3. The second main contribution of this work is the devel-opment of a theoretically grounded plug-and-play Monte Carlo (PMC) method for solving black-box inverse prob-lems using only forward model evaluations and a pre-trained SGM prior. We position this as an important step toward posterior sampling in black-box settings that offers an al-gorithm with formal convergence guarantees and a solid foundation for future advances. We encounter two key chal-lenges in designing a practical ZO posterior sampling al-gorithm: standard LMC often converge slowly, and ZO estimates require batch sizes that scale with the problem dimension, leading to prohibitive computational and mem-ory costs in high-dimensional settings. To address these challenges, we combine annealed LMC with our variance-reduced ZO estimator, enabling accurate forward model gradient approximation using a practical number of function evaluations at each iteration. We incorporate the effect of an-nealing schedule and SGM estimation error on convergence in our theoretical results for posterior sampling. Specifically, the key contributions of this work are the fol-lowing: • We establish the first non-asymptotic complexity guar-antees for ZO sampling, achieving an ε-relative FI error after O(1 /ε 4) iterations. Under a Poincar ´e in-equality assumption on the target distribution, this rate also yields ε-accuracy in squared TV distance. Fur-thermore, with decaying parameters, we show weak convergence to the target distribution. • We propose a novel variance-reduced ZO gradient esti-mator that achieves the convergence guarantees above using only O(1) function evaluations per iteration, eliminating the O(d) batch-size scaling of standard ZO estimator. • We propose a variance-reduced ZO annealed PMC al-gorithm (ZO-APMC) for black-box inverse problems, based on annealed LMC and a pre-trained SGM prior, and establish non-asymptotic and weak convergence guarantees. • We verify our theoretical findings with numerical and statistical experiments, and further demonstrate that ZO-APMC consistently outperforms existing black-box posterior sampling methods in MRI reconstruction and black hole imaging, while delivering competitive performance on the Navier–Stokes inverse problem. 
+
+## 2. Preliminaries 
+
+2.1. Zeroth-Order Sampling 
+
+Traditionally, the Langevin diffusion is defined as the solu-tion to the stochastic differential equation 
+
+dxt = −∇ f (xt)dt + √2dBt, (1) has π ∝ exp( −f ) as its unique stationary distribution and converges to it as t → ∞ under mild conditions. Here, 
+
+(Bt)t≥0 denotes a standard d-dimensional Brownian motion. Discretizing this stochastic process with step size γ > 0
+
+yields the standard Langevin Monte Carlo (LMC) algorithm. 
+
+x(k+1) γ := xkγ −γ∇f (xkγ )+ √2( B(k+1) γ −Bkγ ), (2) In this work, we assume black-box access to the potential function f ; therefore, the gradient ∇f (xkγ ) cannot be com-puted. Instead, we consider its ZO estimation (Nesterov & Spokoiny, 2017), defined as 
+
+e∇fμ(x, u) := f (x + μu) − f (x)
+
+μ u, (3) 2Zeroth-Order Non-Log-Concave Sampling with Variance Reduction and Applications to Inverse Problems                  
+
+> Figure 1. Illustration of weighted annealing in PMC through weighted posteriors  π(αk)
+> σk
+> N−1
+> k=0 . Solid lines and shaded regions denote the distribution mean and density, respectively, while un-shaded regions correspond to ∇log π(x) = 0 .By gradually reducing the prior smoothing parameter σkand its weight αkrela-tive to the likelihood ℓ, weighted annealing enables PMC to escape plateaus in ∇log π(x).
+
+where u∼N (0 , I ) and μ > 0 is the smoothing parameter. We note that the ZO estimator is biased, since ∇fμ(x) := 
+
+Eu[ e∇fμ(x, u)] ̸ = ∇f (x). However, this bias vanishes as 
+
+μ → 0; see Lemma 1 in Appendix B.1. Replacing ∇f (xkγ )
+
+in (2) with its ZO estimate (1 /b ) Pbi=1 e∇fμ(xkγ , uik)
+
+yields a naive ZO-LMC algorithm, where b is the batch size. Roy et al. (2022) analyze this approach for strongly log-concave target distributions, an assumption often vio-lated in practice, and establish Wasserstein-2 convergence guarantees. However, their analysis requires the batch size to scale as O(d), resulting in prohibitively large memory requirements in high-dimensional settings. In this work, we instead provide an analysis for non-log-concave target distributions and use O(1) function evaluations per iteration. This property is ensured by the proposed variance-reduced ZO estimator gk, defined in Section 3. 
+
+2.2. Black-Box Inverse Problems 
+
+For the posterior sampling part of our work, we consider a general black-box inverse problem setting modeled as 
+
+y = A(x) + ξ, x ∈ Rd, y, ξ ∈ Rm. (4) where we assume only black-box access to the forward model A(·). In this setting, gradient information is unavail-able, and A can only be queried through input–output eval-uations. The operator A : Rd → Rm models the response of the imaging system, where m ≪ d, and ξ ∈ Rm represents measurement noise. The objective is to recover the unknown signal x from the noisy measurements y. In many practical settings, the mapping x → y is many-to-one, making the reconstruction task an ill-posed inverse problem, since x
+
+cannot be uniquely recovered from y. In Bayesian frame-work, one could introduce p(x) ∝ exp( −h) as the prior ,and samples from the posterior π(x|y), which is formally established with the Bayes’ rule: π(x|y) ∝ ℓ(y|x)p(x),where ℓ(y|x) ∝ exp( −f ) is the likelihood distribution in-duced by (4). Thus, by applying Bayes’ rule to the LMC iterates in (2) and replacing ∇f (xkγ ) with its naive ZO esti-mate, we readily obtain the following ZO posterior sampling LMC algorithm. 
+
+x(k+1) γ := xkγ − γ
+
+ 1
+
+b
+
+> b
+
+X
+
+> i=1
+
+e∇fμ(xkγ , uik) + ∇h(xkγ )
+
+
+
+(5) 
+
++ √2( B(k+1) γ − Bkγ ),
+
+where f and h denote potential functions of the likelihood and the prior, respectively. While e∇fμ(xkγ , uik) can be computed via forward model function evaluations under the assumption of Gaussian measurement noise in (4), the prior score −∇ h(xkγ ) is unknown. SGMs have been proposed as powerful models for high-dimensional non-log-concave priors. At their core, they learn the perturbed score function −∇ hσ (x) := 
+
+∇ log pσ (x), where pσ (x) := R 
+
+> Rd
+
+p(z)N (x|z, σ 2I) dz
+
+with a small perturbation σ > 0. This score is learned by a deep neural network using score matching objec-tive (Hyv ¨arinen & Dayan, 2005; Vincent, 2011) and can be estimated via Tweedie’s formula (Robbins, 1992; Miya-sawa et al., 1961; Efron, 2011). We denote the SGM esti-mator by Sθ (x, σ ) ≈ −∇ hσ (x), where Sθ is conditioned on the noise level σ and parametrized by θ. In practice, LMC algorithms suffer from slow convergence and mode collapse when sampling from high-dimensional multimodal distributions. To alleviate this, SGMs are trained across multiple noise scales (σk)N −1 
+
+> k=0
+
+where larger noise levels produce smoother approximations of the data distributions, making score estimation and sampling well-posed. Replac-ing −∇ h(xkγ ) in (5) by SGM prior, we obtain a naive ZO annealed LMC for posterior sampling. 
+
+x(k+1) γ := xkγ − γ
+
+ 1
+
+b
+
+> b
+
+X
+
+> i=1
+
+e∇fμ(xkγ , uik) (6) 
+
+− αkSθ (xkγ , σ k)
+
+
+
++ √2( B(k+1) γ − Bkγ ),
+
+where (αk)N −1 
+
+> k=0
+
+denotes a weighted annealing schedule. This corresponds to sampling from a sequence of weighted posterior distributions π(αk ) 
+
+> σk
+
+(x|y) ∝ ℓ(y|x)pαk 
+
+> σk
+
+(x). Ini-tially, the posterior is dominated by the smoothed prior pσk ,and its less concentrated density facilitates escape from low-probability noisy regions of ∇h. As the iterations progress, the likelihood contributes more strongly while the smoothed prior pσk approaches the true prior p, guiding the iterates toward the target posterior. An illustration of this process is provided in Fig. 1. In practice, both the noise scales 
+
+(σk)N −1 
+
+> k=0
+
+and annealing weights (αk)N −1 
+
+> k=0
+
+decrease over the iterations until reaching prescribed minimum values, after which they remain fixed (Song & Ermon, 2019; 2020; Sun 3Zeroth-Order Non-Log-Concave Sampling with Variance Reduction and Applications to Inverse Problems 
+
+et al., 2024). The precise definitions of these schedules are provided in (13). 
+
+2.3. Sampling Analogue of Stationary Point Analysis 
+
+Before introducing our proposed variance-reduced ZO sam-pling method with its convergence guarantees, we explain why convergence in relative FI, defined as FI( ν∥π) := R 
+
+> Rn
+
+ν(x)∥∇ log ν(x) − ∇ log π(x)∥22 dx , serves as the sam-pling analogue of stationary point analysis in non-convex optimization. Consider the minimization of the Kull-back–Leibler (KL) divergence over the Wasserstein space of probability distributions. 
+
+ˆν = arg min 
+
+> ν
+
+KL( ν∥π), (7) where KL( ν∥π) := R 
+
+> Rd
+
+ν(x) log ν(x) 
+
+> π(x)
+
+dx, and ν and π
+
+denote the estimate and target distributions, respectively. Similar to the gradient concept in Euclidean space, the Wasserstein gradient of KL( ·∥ π) at ν is ∇ log( ν/π ) (Am-brosio et al., 2008) and its expected square norm gives us 
+
+FI( ν∥π). If νt evolves under Langevin diffusion in (1), then ddt KL( νt∥π) = −FI( νt∥π) (Ambrosio et al., 2008; Villani, 2009), showing that Langevin diffusion is a gradient flow in probability space. From an optimization perspec-tive, FI( νt∥π) plays a role analogous to the squared gradi-ent norm in non-convex optimization. Unlike optimization, however, the condition FI( ν∥π) = 0 implies ν = π, making FI a natural discrepancy measure for quantifying conver-gence to the target distribution. Accordingly, following Bal-asubramanian et al. (2022), we characterize convergence by requiring the output distribution ν to satisfy FI( ν∥π) ≤ ε,analogous to reaching an ε-stationary point in optimization. 
+
+## 3. Methods 
+
+In this section, we propose the variance-reduced ZO gradient estimator and present theoretical guarantees for sampling from non-log-concave distributions. We then extend our analysis to posterior sampling with SGM priors, accounting for both the bias due to the annealing schedules and the SGM estimation error. 
+
+3.1. Variance-Reduced Zeroth-Order Sampling 
+
+As mentioned previously, the naive ZO estimate requires batch size of O(d) to make an accurate estimate of a gradi-ent, which is prohibitive to calculate at each iteration. Using small batch sizes b ≪ d, while computationally attractive, leads to noisy estimates. Thus, inspired by Li et al. (2021), we combine the large- and small-batch estimators to define the following variance-reduced ZO estimator: 
+
+gk := 
+
+
+
+1
+
+b
+
+> b
+
+X
+
+> i=1
+
+e∇fμ(xkγ , uik), w.p. p, 
+
+gk−1 + 1
+
+b′
+
+> b′
+
+X
+
+> i=1
+
+ e∇fμ(xkγ , uik)
+
+− e∇fμ(x(k−1) γ , uik)
+
+
+
+,
+
+w.p. 1 − p, 
+
+(8) where k ≥ 1 is the iteration index, and b, b ′ ≥ 1 denote batch sizes, with b a large batch size computed with prob-ability p ∈ (0 , 1] and b′ ≪ b a much smaller one. For the initial step k = 0 , we use the batch estimate g0 := 
+
+> 1
+> b
+
+Pbi=1 e∇fμ(x0, ui
+
+> 0
+
+). The key motivation behind this con-struction is to mitigate the high computational cost of ZO estimation, which would otherwise require a batch size on the order of O(d) at every iteration. Instead, a large batch estimator is computed only intermittently, with probability 
+
+p < 1. With the remaining probability 1 − p, the estimation is updated recursively using a small batch of fresh function evaluations together with the previous estimate. More specif-ically, the update approximates the change in the gradient between consecutive iterates, exploiting the strong correla-tion between x(k−1) γ and xkγ . Under a suitable regularity condition on f , this gradient variation can be accurately estimated using only a small batch size b′ ≪ b, thereby substantially reducing the per-iteration computational cost. We formalize this condition in the following assumption. 
+
+Assumption 1. The potential function f : Rd → R is L1-Lipschitz continuous: ∥f (x1) − f (x2)∥2 ≤ L1∥x1 − x2∥2,for all x1, x2 ∈ Rd and for some L1 > 0.Assumption 1 is restrictive since it does not hold globally even for simple distributions such as Gaussians. However, it is satisfied by differentiable potentials on compact domains, which commonly arise in practice through normalization or gradient clipping. In the optimization literature, variance-reduction techniques achieving O(1) per-iteration cost typ-ically rely on Lipschitz continuity condition on stochastic gradients to control their variance (Cutkosky & Orabona, 2019; Li et al., 2021; Liu et al., 2025). Since gradients are unavailable in our setting and must instead be approximated using ZO estimators, we impose Lipschitz continuity on the potential function f to obtain analogous variance-control properties. Using the proposed estimator, we obtain the following variance-reduced ZO-LMC algorithm 
+
+x(k+1) γ := xkγ − γgk + √2( B(k+1) γ − Bkγ ). (9) We state our main results for the following continuous time interpolation of LMC, defined for t ∈ [kγ, (k + 1) γ]:
+
+xt := xkγ − (t − kγ )gk + √2( Bt − Bkγ ), (10) 4Zeroth-Order Non-Log-Concave Sampling with Variance Reduction and Applications to Inverse Problems 
+
+and we write νt for the law of xt. Before presenting our main results, we first provide intuition for the proposed variance-reduction mechanism through the following bound on the estimation error. 
+
+Proposition 1. Suppose Assumption 1 holds, and let 
+
+(xkγ )k≥0 be generated by (9), where gk is given by (8). Define e2 
+
+> k
+
+:= E[∥gk − ∇ fμ(xkγ )∥22]. Then, for any γ > 0,
+
+e2 
+
+> k+1
+
+≤ pσ 2
+
+> k+1
+
+b + (1 − p)e2 
+
+> k
+
++ 4(1 − p)dL 21∆k
+
+μ2b′ , (11) 
+
+where σ2 
+
+> k+1
+
+:= E[∥ e∇fμ(x(k+1) γ , uik+1 )∥2] and ∆k := 
+
+E[∥x(k+1) γ − xkγ ∥2].
+
+Proposition 1 (proof provided in Appendix B.2) gives an in-tuition for the variance-reduction mechanism. When p = 1 ,the estimation error e2 
+
+> k+1
+
+is controlled solely by the variance term σ2
+
+> k+1
+
+/b , which can only be reduced by increasing the batch size b. In contrast, when p < 1, the variance term can be reduced by p while keeping b fixed, at the cost of introducing an error-propagation term (1 − p)e2 
+
+> k
+
+together with an additional term reflecting how similar consecutive iterates remain. Consequently, smaller values of p reduce the variance term but increase error propagation, leading to a trade-off between variance reduction and convergence speed. Unlike stochastic optimization (Li et al., 2021), the additional error term depends on the discretization error of the Langevin diffusion and is amplified by the ZO smooth-ing parameter μ, resulting in an additional trade-off between ZO estimation bias and discretization error. As shown in our main results, these trade-offs can be controlled through suitable choices of the parameters μ, γ, and p. Furthermore, controlling the discretization error requires the following assumption, which is standard in LMC analysis. 
+
+Assumption 2. The gradient of f is L2-Lipschitz contin-uous: ∥∇ f (x1) − ∇ f (x2)∥2 ≤ L2∥x1 − x2∥2, for all 
+
+x1, x2 ∈ Rd and for some L2 > 0.We are now ready to state our first main result. 
+
+Theorem 1. Let π ∝ exp( −f ) be the target distribu-tion, where the potential f satisfies Assumptions 1 and 2 with Lipschitz constants L1 and L2, respectively. Define 
+
+Lm := max {L1, L 2}. Let N ≥ 1 denote the total num-ber of iterations, and let (νt)t≥0 denote the law of the continuous-time interpolation (10) generated by step size 
+
+γ = L−1 
+
+> m
+
+N −3/4d−7/4, probability p = LmN −1/4d−1/4,batch size b = ⌈p−1⌉, and smoothing parameter of ZO es-timates μ = L−1/2 
+
+> m
+
+N −1/8d−5/8. Then, the time-averaged law ¯νN γ := 1
+
+> N γ
+
+R N γ  
+
+> 0
+
+νt dt satisfies FI(¯ νN γ ∥π) ≤ ε after 
+
+O(d7L4
+
+> m
+
+/ε 4) iterations with O(1) function evaluations per iteration. Remark 1. In practice, sampling from ¯νN γ can be carried out as follows. First, draw t ∈ [0 , N γ ] uniformly at random and determine the largest integer k such that kγ ≤ t. Then, perform a linear interpolation over the interval [kγ, t ] by using (10) to obtain xt. The resulting sample follows the distribution ¯νN γ .Theorem 1 (the full statement and the proof are provided in Appendix B.3) shows that the proposed variance-reduced ZO-LMC converges with only O(1) function evaluations per iteration, substantially reducing the memory and per-iteration computational costs compared to naive ZO-LMC in high-dimensional settings. The high polynomial depen-dence on d in number of iterations arises from the interaction between the ZO approximation error and the Langevin dis-cretization error, which is captured by the last term in the upper bound of Proposition 1 and reflects the intrinsic diffi-culty of sampling from non-log-concave distributions using ZO information. In practice, however, our experiments show that accurate samples can be obtained using significantly fewer iterations. We next present a stronger convergence guarantee under the following Poincar´ e inequality assumption. 
+
+Assumption 3. For every smooth, compactly supported function ϕ : Rd → R, the target distribution π ∝
+
+exp( −f ) satisfies the Poincar ´e inequality: Var π (ϕ) ≤
+
+CPI Eπ [∥∇ ϕ∥22] for some CPI > 0.Assumption 3 enforces concentration by requiring suffi-ciently growth of the potential at infinity, thereby preventing heavy tails, and is analogous to Polyak- Łojasiewicz inequal-ity in optimization. This assumption holds for a broad class of distributions, including log-concave distributions and certain non-log-concave cases such as Gaussian convolu-tions of bounded-support distributions (Chewi et al., 2024). Combining the Poincar ´e inequality with Theorem 1, we obtain the following convergence guarantee in squared TV distance. 
+
+Corollary 1. Let π ∝ exp( −f ) be the target distribution, where the potential f satisfies Assumptions 1, 2 with Lips-chitz constants L1, L2, respectively, and Assumption 3 with constant CPI . Define Lm := max {L1, L 2}. Let N ≥ 1
+
+denote the total number of iterations, and let (νt)t≥0 denote the law of the continuous-time interpolation (10) generated by the same step size γ, probability p, batch size b, and smoothing parameter of ZO estimates μ as in Theorem 1. Then, the time-averaged law ¯νN γ := 1
+
+> N γ
+
+R N γ  
+
+> 0
+
+νt dt satisfies 
+
+∥¯νN γ − π∥2TV ≤ ε after O(d7L4
+
+> m
+
+C4PI /ε 4) iterations with 
+
+O(1) function evaluations per iteration. 
+
+The complete statement and the proof are provided in Ap-pendix B.4. Building on Theorem 1 and the fact that 
+
+FI( ν∥π) = 0 implies ν = π, we obtain the following result with its formal statement and proof provided in Ap-pendix B.5. 5Zeroth-Order Non-Log-Concave Sampling with Variance Reduction and Applications to Inverse Problems 
+
+Theorem 2. Let π ∝ exp( −f ) be the target distribution, where the potential f satisfies Assumptions 1 and 2 with Lipschitz constants L1 and L2, respectively. Define Lm := max {L1, L 2}. Let (νt)t≥0 denote the law of continuous-time interpolation (10) generated by time-varying step size 
+
+γk = Cγ 
+
+> k3/2
+
+, probability pk = 12k1/2 , batch size bk = ⌈p−1 
+
+> k
+
+⌉,and smoothing parameter of ZO estimates μk = Cμ 
+
+> k1/8
+
+for 
+
+k ≥ 1, where Cγ , C μ > 0 are constants. Then, the time-averaged law ¯ντn := 1
+
+> τn
+
+R τn 
+
+> 0
+
+νt dt , where τn := Pnk=1 γk,converges weakly to π.
+
+3.2. Zeroth-Order Posterior Sampling with SGM Prior 
+
+In this section, we propose ZO-APMC algorithm for solving black-box inverse problems with an SGM prior and extend the theoretical analysis of the previous section to this setting by incorporating the bias due to the annealing schedules and the SGM estimation error. We replace the naive ZO gradient estimator in (6) with the proposed variance reduc-tion mechanism in (8) yielding the following ZO-APMC iterates: 
+
+x(k+1) γ := xkγ − γ(gk − αkSθ (xkγ , σ k)) (12) 
+
++ √2( B(k+1) γ − Bkγ ),
+
+where (αk)N −1 
+
+> k=0
+
+and (σk)N −1 
+
+> k=0
+
+are annealing and noise schedules, respectively. Following Song & Ermon (2020) and Sun et al. (2024), we define, for all k ≥ 0,
+
+αk := max {α0ρk 
+
+> 1
+
+, 1} and σk := max {σ0ρk 
+
+> 2
+
+, σ min }, (13) where ρ1, ρ 2 ∈ (0 , 1) denote decay rates, σ0 ≥ σmin and 
+
+α0 ≥ 1 are initial values, and σmin > 0 is the minimum noise level. These parameters are selected using the principled techniques of Song & Ermon (2020) such that there exist indices Kα, K σ < N − 1 satisfying αk = 1 , ∀k ≥ Kα
+
+and σk = σmin , ∀k ≥ Kσ . Our analysis relies on these properties together with a continuous-time interpolation of the ZO-APMC iterates incorporating the annealing and noise schedules. For t ∈ [kγ, (k + 1) γ], the interpolation is defined by 
+
+xt := xkγ − (t − kγ )( gk − αkSθ (xkγ , σ k)) (14) 
+
++ √2( Bt − Bkγ ).
+
+Here, Sθ (xkγ , σ k) estimates the perturbed score 
+
+−∇ hσk (xkγ ), rather than the true score −∇ h(xkγ ).Following Sun et al. (2024), we therefore impose the following assumption to quantify the discrepancy between the perturbed and true scores. 
+
+Assumption 4. Let hσk be the potential function of the perturbed prior, defined as pσk (x) ∝ exp( −hσk (x)) ,
+
+pσk (x) := R 
+
+> Rd
+
+p(z)N (x|z, σ 2
+
+> k
+
+I) dz, where p(x) denotes the unperturbed prior. We assume that for any σk > 0 and 
+
+x ∈ Rd, ∥∇ hσk (x) − ∇ h(x)∥2 ≤ C1σk for some constant 
+
+C1 > 0.Under Assumption 4, it follows that ∇hσk → ∇h as 
+
+σk → 0. For special cases, such as Gaussian priors, the discrepancy between the perturbed and true scores can be characterized analytically. However, deriving a closed-form bound for this discrepancy is generally intractable for arbi-trary prior distributions. To account for the SGM estimation error, Sθ (xkγ , σ k) ≈−∇ hσk (xkγ ), we require an additional assumption. Since SGMs are trained using the denoising score matching objec-tive (Song et al., 2021b; Ho et al., 2020), their optimal score network satisfies Sθ (xkγ , σ k) = −∇ hσk (xkγ ) with proba-bility 1. Following this characterization and prior work (Sun et al., 2024), we impose the following assumption. 
+
+Assumption 5. For any σk > 0 and all x ∈ Rd, the score network satisfies ∥S θ (x, σ k) + ∇hσk (x)∥2 ≤ εσk < ∞
+
+and ∥S θ (x, σ k)∥2 ≤ C2σ−1 
+
+> k
+
+.Unlike Sun et al. (2024), we relax the uniform norm bound on the score network to the noise-scale-dependent bound 
+
+∥S θ (x, σ k)∥2 ≤ C2σ−1 
+
+> k
+
+. This assumption is consistent with empirical observations in seminal score-based generative modeling works (Song & Ermon, 2019; Song et al., 2021b; Song & Ermon, 2020), where the score magnitude is ob-served to scale as ∥S θ (x, σ k)∥2 ∝ σ−1 
+
+> k
+
+. Additionally, in contrast to prior work (Yang & Wibisono, 2022; Lee et al., 2022; Sun et al., 2024), our analysis does not require the score network to be Lipschitz continuous, which is often violated in practice. We now present our main result for the ZO-APMC posterior sampling algorithm (12) with SGM prior. 
+
+Theorem 3. Let π ∝ ℓ(y|x)p(x) be the posterior with the likelihood ℓ(y|x) ∝ exp( −f (x)) and the prior p(x) ∝
+
+exp( −h(x)) . Suppose the likelihood potential f satisfies Assumptions 1, 2 with Lipschitz constants Lf1 , Lf2 , respec-tively, the prior potential h satisfies Assumption 2 with Lip-schitz constant Lh and Assumption 4, and SGM satisfies Assumption 5 with decreasing error εσk = O(k−1/2) for 
+
+σk > 0, and k ≥ 1. Define Lm := max {Lf2 + Lh, L f1 }.Let (νt)t≥0 denote the law of interpolation in (14) gener-ated by the step size γ, probability p, batch size b, smooth-ing parameter of ZO estimates μ stated in Theorem 1 with the annealing and noise schedules defined in (13). Then, the time-averaged law ¯νN γ := 1
+
+> N γ
+
+R N γ  
+
+> 0
+
+νt dt satisfies 
+
+FI(¯ νN γ ∥π) ≤ ε after O(d7L4
+
+> m
+
+/ε 4) iterations with O(1) 
+
+function evaluations per iteration. 
+
+The full theorem statement and the proof are provided in Appendix B.6. Intuitively, the theorem guarantees that the sample distribution produced by ZO-APMC increasingly captures the posterior score information that governs di-rections toward high-probability, measurement-consistent reconstructions in inverse problems. This is achieved using only forward model evaluations without any gradient com-6Zeroth-Order Non-Log-Concave Sampling with Variance Reduction and Applications to Inverse Problems 
+
+putation in (4). Moreover, ZO-APMC achieves ε-accuracy with only O(1) function evaluations per iteration, com-pared to the O(d) batch sizes typically required by stan-dard batched ZO estimator. This substantially reduces the per-iteration computational and memory costs, enabling scalable posterior sampling for black-box inverse problems. Although the iteration complexity exhibits a high-order poly-nomial dependence on the dimension, our empirical results on high-dimensional tasks such as MRI reconstruction show that ZO-APMC converges in practice with substantially fewer iterations, matching the iteration count of its gradient-based counterpart APMC (Sun et al., 2024). Leveraging this result and assuming that the target poste-rior π satisfies a Poincar ´e inequality, we obtain a stronger convergence guarantee. 
+
+Corollary 2. Let π ∝ ℓ(y|x)p(x) be the posterior with the likelihood ℓ(y|x) ∝ exp( −f (x)) and the prior p(x) ∝
+
+exp( −h(x)) . Suppose the likelihood potential f satisfies Assumptions 1, 2 with Lipschitz constants Lf1 , Lf2 , respec-tively, the target posterior π satisfies Assumption 3 with con-stant CPI > 0, the prior potential h satisfies Assumption 2 with Lipschitz constant Lh and Assumption 4, and SGM sat-isfies Assumption 5 with decreasing error εσk = O(k−1/2)
+
+for σk > 0, and k ≥ 1. Define Lm := max {Lf2 +Lh, L f1 }.Let (νt)t≥0 denote the law of interpolation (14) generated by the step size γ, probability p, batch size b, smoothing parameter of ZO estimates μ stated in Theorem 1 with the annealing schedule defined in (13). Then, the time-averaged law ¯νN γ := 1
+
+> N γ
+
+R N γ  
+
+> 0
+
+νt dt satisfies ∥¯νN γ − π∥2TV ≤ ε after 
+
+O(d7L4
+
+> m
+
+C4PI /ε 4) iterations with O(1) function evaluations per iteration. 
+
+Corollary 2 (full statement and proof are in Appendix B.7) intuitively implies that, for posterior distributions without flat valleys, widely separated modes, or heavy tails, the reconstructions produced by ZO-APMC are statistically in-distinguishable from samples drawn from the true posterior, up to an ε error, after O(d7L4
+
+> m
+
+C4PI /ε 4) iterations using 
+
+O(1) memory on average. 
+
+Remark 2. The proposed estimator in (8) is randomized, yielding an expected per-iteration cost of O(1) . In appli-cations requiring deterministic bounds on memory usage or per-iteration complexity, our estimator can be replaced with a ZO variant of the STORM estimator (Cutkosky & Orabona, 2019). By choosing β = 1 − p, where β ∈ [0 , 1) 
+
+denotes the STORM momentum parameter, one obtains the same recursive error bound as in Proposition 1. Conse-quently, the convergence guarantees established in this work continue to hold under this alternative estimator. Finally, we establish weak convergence of the generated samples to the target posterior, showing that they asymptoti-cally recover the desired posterior law.                
+
+> Figure 2. (a) Convergence of ZO-APMC with b= 10 ,b′= 5 ,and εk∗= 2 .5for various p, alongside APMC convergence with gradient access. (b) Convergence results for fixed per-iteration cost. Each ×indicate parameter settings (p, b )for which the FI drops below 0.01 after 2000 iterations. (c) Comparison of sample statistics generated by ZO-APMC and APMC with those of the analytical ground truth posterior.
+
+Theorem 4. Let π ∝ ℓ(y|x)p(x) be the posterior with the likelihood ℓ(y|x) ∝ exp( −f (x)) and the prior p(x) ∝
+
+exp( −h(x)) . Suppose the likelihood potential f satisfies Assumptions 1, 2 with Lipschitz constants Lf1 , L f2 , respec-tively, the prior potential h satisfies Assumption 2 with Lip-schitz constant Lh, and Assumption 4, and SGM satisfies Assumption 5 with decreasing error εσk = O(k−1/2) for 
+
+σk > 0, and k ≥ 1. Define Lm := max {Lf2 + Lh, L f1 }.Let (νt)t≥0 denote the law of interpolation (14) generated by time-varying step size γk, probability pk, batch size 
+
+bk, and smoothing parameter of ZO estimates μk stated in Theorem 2 with the annealing schedule defined in (13). Then, the time-averaged law ¯ντn := 1
+
+> τn
+
+R τn 
+
+> 0
+
+νt dt , where 
+
+τn := Pnk=1 γk converges weakly to π.
+
+The complete statement and the proof are provided in Ap-pendix B.8. Next, we validate our theoretical results through statistical and numerical experiments, and demonstrate the performance of ZO-APMC in practical settings. 
+
+## 4. Experiments 
+
+Baselines. Our primary focus is on methods that assume black-box access to the forward model. Accordingly, we compare ZO-APMC against SCG (Huang et al., 2024), DPG (Tang et al., 2024), EnKG (Zheng et al., 2025a), and Forward-GSG and Central-GSG proposed by Zheng et al. (2025a). The GSG methods resemble DPS (Chung et al., 2023b), but approximate the likelihood score via Tweedie’s formula combined with ZO approximations. For complete-ness, we additionally evaluate gradient-based methods in settings where the forward model gradient are available. Specifically, we compare against DPS (Chung et al., 2023b), PnPDM (Wu et al., 2024), and APMC (Sun et al., 2024), an annealed LMC posterior sampling method with gradient access and the gradient-based counterpart of ZO-APMC. 7Zeroth-Order Non-Log-Concave Sampling with Variance Reduction and Applications to Inverse Problems 
+
+Table 1. Quantitative comparison with baselines for MRI recon-struction (SD: sample standard deviation). The best values of each metric for black-box and gradient-access settings are highlighted in bold and underline, respectively.                                                  
+
+> PSNR (dB) ↑SSIM ↑NRMSE ↓SD ↓MSE ↓
+> PnPDM 30.81 0.946 3.76e-2 2.16e-2 8.46e-4 DPS 34.38 0.965 2.54e-2 2.06e-2 4.07e-4 APMC 36.55 0.973 1.99e-2 2.0e-2 2.55e-4 Forward-GSG 27.8 0.918 5.42e-2 3.26e-2 19.1e-4 Central-GSG 27.78 0.917 5.43e-2 3.27e-2 19.2e-4 SCG 7.1 0.711 7.67 1.38 0.21 DPG 32.17 0.953 5.4e-2 2.69e-2 6.5e-4 EnKG 31.32 0.934 5.72e-2 2.92e-2 6.72e-4 ZO-APMC (ours) 35.29 0.966 2.28e-2 2.99e-2 3.29e-4
+
+Figure 3. Visualization of averaged reconstructions generated by APMC in the setting with gradient access and ZO-APMC in the black-box setting. Despite relying solely on function evaluations, ZO-APMC achieves reconstruction quality comparable to APMC. 
+
+Figure 4. Visualization of mean reconstructions for the black-hole imaging inverse problem. Two representative test cases are shown (top and bottom rows), with ground truths in the left column and black-box method reconstructions in the remaining columns. PSNR (dB) and closure-phase error ( χ2cph , lower is better) are reported below each reconstruction. 
+
+4.1. Toy Experiments Numerical Validation. To validate the convergence behav-ior predicted by our theory, we consider a synthetic inverse problem with bimodal 2D Gaussian mixture prior, random forward model A, and measurement noise ξ ∼ N (0 , I ). To mimic SGM estimation error, we use the analytical prior score corrupted by additive Gaussian noise with std. dev. 
+
+εk∗ = 2 .5. We generate 1000 samples with ZO-APMC from 20 random initializations of A and report the mean FI relative to the analytical posterior. Fig. 2a shows that, with b = 10 , b′ = 5 , ZO-APMC converges to near-zero FI for p ∈ { 1, 0.75 , 0.5}, but becomes unstable at p = 0 .3
+
+due to the reduced total number of function evaluations. To validate converges under O(1) batch complexity, we vary p
+
+and b while keeping the per-iteration cost fixed (pb = 10) in Fig. 2b. Across all parameter pairs, ZO-APMC converges below 0.01 FI, consistent with our theoretical predictions. 
+
+Statistical Validation. To validate ZO-APMC’s recovery of posterior mode statistics, we consider a compressed sensing problem with a bimodal Gaussian mixture prior constructed from 32 × 32 CelebA (Liu et al., 2015) images, a random forward model A ∈ R115 ×1024 , and a Gaussian measure-ment noise ξ ∼ N (0 , 0.01 I). The prior modes correspond to the “male” and “female” attributes shifted by +1 and −1,respectively, to ensure clear separation. We train a shallow customized SGM (Nichol & Dhariwal, 2021) on this prior and generate 1000 samples using ZO-APMC and APMC, where ZO-APMC uses p = 0 .5, b = 50 , and b′ = 5 . Fig. 2c shows that ZO-APMC accurately recovers the mean and variance of both posterior modes, closely matching gradient-based APMC up to a slight increase in variance due to ZO estimations. This can be further reduced by increasing b.Additional results and details are provided in Appendix C. 
+
+4.2. Magnetic Resonance Imaging (MRI) 
+
+Imaging inverse problems (e.g., MRI recon.) are widely used benchmarks. Although our primary focus is on more challenging black-box forward models, we additionally eval-uate our method on linear MRI recon. problem for complete-ness and to demonstrate the effectiveness of our variance-reduction mechanism in a high-dimensional setting. 
+
+Problem Setting. We consider a radial subsampling mask with acceleration factor of 4×. For evaluation, we use the SGM prior from Sun et al. (2024), which is pre-trained on the FastMRI brain dataset (Zbontar et al., 2019), and evaluate all methods on a separate test set provided in that work to ensure a consistent comparison. We randomly select 40 images of size 256 × 256 and, for each method, generate 20 reconstructions per image, average them, and report the 8Zeroth-Order Non-Log-Concave Sampling with Variance Reduction and Applications to Inverse Problems                                                          
+
+> Table 2. Quantitative comparison with baselines for black-hole imaging (SD: sample standard deviation). Best values for black-box and gradient-access settings are shown in bold and underline , respectively. PSNR ↑Blurred PSNR ↑χ2
+> cph ↓χ2
+> camp ↓SD ↓
+> PnPDM 26.48 32.31 11.48 23.54 4.5e-2 DPS 25.61 30.84 12.39 17.72 4.32e-2 APMC 26.23 31.32 11.78 19.23 4.34e-2 Forward-GSG 26.21 31.47 6.77 14.06 2.99e-2 Central-GSG 21.63 23.73 80.31 78.5 4.5e-2 SCG 22.21 25.51 23.72 14.23 1.7e-2 DPG 12.33 14.02 8.17 30.44 1.6e-2
+> EnKG 22.86 27.69 64.37 33.44 0.925 ZO-APMC (Ours) 26.71 32.86 5.42 11.23 3.02e-2 Figure 5. Visualization of mean samples for the Navier– Stokes inverse problem across black-box methods.
+
+mean image-quality metrics across the test set. For ZO-APMC, we use p = 0 .2, b = 10 4, and b′ = 10 3.
+
+Results. Fig. 3 demonstrates that both ZO-APMC and APMC yield visually indistinguishable reconstructions for representative brain MRI cases showing pathology, with ZO-APMC accurately capturing fine details without gradient information. Table 1 shows that ZO-APMC consistently achieve higher reconstruction quality than other black-box baselines in all image quality metrics and closely matches the APMC with gradient access. Our method yields slightly higher SD than DPG but this can be alleviated by increasing 
+
+p or b, albeit at larger computational cost. 
+
+4.3. Black-Hole Imaging Problem Setting. Black-hole interferometric imaging re-constructs black-hole images from “visibility” measure-ments acquired by Earth-based telescope arrays. We use the SGM prior pre-trained on GRMHD (Wong et al., 2022) images of size 64 × 64 , the highly nonlinear forward model, and 100 test images provided by InverseBench (Zheng et al., 2025b). For each method, we generate 5 reconstructions per image, average them, and report the resulting mean metrics across the test set. Since the image sizes are small, we use 
+
+p = 1 with b = 1024 . Evaluation is based on the chi-square errors of the closure phases ( χ2
+
+> cph
+
+) and closure amplitudes (χ2
+
+> camp
+
+), which quantify how well the reconstructions fit the measurements. Because the black-hole imaging system cap-tures only low spatial frequencies, we follow Akiyama et al. (2019) and compute PSNR for both the original and blurred reconstructions at the system’s intrinsic resolution. 
+
+Results. Fig. 4 shows two representative cases of black-hole reconstructions generated by ZO-APMC and other black-box baselines, alongside the ground truth. ZO-APMC pro-duces reconstructions that most closely match the ground truth, whereas baselines introduce artifacts and lose fine details. Table 2 shows that ZO-APMC outperforms all base-lines across all metrics except SD, which can be mitigated by increasing batch size p or b at additional cost. 
+
+4.4. Navier–Stokes Equation Problem Setting. The Navier–Stokes equation is a standard fluid-dynamics benchmark (Iglesias et al., 2013), widely used from ocean dynamics to climate modeling, where at-mospheric observations calibrate initial conditions for nu-merical forecasts. Computing forward model gradients via auto-differentiation is impractical because it requires differ-entiating through a PDE solver. We use the Navier–Stokes forward model, 10 test images, and the pre-trained SGM prior provided by InverseBench (Zheng et al., 2025b). For each black-box method, we generate 5 samples per test im-age, average them, and report the mean NRMSE across the 10 test images. We repeat this procedure for 3 noise lev-els σnoise ∈ { 0, 1, 2}. Additional experimental details are provided in Appendix C.5. 
+
+Results. Fig. 5 shows results obtained with σnoise = 1 ,demonstrating that ZO-APMC generates samples that qual-itatively preserve key flow features, comparable to EnKG and DPG, whereas SCG fails to do so. Moreover, EnKG produces noticeably noisier samples than ZO-APMC. Quan-titative results in Appendix C.5 show that, although ZO-APMC does not outperform EnKG and DPG in NRMSE, it achieves comparable performance to DPG while providing convergence guarantees and a principled understanding of how hyperparameters affect performance, unlike competing methods that rely on heuristic approximations. 
+
+## 5. Conclusion 
+
+We established a theoretically grounded framework for variance-reduced zeroth-order (ZO) sampling in non-log-concave settings, with applications to inverse problems. We derived the first non-asymptotic complexity guarantees for non-log-concave ZO sampling and for black-box pos-terior sampling with SGM priors. Empirically, our pro-posed ZO-APMC method achieved state-of-the-art perfor-mance among black-box methods in MRI reconstruction and black-hole imaging, while remaining competitive on the Navier–Stokes inverse problem. Future work includes ex-tending our method to underdamped Langevin dynamics and latent diffusion models for improved sampling efficiency. 9Zeroth-Order Non-Log-Concave Sampling with Variance Reduction and Applications to Inverse Problems 
+
+## Acknowledgements 
+
+This work was partially supported by National Insititutes of Health grant NIH/NHLBI R01-HL153430 (PI: Sharif), and supported in part by NSF DMS-2502560 and CNS-2313109. 
+
+## Impact Statement 
+
+This work establshes the first theoretically grounded frame-work for zeroth-order sampling from non-log-concave dis-tributions, addressing a fundamental gap in derivative-free probabilistic inference. We further develop the first zeroth-order posterior sampling framework with convergence guar-antees for black-box inverse problems using score-based generative priors. These advances broaden the applicability of sampling methods to settings where gradients are inac-cessible, undefined, or prohibitively expensive, including scientific simulators, medical imaging systems, and physics-based inverse problems. By enabling principled probabilis-tic inference under limited forward model access, our work may expand the use of machine learning in scientific and en-gineering domains. As with other sampling and generative methods, practical deployment in application domains re-quires careful empirical validation and appropriate domain expertise. 
+
+## References 
+
+Akiyama, K., Alberdi, A., Alef, W., Asada, K., Azulay, R., Baczko, A.-K., Ball, D., Balokovi ´c, M., Barrett, J., Bintley, D., et al. First m87 event horizon telescope results. iv. imaging the central supermassive black hole. 
+
+The Astrophysical Journal Letters , 875(1):L4, 2019. Ambrosio, L., Gigli, N., and Savar ´e, G. Gradient Flows in Metric Spaces and in the Space of Probability Measures .Lectures in Mathematics ETH Z ¨urich. Birkh ¨auser Verlag, Basel, 2nd edition, 2008. Balasubramanian, K., Chewi, S., Erdogdu, M. A., Salim, A., and Zhang, S. Towards a theory of non-log-concave sampling: first-order stationarity guarantees for langevin monte carlo. In Conference on Learning Theory , pp. 2896–2923. PMLR, 2022. Bouman, C. A. and Buzzard, G. T. Generative plug and play: Posterior sampling for inverse problems. In 2023 59th Annual Allerton Conference on Communication, Control, and Computing (Allerton) , pp. 1–7. IEEE, 2023. Chael, A. A., Johnson, M. D., Bouman, K. L., Blackburn, L. L., Akiyama, K., and Narayan, R. Interferometric imaging directly with closure phases and closure ampli-tudes. The Astrophysical Journal , 857(1):23, 2018. Chewi, S., Erdogdu, M. A., Li, M., Shen, R., and Zhang, M. S. Analysis of langevin monte carlo from poincare to log-sobolev. Foundations of Computational Mathematics ,pp. 1–51, 2024. Chung, H., Kim, J., Kim, S., and Ye, J. C. Parallel diffusion models of operator and image for blind inverse problems. In Proceedings of the IEEE/CVF Conference on Com-puter Vision and Pattern Recognition , pp. 6059–6069, 2023a. Chung, H., Kim, J., Mccann, M. T., Klasky, M. L., and Ye, J. C. Diffusion posterior sampling for general noisy inverse problems. In The Eleventh International Confer-ence on Learning Representations , 2023b. URL https: //openreview.net/forum?id=OnD9zGAGT0k .Coeurdoux, F., Dobigeon, N., and Chainais, P. Plug-and-play split gibbs sampler: embedding deep generative priors in bayesian inference. IEEE Transactions on Image Processing , 33:3496–3507, 2024. Cutkosky, A. and Orabona, F. Momentum-based variance reduction in non-convex sgd. Advances in neural infor-mation processing systems , 32, 2019. Daras, G., Chung, H., Lai, C.-H., Mitsufuji, Y., Ye, J. C., Milanfar, P., Dimakis, A. G., and Delbracio, M. A survey on diffusion models for inverse problems, 2024. URL 
+
+https://arxiv.org/abs/2410.00083 .Efron, B. Tweedie’s formula and selection bias. Journal of the American Statistical Association , 106(496):1602– 1614, 2011. Evensen, G. and Van Leeuwen, P. J. Assimilation of geosat altimeter data for the agulhas current using the ensemble kalman filter with a quasigeostrophic model. Monthly weather review , 124(1):85–96, 1996. Feng, B. T., Smith, J., Rubinstein, M., Chang, H., Bouman, K. L., and Freeman, W. T. Score-based diffusion models as principled priors for inverse imaging. In Proceedings of the IEEE/CVF International Conference on Computer Vision , pp. 10520–10531, 2023. Gong, A., He, W., Cao, Y., Zhou, G., and Zhu, H. Inter-pretability metrics and optimization methods for belief rule based expert systems. Expert Systems with Applica-tions , pp. 128363, 2025. Guillin, A., L ´eonard, C., Wu, L., and Yao, N. Transportation-information inequalities for markov processes. Probabil-ity theory and related fields , 144(3):669–695, 2009. Harbaugh, A. W., Banta, E. R., Hill, M. C., and McDonald, M. G. MODFLOW-2000, the U.S. geological survey modular ground-water model: User guide to modulariza-tion concepts and the ground-water flow process. Tech-nical Report 00-92, U.S. Geological Survey, 2000. URL 
+
+https://doi.org/10.3133/ofr200092 .10 Zeroth-Order Non-Log-Concave Sampling with Variance Reduction and Applications to Inverse Problems 
+
+He, Y. and Sun, W. Stability and convergence of the crank– nicolson/adams–bashforth scheme for the time-dependent navier–stokes equations. SIAM Journal on Numerical Analysis , 45(2):837–869, 2007. He, Y., Rojas, K., and Tao, M. Zeroth-order sampling methods for non-log-concave distributions: Alleviating metastability by denoising diffusion. Advances in Neural Information Processing Systems , 37:71122–71161, 2024. Ho, J., Jain, A., and Abbeel, P. Denoising diffusion proba-bilistic models. Advances in neural information process-ing systems , 33:6840–6851, 2020. Huang, Y., Ghatare, A., Liu, Y., Hu, Z., Zhang, Q., Shama Sastry, C., Gururani, S., Oore, S., and Yue, Y. Symbolic music generation with non-differentiable rule guided diffusion. In Proceedings of the 41st Interna-tional Conference on Machine Learning , volume 235 of 
+
+Proceedings of Machine Learning Research , pp. 19772– 19797. PMLR, 21–27 Jul 2024. Hyv ¨arinen, A. and Dayan, P. Estimation of non-normalized statistical models by score matching. Journal of Machine Learning Research , 6(4), 2005. Iglesias, M. A., Law, K. J., and Stuart, A. M. Ensemble kalman methods for inverse problems. Inverse Problems ,29(4):045001, 2013. Jalal, A., Arvinte, M., Daras, G., Price, E., Dimakis, A. G., and Tamir, J. Robust compressed sensing mri with deep generative priors. Advances in neural information pro-cessing systems , 34:14938–14954, 2021. Karakuzu, A., Blostein, N., Caron, A. V., Bor ´e, A., Rheault, F., Descoteaux, M., and Stikov, N. Rethinking mri as a measurement device through modular and portable pipelines. Magnetic Resonance Materials in Physics, Biology and Medicine , pp. 1–17, 2025. Karras, T., Aittala, M., Aila, T., and Laine, S. Elucidating the design space of diffusion-based generative models. 
+
+Advances in neural information processing systems , 35: 26565–26577, 2022. Kawar, B., Vaksman, G., and Elad, M. Snips: Solving noisy inverse problems stochastically. Advances in Neural Information Processing Systems , 34:21757–21769, 2021. Lan, G. First-order and stochastic optimization methods for machine learning , volume 1. Springer, 2020. Laumont, R., Bortoli, V. D., Almansa, A., Delon, J., Dur-mus, A., and Pereyra, M. Bayesian imaging using plug & play priors: when langevin meets tweedie. SIAM Journal on Imaging Sciences , 15(2):701–737, 2022. Lee, H., Lu, J., and Tan, Y. Convergence for score-based generative modeling with polynomial complexity. Ad-vances in Neural Information Processing Systems , 35: 22870–22882, 2022. Li, Z., Bao, H., Zhang, X., and Richt ´arik, P. Page: A simple and optimal probabilistic gradient estimator for nonconvex optimization. In International conference on machine learning , pp. 6286–6295. PMLR, 2021. Liu, J., Anirudh, R., Thiagarajan, J. J., He, S., Mohan, K. A., Kamilov, U. S., and Kim, H. Dolce: A model-based prob-abilistic diffusion framework for limited-angle ct recon-struction. In Proceedings of the IEEE/CVF international conference on computer vision , pp. 10498–10508, 2023. Liu, L. and Wang, Z. One-point gradient estimators for zeroth-order stochastic gradient langevin dynamics. In 
+
+OPT2020: 12th Annual Workshop on Optimization for Machine Learning , 2020. URL https://opt-ml. org/oldopt/papers/2020/paper_96.pdf .Liu, Y., Chen, M., Ji, C., Zhang, H., and Wang, R. Serena: A unified stochastic recursive variance reduced gradi-ent framework for riemannian non-convex optimization. In Forty-second International Conference on Machine Learning , 2025. Liu, Z., Luo, P., Wang, X., and Tang, X. Deep learning face attributes in the wild. In Proceedings of the IEEE international conference on computer vision , pp. 3730– 3738, 2015. Lopez-Gomez, I., Christopoulos, C., Langeland Ervik, H. L., Dunbar, O. R., Cohen, Y., and Schneider, T. Train-ing physics-based machine-learning parameterizations with gradient-free ensemble kalman methods. Jour-nal of Advances in Modeling Earth Systems , 14(8): e2022MS003105, 2022. Miyasawa, K. et al. An empirical bayes estimator of the mean of a normal population. Bull. Inst. Internat. Statist ,38(181-188):1–2, 1961. Mo ¨es, N., Dolbow, J., and Belytschko, T. A finite element method for crack growth without remeshing. Interna-tional journal for numerical methods in engineering , 46 (1):131–150, 1999. Nesterov, Y. and Spokoiny, V. Random gradient-free mini-mization of convex functions. Foundations of Computa-tional Mathematics , 17(2):527–566, 2017. Nesterov, Y. et al. Lectures on convex optimization , volume 137. Springer, 2018. Nichol, A. Q. and Dhariwal, P. Improved denoising diffu-sion probabilistic models. In International conference on machine learning , pp. 8162–8171. PMLR, 2021. 11 Zeroth-Order Non-Log-Concave Sampling with Variance Reduction and Applications to Inverse Problems 
+
+Oliver, D. S., Reynolds, A. C., and Liu, N. Inverse the-ory for petroleum reservoir characterization and history matching. Cambridge, New York , 2008. Robbins, H. E. An empirical bayes approach to statistics. In Breakthroughs in Statistics: Foundations and basic theory , pp. 388–394. Springer, 1992. Rotshtein, A. P. and Rakytyanska, H. B. Inverse inference based on fuzzy rules. In Fuzzy Evidence in Identification, Forecasting and Diagnosis , pp. 193–233. Springer, 2012. Rout, L., Raoof, N., Daras, G., Caramanis, C., Dimakis, A., and Shakkottai, S. Solving linear inverse problems prov-ably via posterior sampling with latent diffusion models. 
+
+Advances in Neural Information Processing Systems , 36: 49960–49990, 2023. Rout, L., Chen, Y., Ruiz, N., Kumar, A., Caramanis, C., Shakkottai, S., and Chu, W.-S. RB-modulation: Training-free stylization using reference-based modulation. In 
+
+The Thirteenth International Conference on Learning Representations , 2025. URL https://openreview. net/forum?id=bnINPG5A32 .Roy, A., Shen, L., Balasubramanian, K., and Ghadimi, S. Stochastic zeroth-order discretizations of langevin diffu-sions for bayesian inference. Bernoulli , 28(3):1810–1834, 2022. Song, J., Meng, C., and Ermon, S. Denoising diffu-sion implicit models. In International Conference on Learning Representations , 2021a. URL https:// openreview.net/forum?id=St1giarCHLP .Song, J., Vahdat, A., Mardani, M., and Kautz, J. Pseudoinverse-guided diffusion models for inverse prob-lems. In International Conference on Learning Represen-tations , 2023. Song, Y. and Ermon, S. Generative modeling by estimating gradients of the data distribution. Advances in neural information processing systems , 32, 2019. Song, Y. and Ermon, S. Improved techniques for train-ing score-based generative models. Advances in neural information processing systems , 33:12438–12448, 2020. Song, Y., Sohl-Dickstein, J., Kingma, D. P., Kumar, A., Ermon, S., and Poole, B. Score-based generative mod-eling through stochastic differential equations. In In-ternational Conference on Learning Representations ,2021b. URL https://openreview.net/forum? id=PxTIG12RRHS .Song, Y., Shen, L., Xing, L., and Ermon, S. Solving inverse problems in medical imaging with score-based genera-tive models. In International Conference on Learning Representations , 2022. URL https://openreview. net/forum?id=vaRCHVj0uGI .Sun, H. and Bouman, K. L. Deep probabilistic imaging: Uncertainty quantification and multi-modal solution char-acterization for computational imaging. In Proceedings of the AAAI conference on artificial intelligence , volume 35, pp. 2628–2637, 2021. Sun, Y., Wu, Z., Chen, Y., Feng, B. T., and Bouman, K. L. Provable probabilistic imaging using score-based genera-tive priors. IEEE Transactions on Computational Imag-ing , 2024. Tan, Z., Kaul, C. M., Pressel, K. G., Cohen, Y., Schnei-der, T., and Teixeira, J. An extended eddy-diffusivity mass-flux scheme for unified representation of subgrid-scale turbulence and convection. Journal of Advances in Modeling Earth Systems , 10(3):770–800, 2018. Tang, H., Xie, T., Feng, A., Wang, H., Zhang, C., and Bai, Y. Solving general noisy inverse problem via posterior sampling: A policy gradient viewpoint. In International Conference on Artificial Intelligence and Statistics , pp. 2116–2124. PMLR, 2024. Villani, C. Optimal Transport: Old and New , volume 338 of 
+
+Grundlehren der Mathematischen Wissenschaften [Fun-damental Principles of Mathematical Sciences] . Springer-Verlag, Berlin, 2009. Vincent, P. A connection between score matching and de-noising autoencoders. Neural computation , 23(7):1661– 1674, 2011. Wang, Y., Yu, J., and Zhang, J. Zero-shot image restora-tion using denoising diffusion null-space model. In The Eleventh International Conference on Learning Represen-tations , 2023. URL https://openreview.net/ forum?id=mRieQgMtNTQ .Wong, G. N., Prather, B. S., Dhruv, V., Ryan, B. R., Mo ´scibrodzka, M., Chan, C.-k., Joshi, A. V., Yarza, R., Ricarte, A., Shiokawa, H., et al. Patoka: Simulating elec-tromagnetic observables of black hole accretion. The As-trophysical Journal Supplement Series , 259(2):64, 2022. Wu, Z., Sun, Y., Chen, Y., Zhang, B., Yue, Y., and Bouman, K. Principled probabilistic imaging using diffusion mod-els as plug-and-play priors. Advances in Neural Informa-tion Processing Systems , 37:118389–118427, 2024. Yang, K. Y. and Wibisono, A. Convergence of the inexact langevin algorithm and score-based generative models in kl divergence. arXiv preprint arXiv:2211.01512 , 2022. Zbontar, J., Knoll, F., Sriram, A., Murrell, T., Huang, Z., Muckley, M. J., Defazio, A., Stern, R., Johnson, P., Bruno, 12 Zeroth-Order Non-Log-Concave Sampling with Variance Reduction and Applications to Inverse Problems 
+
+M., et al. fastmri: An open dataset and benchmarks for accelerated mri, 2019. URL https://arxiv.org/ abs/1811.08839 .Zheng, H., Chu, W., Wang, A., Kovachki, N. B., Baptista, R., and Yue, Y. Ensemble kalman diffusion guidance: A derivative-free method for inverse problems. Transac-tions on Machine Learning Research , 2025a. ISSN 2835-8856. URL https://openreview.net/forum? id=XPEEsKneKs .Zheng, H., Chu, W., Zhang, B., Wu, Z., Wang, A., Feng, B., Zou, C., Sun, Y., Kovachki, N. B., Ross, Z. E., Bouman, K., and Yue, Y. Inversebench: Benchmarking plug-and-play diffusion priors for inverse problems in physical sciences. In The Thirteenth International Conference on Learning Representations , 2025b. URL https:// openreview.net/forum?id=U3PBITXNG6 .13 Zeroth-Order Non-Log-Concave Sampling with Variance Reduction and Applications to Inverse Problems 
+
+## A. Comparison to Related Work 
+
+In this section, we compare ZO-APMC against existing posterior sampling methods based on SGM priors, highlighting their strengths and limitations. 
+
+A.1. Black-box Posterior Sampling Algorithms 
+
+There are three other prior works that studied posterior sampling with SGM priors for black-box (derivative-free) forward models. The most recent is EnKG, which estimates the likelihood score using the ensemble-based statistical lineariza-tion (Zheng et al., 2025a). Unlike our algorithm, EnKG is not designed to sample from the full posterior and therefore offers limited uncertainity quantification. In our experiments, we observed that EnKG also becomes highly inefficient when the evaluation of the forward model is cheaper than computation of the score network, which is the case in MRI reconstruction with linear forward model. In addition, as reflected in our results, in black hole imaging and MRI reconstruction, it produced noticeably lower reconstruction quality than our method. However, it performed better than our method for Navier–Stokes inverse problem because noisy function evaluations of forward model makes the guidance term unstable. In EnKG paper, authors proposed Forward-GSG and Central-GSG baselines, which are originated from DPS algorithm but the guidance term is estimated by mini-batch ZO estimate. Since they have additional approximation error due to heuristic approximation of the guidance term (Chung et al., 2023b), they generate samples with larger reconstruction errors, as reflected in our results. However, they require less iteration as they use SDE from diffusion models (Song et al., 2021b) as opposed to Langevin sampling, which requires longer iterations. SCG (Huang et al., 2024) and DPG (Tang et al., 2024), which cast diffusion guidance in a stochastic control framework and steer the sampling process via an estimated value function. Similar to EnKG, neither of the targets to sample from the posterior distribution due to intractable score likelihood term, so uncertainity quantification cannot be done as opposed to our algorithm. Moreover, SCG relies on a threshold parameter that disables the likelihood-based guidance in certain iterations. We found that improper tuning of this threshold leads to severely degraded performance, yet the method provides no theoretical guidance for selecting it. As a result, practitioners must rely on grid search or extensive hyperparameter tuning. However, in our setting, p and b can be adjusted easily once a budget for per-iteration is determined. Although we did not experiment with, since SCG is based on value function (not approximation of gradient), it could perform better than our method for rule-based inverse problems. Similar to our approach, DPG also relies on Monte Carlo mini-batch estimates of the posterior score. However, unlike our method, DPG does not include any variance-reduction mechanism, and incorporating such mechanisms is nontrivial due to the DDPM (Ho et al., 2020) and DDIM (Song et al., 2021a) sampling procedures it depends on. In addition, their update rule couples the likelihood and prior score terms, preventing the decoupling that enables our variance-reduced design. Empirically, these differences lead to clear performance gaps: in both the black hole and MRI reconstruction tasks, our method achieves substantially better reconstruction quality, whereas on the Navier–Stokes example DPG performs slightly better, which may be due to instability in the ZO score approximations for this specific problem. 
+
+A.2. Gradient-based Posterior Sampling Algorithms 
+
+There are many gradient-based posterior sampling with SGM priors proposed for solving inverse problems. As can be seen from our MRI reconstruction experiments (Table 1), APMC (Sun et al., 2024), which is the closest work to ours, generated slightly better reconstructions than the proposed ZO-APMC algorithm. This shows that when one can compute the gradient of the forward model exactly, it is more preferable. However, this may not be possible in commercial MRI applications or closed-source systems (Karakuzu et al., 2025), where one can only have access to input and output of the forward operator. In that scenario, our model performs the best among black-box posterior samplers with comparable performance to the gradient-based model. Similar trend can be seen in black hole imaging experiments as well. Similar to our work, the APMC paper also derived an upper bound on the FI. However, beyond establishing an FI bound in the black-box setting, we additionally prove convergence in squared total variation distance and show weak asymptotic convergence to the target distribution without using Lipschitzness assumption of the score network. Besides APMC, we used DPS (Chung et al., 2023b) and PnP-DM (Wu et al., 2024) posterior sampling algorithms as gradient-based baselines. Although our method treats the forward model as black-box, it performed better than DPS in experiments. We attributed this to the heuristic approximation of the guidance term in DPS, which is called Jensen gap which cannot be controlled explicitly as we control the estimator error via PAGE variance reduction mechanism. PnP-DM 14 Zeroth-Order Non-Log-Concave Sampling with Variance Reduction and Applications to Inverse Problems 
+
+Table 3. A conceptual overview of posterior sampling approaches for probabilistic imaging. The “Annealing” column highlights distinctions among MCMC-based methods. The “Black-box access” column shows whether the corresponding method assumes black-box access and works when gradients of the forward model is unavailable. The A(·) column shows the assumption on the type of forward model. This table extends that of Sun et al. (2024) by incorporating additional black-box posterior sampling algorithms. 
+
+Category Reference Generative prior Model agnostic A(·) Convergence guarantees Annealing Black-box access 
+
+Variational Bayesian (Sun &Bouman, 2021) 
+
+✗ ✗ General ✗ – ✗
+
+(Feng et al., 2023) 
+
+✓ ✗ General ✗ – ✗
+
+DM-based (Song et al., 2022) 
+
+✓ ✓ Linear ✗ – ✗
+
+(Chung et al., 2023b) 
+
+✓ ✓ General ✗ – ✗
+
+(Liu et al., 2023) 
+
+✓ ✗ Linear ✗ – ✗
+
+(Tang et al., 2024) 
+
+✓ ✗ General ✗ – ✓
+
+(Huang et al., 2024) 
+
+✓ ✗ General ✗ – ✓
+
+(Zheng et al., 2025a) 
+
+✓ ✗ General ✗ – ✓
+
+MCMC-based (Jalal et al., 2021) 
+
+✓ ✓ Linear ✓1 ✓ ✗
+
+(Kawar et al., 2021) 
+
+✓ ✓ Linear ✗ ✓ ✗
+
+(Laumont et al., 2022) 
+
+✗ ✓ General ✓ ✗ ✗
+
+(Coeurdoux et al., 2024) 
+
+✓ ✓ Linear ✗ ✗ ✗
+
+(Bouman & Buzzard, 2023) 
+
+✗ ✓ Linear ✓2 ✗ ✗
+
+(Sun et al., 2024) 
+
+✓ ✓ General ✓ ✓ ✗
+
+MCMC-based Ours ✓ ✓ General ✓ ✓ ✓
+
+> 1
+
+Requires A(·) to be a Gaussian random matrix. 2Guarantees on asymptotic convergence. 
+
+provides a principled framework for posterior sampling, but it applies to inverse problems only when implemented within the EDM framework (Karras et al., 2022) as opposed to our method. Moreover, although PnP-DM establishes upper bounds on FI, it provides neither asymptotic convergence to the true posterior nor non-asymptotic guarantees in squared total variation distance. Consequently, it remains unclear whether samples produced after many iterations will coincide with those from the exact true posterior. 
+
+## B. Theoretical Results 
+
+Notation. Throughout the proof, we work within the probability space (Ω , F, P), where Ω denotes the sample space, F the 
+
+σ-algebra, and P the probability measure. We define the following filtration containing all randomness up to iteration k
+
+Fk := σ(x0, ui
+
+> 0
+
+, Z0, . . . , uik, Zk), (15) where Zk := B(k+1) γ − Bkγ and uik denotes the collection of Gaussian vectors used in the ZO estimates at iteration k.
+
+⌈·⌉ is the ceiling function and it is defined as ⌈x⌉ := min {n ∈ Z : n ≥ x}.For two nonnegative sequences (an)n≥0 and (bn)n≥0, the notation an ≲ bn denotes that there exists a constant C > 0,15 Zeroth-Order Non-Log-Concave Sampling with Variance Reduction and Applications to Inverse Problems 
+
+independent of n, such that 
+
+an ≤ Cb n,
+
+for all n ≥ 0.For a random variable X : Ω → Rn, we write its expectation as 
+
+E[X] = 
+
+Z
+
+> Ω
+
+X(ω) P(dω ).
+
+The posterior distribution of interest is of the form 
+
+π(x|y) ∝ ℓ(y|x)p(x),
+
+where we define f (x) and h(x) as potential functions of the likelihood ℓ(y|x) ∝ exp( −f (x)) and the prior p(x) ∝
+
+exp( −h(x)) , respectively. Moreover, we define hσk as the potential function of the perturbed prior given as pσk (x) ∝
+
+exp( −hσk (x)) , pσ (x) := R 
+
+> Rd
+
+p(z)N (x|z, σ 2I) dz, where p(x) is the unperturbed prior. For simplicity, we omit the explicit dependence on y. Recall that 
+
+−∇ log π(x) = ∇f (x) + ∇h(x). (16) We denote the zeroth-order approximation of the forward model gradient as follows 
+
+e∇fμ(xkγ , u) := f (xkγ + μu) − f (xkγ )
+
+μ u, (17) where u ∼ N (0 , I ) and μ > 0. The expectation of the zeroth-order approximation is denoted as ∇fμ(xkγ ) := 
+
+Eu
+
+h e∇fμ(xkγ , u)
+
+i
+
+. For notational convenience, we also define 
+
+∆k := E∥x(k+1) γ − xkγ ∥22
+
+, (18) as the expected squared ℓ2-distance between consecutive iterates. For convenience, we recall the definition of the Kullback– Leibler (KL) divergence between two probability densities ν and π:
+
+KL( ν∥π) = 
+
+Z
+
+> Rn
+
+ν(x) log ν(x)
+
+π(x) dx. 
+
+The Fisher information (FI) is given by 
+
+FI( ν∥π) = 
+
+Z
+
+> Rn
+
+∇ log ν(x)
+
+> π(x)
+> 22
+
+ν(x) dx =
+
+Z
+
+> Rn
+
+∥∇ log ν(x) − ∇ log π(x)∥22ν(x) dx. 
+
+Total variation (TV) distance between two probability measures μ and ν on a measurable space (X , F) is given b by 
+
+∥ν − π∥TV := sup 
+
+> A∈F
+
+ν(A) − π(A) = 12
+
+Z
+
+> X
+
+dν − dπ .
+
+Unless otherwise stated, ∥ · ∥ denotes the squared ℓ2-norm, i.e. ∥ · ∥ 2. C1,1 
+
+> L
+
+denotes the class of differentiable functions 
+
+f : Rd → R whose gradients are L-Lipschitz, i.e., 
+
+∥∇ f (x) − ∇ f (y)∥2 ≤ L∥x − y∥2, ∀x, y ∈ Rd. (19) 
+
+B.1. Lemmas 
+
+We begin by reviewing the key lemmas from the zeroth-order optimization and non-log-concave sampling literature. The following lemma summarizes key properties of zeroth-order approximations used in our analysis. 
+
+Lemma 1 (Lemma 6.2 under Section 6.1.2.1 in Lan (2020)) . Suppose that f (x) ∈ C1,1 
+
+> L
+
+, i.e., f is continuously differentiable and its gradient is L-Lipschitz, and let fμ(x) := Eu[f (x + μu)] . Then the following statements hold: 
+
+16 Zeroth-Order Non-Log-Concave Sampling with Variance Reduction and Applications to Inverse Problems 
+
+(a) fμ ∈ C1,1 
+
+> Lμ
+
+(Rd), where Lμ ≤ L,(b) ∥∇ fμ(x) − ∇ f (x)∥ ≤ 12 μL (d + 3) 32 ,(c) Eu[∥ e∇fμ(x, u)∥2] ≤ 12 μ2L2(d + 6) 3 + 2( d + 4) ∥∇ f (x)∥22,where e∇fμ(x, u) := f (x+μu)−f (x) 
+
+> μ
+
+u for u ∼ N (0 , I ) and any x ∈ Rd, μ > 0.
+
+The following lemma concerns the density evolution of an interpolated diffusion process. 
+
+Lemma 2 (Lemma 23 in Balasubramanian et al. (2022)) . Consider the stochastic process defined by 
+
+xt := x0 − tg 0 + √2Bt, with g0 = g(x0), x0 ∼ ν0
+
+where g0 is integrable and {Bt}t≥0 is a standard Brownian motion in Rd independent of (x0, g 0). Then, writing νt for the probability density of xt, we have 
+
+ddt KL( νt∥π) ≤ − 34 FI( νt∥π) + E ∥∇ f (xt) − g0∥2 ,
+
+where we recall that π ∝ e−f , and the expectation in the last term is with respect to x0 ∼ ν0 and xt ∼ νt.
+
+We also used the following lemma to bound the Fisher information, which is taken from (Chewi et al., 2024). 
+
+Lemma 3 (Lemma 20 in Chewi et al. (2024)) . Assume that ∇ log π(x) is Lπ -Lipschitz. For any probability measure ν, it holds that 
+
+Eν
+
+∥∇ log π(x)∥2 ≤ FI ( ν∥π) + 2 dL π .
+
+We use the following lemma to derive an upper bound on total variation (TV) distance. 
+
+Lemma 4 (Theorem 3.1 in Guillin et al. (2009)) . If π satisfies a Poincar ´e inequality, i.e. for every smooth, compactly supported f : Rd → R,
+
+Var π (f ) ≤ CPI Eπ
+
+∥∇ f ∥2,
+
+then for any probability measure ν,
+
+∥ν − π∥2TV ≤ 4CPI FI( ν∥π).
+
+B.2. Proof of Proposition 1 Proposition 1 Suppose Assumption 1 holds, and let (xkγ )k≥0 be generated by (9), where gk is given by (8). Define 
+
+e2 
+
+> k
+
+:= E[∥gk − ∇ fμ(xkγ )∥22]. Then, for any γ > 0,
+
+e2 
+
+> k+1
+
+≤ pσ 2
+
+> k+1
+
+b + (1 − p)e2 
+
+> k
+
++ 4(1 − p)dL 21∆k
+
+μ2b′ , (20) 
+
+where σ2 
+
+> k+1
+
+:= E[∥ e∇fμ(x(k+1) γ , uik+1 )∥2] and ∆k := E[∥x(k+1) γ − xkγ ∥2]
+
+Proof. Using the definition of gk in (8), we can bound e2 
+
+> k+1
+
+as follows 
+
+e2 
+
+> k+1
+
+= p E
+
+ ∇fμ(x(k+1) γ ) − 1
+
+b
+
+> b
+
+X
+
+> i=1
+
+e∇fμ
+
+ x(k+1) γ , uik+1 
+
+ 2
+
++ (1 − p) E
+
+ ∇fμ(x(k+1) γ ) − gk − 1
+
+b′
+
+> b′
+
+X
+
+> i=1
+
+ e∇fμ(x(k+1) γ , uik+1 ) − e∇fμ(xkγ , uik+1 )
+
+ 2 (21) 17 Zeroth-Order Non-Log-Concave Sampling with Variance Reduction and Applications to Inverse Problems 
+
+where b′, b denote the small and large batch sizes, respectively, and uik+1 ∼ N (0 , I ) in Rd. Here, k and i denote the iteration and sample indices, respectively, for the sampled Gaussian vectors. We can upper bound the first expectation as 
+
+E
+
+ ∇fμ(x(k+1) γ ) − 1
+
+b
+
+> b
+
+X
+
+> i=1
+
+e∇fμ
+
+ x(k+1) γ , uik+1 
+
+ 2 = 1
+
+b E
+
+
+
+∇fμ(x(k+1) γ ) − e∇fμ(x(k+1) γ , uik+1 ) 2
+
+(22) 
+
+≤ 1
+
+b E
+
+e∇fμ(x(k+1) γ , uik+1 ) 2| {z }
+
+> =σ2
+> k+1
+
+. (23) In (22), we expand the square and use E[ e∇fμ(x(k+1) γ , uik+1 )|F k] = ∇fμ(x(k+1) γ ) with the fact that uik+1 are identically and independently distributed. In (23), we use the second-moment bound on the variance with definition of σ2
+
+> k+1
+
+. Plugging this upper bound into (21), we get 
+
+e2 
+
+> k+1
+
+≤ pσ 2
+
+> k+1
+
+b + (1 − p)E
+
+"
+
+∇fμ(x(k+1) γ ) − gk − 1
+
+b′
+
+> b′
+
+X
+
+> i=1
+
+ e∇fμ(x(k+1) γ , uik+1 ) − e∇fμ(xkγ , uik+1 )
+
+ 2
+
+#
+
+(24) 
+
+= pσ 2
+
+> k+1
+
+b + (1 − p)E
+
+"
+
+∇fμ(xkγ ) − gk + ∇fμ(x(k+1) γ ) − ∇ fμ(xkγ )
+
+− 1
+
+b′
+
+> b′
+
+X
+
+> i=1
+
+ e∇fμ(x(k+1) γ , uik+1 ) − e∇fμ(xkγ , uik+1 )
+
+ 2
+
+#
+
+(25) 
+
+= pσ 2
+
+> k+1
+
+b + (1 − p)e2 
+
+> k
+
++ (1 − p)
+
+b′ E
+
+"
+
+∇fμ(x(k+1) γ ) − ∇ fμ(xkγ ) −
+
+ e∇fμ(x(k+1) γ , uik+1 ) − e∇fμ(xkγ , uik+1 )
+
+ 2
+
+#
+
+(26) 
+
+≤ pσ 2
+
+> k+1
+
+b + (1 − p)e2 
+
+> k
+
++ (1 − p)
+
+b′ E
+
+"e∇fμ(x(k+1) γ , uik+1 ) − e∇fμ(xkγ , uik+1 ) 2
+
+#
+
+(27) 
+
+= pσ 2
+
+> k+1
+
+b + (1 − p)e2 
+
+> k
+
++ (1 − p)
+
+μ2b′ E
+
+" 
+
+f (x(k+1) γ + μuik+1 ) − f (xkγ + μuik+1 )
+
+
+
+−
+
+
+
+f (x(k+1) γ ) − f (xkγ )
+
+ 2
+
+uik+1 
+
+> 2
+
+#
+
+(28) 
+
+≤ pσ 2
+
+> k+1
+
+b + (1 − p)e2 
+
+> k
+
++ 4(1 − p)L21∆k
+
+μ2b′ E
+
+h
+
+uik+1 
+
+> 2
+
+i
+
+(29) 
+
+= pσ 2
+
+> k+1
+
+b + (1 − p)e2 
+
+> k
+
++ 4(1 − p)dL 21∆k
+
+μ2b′ (30) where ∆k := E ∥x(k+1) γ − xkγ ∥2. Note that we add and subtract ∇fμ(xkγ ) in (25). To get (26), we use the fact that random variables uik+1 ∼ N (0 , I ) are i.i.d., and calculate the conditional expectations conditioned with respect to Fk
+
+and then use the definition of e2
+
+> k
+
+. We use second-moment bound on variance in (27) and use the zeroth-order definition to get (28). Following these steps, we apply Assumption 1 and use the independence of uik+1 from xkγ and x(k+1) γ to obtain (29). This concludes our proof. □
+
+B.3. Proof of Theorem 1 Theorem 1 Let (νt)t≥0 denote the law of interpolation (10), and let π ∝ exp( −f ) be the target distribution, where the potential function f satisfies Assumptions 1 and 2 with Lipschitz constants L1 and L2, respectively. Then, for any step size 
+
+γ ∈
+
+
+
+0, 1
+
+> Lm
+
+√52 ϕ(μ)
+
+
+
+, where ϕ(μ) := 1 + 4(1 −p)dpμ 2b′ and Lm := max {L1, L 2}, and for any N ≥ 1, the Fisher information satisfies 
+
+1
+
+N γ 
+
+Z N γ 
+
+> 0
+
+FI( νt∥π) dt ≤ C0
+
+N γ + 13 d(d + 2) 2b + 13 8 μ2L22(d + 3) 3 + 14 γL 2
+
+> m
+
+ϕ(μ)d, (31) 18 Zeroth-Order Non-Log-Concave Sampling with Variance Reduction and Applications to Inverse Problems 
+
+where C0 > 0 is a numerical constant. Furthermore, let 
+
+γ = 1
+
+LmN 3/4d7/4 , p = Lm
+
+N 1/4d1/4 b =
+
+ 1
+
+p
+
+
+
+, and μ2 = 1
+
+LmN 1/4d5/4 (32) 
+
+Then, to achieve FI(¯ νN γ ∥π) ≤ ε for the time averaged law ¯νN γ := 1
+
+> N γ
+
+R N γ  
+
+> 0
+
+νt dt , O
+
+ d7L4
+
+> m
+> ε4
+
+
+
+iterations with O(1) function evaluations per iteration is sufficient. Proof. At initialization, we choose γ0, b 0, μ 0 > 0 and p0 ∈ (0 , 1] , and define g0 as 
+
+g0 := 1
+
+b0
+
+> b0
+
+X
+
+> i=1
+
+e∇fμ0 (x0, ui
+
+> 0
+
+), ui 
+
+> 0
+
+∼ N (0 , I ).
+
+We recall that the interpolation argument (10) for the proposed algorithm is given as 
+
+xt := xkγ − (t − kγ )gk + √2( Bt − Bkγ ), (33) where (Bt)t≥0 is Brownian motion and gk is the proposed variance-reduced ZO estimator. Using this interpolation with Lemma 2, we obtain 
+
+ddt KL( νt∥π) ≤ − 34 FI( νt∥π) + E[∥∇ f (xt) − gk∥2]= − 34 FI( νt∥π) + E[∥∇ f (xt) − ∇ f (xkγ ) + ∇f (xkγ ) − ∇ fμ(xkγ ) + ∇fμ(xkγ ) − gk∥2]
+
+≤ − 34 FI( νt∥π) + 3 L22E[∥xt − xkγ ∥2] + 34 μ2L22(d + 3) 3 + 3 E[∥∇ fμ(xkγ ) − gk∥2]. (34) We use Jensen’s inequality, Lemma 1, and Assumption 2 to obtain the last inequality. Let ek := E[∥∇ fμ(xkγ ) − gk∥2] be the mean squared estimation error. Then, using Proposition 1, we have 
+
+e2 
+
+> k+1
+
+≤ pσ 2
+
+> k+1
+
+b + (1 − p)e2 
+
+> k
+
++ 4(1 − p)dL 1∆k
+
+μ2b′ , (35) where ∆k := E[∥x(k+1) γ − xkγ ∥2] and σ2 
+
+> k+1
+
+:= E[∥ e∇fμ(x(k+1) γ , uik+1 )∥2]. We can further upper bound σ2 
+
+> k+1
+
+by using the definition of e∇fμ(x(k+1) γ , uik+1 ) with the Assumption 1 as follows 
+
+σ2 
+
+> k+1
+
+= E[∥ e∇fμ(x(k+1) γ , uik+1 )∥2]
+
+≤ L21E[∥uik+1 ∥4] (36) 
+
+= L21d(d + 2) .
+
+Plugging this into (35), we have 
+
+e2 
+
+> k+1
+
+≤ pd (d + 2) L21
+
+b + (1 − p)e2 
+
+> k
+
++ 4(1 − p)dL 1∆k
+
+μ2b′ (37) for k ≥ 1. Dividing both sides by p and rearranging the terms, we get a recursive upper bound on the error term 
+
+e2 
+
+> k
+
+≤ d(d + 2) L21
+
+b +
+
+ 1 − pp
+
+ 4dL 21
+
+μ2b′ ∆k − 1
+
+p (e2 
+
+> k+1
+
+− e2
+
+> k
+
+). (38) Using the interpolation in (10), we can upper bound E[∥xt − xkγ ∥2] in (34) as 
+
+E[∥xt − xkγ ∥2] = ( t − kγ )E[∥gk∥2] + 2 γd 
+
+≤ γ2E[∥gk∥2] + 2 γd = ∆ k. (39) Using this property and plugging the upper bound in (38) into (34), we get 
+
+ddt KL( νt∥π) ≤ − 34 FI( νt∥π) + 3 L2
+
+> m
+
+ϕ(μ)∆ k + 3d(d + 2) L21
+
+b − 3
+
+p (e2 
+
+> k+1
+
+− e2
+
+> k
+
+) + 34 μ2L22(d + 3) 3, (40) 19 Zeroth-Order Non-Log-Concave Sampling with Variance Reduction and Applications to Inverse Problems 
+
+where ϕ(μ) := 1 + 
+
+ 1−pp
+
+ 4dμ2b′ . We can upper bound the term involving ∆k as 
+
+∆k := E[∥x(k+1) γ − xkγ ∥2]= γ2E[∥gk∥2] + 2 γd (41) 
+
+= γ2E[∥gk − ∇ fμ(xkγ ) + ∇fμ(xkγ ) − ∇ f (xkγ ) + ∇f (xkγ ) − ∇ f (xt) + ∇f (xt)∥2] + 2 γd 
+
+= 4 γ2L22∆k + γ2μ2L22(d + 3) 3 + 4 γ2e2 
+
+> k
+
++ 4 γ2E[∥∇ f (xt)∥2] + 2 γd (42) 
+
+≤ 4γ2L2
+
+> m
+
+ϕ(μ)∆ k + 4γ2d(d + 2) L21
+
+b − 4γ2
+
+p (e2 
+
+> k+1
+
+− e2
+
+> k
+
+) + γ2μ2L22(d + 3) 3 + 4 γ2E[∥∇ f (xt)∥2] + 2 γd. (43) We use interpolation (10) to obtain (41). Following that, we use Assumption 2 together with (39), Jensen’s inequality, and apply Lemma 1 to obtain (42). Finally, we use the upper bound in (38) with the fact that L2 ≤ Lm to obtain (43). Rearranging the terms, we get 
+
+ 1 − 4γ2L2
+
+> m
+
+ϕ(μ) ∆k ≤ 4γ2d(d + 2) L21
+
+b − 4γ2
+
+p (e2 
+
+> k+1
+
+− e2
+
+> k
+
+) + γ2μ2L22(d + 3) 3 + 4 γ2E[∥∇ f (xt)∥2] + 2 γd. 
+
+Let γ ≤ 1
+
+> Lm
+
+√52 ϕ(μ) and multiplying both sides by 13 12 , we get 
+
+∆k ≤ 13 3
+
+γ2d(d + 2) L21
+
+b − 13 3
+
+γ2
+
+p
+
+ e2 
+
+> k+1
+
+− e2
+
+> k
+
+ + 13 12 γ2μ2L22(d + 3) 3 + 13 γ2
+
+3 E[∥∇ f (xt)∥2] + 13 6 γd 
+
+Plugging this upper bound into (40), we obtain 
+
+ddt KL( νt∥π) ≤ − 34 FI( νt∥π) + 3 + 13 γ2L2
+
+> m
+
+ϕ(μ) d(d + 2) 
+
+b − 1
+
+p
+
+3 + 13 γ2L2
+
+> m
+
+ϕ(μ) (e2 
+
+> k+1
+
+− e2
+
+> k
+
+)+
+
+ 34 + 13 4 γ2L2
+
+> m
+
+ϕ(μ)
+
+
+
+μ2L22(d + 3) 3 + 13 γ2L2
+
+> m
+
+ϕ(μ)E[∥∇ f (xt)∥2] + 13 2 γL 2
+
+> m
+
+ϕ(μ)d
+
+≤ − 12 FI( νt∥π) + 13 d(d + 2) 4b − 1
+
+p
+
+3 + 13 γ2L2
+
+> m
+
+ϕ(μ) (e2 
+
+> k+1
+
+− e2
+
+> k
+
+) + 13 16 μ2L22(d + 3) 3
+
++
+
+ 13 2 + 26 γL m
+
+
+
+γL 2
+
+> m
+
+ϕ(μ)d. (44) We use the bound γ ≤ 1
+
+> Lm
+
+√52 ϕ(μ) and apply Lemma 3 to obtain (44). We define 
+
+Lk := KL( νt∥π) + γp
+
+ 3 + 13 γ2L2
+
+> m
+
+ϕ(μ) e2
+
+> k
+
+.
+
+Integrating both sides of (44) and using the definition Lk, we get 
+
+Lk+1 − L k ≤ − 12
+
+Z (k+1) γkγ 
+
+FI( νt∥π) dt + 13 4
+
+γd (d + 2) 
+
+b + 13 16 γμ 2L22(d + 3) 3 + 7 γ2Lmϕ(μ)d. (45) Iterating this inequality for k ∈ { 0, 1, . . . , N − 1}, and rearranging the terms, we obtain 
+
+1
+
+N γ 
+
+Z N γ 
+
+> 0
+
+FI( νt∥π) dt ≤ 2L0
+
+N γ + 13 2
+
+d(d + 2) 
+
+b + 13 8 μ2L22(d + 3) 3 + 14 γL 2
+
+> m
+
+ϕ(μ)d, (46) where 
+
+2L0 = 2KL( ν0∥π) + 2γp
+
+ 3 + 13 γ2L2
+
+> m
+
+ϕ(μ) e20 ≤ 2KL( ν0∥π) + 26 γ
+
+4p e20
+
+| {z }
+
+> := C0
+
+< ∞,
+
+where we use γ ≤ 1
+
+> Lm
+
+√52 ϕ(μ) and C0 > 0 is a numerical constant. This proves the upper bound on Fisher information in the theorem statement. Furthermore, since p ∈ (0 , 1] , we obtain 
+
+ϕ(μ) = 1 + (1 − p)4 dpμ 2b′ ≤ 1 + 4dpμ 2b′ = 1 + 4d5/2N 1/2
+
+b′ .
+
+20 Zeroth-Order Non-Log-Concave Sampling with Variance Reduction and Applications to Inverse Problems 
+
+We can choose N ≥ b′ 
+
+> 4d5/2
+
+and obtain 
+
+ϕ(μ) ≤ 1 + 4d5/2N 1/2
+
+b′ ≤ 8d5/2N 1/2
+
+b′ (47) Plugging this upper bound into (46), we obtain 
+
+1
+
+N γ 
+
+Z N γ 
+
+> 0
+
+FI( νt∥π) dt ≤ C0
+
+N γ + 13 d(d + 2) 2b + 13 8 μ2L22(d + 3) 3 + 112 γL 2
+
+> m
+
+d7/2N 1/2
+
+b′ .
+
+Using the convexity of Fisher information, we obtain 
+
+FI(¯ νN γ ∥π) ≤ C0
+
+N γ + 13 d(d + 2) 2b + 13 8 μ2L22(d + 3) 3 + 112 γL 2
+
+> m
+
+d2
+
+pμ 2b′ . (48) Let 
+
+γ = 1
+
+LmN 3/4d7/4 , p = Lm
+
+N 1/4d1/4 b =
+
+ 1
+
+p
+
+
+
+, and μ2 = 1
+
+LmN 1/4d5/4 .
+
+Plugging these values into (48), we obtain 
+
+FI(¯ νN γ ∥π) ≤ C0Lmd7/4
+
+N 1/4 + 13 2
+
+Lm(d + 2) 3/2
+
+N 1/4 + 13 8
+
+Lm(d + 3) 3
+
+N 1/4d5/4 + 112 d7/4Lm
+
+b′N 1/4 .
+
+This implies FI(¯ νN γ ∥π) = O
+
+ d7/4Lm 
+
+> N1/4
+
+
+
+. Therefore, to obtain FI(¯ νN γ ∥π) ≤ ε, the sufficient number of iterations is 
+
+N = O
+
+ d7L4
+
+> m
+
+ε4
+
+
+
+.
+
+Note that the per-iteration cost is pb + (1 − p)b′ = O(1) , therefore, the total number of function evaluation is O
+
+ d7L4
+
+> m
+> ε4
+
+
+
+as well. It remains to verify that the iteration complexity N = O
+
+ d7L4
+
+> m
+> ε4
+
+
+
+satisfies the conditions 
+
+N ≥ b′
+
+4d5/2 , p ∈ (0 , 1] , γ ≤ 1
+
+Lm
+
+p52 ϕ(μ) .
+
+The first condition holds since b′ = O(1) is a numerical constant. The second condition requires 
+
+N ≥ L4
+
+> m
+
+d ,
+
+which is satisfied by the derived iteration complexity. Finally, using the upper bound in (47), we choose N such that 
+
+γ ≤ 1
+
+Lm
+
+q 416 d5/2N 1/2
+
+> b′
+
+≤ 1
+
+Lm
+
+p52 ϕ(μ) ,
+
+which verifies the last condition. Substituting the definition of γ and simplifying yields the additional requirement 
+
+N ≥ 416 
+
+b′d ,
+
+which is again satisfied by the derived iteration complexity. This completes the proof. 
+
+□
+
+21 Zeroth-Order Non-Log-Concave Sampling with Variance Reduction and Applications to Inverse Problems 
+
+B.4. Proof of Corollary 1 Corollary 1 Let (νt)t≥0 denote the law of interpolation (10), and let π ∝ exp( −f ) be the target distribution, where the potential function f satisfies Assumptions 1, 2 with Lipschitz constants L1, L2, respectively, and Assumption 3 with constant 
+
+CPI . Then, for any step size γ ∈
+
+
+
+0, 1
+
+> Lm
+
+√52 ϕ(μ)
+
+
+
+, where ϕ(μ) := 1 + 4(1 −p)dpμ 2b′ and Lm := max {L1, L 2}, and for any 
+
+N ≥ 1, we have 
+
+∥¯νN γ − π∥2TV ≤ 4CPI C0
+
+N γ + 26 CPI d(d + 2) 
+
+b + 13 2 CPI μ2L22(d + 3) 3 + 56 CPI γL 2
+
+> m
+
+ϕ(μ)d, (49) 
+
+where C0 > 0 is a numerical constant. Furthermore, let 
+
+γ = 1
+
+LmN 3/4d7/4 , p = Lm
+
+N 1/4d1/4 b =
+
+ 1
+
+p
+
+
+
+, and μ2 = 1
+
+LmN 1/4d5/4 (50) 
+
+Then, to achieve ∥¯νN γ − π∥2TV ≤ ε for the time averaged law ¯νN γ := 1
+
+> N γ
+
+R N γ  
+
+> 0
+
+νt dt , O
+
+ d7L4
+
+> mCPI 4
+> ε4
+
+
+
+iterations with O(1) 
+
+function evaluations per iteration is sufficient. Proof. Recall from Theorem 1, we have 
+
+1
+
+N γ 
+
+Z N γ 
+
+> 0
+
+FI( νt∥π) dt ≤ C0
+
+N γ + 13 2
+
+d(d + 2) 
+
+b + 13 8 μ2L22(d + 3) 3 + 14 γL 2
+
+> m
+
+ϕ(μ)d. (51) Since FI( ·∥ π) is convex with respect to its first argument, Jensen’s inequality yields 
+
+FI(¯ νN γ ∥π) ≤ C0
+
+N γ + 13 2
+
+d(d + 2) 
+
+b + 13 8 μ2L22(d + 3) 3 + 14 γL 2
+
+> m
+
+ϕ(μ)d. (52) Using Assumption 3 and invoking Lemma 4, we obtain 
+
+∥¯νN γ − π∥2TV ≤ 4CPI C0
+
+N γ + 26 CPI 
+
+d(d + 2) 
+
+b + 13 2 CPI μ2L22(d + 3) 3 + 56 CPI γL 2
+
+> m
+
+ϕ(μ)d. (53) This completes the proof of the upper bound in the corollary. The convergence rate then follows by an argument similar to that of Theorem 1. We can choose N ≥ b′ 
+
+> 4d5/2
+
+and using the fact that p ∈ (0 , 1] , we have 
+
+ϕ(μ) := 1 + (1 − p)4 dpμ 2b′ ≤ 8dpμ 2b′ , (54) we obtain 
+
+∥¯νN γ − π∥2TV ≤ 4CPI C0
+
+N γ + 26 CPI 
+
+d(d + 2) 
+
+b + 13 2 CPI μ2L22(d + 3) 3 + 448 CPI 
+
+γL 2
+
+> m
+
+d2
+
+pμ 2b′ . (55) Similar to the previous part, letting 
+
+γ = 1
+
+LmN 3/4d7/4 , p = Lm
+
+N 1/4d1/4 b =
+
+ 1
+
+p
+
+
+
+, and μ2 = 1
+
+LmN 1/4d5/4 , (56) we obtain that ∥¯νN γ − π∥2TV ≤ O 
+
+ CPI d7/4Lm 
+
+> N1/4
+
+
+
+. Therefore, to obtain ∥¯νN γ − π∥2TV ≤ ε, the sufficient number of iterations is 
+
+N = O
+
+ C4PI d7L4
+
+> m
+
+ε4
+
+
+
+. (57) Note that the per-iteration cost is pb + (1 − p)b′ = O(1) ; therefore, the number of function evaluations is O
+
+ C4PI d7L4
+
+> m
+> ε4
+
+
+
+as well. The remaining conditions on N can be verified by following the same arguments as in the proof of Theorem 1. □
+
+22 Zeroth-Order Non-Log-Concave Sampling with Variance Reduction and Applications to Inverse Problems 
+
+B.5. Proof of Theorem 2 Theorem 2 Let (νt)t≥0 denote the law of interpolation (10), and let π ∝ exp( −f ) be the target distribution, where the potential function f satisfies Assumptions 1 and 2 with Lipschitz constants L1 and L2, respectively. Define the time-varying parameters as follows 
+
+γk = Cγ
+
+k3/2 , pk = 12k1/2 , bk =
+
+ 1
+
+pk
+
+
+
+, and μk = Cμ
+
+k1/8 , ∀k ≥ 1, (58) 
+
+where Lm := max {L1, L 2}, and Cγ , C μ > 0 are numerical constants. Then, the time averaged law ¯ντn := 1
+
+> τn
+
+R τn 
+
+> 0
+
+νt dt ,where τn := Pnk=1 γk, converges weakly to π.Proof. Given time-varying parameters γk, b k, p k, μ k at iteration k, define the cumulative time τn and averaged law ¯ντn at iteration n as 
+
+τn := 
+
+> n
+
+X
+
+> k=1
+
+γk, ¯ντn := 1
+
+τn
+
+Z τn
+
+> 0
+
+νt dt, 
+
+where νt denotes the law of the process xt under the following continuous-time interpolation 
+
+xt := xτn − (t − τn) gn + √2  Bt − Bτn
+
+, t ∈ [τn, τ n+1 ]. (59) 
+
+gn is defined as follows 
+
+gn := 
+
+
+
+1
+
+bnbnX
+
+> i=1
+
+e∇fμn (xτn , uin) w.p. pn,
+
+gn−1 + 1
+
+b′
+
+> b′
+
+X
+
+> i=1
+
+ e∇fμn (xτn , uin) − e∇fμn (xτn−1 , uin)
+
+
+
+w.p. 1 − pn,
+
+(60) for all n ≥ 1. At initialization, we choose γ0, b 0, μ 0 > 0 and p0 ∈ (0 , 1] , and define g0 as 
+
+g0 := 1
+
+b0
+
+> b0
+
+X
+
+> i=1
+
+e∇fμ0 (x0, ui
+
+> 0
+
+), ui 
+
+> 0
+
+∼ N (0 , I ).
+
+We establish weak convergence by adapting the proof of Theorem 1. To this end, we verify that the step sizes (γk)k≥1
+
+satisfy the step-size condition of Theorem 1, namely, 
+
+γk ∈ 0, 1
+
+Lm
+
+p52 ϕk(μk)
+
+#
+
+, where ϕk(μk) = 1 + 4(1 − pk)dpkμ2
+
+> k
+
+b′ (61) for all k ≥ 1. Using the definitions of μk and pk, we have 
+
+ϕk(μk) = 1 + 4(1 − pk)dpkμ2
+
+> k
+
+b′
+
+≤ 1 + 4dpkμ2
+
+> k
+
+b′
+
+≤ 1 + 8dk 3/4
+
+b′C2
+
+> μ
+
+≤ 16 dk 3/4
+
+b′C2
+
+> μ
+
+, (62) where the last inequality is satisfied by selecting a constant Cμ such that 
+
+r 8db′ ≤ Cμ.
+
+23 Zeroth-Order Non-Log-Concave Sampling with Variance Reduction and Applications to Inverse Problems 
+
+Then, we have 
+
+1
+
+Lm
+
+p52 ϕk(μk) ≥ 1
+
+Lm
+
+q 832 dk 3/4
+
+> b′C2
+> μ
+
+= Cμ
+
+Lmk3/8
+
+r b′
+
+832 d .
+
+Choosing 
+
+Cγ = Cμ
+
+Lm
+
+r b′
+
+832 d ,
+
+we have 
+
+γk = Cγ
+
+k3/2 ≤ Cμ
+
+Lmk3/8
+
+r b′
+
+832 d ≤ 1
+
+Lm
+
+p52 ϕk(μk) ,
+
+which verifies (61). By definition of pk = 12k1/2 , we have pk ∈ (0 , 1] for k ≥ 1. Therefore, we can follow the same steps in Theorem 1 up to (45) since the same arguments remain valid for t ∈ [τn−1, τ n] with time-varying parameters. We obtain 
+
+KL( ντn ∥π) − KL( ντn−1 ∥π) ≤ − 12
+
+Z τn
+
+> τn−1
+
+FI( νt∥π)dt + 13 γnd(d + 2) L21
+
+4b + 13 16 γnμ2
+
+> n
+
+L22(d + 3) 3
+
++ 7 γ2
+
+> n
+
+dL 2
+
+> m
+
+ϕn(μn) − γn
+
+pn
+
+ 3 + 13 γ2
+
+> n
+
+L2
+
+> m
+
+ϕn(μn)   e2 
+
+> n
+
+− e2
+
+> n−1
+
+ (63) for t ∈ [τn−1, τ n]. Plugging the definitions of γn, bn, pn, and μn into (63), we get 
+
+KL( ντn ∥π) − KL( ντn−1 ∥π) ≤ − 12
+
+Z τn
+
+> τn−1
+
+FI( νt∥π)dt + A1
+
+n2 + A2
+
+n7/4 + A3
+
+n9/4 − cn
+
+ e2 
+
+> n
+
+− e2
+
+> n−1
+
+ , (64) where 
+
+A1 := 13 d(d + 2) L21Cγ
+
+8 , A2 := 13 L22(d + 3) 3Cγ C2
+
+> μ
+
+16 , A3 := 112 d2L2
+
+> m
+
+C2
+
+> γ
+
+b′C2
+
+> μ
+
+,
+
+and 
+
+cn := γn
+
+pn
+
+ 3 + 13 γ2
+
+> n
+
+L2
+
+> m
+
+ϕn(μn)
+
+for n ≥ 1. Iterating the bound in (64), we obtain 
+
+KL( ντn ∥π) ≤ KL( ν0∥π) − 12
+
+Z τn
+
+> 0
+
+FI( νt∥π)dt + A1S1 + A2S2 + A3S3 −
+
+> n
+
+X
+
+> k=1
+
+ck
+
+ e2 
+
+> k
+
+− e2
+
+> k−1
+
+ (65) where we have nX
+
+> k=1
+
+k−2 ≤
+
+> ∞
+
+X
+
+> k=1
+
+k−2
+
+| {z }
+
+> := S1
+
+< ∞,
+
+> n
+
+X
+
+> k=1
+
+k−7/4 ≤
+
+> ∞
+
+X
+
+> k=1
+
+k−7/4
+
+| {z }
+
+> := S2
+
+< ∞.
+
+> n
+
+X
+
+> k=1
+
+k−9/4 ≤
+
+> ∞
+
+X
+
+> k=1
+
+k−9/4
+
+| {z }
+
+> := S3
+
+< ∞.
+
+Thus, A1S1, A2S2, and A3S3 are bounded constants and are independent of n. Furthermore, if we assume that (cn)n≥1 is nonnegative and decreasing sequence (i.e. 0 ≤ cn+1 < c n), we can bound the summation in (65) as follows 
+
+−
+
+> n
+
+X
+
+> k=1
+
+ck
+
+ e2 
+
+> k
+
+− e2
+
+> k−1
+
+ = c1e20 +
+
+> n−1
+
+X
+
+> k=1
+
+(ck+1 − ck)e2 
+
+> k
+
+− cne2 
+
+> n
+
+≤ c1e0. (66) Thus, it remains to show that (cn)n≥1 is a nonnegative and decreasing sequence. Substituting the parameters γn, bn, pn, and 
+
+μn into the definition of cn, we obtain 
+
+cn = 6Cγ
+
+n + 6L2
+
+> m
+
+C3
+
+> γ
+
+n4 + 48 dL 2
+
+> m
+
+C3
+
+> γ
+
+b′C2
+
+> μ
+
+1
+
+n13 /4
+
+
+
+1 − 12n1/2
+
+
+
+(67) 24 Zeroth-Order Non-Log-Concave Sampling with Variance Reduction and Applications to Inverse Problems 
+
+for n ≥ 1. For notational convenience, define F := L2
+
+> m
+
+C3 
+
+> γ
+
+, which is a numerical constant, then we rewrite cn as 
+
+cn = 6Cγ
+
+n + Fn4 + 8F d b′C2
+
+> μ
+
+n13 /4
+
+
+
+1 − 12n1/2
+
+
+
+.
+
+Nonnegativity is immediate since 1 − 12n1/2 > 0 for n ≥ 1. Therefore, all the terms in cn are nonnegative for n ≥ 1. To show (cn)n≥1 is decreasing, define the continuous extension c(x), for x ≥ 1, as 
+
+c(x) = 6Cγ
+
+x + Fx4 + 8F d b′C2
+
+> μ
+
+x13 /4
+
+
+
+1 − 12x1/2
+
+
+
+.
+
+Taking the derivative yields 
+
+c′(x) = − 6Cγ
+
+x2 − 4Fx5 − 26 F d b′C2
+
+> μ
+
+x17 /4
+
+
+
+1 − 15 26 x1/2
+
+
+
+.
+
+For x ≥ 1, we have 
+
+1 − 15 26 x1/2 > 0,
+
+and hence c′(x) < 0. Therefore, c(x) is decreasing on [1 , ∞), which implies that (cn)n≥1 is decreasing. Hence, using the upper bound (66) in (65) yields 
+
+KL( ντn ∥π) ≤ KL( ν0∥π) − 12
+
+Z τn
+
+> 0
+
+FI( νt∥π)dt + A1S1 + A2S2 + A3S3 + c1e20 (68) Rearranging the terms, using the convexity of Fisher information with Jensen’s inequality, and multiplying both sides by 
+
+2/τ n, we get 
+
+FI(¯ ντn ∥π) ≤ 1
+
+τn
+
+Z τn
+
+> 0
+
+FI( νt∥π) dt 
+
+≤ 2 KL( ν0∥π)
+
+τn
+
++ 2
+
+τn
+
+
+
+A1S1 + A2S2 + A3S3 + c1e20
+
+
+
+, (69) where A1S1 + A2S2 + A3S3 < ∞ and does not depend on n. On the other hand, if t ∈ [τn, τ n+1 ], integrating (44) between 
+
+τn and t and dropping the negative integral over the Fisher information give us 
+
+KL( νt∥π) ≤ KL( ντn ∥π) + 13( t − τn)d(d + 2) L2
+
+> f1
+
+4b + 13 16 (t − τn)μ2L2 
+
+> f2
+
+(d + 3) 3
+
++ 7( t − τn)γdL 2
+
+> m
+
+ϕ(μ) − (t − τn)
+
+pn+1 
+
+ 3 + 13 γ2
+
+> n+1
+
+L2
+
+> m
+
+ϕn+1 (μn+1 ) (e2 
+
+> n+1
+
+− e2
+
+> n
+
+)
+
+≤ KL( ν0∥π) + 2 A1S1 + 2 A2S2 + 2 A3S3 + 2 c1e20 + cn+1 e2
+
+> n
+
+. (70) To obtain the second inequality, we bound all terms except the KL divergence, c1e20, and cn+1 e2 
+
+> n
+
+by their finite limits as 
+
+n → ∞ . We then apply the bound on KL( ντn ∥π) derived from (68). By Assumption 1 and Lemma 1, the initial error satisfies e0 < ∞, and hence c1e20 < ∞. Therefore, to show that {KL( νt∥π) | t ≥ 0} is bounded, it remains to prove that cn+1 e2 
+
+> n
+
+< ∞ for all n ≥ 1. Since (cn)n≥1 is decreasing, it is uniformly bounded. Therefore, it remains to show that 
+
+e2 
+
+> n
+
+< ∞ for all n ≥ 1. To this end, we apply Proposition 1 for time-varying parameters 
+
+e2 
+
+> n+1
+
+≤ (1 − pn+1 )e2 
+
+> n
+
++ pn+1 σ2
+
+> n+1
+
+bn+1 
+
++ 4(1 − pn+1 )dL 21
+
+μ2
+
+> n+1
+
+b′ E[∥xτn+1 − xτn ∥2], (71) where 
+
+σ2 
+
+> n+1
+
+:= E[∥ e∇fμ(xτn+1 , uin+1 )∥2].
+
+The second term can be bounded using Assumption 1 together with Lemma 1, which imply that σ2 
+
+> n
+
+≤ Cσ for some constant 
+
+Cσ > 0. Hence, 
+
+pn+1 σ2
+
+> n+1
+
+bn+1 
+
+≲ p2
+
+> n+1
+
+, (72) 25 Zeroth-Order Non-Log-Concave Sampling with Variance Reduction and Applications to Inverse Problems 
+
+where an ≲ bn denotes that there exists a constant C > 0, independent of n, such that an ≤ Cb n.To bound the last term in (71), we use the interpolation (10) to obtain 
+
+4(1 − pn+1 )dL 21
+
+μ2
+
+> n+1
+
+b′ E[∥xτn+1 − xτn ∥2] ≲ 1 − pn+1 
+
+μ2
+
+> n+1
+
+ γ2
+
+> n+1
+
+E[∥gn∥2] + γn+1 
+
+ (73) 
+
+≲ 1
+
+μ2
+
+> n+1
+
+ γ2
+
+> n+1
+
+e2 
+
+> n
+
++ γ2
+
+> n+1
+
+E[∥∇ fμn (xτn )∥2] + γn+1 
+
+ (74) 
+
+≲ γ2
+
+> n+1
+
+μ2
+
+> n+1
+
+(e2 
+
+> n
+
++ 1) + γn+1 
+
+μ2
+
+> n+1
+
+(75) 
+
+≲ (n + 1) −11 /4(e2 
+
+> n
+
++ 1) + ( n + 1) −5/4 (76) 
+
+≲ p11 /2 
+
+> n+1
+
+(e2 
+
+> n
+
++ 1) + p5/2
+
+> n+1
+
+. (77) We add and subtract ∇fμn (xτn ) inside the squared norm in (73), apply the inequality (a + b)2 ≤ 2a2 + 2 b2 and use 
+
+pn+1 ∈ (0 , 1] to obtain (74). Since Lipschitz continuity is preserved under Gaussian smoothing, fμn is Lipschitz continuous whenever f is Lipschitz continuous. Applying this property yields (75). Substituting the definitions of γn+1 and μn+1 
+
+into (75) gives (76), and using the definition of pn+1 yields the final inequality. Combining (72) and (77), we obtain, for some constant G > 0,
+
+e2 
+
+> n+1
+
+≤
+
+
+
+1 − pn+1 + Gp 11 /2
+
+> n+1
+
+
+
+e2 
+
+> n
+
++ G
+
+
+
+p2 
+
+> n+1
+
++ p11 /2 
+
+> n+1
+
++ p5/2
+
+> n+1
+
+
+
+. (78) Since pn → 0, there exists n0 ≥ 1 such that 
+
+Gp 9/2 
+
+> n+1
+
+≤ 12
+
+for all n ≥ n0. Moreover, since pn+1 ∈ (0 , 1] ,
+
+p2 
+
+> n+1
+
++ p11 /2 
+
+> n+1
+
++ p5/2 
+
+> n+1
+
+≤ 3pn+1 .
+
+Therefore, 
+
+e2 
+
+> n+1
+
+≤
+
+
+
+1 − pn+1 
+
+2
+
+
+
+e2 
+
+> n
+
++ 3 Gp n+1 , n ≥ n0.
+
+Defining M := 6 G, we obtain 
+
+e2 
+
+> n+1
+
+≤
+
+
+
+1 − pn+1 
+
+2
+
+
+
+e2 
+
+> n
+
++ M p n+1 
+
+2 .
+
+Since the right-hand side is a convex combination of e2 
+
+> n
+
+and M ,
+
+e2 
+
+> n+1
+
+≤ max {e2
+
+> n
+
+, M }, n ≥ n0.
+
+By induction, 
+
+e2 
+
+> n
+
+≤ max {e2 
+
+> n0
+
+, M }, n ≥ n0.
+
+For the finitely many indices 1 ≤ n ≤ n0, finiteness of e2 
+
+> n
+
+follows recursively from (78). Consequently, 
+
+e2 
+
+> n
+
+≤ max {e20, . . . , e 2 
+
+> n0
+
+, M } < ∞ (79) for all n ≥ 1. That proves cn+1 e2 
+
+> n
+
+< ∞ for all n ≥ 1.Combining this with (70) implies that {KL( νt∥π) | t ≥ 0} is uniformly bounded. By the convexity of the KL divergence, this implies that the sequence {KL(¯ ντn ∥π)}n∈N is uniformly bounded as well. Since the sublevel sets of KL( ·∥ π) are weakly compact, (¯ ντn )n∈N is tight. To establish that ¯ντn ⇀ π weakly, it suffices to verify that every cluster point of 
+
+(¯ ντn )n∈N equal to π.Consider a subsequence of (¯ ντn )n∈N converging to some limit ¯ν. Taking n → ∞ in (69) and noting that τn → ∞ , we obtain FI(¯ ντn ∥π) → 0. Therefore, the same holds along the subsequence. By the weak lower semicontinuity of the Fisher information along the subsequence, we have FI(¯ ν∥π) = 0 . Writing ψ := d¯νdπ , this means √ψ ∈ dom E and E(√ψ) = 0 ,where E denotes the Dirichlet energy (i.e., the squared L2(π)-norm of the gradient; see Section 3 in Balasubramanian et al. (2022)). Since ∇ log π is Lipschitz by Assumption 2, π has a continuous and strictly positive density on Rd, so E(√ψ) = 0 ,which implies that ψ must be a constant π-a.e., hence ¯ν = π. □
+
+26 Zeroth-Order Non-Log-Concave Sampling with Variance Reduction and Applications to Inverse Problems 
+
+B.6. Proof of Theorem 3 Theorem 3 Let π ∝ ℓ(y|x)p(x) be the posterior with the likelihood ℓ(y|x) ∝ exp( −f (x)) and the prior p(x) ∝
+
+exp( −h(x)) . Suppose the likelihood potential f satisfies Assumptions 1, 2 with Lipschitz constants Lf1 , Lf2 , respectively, the prior potential h satisfies Assumption 2 with Lipschitz constant Lh and Assumption 4, and the SGM satisfies Assumption 5 with decreasing error εσk = O(k−1/2) for σk > 0, and k ≥ 1. Define Lm := max {Lf2 + Lh, L f1 }. Let (νt)t≥0
+
+denote the law of interpolation generated by (14) with annealing and noise schedules defined in (13). For any step size 
+
+γ ∈
+
+
+
+0, 1
+
+> Lm
+
+√85 ϕ(μ)
+
+
+
+, where ϕ(μ) := 1 + 4(1 −p)dpμ 2b′ , and for any N ≥ 1, the Fisher information satisfies 
+
+1
+
+N γ 
+
+Z N γ 
+
+> 0
+
+FI( νt∥π) dt ≤ C0
+
+N γ + 17 d(d + 2) L2
+
+> f1
+
+2b + 17 μ2L2 
+
+> f2
+
+(d + 3) 3
+
+8 + ¯ σ2 + ¯ ε2 
+
+> σ
+
++ ¯ α2 + 32 γL 2
+
+> m
+
+dϕ (μ), (80) 
+
+where 
+
+¯σ2 := 51 C21
+
+2N 
+
+> N−1
+
+X
+
+> k=0
+
+σ2
+
+> k
+
+, ¯ε2 
+
+> σ
+
+:= 51 2N 
+
+> N−1
+
+X
+
+> k=0
+
+ε2 
+
+> σk
+
+, and ¯α2 := 51 C22
+
+2N 
+
+> N−1
+
+X
+
+> k=0
+
+(αk − 1) 2
+
+σ2
+
+> k
+
+,
+
+and C0, C1, C2 are positive constants. Furthermore, let 
+
+γ = 1
+
+LmN 3/4d7/4 , p = Lm
+
+N 1/4d1/4 b =
+
+ 1
+
+p
+
+
+
+, and μ2 = 1
+
+LmN 1/4d5/4 ,
+
+and let the initial parameters satisfy σ0 ≥ σmin , εσ0 > 0, α0 ≥ 1, and σmin > 0 is the minimum noise level. Then, to achieve 
+
+FI(¯ νN γ ∥π) ≤ ε for the time averaged law ¯νN γ := 1
+
+> N γ
+
+R N γ  
+
+> 0
+
+νt dt , O
+
+ d7L4
+
+> m
+> ε4
+
+
+
+iterations with O(1) function evaluations per iteration is sufficient. Proof. At initialization, we choose γ0, b 0, μ 0 > 0 and p0 ∈ (0 , 1] , and define g0 as 
+
+g0 := 1
+
+b0
+
+> b0
+
+X
+
+> i=1
+
+e∇fμ0 (x0, ui
+
+> 0
+
+), ui 
+
+> 0
+
+∼ N (0 , I ).
+
+We recall the interpolation argument in (14) given as 
+
+xt := xkγ − (t − kγ )( gk − αkSθ (xkγ )) + √2( Bt − Bkγ ) for t ∈ [kγ, (k + 1) γ] , (81) where gk denotes variance-reduced zeroth-order estimate of the negative likelihood score ∇f (xkγ ) at iteration k, and 
+
+(αk)N −1 
+
+> k=0
+
+and (σk)N −1 
+
+> k=0
+
+denote annealing and noise schedules, respectively. By Assumption 2, 4 and triangle inequality, we know that the posterior score function ∇ log π(x) is Lipschitz continuous with Lipschitz constant Lp + Lf2 . Furthermore, by Assumptions 4 and 5, the error between the negative prior score and and its estimate scaled by annealing parameter can be bounded by 
+
+∥∇ h(xkγ ) + αkSθ (xkγ )∥ ≤ ∥∇ h(xkγ ) − ∇ hσk (xkγ ) + ∇hσk (xkγ ) + Sθ (xkγ , σ k) + ( αk − 1) Sθ (xkγ )∥≤ σkC + εσk + ( αk − 1) σ−1 
+
+> k
+
+C. (82) Recall that Sθ (xkγ , σ k) estimates the perturbed score −∇ hσk (xkγ ). Applying the triangle inequality yields (82). We are now ready to prove the theorem. Combining Lemma 2 with the interpolation argument in (81), it follows that for every t ∈ [kγ, (k + 1) γ],
+
+ddt KL( νt∥π) ≤ − 34 FI( νt∥π) + E ∥∇ log π(xt) + gk − αkSθ (xkγ , σ k)∥2 .
+
+Adding and subtracting ∇fμ(xt), ∇fμ(xkγ ), ∇h(xkγ ), and ∇hσk (xkγ ) inside the squared norm in expectation, and applying the inequality (a + b + c + d)2 ≤ 4a2 + 4 b2 + 4 c2 + 4 d2 together with (82) and Lemma 1 yields 
+
+ddt KL( νt∥π) ≤ − 34 FI( νt∥π) + 4 E ∥gk − ∇ fμ(xkγ )∥2 + 4 L2 
+
+> π
+
+E ∥xt − xkγ ∥2
+
++ μ2L2 
+
+> f2
+
+(d + 3) 3 + 4( C1σk + εσk + ( αk − 1) C2σ−1 
+
+> k
+
+)2, (83) 27 Zeroth-Order Non-Log-Concave Sampling with Variance Reduction and Applications to Inverse Problems 
+
+where Lπ := Lf2 + Lh. Using Proposition 1, and subsequently applying steps (36), (37), and (38), we can upper bound the mean squared estimation error e2 
+
+> k
+
+:= E[∥gk − ∇ fμ(xkγ )∥2] as follows 
+
+e2 
+
+> k
+
+≤ d(d + 2) L2
+
+> f1
+
+b +
+
+ 1 − pp
+
+ 4dL 2
+
+> f1
+
+μ2b′ ∆k − 1
+
+p (e2 
+
+> k+1
+
+− e2
+
+> k
+
+) (84) Plugging this upper bound into (83), we get 
+
+ddt KL( νt∥π) ≤ − 34 FI( νt∥π) + 4 L2 
+
+> π
+
+E
+
+h
+
+∥xt − xkγ ∥2i
+
++ μ2L2 
+
+> f2
+
+(d + 3) 2 + 4d(d + 2) L2
+
+> f1
+
+b
+
++
+
+ 1 − pp
+
+ 16 dL 2
+
+> f1
+
+μ2b′ ∆k − 4
+
+p (e2 
+
+> k+1
+
+− e2
+
+> k
+
+) + 4( C1σk + εσk + ( αk − 1) C2σ−1 
+
+> k
+
+)2 (85) By the interpolation argument in (81), we have 
+
+E[∥xt − xkγ ∥2] = ( t − kγ )2E ∥gk − αkSθ (xkγ )∥2 + 2( t − kγ )d
+
+≤ γ2E ∥gk − αkSθ (xkγ )∥2 + 2 γd 
+
+= E[∥x(k+1) γ − xkγ ∥2]= ∆ k (86) for t ∈ [kγ, (k + 1) γ]. Substituting the bound in (86) into (85) yields 
+
+ddt KL( νt∥π) ≤ − 34 FI( νt∥π) + 4 L2
+
+> m
+
+
+
+1 + 
+
+ 1 − pp
+
+ 4dμ2b′
+
+| {z }
+
+> := ϕ(μ)
+
+∆k + μ2L2 
+
+> f2
+
+(d + 3) 2 + 4d(d + 2) L2
+
+> f1
+
+b
+
+− 4
+
+p (e2 
+
+> k+1
+
+− e2
+
+> k
+
+) + 4( C1σk + εσk + ( αk − 1) C2σ−1 
+
+> k
+
+)2 (87) where Lm := max {Lf1 , L π }. We next use the interpolation (81) to derive an upper bound on ∆k:
+
+∆k = γ2E[∥gk − αkSθ (xkγ , σ k)∥2] + 2 γd 
+
+≤ 5γ2e2 
+
+> k
+
++ 5γ2μ2L2 
+
+> f2
+
+(d + 3) 3
+
+4 + 5 γ2L2 
+
+> π
+
+∆k + 5 γ2E ∥∇ log π(xt)∥2
+
++ 5 γ2(C1σk + εσk + ( αk − 1) C2σ−1 
+
+> k
+
+)2 + 2 γd (88) where we add and subtract ∇fμ(xkγ ), ∇f (xkγ ), ∇f (xt), ∇h(xt), ∇h(xkγ ), and ∇hσk (xkγ ) inside the squared norm in expectation, and then apply the convexity of the ℓ2 norm together with the part (b) of Assumption 5 to obtain (88). Using the bound on e2 
+
+> k
+
+in (84), we get 
+
+∆k ≤ 5γ2L2
+
+> m
+
+ϕ(μ)∆ k + 5γ2d(d + 2) L2
+
+> f1
+
+b + 5γ2μ2L2 
+
+> f2
+
+(d + 3) 3
+
+4 + 5 γ2E ∥∇ log π(xt)∥2 − 5γ2
+
+p
+
+ e2 
+
+> k+1
+
+− e2
+
+> k
+
+
+
++ 5 γ2(σkC + εσk + ( αk − 1) σ−1 
+
+> k
+
+C)2 + 2 γd 
+
+Assume that γ ≤ 1
+
+> Lm
+
+√85 ϕ(μ) , then rearranging the terms, we have 
+
+16 17 ∆k ≤ 5γ2d(d + 2) L2
+
+> f1
+
+b + 5γ2μ2L2 
+
+> f2
+
+(d + 3) 3
+
+4 + 5 γ2E ∥∇ log π(xt)∥2 − 5γ2
+
+p
+
+ e2 
+
+> k+1
+
+− e2
+
+> k
+
+
+
++ 5 γ2(C1σk + εσk + ( αk − 1) C2σ−1 
+
+> k
+
+)2 + 2 γd 
+
+Multiplying both sides by 17 16 , we get 
+
+∆k ≤ 85 γ2d(d + 2) L2
+
+> f1
+
+16 b + 85 γ2μ2L2 
+
+> f2
+
+(d + 3) 3
+
+64 + 85 16 γ2E ∥∇ log π(xt)∥2 − 85 γ2
+
+16 p
+
+ e2 
+
+> k+1
+
+− e2
+
+> k
+
+
+
++ 85 16 γ2(C1σk + εσk + ( αk − 1) C2σ−1 
+
+> k
+
+)2 + 17 8 γd 
+
+28 Zeroth-Order Non-Log-Concave Sampling with Variance Reduction and Applications to Inverse Problems 
+
+We can use Lemma 3 to put an upper bound on E[∥∇ log π(xt)∥2]∆k ≤ 85 γ2d(d + 2) L2
+
+> f1
+
+16 b + 85 γ2μ2L2 
+
+> f2
+
+(d + 3) 3
+
+64 + 85 16 γ2FI( νt∥π) + 85 8 γ2Lπ d − 85 γ2
+
+16 p
+
+ e2 
+
+> k+1
+
+− e2
+
+> k
+
+
+
++ 85 16 γ2(C1σk + ε2 
+
+> σk
+
++ ( αk − 1) C2σ−1 
+
+> k
+
+)2 + 17 8 γd. (89) We can combine the terms 85 8 γ2Lπ d and 17 8 γd using the assumption γ ≤ 1
+
+> Lm
+
+√85 ϕ(μ) . In particular, 
+
+γ ≤ 1
+
+r
+
+85 L2
+
+> m
+
+
+
+1 + 
+
+ 1−pp
+
+ 4dμ2b′
+
+ ≤ 1
+
+Lm
+
+√85 ,
+
+where we use the fact that 
+
+ 1−pp
+
+ 8dμ2b′ > 0. Consequently, 
+
+85 8 γ2dL π ≤√85 γdL π
+
+8Lm
+
+≤√85 8 γd, 
+
+where we use Lπ ≤ Lm. Therefore, 
+
+85 8 γ2Lπ d + 17 8 γd ≤
+
+√85 8 + 17 8
+
+!
+
+γd 
+
+≤ 4γd. 
+
+Substituting this bound into (89) yields the simplified bound 
+
+∆k ≤ 85 γ2d(d + 2) L2
+
+> f1
+
+16 b + 85 γ2μ2L2 
+
+> f2
+
+(d + 3) 3
+
+64 + 85 16 γ2FI( νt∥π) − 85 γ2
+
+16 p
+
+ e2 
+
+> k+1
+
+− e2
+
+> k
+
+
+
++ 85 16 γ2(C1σk + ε2 
+
+> σk
+
++ ( αk − 1) C2σ−1 
+
+> k
+
+)2 + 4 γd. (90) Plugging (90) into (87), we get 
+
+ddt KL( νt∥π) ≤
+
+
+
+− 34 + 85 γ2L2
+
+> m
+
+ϕ(μ)2
+
+4
+
+
+
+FI( νt∥π) + 
+
+
+
+1 + 85 γ2L2
+
+> m
+
+ϕ(μ)16 
+
+ 4d(d + 2) L2
+
+> f1
+
+b
+
++
+
+
+
+1 + 85 γ2L2
+
+> m
+
+ϕ(μ)16 
+
+
+
+μ2L2 
+
+> f2
+
+(d + 3) 3 − 4
+
+p
+
+
+
+1 + 85 γ2L2
+
+> m
+
+ϕ(μ)16 
+
+  e2 
+
+> k+1
+
+− e2
+
+> k
+
+
+
++ 4 
+
+
+
+1 + 85 γ2L2
+
+> m
+
+ϕ(μ)16 
+
+
+
+(σkC + εσk + ( αk − 1) σ−1 
+
+> k
+
+C)2 + 16 γdL 2
+
+> m
+
+ϕ(μ)
+
+≤ − 12 FI( νt∥π) + 17 d(d + 2) L2
+
+> f1
+
+4b + 17 16 μ2L2 
+
+> f2
+
+(d + 3) 3 − 4
+
+p
+
+
+
+1 + 85 γ2L2
+
+> m
+
+ϕ(μ)16 
+
+  e2 
+
+> k+1
+
+− e2
+
+> k
+
+
+
++ 17 4 (C1σk + εσk + ( αk − 1) C2σ−1 
+
+> k
+
+)2 + 16 γdL 2
+
+> m
+
+ϕ(μ), (91) where we use the fact that 85 γ2L2
+
+> m
+
+ϕ(μ) ≤ 1 to get (91). Integrating both sides between [kγ, (k + 1) γ], we get 
+
+KL( ν(k+1) γ ∥π) − KL( νkγ ∥π) ≤ − 12
+
+Z (k+1) γkγ 
+
+FI( νt∥π)dt + 17 γd (d + 2) L2
+
+> f1
+
+4b + 17 16 γμ 2L2 
+
+> f2
+
+(d + 3) 3
+
+− 4γp
+
+
+
+1 + 85 γ2L2
+
+> m
+
+ϕ(μ)16 
+
+  e2 
+
+> k+1
+
+− e2
+
+> k
+
+
+
++ 51 γ
+
+4 (C21 σ2 
+
+> k
+
++ ε2 
+
+> σk
+
++ ( αk − 1) 2C22 σ−2 
+
+> k
+
+) + 16 γ2dL 2
+
+> m
+
+ϕ(μ), (92) 29 Zeroth-Order Non-Log-Concave Sampling with Variance Reduction and Applications to Inverse Problems 
+
+where we use the inequality (a + b + c)2 ≤ 3a2 + 3 b2 + 3 c2 to get the last term. Let Lk := KL( νkγ ∥π) + 
+
+> 4γp
+
+1 + 85 16 γ2L2
+
+> m
+
+ϕ(μ) e2
+
+> k
+
+, iterating for k = 0 , . . . , N − 1, multiplying both sides by 2 
+
+> N γ
+
+, rearranging the terms and using the fact that LN ≥ 0, we get 
+
+1
+
+N γ 
+
+Z N γ 
+
+> 0
+
+FI( νt∥π)dt ≤ 2L0
+
+N γ + 17 d(d + 2) L2
+
+> f1
+
+2b + 17 8 μ2L2 
+
+> f2
+
+(d + 3) 3 + ¯ σ2 + ¯ ε2 
+
+> σ
+
++ ¯ α2 + 32 γL 2
+
+> m
+
+dϕ (μ), (93) where ¯σ2 := 51 C21
+
+> 2N
+
+PN −1 
+
+> k=0
+
+σ2
+
+> k
+
+, ¯ε2 
+
+> σ
+
+:= 51 2N
+
+PN −1 
+
+> k=0
+
+ε2 
+
+> σk
+
+, and ¯α := 51 C22
+
+> 2N
+
+PN −1 
+
+> k=0 (αk−1) 2
+> σ2
+> k
+
+. Since 85 γ2L2
+
+> m
+
+ϕ(μ) ≤ 1, we have 
+
+L0 = KL( ν0∥π) + 4γp
+
+
+
+1 + 85 γ2L2
+
+> m
+
+ϕ(μ)16 
+
+
+
+e20 ≤ KL( ν0∥π) + 17 γe 20
+
+4p .
+
+We can define C0 := 2KL( ν0∥π) + 17 γe 20 
+
+> 2p
+
+which is a numerical constant. This completes the proof of the Fisher information upper bound. To establish the iteration complexity, we observe that all terms in the upper bound of Theorem 1, except for the bias induced by the score network approximation error ¯ε2 
+
+> σ
+
+, and the bias due to the annealing and noise schedules ¯α2 and ¯σ2, respectively, appear with different coefficients. Therefore, choosing the same parameter values as 
+
+γ = 1
+
+LmN 3/4d7/4 , p = Lm
+
+N 1/4d1/4 b =
+
+ 1
+
+p
+
+
+
+, and μ2 = 1
+
+LmN 1/4d5/4 ,
+
+we obtain the following result 
+
+1
+
+N γ 
+
+Z N γ 
+
+> 0
+
+FI( νt∥π)dt ≤ O 
+
+ d7/4Lm
+
+N 1/4
+
+
+
++ ¯ σ2 + ¯ ε2 
+
+> σ
+
++ ¯ α2. (94) We recall that the noise (σk)N −1 
+
+> k=0
+
+and annealing (αk)N −1 
+
+> k=0
+
+schedules are defined as 
+
+αk = max {α0ρk 
+
+> 1
+
+, 1} and σk = max {σ0ρk 
+
+> 2
+
+, σ min }, (95) where ρ1, ρ 2 ∈ (0 , 1) denote decay rates, σ0 > 0, α0 > 0, and σmin > 0 is the minimum noise level. By definition in (13), there exist indices Kα < N − 1 and Kσ < N − 1 independent of N such that αk = 1 for ∀k ≥ Kα and σk = σmin for 
+
+∀k ≥ Kσ .We next analyze the convergence behavior of the bias contributions due to the noise schedule, annealing schedule, and score network error separately. To bound ¯σ2, we proceed as 
+
+¯σ2 = 51 C21
+
+2N 
+
+> N−1
+
+X
+
+> k=0
+
+max {σ20 ρ2k 
+
+> 2
+
+, σ 2min }
+
+> (∗)
+
+= 51 C21
+
+2N 
+
+> Kσ−1
+
+X
+
+> k=0
+
+σ20 ρ2k 
+
+> 2
+
++ 51 C21
+
+2N 
+
+> N−1
+
+X
+
+> k=Kσ
+
+σ2min 
+
+= 51 C21 σ20 (1 − ρ2Kσ 
+
+> 2
+
+)2N (1 − ρ22)
+
+| {z } 
+
+> O(N−1)
+
++ 51 C21 (N − Kσ )σ2min 
+
+2N . (96) where (∗) follows from the definition of the annealing and noise schedules (13). Setting 
+
+σmin = O(N −1/8),
+
+we obtain 
+
+¯σ2 = O(N −1) + O(N −1/4) = O(N −1/4). (97) 30 Zeroth-Order Non-Log-Concave Sampling with Variance Reduction and Applications to Inverse Problems 
+
+To bound ¯α2, we use that (σk)N −1 
+
+> k=0
+
+is a nonincreasing sequence and that there exists a constant Kα < N − 1, independent of N , such that αk = 1 for all k ≥ Kα. Thus, we obtain 
+
+¯α2 = 51 C22
+
+2N 
+
+> N−1
+
+X
+
+> k=0
+
+(αk − 1) 2
+
+σ2
+
+> k
+
+= 51 C22
+
+2N
+
+> Kα−1
+
+X
+
+> k=0
+
+(α0ρk 
+
+> 1
+
+− 1) 2
+
+σ2
+
+> k
+
+≤ 51 C22
+
+2N σ 2
+
+> min
+> Kα−1
+
+X
+
+> k=0
+
+(α0ρk 
+
+> 1
+
+− 1) 2
+
+≤ 51 C22
+
+2N σ 2
+
+> min
+> Kα−1
+
+X
+
+> k=0
+
+(α20ρ2k 
+
+> 1
+
+− 2α0ρk 
+
+> 1
+
++ 1) 
+
+≤ 51 C22 α20
+
+2N σ 2
+
+> min
+> Kα−1
+
+X
+
+> k=0
+
+ρ2k 
+
+> 1
+
++ 51 C22 Kα
+
+2N σ 2
+
+> min
+
+= 51 C22 α20(1 − ρ2Kα 
+
+> 1
+
+)2N σ 2
+
+> min
+
+(1 − ρ21)
+
+| {z }
+
+> O
+
+(N −3/4)+ 51 C22 Kα
+
+2N σ 2
+
+> min
+
+| {z } 
+
+> O(N−3/4)
+
+= O
+
+
+
+N −3/4
+
+(98) Finally, to bound ¯ε2 
+
+> σ
+
+, under the assumption that the SGM estimation error decays as ε2 
+
+> σk
+
+≤ C′ 
+
+> k
+
+for some constant C′ > 0,we proceed as 
+
+¯ε2 
+
+> σ
+
+= 51 2N 
+
+> N−1
+
+X
+
+> k=0
+
+ε2 
+
+> σk
+
+≤ 51 ε2
+
+> σ0
+
+2N + 51 C′
+
+2N 
+
+> N−1
+
+X
+
+> k=1
+
+1
+
+k = O
+
+ log NN
+
+
+
+(99) Combining the results (97), (98), and (99), we obtain 
+
+1
+
+N γ 
+
+Z N γ 
+
+> 0
+
+FI( νt∥π)dt = O
+
+ d7/4Lm
+
+N 1/4
+
+
+
++ O
+
+ 1
+
+N 1/4
+
+
+
++ O
+
+ 1
+
+N 3/4
+
+
+
++ O
+
+ log NN
+
+
+
+= O
+
+ d7/4Lm
+
+N 1/4
+
+
+
+(100) By the convexity of the Fisher information and Jensen’s inequality, it follows that 
+
+FI(¯ νN γ ∥π) = O
+
+ d7/4Lm
+
+N 1/4
+
+
+
+.
+
+Therefore, to obtain FI(¯ νN γ ∥π) ≤ ε, the sufficient number of iterations is 
+
+N = O
+
+ d7L4
+
+> m
+
+ε4
+
+
+
+.
+
+Note that the mean per-iteration cost is pb + (1 − p)b′ = O(1) , therefore, the total number of function evaluations is 
+
+O
+
+ d7L4
+
+> m
+> ε4
+
+
+
+as well. In the proof of Theorem 1, we verify that N ≥ O 
+
+ d7L4
+
+> m
+> ε4
+
+
+
+satisfies the conditions 
+
+p ∈ (0 , 1] and γ ≤ 1
+
+Lm
+
+p85 ϕ(μ) . (101) Therefore, all required conditions on N hold by the iteration complexity, completing the proof. □
+
+31 Zeroth-Order Non-Log-Concave Sampling with Variance Reduction and Applications to Inverse Problems 
+
+B.7. Proof of Corollary 2 Corollary 2 Let π ∝ ℓ(y|x)p(x) be the posterior with the likelihood ℓ(y|x) ∝ exp( −f (x)) and the prior p(x) ∝
+
+exp( −h(x)) . Suppose the likelihood potential f satisfies Assumptions 1, 2 with Lipschitz constants Lf1 , Lf2 , respectively, the target posterior π satisfies Assumption 3 with constant CPI > 0, the prior potential h satisfies Assumption 2 with Lipschitz constant Lh and Assumption 4, and the SGM satisfies Assumption 5 with decreasing error εσk = O(k−1/2) for 
+
+σk > 0, and k ≥ 1. Define Lm := max {Lf2 + Lh, L f1 }. Let (νt)t≥0 denote the law of interpolation generated by (14) with annealing and noise schedules defined in (13). For any step size γ ∈
+
+
+
+0, 1
+
+> Lm
+
+√85 ϕ(μ)
+
+
+
+, where ϕ(μ) := 1 + 4(1 −p)dpμ 2b′ ,and for any N ≥ 1, we have 
+
+∥¯νN γ − π∥2TV ≤ 16 Lm
+
+r C0CPI dϕ (μ)
+
+N + 34 d(d + 2) CPI L2
+
+> f1
+
+b + 17 2 μ2CPI L2 
+
+> f2
+
+(d + 3) 3 + ¯ σ2 + ¯ ε2 
+
+> σ
+
++ ¯ α2,
+
+where 
+
+¯σ2 := 102 CPI C21
+
+N 
+
+> N−1
+
+X
+
+> k=0
+
+σ2
+
+> k
+
+, ¯ε2 
+
+> σ
+
+:= 102 CPI 
+
+N 
+
+> N−1
+
+X
+
+> k=0
+
+ε2 
+
+> σk
+
+, and ¯α2 := 102 CPI C22
+
+N 
+
+> N−1
+
+X
+
+> k=0
+
+(αk − 1) 2
+
+σ2
+
+> k
+
+,
+
+and C0, C 1, C 2 are positive constants. Furthermore, let 
+
+γ = 1
+
+LmN 3/4d7/4 , p = Lm
+
+N 1/4d1/4 b =
+
+ 1
+
+p
+
+
+
+, and μ2 = 1
+
+LmN 1/4d5/4 ,
+
+and let the initial parameters satisfy σ0 ≥ σmin , εσ0 > 0, α0 ≥ 1, and σmin > 0 is the minimum noise level. Then, to achieve 
+
+∥¯νN γ − π∥2TV ≤ ε for the time average law ¯νN γ := 1
+
+> N γ
+
+R N γ  
+
+> 0
+
+νt dt , O
+
+ d7L4
+
+> mC4PI
+> ε4
+
+
+
+iterations with O(1) function evaluations per iteration is sufficient. Proof. Recall that from Theorem 3 proof, we have inequality (93) as 
+
+1
+
+N γ 
+
+Z N γ 
+
+> 0
+
+FI( νt∥π)dt ≤ C0
+
+N γ + 17 d(d + 2) L2
+
+> f1
+
+2b + 17 8 μ2L2 
+
+> f2
+
+(d + 3) 3 + ¯ σ2 + ¯ ε2 
+
+> σ
+
++ ¯ α2 + 32 γL 2
+
+> m
+
+dϕ (μ),
+
+where C0 = 2KL( ν0∥π) + 17 γe 20 
+
+> 2p
+
+. By the convexity of the Fisher information, we have 
+
+FI(¯ νN γ ∥π) ≤ 1
+
+N γ 
+
+Z N γ 
+
+> 0
+
+FI( νt∥π)dt 
+
+≤ C0
+
+N γ + 17 d(d + 2) L2
+
+> f1
+
+2b + 17 8 μ2L2 
+
+> f2
+
+(d + 3) 3 + ¯ σ2 + ¯ ε2 
+
+> σ
+
++ ¯ α2 + 32 γL 2
+
+> m
+
+dϕ (μ)
+
+where ¯νN γ := 1
+
+> N γ
+
+R N γ  
+
+> 0
+
+νtdt . By Assumption 3, we invoke Lemma 4 and get 
+
+∥¯νN γ − π∥2TV ≤ 4CPI FI(¯ νN γ ∥π)
+
+≤ 4C0CPI 
+
+N γ + 34 d(d + 2) CPI L2
+
+> f1
+
+b + 17 2 μ2CPI L2 
+
+> f2
+
+(d + 3) 3 + 4 CPI (¯ σ2 + ¯ ε2 
+
+> σ
+
++ ¯ α2)+ 128 γC PI L2
+
+> m
+
+dϕ (μ). (102) Let 
+
+γ = 1
+
+LmN 3/4d7/4 , p = Lm
+
+N 1/4d1/4 b =
+
+ 1
+
+p
+
+
+
+, and μ2 = 1
+
+LmN 1/4d5/4 .
+
+Substituting these choices into (102) and following the derivation steps from (94) to (100) in Theorem 3, we obtain 
+
+∥¯νN γ − π∥2TV = O
+
+ CPI d7/4Lm
+
+N 1/4 + CPI log NN
+
+
+
+(103) 32 Zeroth-Order Non-Log-Concave Sampling with Variance Reduction and Applications to Inverse Problems 
+
+provided that the annealing and noise schedules are defined as (13) and the SGM estimation error obeys εσk := O(k−1/2)
+
+and for all k ≥ 1 with initial value εσ0 > 0. Thereofer, to achieve ∥¯νN γ − π∥2TV ≤ ε, the sufficient number of iterations is 
+
+N = O
+
+ C4PI d7L4
+
+> m
+
+ε4
+
+
+
+.
+
+Furthermore, the per-iteration computation cost is pb + (1 − p)b′ = O(1) ; therefore, the number of total function evaluations is O
+
+ C4PI d7L4
+
+> m
+> ε4
+
+
+
+as well. □
+
+B.8. Proof of Theorem 4 Theorem 4 Let π ∝ ℓ(y|x)p(x) be the posterior with the likelihood ℓ(y|x) ∝ exp( −f (x)) and the prior p(x) ∝
+
+exp( −h(x)) . Suppose the likelihood potential f satisfies Assumptions 1, 2 with Lipschitz constants Lf1 , Lf2 , respectively, the prior potential h satisfies Assumption 2 with Lipschitz constant Lh and Assumption 4, and the SGM satisfies Assumption 5 with decreasing error εσk = O(k−1/2) for σk > 0, and k ≥ 1. Define Lm := max {Lf2 + Lh, L f1 }. Let (νt)t≥0 denote the law of interpolation generated by (14) with annealing and noise schedules defined in (13). Define the time-varying parameters as follows 
+
+γk = Cγ
+
+k3/2 , pk = 12k1/2 , bk =
+
+ 1
+
+pk
+
+
+
+, and μk = Cμ
+
+k1/8 ,
+
+where Lm := max {Lf2 + Lh, L f1 }, and Cγ , C μ are positive constants. Let the initial parameters satisfy σ0 ≥ σmin ,
+
+εσ0 > 0, α0 ≥ 1, and σmin > 0 is the minimum noise level. Then, the time-averaged law ¯ντn := 1
+
+> τn
+
+R τn 
+
+> 0
+
+νt dt , where 
+
+τn := Pnk=1 γk, converges weakly to π.Proof. Given time-varying parameters γk, b k, p k, μ k at iteration k, define the cumulative time τn and averaged law ¯ντn at iteration n as 
+
+τn := 
+
+> n
+
+X
+
+> k=1
+
+γk, ¯ντn := 1
+
+τn
+
+Z τn
+
+> 0
+
+νt dt, 
+
+where νt denotes the law of the process xt under the following continuous-time interpolation 
+
+xt := xτn−1 − (t − τn−1) ( gn − αnSθ (xτn , σ n)) + √2  Bt − Bτn−1
+
+, t ∈ [τn−1, τ n]. (104) 
+
+gk is defined as follows 
+
+gn := 
+
+
+
+1
+
+bnbnX
+
+> i=1
+
+e∇fμn (xτn , uin) w.p. pn,
+
+gn−1 + 1
+
+b′
+
+> b′
+
+X
+
+> i=1
+
+ e∇fμn (xτn , uin) − e∇fμn (xτn−1 , uin)
+
+
+
+w.p. 1 − pn,
+
+(105) for all n ≥ 1. At initialization, we choose γ0, b 0, μ 0 > 0 and p0 ∈ (0 , 1] , and define g0
+
+g0 := 1
+
+b0
+
+> b0
+
+X
+
+> i=1
+
+e∇fμ0 (x0, ui
+
+> 0
+
+), ui 
+
+> 0
+
+∼ N (0 , I ).
+
+We establish weak convergence by adapting the proof of Theorem 3. To this end, we first verify that the step sizes (γk)k≥1
+
+satisfy the step-size condition of Theorem 3, namely, 
+
+γk ∈ 0, 1
+
+Lm
+
+p85 ϕk(μk)
+
+#
+
+, where ϕk(μk) = 1 + 4(1 − pk)dpkμ2
+
+> k
+
+b′ (106) 33 Zeroth-Order Non-Log-Concave Sampling with Variance Reduction and Applications to Inverse Problems 
+
+for k ≥ 1. Using the definitions of μk and pk, we have 
+
+ϕk(μk) = 1 + 4(1 − pk)dpkμ2
+
+> k
+
+b′
+
+≤ 1 + 4dpkμ2
+
+> k
+
+b′
+
+≤ 1 + 8dk 3/4
+
+b′C2
+
+> μ
+
+≤ 16 dk 3/4
+
+b′C2
+
+> μ
+
+, (107) where the last inequality is satisfied by selecting a constant Cμ such that 
+
+r 8db′ ≤ Cμ.
+
+Then, we have 
+
+1
+
+Lm
+
+p85 ϕk(μk) ≥ 1
+
+Lm
+
+q 1360 dk 3/4
+
+> b′C2
+> μ
+
+= Cμ
+
+Lmk3/8
+
+r b′
+
+1360 d .
+
+Choosing 
+
+Cγ = Cμ
+
+Lm
+
+r b′
+
+1360 d ,
+
+we have 
+
+γk = Cγ
+
+k3/2 ≤ Cμ
+
+Lmk3/8
+
+r b′
+
+1360 d ≤ 1
+
+Lm
+
+p85 ϕk(μk) ,
+
+which implies (106) holds for k ≥ 1. Furthermore, we note that pk ∈ (0 , 1] holds for all k ≥ 1 by definition. Therefore, we can follow the same steps up to (92) in Theorem 3 since the same arguments remain valid for t ∈ [τn−1, τ n] with time-varying parameters. We obtain 
+
+KL( ντn ∥π) − KL( ντn−1 ∥π) ≤ − 12
+
+Z τn
+
+> τn−1
+
+FI( νt∥π)dt + 17 γnd(d + 2) L2
+
+> f1
+
+4bn
+
++ 17 16 γnμ2
+
+> n
+
+L2 
+
+> f2
+
+(d + 3) 3
+
+− 4γn
+
+pn
+
+
+
+1 + 85 γ2
+
+> n
+
+L2
+
+> m
+
+ϕn(μn)16 
+
+  e2 
+
+> n
+
+− e2
+
+> n−1
+
+
+
++ 51 γn
+
+4 (C21 σ2 
+
+> n
+
++ ε2 
+
+> σn
+
++ ( αn − 1) 2C22 σ−2 
+
+> n
+
+) + 16 γ2
+
+> n
+
+dL 2
+
+> m
+
+ϕn(μn) (108) for t ∈ [τn−1, τ n]. Plugging the definitions of γk, bk, pk, and μk given in Theorem 4 into (108), we get 
+
+KL( ντn ∥π) − KL( ντn−1 ∥π) ≤ − 12
+
+Z τn
+
+> τn−1
+
+FI( νt∥π)dt + A1
+
+n2 + A2
+
+n7/4 + A3
+
+n9/4 − cn
+
+ e2 
+
+> n
+
+− e2
+
+> n−1
+
+
+
++ 51 γn
+
+4 (C21 σ2 
+
+> n
+
++ ε2 
+
+> σn
+
++ ( αn − 1) 2σ−2 
+
+> n
+
+C22 ), (109) where 
+
+A1 := 17 d(d + 2) L2 
+
+> f1
+
+Cγ
+
+8 , A2 := 17 L2 
+
+> f2
+
+(d + 3) 3Cγ C2
+
+> μ
+
+16 , A3 := 256 d2L2
+
+> m
+
+C2
+
+> γ
+
+b′C2
+
+> μ
+
+,
+
+and 
+
+cn := γn
+
+pn
+
+
+
+4 + 85 γ2
+
+> n
+
+L2
+
+> m
+
+ϕn(μn)16 
+
+
+
+,
+
+34 Zeroth-Order Non-Log-Concave Sampling with Variance Reduction and Applications to Inverse Problems 
+
+for n ≥ 1. We use (107) to obtain A3. Iterating the bound in (109), we obtain 
+
+KL( ντn ∥π) ≤ KL( ν0∥π) − 12
+
+Z τn
+
+> 0
+
+FI( νt∥π)dt + A1S1 + A2S2 + A3S3 −
+
+> n
+
+X
+
+> k=1
+
+ck
+
+ e2 
+
+> k
+
+− e2
+
+> k−1
+
+
+
++ 51 4
+
+> n
+
+X
+
+> k=1
+
+γk(σ2
+
+> k
+
+C2 + ε2 
+
+> σk
+
++ ( αk − 1) 2σ−2 
+
+> k
+
+C2), (110) where we have nX
+
+> k=1
+
+k−2 ≤
+
+> ∞
+
+X
+
+> k=1
+
+k−2
+
+| {z }
+
+> := S1
+
+< ∞,
+
+> n
+
+X
+
+> k=1
+
+k−7/4 ≤
+
+> ∞
+
+X
+
+> k=1
+
+k−7/4
+
+| {z }
+
+> := S2
+
+< ∞.
+
+> n
+
+X
+
+> k=1
+
+k−9/4 ≤
+
+> ∞
+
+X
+
+> k=1
+
+k−9/4
+
+| {z }
+
+> := S3
+
+< ∞.
+
+Thus, A1S1, A2S2, and A3S3 are uniformly bounded constants and are independent of n. Furthermore, if we assume that 
+
+cn is nonnegative and decreasing sequence (i.e. 0 ≤ cn+1 < c n), we can bound the summation in (110) as follows 
+
+−
+
+> n
+
+X
+
+> k=1
+
+ck
+
+ e2 
+
+> k
+
+− e2
+
+> k−1
+
+ = c1e20 +
+
+> n−1
+
+X
+
+> k=1
+
+(ck+1 − ck)e2 
+
+> k
+
+− cne2 
+
+> n
+
+≤ c1e0. (111) Thus, it remains to show that (cn)n≥1 is a nonnegative and decreasing sequence. Substituting the parameters γn, bn, pn, and 
+
+μn into the definition of cn, we obtain 
+
+cn = 8Cγ
+
+n + 85 L2
+
+> m
+
+C3
+
+> γ
+
+81
+
+n4 + 85 dL 2
+
+> m
+
+C3
+
+> γ
+
+b′C2
+
+> μ
+
+1
+
+n13 /4
+
+
+
+1 − 12n1/2
+
+
+
+for n ≥ 1. Let F := 85 L2 
+
+> mC3
+> γ
+> 8
+
+, which is a numerical constant. Then, we have 
+
+cn = 8Cγ
+
+n + Fn4 + 8F d b′C2
+
+> μ
+
+n13 /4
+
+
+
+1 − 12n1/2
+
+
+
+.
+
+Nonnegativity is immediate since 1 − 12n1/2 > 0 for n ≥ 1. Therefore, all the terms in cn are nonnegative for n ≥ 1. To show (cn)n≥1 is decreasing, define the continuous extension c(x), for x ≥ 1, as 
+
+c(x) = 8Cγ
+
+x + Fx4 + 8F d b′C2
+
+> μ
+
+x13 /4
+
+
+
+1 − 12x1/2
+
+
+
+.
+
+Taking the derivative yields 
+
+c′(x) = − 8Cγ
+
+x2 − 4Fx5 − 26 F d b′C2
+
+> μ
+
+x17 /4
+
+
+
+1 − 15 26 x1/2
+
+
+
+.
+
+For x ≥ 1, we have 
+
+1 − 15 26 x1/2 > 0,
+
+and hence c′(x) < 0. Therefore, c(x) is decreasing on [1 , ∞), which implies that (cn)n≥1 is decreasing. Hence, using the upper bound (111) in (110), we get 
+
+KL( ντn ∥π) ≤ KL( ν0∥π) − 12
+
+Z τn
+
+> 0
+
+FI( νt∥π)dt + A1S1 + A2S2 + A3S3 + c1e20
+
++ 51 4
+
+> n
+
+X
+
+> k=1
+
+γk(C21 σ2 
+
+> k
+
++ ε2 
+
+> σk
+
++ ( αk − 1) 2C22 σ−2 
+
+> k
+
+). (112) 35 Zeroth-Order Non-Log-Concave Sampling with Variance Reduction and Applications to Inverse Problems 
+
+We next show that the last term in (112), capturing the effects of the noise and annealing schedules and the SGM error, is uniformly bounded. For the noise schedule (σk)nk=1 , using monotonicity, we obtain 
+
+51 C21
+
+4
+
+> n
+
+X
+
+> k=1
+
+γkσ2 
+
+> k
+
+= 51 C21 σ20
+
+4
+
+> n
+
+X
+
+> k=1
+
+γk
+
+= 51 C21 σ20 Cγ
+
+4
+
+> n
+
+X
+
+> k=1
+
+1
+
+k3/2
+
+≤ 51 C21 σ20 Cγ
+
+4
+
+> ∞
+
+X
+
+> k=1
+
+1
+
+k3/2
+
+| {z }
+
+> := Cσ
+
+(113) 
+
+< ∞. (114) For the annealing and noise schedules (αk)nk=1 and (σk)nk=1 , respectively, using monotonicity together with the bounds 
+
+αk ≤ α0 and σk ≥ σmin , we obtain 
+
+51 C22
+
+4
+
+> n
+
+X
+
+> k=1
+
+γk(αk − 1) 2
+
+σ2
+
+> k
+
+≤ 51 C22 (α0 − 1) 2
+
+4σ2
+
+> min
+> n
+
+X
+
+> k=1
+
+γk
+
+≤ 51 C22 (α0 − 1) 2
+
+4σ2
+
+> min
+> ∞
+
+X
+
+> k=1
+
+1
+
+k3/2
+
+| {z }
+
+> := Cα
+
+(115) 
+
+< ∞. (116) Lastly, for the SGM error decay (εσk )nk=1 , we have 
+
+51 4
+
+> n
+
+X
+
+> k=1
+
+γkε2 
+
+> σk
+
+≤ 51 4
+
+> ∞
+
+X
+
+> k=1
+
+O
+
+ 1
+
+k5/2
+
+| {z }
+
+> := Cεσ
+
+< ∞. (117) Using the upper bounds (113), (115), and (117) to upper bound the last term in (112), we obtain 
+
+KL( ντn ∥π) ≤ KL( ν0∥π) − 12
+
+Z τn
+
+> 0
+
+FI( νt∥π)dt + A1S1 + A2S2 + A3S3 + c1e20 + Cα + Cσ + Cεσ . (118) Rearranging the terms, using the convexity of Fisher information and multiplying both sides by 2/τ n, we get 
+
+FI(¯ ντn ∥π) ≤ 1
+
+τn
+
+Z τn
+
+> 0
+
+FI( νt∥π) dt 
+
+≤ 2 KL( ν0∥π)
+
+τn
+
++ 2
+
+τn
+
+
+
+A1S1 + A2S2 + A3S3 + c1e20 + Cα + Cσ + Cεσ
+
+
+
+, (119) where A1S1 + A2S2 + A3S3 + Cα + Cεσ + Cσ < ∞ and does not depend on n. On the other hand, if t ∈ [τn, τ n+1 ],integrating (91) between τn and t and dropping the negative integral over the Fisher information give us 
+
+KL( νt∥π) ≤ KL( τn∥π) + 17( t − τn)d(d + 2) L2
+
+> f1
+
+4b + 17 16 (t − τn)μ2L2 
+
+> f2
+
+(d + 3) 3
+
++ 4( t − τn)γdL 2
+
+> m
+
+ϕ(μ) − 4( t − τn)
+
+p
+
+
+
+1 + 85 γ2L2
+
+> m
+
+ϕ(μ)16 
+
+
+
+(e2 
+
+> n+1
+
+− e2
+
+> n
+
+)+ 51( t − τn)4 (C21 σ2 
+
+> k
+
++ ε2 
+
+> σk
+
++ ( αk − 1) 2C22 σ−2 
+
+> k
+
+)
+
+≤ KL( ν0∥π) + 2 A1S1 + 2 A2S2 + 2 A3S3 + 2 c1e20 + cn+1 e2 
+
+> n
+
++ 2 Cα + 2 Cεσ + 2 Cσ . (120) 36 Zeroth-Order Non-Log-Concave Sampling with Variance Reduction and Applications to Inverse Problems 
+
+We obtain (120) by bounding all terms except the KL divergence, c1e20, and cne2 
+
+> n
+
+by their finite limits as n → ∞ . We then apply the bound on KL( ντn ∥π) derived from (118). By Assumption 1 and Lemma 1, the initial error satisfies e0 < ∞, and hence c1e20 < ∞. In addition, following the steps from (78) to (79) in the proof of Theorem 2, we have e2 
+
+> n
+
+< ∞. Combining these with (120) implies that {KL( νt∥π) | t ≥ 0} is uniformly bounded. By the convexity of the KL divergence, this implies that the sequence {KL(¯ ντn ∥π)}n∈N is uniformly bounded as well. Since the sublevel sets of KL( ·∥ π) are weakly compact, 
+
+(¯ ντn )n∈N is tight. To establish that ¯ντn ⇀ π weakly, it suffices to verify that every cluster point of (¯ ντn )n∈N equal to π.Consider a subsequence (¯ ντn )n∈N converging to some limit ¯ν. Taking n → ∞ in (119) and noting that τn → ∞ , we obtain FI(¯ ντn ∥π) → 0. Therefore, the same holds along the subsequence. By the weak lower semicontinuity of the Fisher information along the subsequence, we have FI(¯ ν∥π) = 0 . Writing ψ := d¯νdπ , this means √ψ ∈ dom E and E(√ψ) = 0 ,where E denotes the Dirichlet energy (i.e., the squared L2(π)-norm of the gradient; see Section 3 in Balasubramanian et al. (2022)). Since ∇ log π is Lipschitz by Assumption 2, π has a continuous and strictly positive density on Rd, so E(√ψ) = 0 ,which implies that ψ must be a constant π-a.e., hence ¯ν = π. □
+
+## C. Extended Experimental Results 
+
+In this section, we provide additional details on our experiments. The code is publicly available at https://github. com/mberk-sahin/zo-posterior-sampling , where additional implementation details can be found. 
+
+C.1. Numerical Validation 
+
+Similar to the related works (Sun et al., 2024; Song & Ermon, 2020), we run ZO-APMC with an exponential annealing schedule: 
+
+σk := max {σ0ρk 
+
+> 2
+
+, σ min }, αk = max {α0σ2
+
+> k
+
+, 1}, (121) where ρ2 is the decay rate and k is the step index. We always choose α0 ≤ 1/σ 2 
+
+> min
+
+so that αk converges to 1. We note that our definition of annealing and noise schedules (13) with two different independent decay rates, which are ρ1 and 
+
+ρ2, for each schedule is more general than this definition since one could easily recover (121) by setting ρ2, α0, σ0, and 
+
+σmin properly. For our numerical validation results, we set σ0 = 10 , α0 = 10 , ρ2 = 0 .975 , σmin = 0 and γ = 0 .1. For ZO estimator, we choose the smoothing parameter as μ = 10 −4. We run ZO-APMC with 1000 sample points initialized with uniform distribution U [−50 , 50] 2 on [−50 , 50] 2 grid for N = 2000 iterations. At each step, we use a Gaussian mixture model (GMM) to fit a distribution to the samples at intermediate steps, which allows us to compute the probability of an arbitrary value on [−50 , 50] 2 grid. Then, for each intermediate GMM distribution, we calculate the empirical Fisher information relative to target posterior whose analytical posterior can be calculated. We discretize the grid to 1000 × 1000 
+
+unit areas in [−50 , 50] 2 and calculate the Fisher information for each unit area. The total sum over the grid gives us the approximate relative Fisher information. As stated in Section 4.1, all results in the numerical validation experiments are obtained by repeating the same experimental procedure across 20 random seeds, each corresponding to a different randomly generated forward operator. Reported Fisher information and KL divergence values are averaged over these runs. 
+
+Convergence in Fisher Information. We provide additional experiments illustrating the effect of p on FI convergence in Fig. 6. At each iteration, ZO-APMC performs a zero-order estimate with a large batch size b = 10 with probability p, while with probability 1 − p it uses a smaller batch size b′ = 1 , whose gradient estimate is aggregated with the previous step’s update. To further demonstrate the benefit of the variance reduction mechanism, we compare naive ZO-APMC approach ( p = 1 )discussed in after Proposition 1 with ZO-APMC with p < 1. We use the same inverse problem setting and analytical prior explained in Section 4.1. We note that we approximate FI accurately because our generated samples live in R2. In higher dimensions, this approximation quickly becomes unreliable and expensive. Importantly, in R2, ZO estimators do not suffer from the curse of dimensionality, which is a primary motivation for our variance-reduction mechanism. To better mimic high-dimensional behavior and induce higher variance in ZO estimates, we inject synthetic noise into the likelihood score estimates with standard deviation σnoise = 10 . Given a fixed budget of 6 score likelihood approximations on average, which corresponds to 12 forward model evaluations, we run ZO-APMC with different pairs of (p, b ) ∈{(1 , 6) , (0 .4, 9) , (0 .2, 14) , (0 .1, 24) }. For each pair, we choose b′ such that (1 − p)b′ + pb ≤ 6 and the algorithm remains within the per-iteration budget. This ensures a fair comparison between ZO-APMC with p < 1 and the naive ZO-APMC 
+
+(p = 1) approach. In addition to the Gaussian noise model, we also consider a Laplace noise model, which is commonly 37 Zeroth-Order Non-Log-Concave Sampling with Variance Reduction and Applications to Inverse Problems         
+
+> Figure 6. Effect of pon the convergence of ZO-APMC to the true posterior distribution in terms of relative Fisher information. The solid lines show the mean values and shaded areas show the minimum and maximum ranges.
+> Figure 7. Comparison of naive ZO-APMC ( p= 1 ) and ZO-APMC with p < 1for Fisher information convergence under Gaussian (left) and Laplace (right) measurement noise types in an inverse problem. Each plot performs the same number of forward model evaluations per iteration on average.
+
+used in practice. Accordingly, we conduct experiments under both noise modeling assumptions. We present the results in Fig. 7. They verify our theoretical results in Theorem 3. When p = 1 , ZO-APMC converges to the largest suboptimal point. This suggests that when b is not large enough, the upper bound in Theorem 3 becomes suboptimal and it can be made optimal only by increasing b. In contrast, when p < 1, we can increase b without changing the per-iteration budget. Doing so improves the convergence of the FI because ZO-APMC with different values of p < 1 converge to smaller values. We further note that the convergence for p = 0 .1 is worse than p = 0 .4. This is consistent with Theorem 3 because as p
+
+reduces, it increases the discretization error (second term) at the upper bound. We present a similar comparison for statistical validation in the subsequent section after weak convergence results. 
+
+Weak Convergence. To verify the weak convergence of ZO-APMC to the target posterior, we consider the same synthetic inverse problem setting as in the previous experiments, but use time-varying schedules for the step size γk, refresh probability 
+
+pk, batch size bk, and ZO smoothing parameter μk. Following Theorem 4, we employ decreasing schedules for γk, pk,and μk, together with an increasing schedule for bk. Specifically, letting t = k/N ∈ [0 , 1] denote the normalized iteration index, where N is the total number of iterations, we linearly decay the step size from γ0 = 0 .1 to γmin = 0 .001 , the refresh probability from its initial value p0 (reported in Fig. 8) to pmin = 0 .01 , and the smoothing parameter from μ0 = 10 −4 to 
+
+μmin = 10 −5. Consistent with the theoretical relation bk = ⌈1/p k⌉, the batch size is increased linearly from b0 = 10 to 
+
+bmax = 100 . Unlike the asymptotic schedules in Theorem 4, where γk, p k, μ k → 0 and bk → ∞ , we use bounded practical schedules for numerical stability and finite computational cost. Moreover, consistent with Theorem 4, the SGM estimation error is linearly decreased from εσ0 = 2 .5 to 0 throughout sampling. Fig. 8 shows that, across different initial values of 
+
+p0, ZO-APMC achieves near-zero KL divergence, providing empirical support for the weak convergence of the generated sample distribution toward the target posterior predicted by Theorem 4. Despite using only ZO likelihood score estimates (8), ZO-APMC closely matches the convergence behavior of APMC using exact likelihood scores. 38 Zeroth-Order Non-Log-Concave Sampling with Variance Reduction and Applications to Inverse Problems              
+
+> Figure 8. Convergence of APMC and ZO-APMC to the target posterior in KL divergence for varying initial values p0. The probability parameter pis decreased throughout sampling, and the reported values denote its initialization. ZO-APMC converges for all initial values of p0.
+> Figure 9. Comparison of naive ZO-APMC ( p= 1 ) and ZO-APMC with p < 1for estimating the ground truth posterior mean and variance statistics under Gaussian (left) and Laplace (right) measurement noise types. First row shows the posterior means and the second row shows the posterior variance. The colorbar for each statistic is shown at the end of its corresponding row. Each column shows the statistics estimated by ZO-APMC with specified probability p.
+
+C.2. Statistical Validation 
+
+The SGM used in this experiment is U-Net taken from (Nichol & Dhariwal, 2021) with some of its layers removed to process the 32 × 32 images, which are taken from CelebA (Liu et al., 2015) dataset. Each image is normalized to [−1, 1] 
+
+and downscaled to 32 × 32 pixels for simplicity. The forward operator is generated as random Gaussian matrix and for each test image, we inject a Gaussian noise with variance 0.01 as a measurement noise. We construct a bimodal distribution by selecting male and female images from the CelebA dataset and fitting a Gaussian mixture model (GMM) to the combined data. To ensure adequate separation, the two modes are shifted by +1 and −1. The SGM prior is then trained on samples drawn from this synthetic multimodal distribution. Because the synthetic Gaussian images lack the structural richness of natural images, the score network’s results on this dataset should not be taken as representative of its performance on real-world data. For comparison, we compute the target modes and posterior statistics using the statistics derived from male and female images in the CelebA dataset. In addition to the statistical validation experiments in Section 4.1, we compare naive ZO-APMC ( p = 1 ) with ZO-APMC for 
+
+p < 1 under Gaussian and Laplace noise modeling, which are two widely used noise modelings. We run each ZO-APMC algo-rithm for N = 5000 iterations to generate 1000 samples with different values of (p, b ) ∈ { (1 , 2) , (0 .4, 4) , (0 .2, 7) , (0 .1, 12) }
+
+and b′ is selected such that the number of gradient approximations per-iteration satisfies (1 − p)b′ + pb ≤ 2. Because the Laplace likelihood and Gaussian prior are not a conjugate pair, closed-form posterior statistics are not available. Therefore, when modeling Laplace noise, we estimate the ground truth posterior statistics numerically by running standard Langevin Monte Carlo and get an empirical estimate of mean and variance. In this procedure, we use the likelihood score directly and do not apply any annealing schedule to the sampling parameters. We present the results in Fig. 9. Under Gaussian measurement noise, the naive ZO-APMC has significantly higher variance than the ground truth variance, which would 39 Zeroth-Order Non-Log-Concave Sampling with Variance Reduction and Applications to Inverse Problems 
+
+require increasing the batch size and therefore the number of forward evaluations per iteration. Instead, our ZO-APMC with p < 1 reduces this variance by using a larger batch size b together with a small p as explained previously. Fig. 9 shows that choosing p = 0 .4 reduces the sample variance significantly and it looks very similar to the ground truth variance. However, the variance reduction is not monotonic in p. For p = 0 .2 and p = 0 .1, we observe a slight increase in variance, although it remains lower than that obtained with p = 1 . This phenomenon follows from the trade-off characterized in Proposition 1 between variance reduction and propagated estimation error. Specifically, decreasing p increases the influence of accumulated errors from previous iterations, leading to larger zeroth-order estimation error and preventing convergence to the target statistics. We observe a similar trend under Laplace noise modeling. The choice p = 0 .4 yields the most accurate posterior variance estimate, whereas decreasing p further to p = 0 .2 leads to increased variance. Lastly, across all the experiments, we keep the ZO smoothing parameter fixed μ = 10 −4 to isolate its effect. This results in large batch sizes being used less frequently, thereby increasing the bias-induced error predicted by Proposition 1. We observe this effect at p = 0 .1 in the estimated posterior mean under both noise models. The effect is stronger under Laplace noise modeling because the Fisher information upper bound in Theorem 3 depends on the smoothness properties of the log-likelihood. While ∥y − Ax ∥22 is globally smooth with Lipschitz gradient constant 2∥A⊤A∥op , ∥y − Ax ∥1 is non-smooth and only differentiable almost everywhere. Consequently, the zeroth-order smoothing bias is larger under Laplace noise modeling, although this effect can be mitigated by choosing a smaller value of μ.
+
+C.3. MRI Reconstruction 
+
+We evaluate the reconstruction quality of the samples generated by ZO-APMC and other baselines methods by using peak signal to noise (PSNR) ratio, structural similarity index measure (SSIM), normalized root mean square error (NRMSE), and mean standard deviation (SD). Given an estimate ˆx ∈ Rd and the ground truth xGT ∈ Rd, we define the error metrics as MSE ( ˆ x, xGT ) := 1
+
+d ∥ ˆx − xGT ∥22, NRMSE ( ˆ x, xGT ) := ∥ ˆx − xGT ∥2
+
+∥xGT ∥2
+
+,
+
+PSNR ( ˆ x, xGT ) := 10 log 10 
+
+max( xGT )2
+
+MSE ( ˆ x, xGT )
+
+!
+
+.
+
+where d is the dimensionality of x, and max denotes the maximum possible value of the signal (e.g., 1 for normalized data or 255 for 8-bit images). In addition, we compute SD as follows: for each test image, we first calculate the standard deviation across generated samples at each pixel location, and then average these pixel-wise standard deviations to obtain a mean standard deviation for the generated image. We run ZO-APMC and APMC using the annealing and noise schedules defined in (121), with step size γ = 5 × 10 −6, initial noise and annealing parameters σ0 = 348 and α0 = 10 4, minimum noise level σmin = 0 .01 , decay rate ρ2 = 0 .99 , and ZO smoothing parameter μ = 10 −4. Unless otherwise specified, these hyperparameters follow the implementation and settings of Sun et al. (2024). For all other baselines, we utilize the implementations and parameters provided by InverseBench (Zheng et al., 2025b). While our theoretical results do not imply gains in sampling speed, for completeness, we report runtimes of each method to generate a sample. The per-sample runtimes (seconds) are as follows: PnPDM: 68.3, DPS: 25.4, APMC: 23.77, Forward-GSG: 38.12, Central-GSG: 37.83, DPG: 60.54, and ZO-APMC: 50.53, measured on an NVIDIA H100 GPU. 
+
+Ablation Study. Among the inverse problems considered in this work, MRI reconstruction involves the largest image size (256 × 256 ), which necessitates a larger batch size in our ZO estimator to accurately compute the forward model gradient. To identify the optimal value of p, we subsample examples from the validation set of FastMRI (Zbontar et al., 2019) and evaluate reconstruction quality across different values, p ∈ { 0.1, 0.2, 0.4, 0.5}, as illustrated in Fig. 10. As indicated by the orange arrow, reducing p excessively while keeping b fixed produces visible artifacts in the generated samples. ZO-APMC maintains reasonable reconstruction quality down to p = 0 .2. Even when using a smaller batch size of b′ = 10 3, an order of magnitude lower than b, in about half of the iterations on average, ZO-APMC maintains high reconstruction quality that is very close both visually and quantitatively to the reconstruction of APMC. As opposed to APMC, ZO-APMC achieves this without any gradient information and uses only forward model function evaluations. Because the performance gain beyond 
+
+p = 0 .2 is not significant and the gap between p = 0 .5 and p = 0 .2 can be further reduced by averaging multiple parallel outputs, we set p = 0 .2 for our brain MRI inverse problem experiments. Moreover, ZO estimators are widely recognized in the literature for exhibiting high variance in high-dimensional settings, as they rely on first-order approximations of the function along random directions. To evaluate our proposed variance-reduction mechanism, we compare the reconstructions of our method with DPS and APMC, which do not assume black-box setting and have access to gradients of the forward model. Results in Fig. 11 show that although our proposed method ZO-APMC 40 Zeroth-Order Non-Log-Concave Sampling with Variance Reduction and Applications to Inverse Problems 
+
+Figure 10. Comparison of the ground-truth brain MRI with APMC and ZO-APMC reconstructions for various probabilities p ∈{0.1, 0.2, 0.4, 0.5}, using a large batch size of b = 10 4 and a small batch size of b′ = 10 3. PSNR values for each reconstruction are displayed in the lower-left corner of the corresponding image. 
+
+Figure 11. Comparison of the ground-truth brain MRI with reconstructions from ZO-APMC and the gradient-based approaches DPS and APMC. Each method generates 20 samples from the same measurements; the first row shows the mean reconstructions and the second row shows the corresponding variance maps. Owing to its variance-reduction mechanism, ZO-APMC produces variance maps comparable to those of the gradient-based algorithms despite relying on noisy evaluations of the forward model. 
+
+assumes black-box setting and uses noisy forward model evaluations to approximate the gradient of the forward model, it has similar variance compared to DPS and APMC, which assumes access to the gradients, thanks to our proposed variance-reduction mechanism. 
+
+C.4. Black-Hole Imaging 
+
+In black-hole imaging, very long baseline interferometry (VLBI) uses an array of ground-based telescopes. Each telescope pair (a, b ) at time t produces a complex visibility V a,b t . To mitigate atmospheric and thermal phase errors, visibilities are combined into noise-robust closure measurements (Chael et al., 2018): closure phases ycph  
+
+> t, (a,b,c )
+
+and log-closure amplitudes 
+
+ycamp 
+
+> t, (a,b,c,d )
+
+. Following Sun & Bouman (2021); Zheng et al. (2025a), we use the following likelihood model: 
+
+ℓ(y | x) = X
+
+> t
+
+Acph  
+
+> t
+
+(x) − ycph 
+
+> t
+> 22
+
+2β2cph 
+
++ X
+
+> t
+
+Acamp  
+
+> t
+
+(x) − ycamp 
+
+> t
+> 22
+
+2β2camp 
+
++ ρ
+
+2
+
+X
+
+> i
+
+xi − yflux 22. (122) Here, Acph  
+
+> t
+
+and Acamp  
+
+> t
+
+map an image x to predicted closure phases and log-closure amplitudes, respectively; βcph and 
+
+βcamp are instrument-specific noise scales. The first two sums act as chi-squared penalties for the closure measurements, while the final term enforces the total-flux constraint with weight ρ and target flux yflux . For our experiments, we use the GRMHD dataset (Wong et al., 2022), the pre-trained SGM prior (Sun et al., 2024), and the forward model implementation 41 Zeroth-Order Non-Log-Concave Sampling with Variance Reduction and Applications to Inverse Problems 
+
+and baseline methods provided by Zheng et al. (2025b). For EnKG, we adopt the hyperparameter settings recommended by Zheng et al. (2025a), while for the baseline methods we use the hyperparameters provided by Zheng et al. (2025b). For ZO-APMC, we use a batch size of b = 1024 , set p = 1 , and choose a ZO smoothing parameter of μ = 0 .01 . We use 
+
+p = 1 because the image size is relatively small ( 64 × 64 ), making the large batch size practical. The per-sample runtimes (seconds) of each method are PnPDM: 25.84, DPS: 15.02, APMC: 14.32, Forward-GSG: 156.72, Central-GSG: 155.66, SCG: 213.78, DPG: 152.86, EnKG: 422.25, and ZO-APMC: 154.22, measured on an NVIDIA H100 GPU. 
+
+C.5. Navier–Stokes Equation 
+
+In our experiments, we study the two-dimensional Navier–Stokes equations for a viscous, incompressible fluid in vorticity form on a torus. Let u ∈ C([0 , T ]; Hr
+
+> per
+
+((0 , 2π)2, R2)) for any r > 0 denote the velocity field, and let w = ∇ × u be the vorticity. The initial vorticity is w0 ∈ L2per ((0 , 2π)2; R), the viscosity coefficient is ν ∈ R+, and the forcing term is 
+
+f ∈ L2per ((0 , 2π)2; R). The solution operator G maps the initial vorticity to the vorticity at time T , i.e. G : w0 7 → wT . In our experiments, we implement G using a pseudo-spectral solver following He & Sun (2007): 
+
+∂tw(x, t ) + u(x, t ) · ∇ w(x, t ) = ν∆w(x, t ) + f (x), x ∈ (0 , 2π)2, t ∈ (0 , T ], (123) 
+
+∇ · u(x, t ) = 0 , x ∈ (0 , 2π)2, t ∈ (0 , T ], (124) 
+
+w(x, 0) = w0(x), x ∈ (0 , 2π)2. (125) The task is to infer the initial vorticity field from noisy and sparsely observed vorticity data at time T = 1 . Since Eq. (21) admits no closed-form solution, the corresponding derivative of the solution operator is also unavailable. Furthermore, the computation of accurate numerical derivatives via automatic differentiation through the solve is challenging since the extensive computation graph can span thousands of discrete time steps. We follow the approach in Zheng et al. (2025a;b) and first solve the equation up to time T = 5 starting from random Gaussian initial conditions, which are highly nontrivial due to the nonlinearity of the Navier–Stokes equations. We use the SGM-prior, which was pre-trained over 20 ,000 vorticity fields, and use the test set consisting of 10 samples with size of 
+
+128 × 128 from InverseBench. For EnKG, we use the hyperparameters recommended by Zheng et al. (2025a), while for the baseline methods we adopt the settings provided by Zheng et al. (2025b). For ZO-APMC, we set the ZO smoothing parameter to μ = 0 .01 , batch size to b = 1024 and use p = 1 . We observed degraded performance for p < 1, which may arise from the violation of Assumption 1, as the Navier–Stokes forward operator exhibits strong nonlinearity arising from the underlying PDE dynamics. Quantitative results are presented in Table 4. Our method outperforms Forward-GSG, Central-GSG, and SCG, and achieves performance comparable to DPG, while additionally providing theoretical guarantees of convergence to the target posterior that the baseline methods lack. Table 4 also shows that EnKG outperforms ZO-APMC in this setting. One possible explanation is that ZO-APMC estimates gradients using Gaussian perturbations, which may move inputs off the data manifold and adversely affect solver stability in highly nonlinear PDE-based problems such as Navier–Stokes. In contrast, EnKG avoids such perturbations and appears more robust in this regime. We refer the reader to Section 4.2 of Zheng et al. (2025a) for a more detailed discussion. The per-sample runtimes (seconds) of each method are Forward-GSG: 4536.87, Central-GSG: 4534.32, SCG: 2112.72, DPG: 5133.93, EnKG: 3422.25, and ZO-APMC: 4531.61, measured on an NVIDIA H100 GPU.                           
+
+> Table 4. Quantitative results for the Navier–Stokes inverse problem. For noise level σnoise , the best-performing method is shown in bold .Baseline results are taken from Zheng et al. (2025a). NRMSE ( σnoise = 0 )↓NRMSE ( σnoise = 1 )↓NRMSE ( σnoise = 2 )↓
+> Forward-GSG 1.687 1.612 1.454 Central-GSG 2.203 2.117 1.746 SCG 0.908 0.928 0.966 DPG 0.325 0.408 0.466 EnKG 0.120 0.191 0.294
+> ZO-APMC (Ours) 0.459 0.463 0.472
+
+42

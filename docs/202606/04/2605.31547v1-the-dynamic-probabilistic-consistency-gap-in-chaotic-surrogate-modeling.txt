@@ -1,0 +1,2824 @@
+Title: The Dynamic-Probabilistic Consistency Gap in Chaotic Surrogate Modeling
+
+URL Source: https://arxiv.org/pdf/2605.31547v1
+
+Published Time: Mon, 01 Jun 2026 01:34:29 GMT
+
+Number of Pages: 39
+
+Markdown Content:
+# The Dynamic-Probabilistic Consistency Gap in Chaotic Surrogate Modeling 
+
+Andre Herz 1,2,∗ Matthijs Pals 3 Daniel Durstewitz 1,3,4 Georgia Koppe 1,2,5,6
+
+> 1
+
+Interdisciplinary Center for Scientific Computing, Heidelberg University, Germany 
+
+> 2
+
+Faculty of Mathematics and Computer Science, Heidelberg University, Germany 
+
+> 3
+
+Dept. of Theoretical Neuroscience, Central Institute of Mental Health (CIMH), Mannheim, Germany 
+
+> 4
+
+Faculty of Physics and Astronomy, Heidelberg University, Germany 
+
+> 5
+
+Hector Institute for AI in Psychiatry and Dept. of Psychiatry and Psychotherapy, CIMH, Mannheim, Germany 
+
+> 6
+
+Hertie Institute for AI in Brain Health, University of Tübingen, Germany 
+
+> ∗
+
+Correspondence to: andre.herz @ iwr.uni-heidelberg.de 
+
+## Abstract 
+
+Dynamical systems reconstruction (DSR) aims to learn surrogate models that cap-ture the dynamics underlying time-series data. Reliably deploying these surrogates requires uncertainty estimates consistent with the learned dynamics. We expose a 
+
+dynamic-probabilistic consistency (DPC) gap: the pursuit of finite-horizon proba-bilistic objectives can degrade dynamics or decouple predictive uncertainty from the local tangent dynamics it ought to reflect. We isolate three mechanisms behind this gap: core collapse, noise masking, and blind uncertainty. Specifically, we show that open-loop Gaussian rollout objectives can penalize Jacobian-generated covariance growth in chaotic systems, encouraging optimization shortcuts that weaken physical expansion or decouple uncertainty from it. To mitigate this gap, we propose KAFFEE (Kalman-Aware Framework For Ergodic Emulation), a differ-entiable extended Kalman filter-based training framework that evaluates likelihood on local predictive residuals (innovations) while transporting covariance through learned local Jacobians. On stochastic hyperchaotic Lorenz-96, KAFFEE reduces the identified failure modes, improves reconstruction of dynamical invariants rel-ative to open-loop objectives, and maintains competitive predictive scores. We further show that the DPC gap appears when probabilistically adapting a DSR foundation model across 13 chaotic systems, where KAFFEE enables in-context Bayesian filtering while largely preserving zero-shot dynamics. 
+
+## 1 Introduction 
+
+Dynamical systems reconstruction (DSR) aims to learn generative neural surrogates of latent systems from observed time series [ 1– 3]. Short-horizon predictive accuracy is not sufficient here: rather, the surrogate is asked to act as an autonomous scientific model. It should therefore generate open-loop rollouts that reproduce the long-run dynamical structure of the true system, including attractor geometry, invariant measures, and chaotic expansion rates as quantified by its Lyapunov exponents [ 4, 5]. These properties are central whenever the surrogate is used beyond point forecasting, for example in invariant-measure estimation, bifurcation analysis, perturbation studies, or long-horizon model-based control [6–9]. Deployment for scientific applications, however, also requires probabilistic state estimation and 
+
+uncertainty-aware prediction from noisy observations [ 10 , 11 ]. In settings such as data assimilation, extreme-event forecasting, or risk-aware control, the model must not only forecast accurately on           
+
+> Preprint.
+> arXiv:2605.31547v1 [cs.LG] 29 May 2026 DPC gap: finite-horizon score improvement can trigger shortcuts Mechanistic taxonomy
+> Finite-horizon score 𝒮 𝐻 ↓
+> Core collapse Noise masking Blind uncertainty
+> KAFFEE blocks shortcuts filtered local score + Jacobian-transported covariance
+> uncertainty locally grounded; autonomous core protected
+> Objective
+> Open-loop score Filtered innovation
+> No Jacobian
+> Covariance
+> transport
+> Jacobian
+> Covariance
+> transport
+> Noise masking
+> shell absorbs error
+> Blind uncertainty
+> decoupled covariance
+> Core collapse
+> Jacobians shrink
+> KAFFEE
+> local score
+> +𝐉𝚺 𝐉 ⊤transport
+
+𝚪 ,𝚲  ↑ 𝑮 𝒕𝒂𝒏  ↓
+
+‖ 𝐉 ‖ ↓
+
+𝚺 𝐩𝐫𝐞𝐝  = 𝐉 𝚺 𝐟𝐢𝐥𝐭 𝐉 ⊤ + 𝚪 , 𝚺 𝐟𝐢𝐥𝐭 ≤ 𝚺 𝐩𝐫𝐞𝐝 Figure 1: The DPC gap in probabilistic DSR. Left : Finite-horizon scores SH can improve through optimization shortcuts that can degrade dynamical reconstruction quality: core collapse, noise masking, or blind uncertainty. KAFFEE mitigates these by pairing filtered innovation scoring with Jacobian-based covariance propagation. Right : A mechanistic taxonomy of these failure modes. average, but also indicate when local dynamics amplify small state errors [ 12 , 13 ]. This motivates 
+
+probabilistic DSR : a surrogate should couple autonomous physical fidelity with dynamically grounded local uncertainty , tied to the same Jacobian structure that governs expansion and contraction. Achieving this goal creates a structural optimization tension. Probabilistic objectives balance data fit against predictive uncertainty [ 14 , 15 ], but in dynamical systems, uncertainty is not merely an independent degree of freedom: under autonomous propagation it is partly generated by the same local Jacobians that determine unstable directions and long-run invariants [ 16 ]. This can induce rapid covariance growth along unstable directions [ 13 , 17 ], creating several possible optimization shortcuts: Gaussian open-loop rollout objectives may contract learned Jacobian products to suppress covariance growth ( core collapse ); flexible noise parametrizations may absorb model error without correcting the learned autonomous dynamics ( noise masking ); and covariance parametrizations decoupled from local Jacobians may remain calibrated on average while being blind to locally unstable episodes (blind uncertainty ). We identify and formalize these failure modes as instances of the dynamic-probabilistic consistency 
+
+(DPC) gap: a mismatch between improving finite-horizon probabilistic scores and preserving the dynamical-probabilistic properties required of a scientific surrogate. The gap appears when the training objective can improve likelihood or calibration by changing the model in ways that damage autonomous dynamics or the dynamical consistency of its local uncertainty. We demonstrate that this issue appears in reconstructed probabilistic dynamical systems and affects emerging dynamical-system foundation models (DSFMs) [ 18 – 20 ], whose zero-shot dynamics must be probabilistically retrofitted to enable reliable use in noisy observation regimes. Our analysis suggests two design principles for probabilistic DSR. First, likelihood should be evaluated locally, after data assimilation, rather than on long open-loop predictive covariances whose volume growth directly penalizes chaotic expansion. Second, local predictive uncertainty should remain dynamically grounded, so that covariance reflects the local Jacobian structure that governs the autonomous dynamics. We introduce KAFFEE (Kalman-Aware Framework For Ergodic Emulation) as one concrete realization of these principles. KAFFEE uses a differentiable Extended Kalman Filter (EKF) and optimizes the negative log-likelihood (NLL) of the EKF innovation sequence [21–26]. 
+
+Contributions. First, we identify and formalize the DPC gap , and identify three failure modes. We isolate open-loop Gaussian covariance-volume pressure as a concrete mechanism for one failure mode, core collapse , in finite-horizon rollout objectives, where likelihood can penalize the Jacobian products that determine chaotic expansion. Second, we introduce a three-axis evaluation framework 
+
+for probabilistic DSR that separates local probabilistic behavior, stochastic dynamical fidelity, and deterministic dynamical fidelity; on stochastic hyperchaotic Lorenz-96 [ 27 ], this isolates core collapse ,
+
+noise masking , and blind uncertainty . Third, we propose KAFFEE , a differentiable EKF-based framework that mitigates the DPC gap. Fourth, we show that the DPC gap arises when probabilistically adapting the pretrained DSFM DynaMix [ 18 ] across 13 held-out chaotic systems, and that KAFFEE enables in-context Bayesian filtering while largely preserving transferred autonomous dynamics. 22 Preliminaries 
+
+2.1 Probabilistic DSR: the core and the shell 
+
+We study the reconstruction of a chaotic dynamical system from time series using generative neural surrogates. Let zt+1 = F⋆(zt) denote the unknown, discrete-time autonomous system with latent state zt ∈ Z ⊂ RM , and let observations satisfy xt ∈ RN . We approximate the unknown dynamics 
+
+F⋆ by a neural surrogate Fθc and embed it in a probabilistic SSM. Specifically, we consider a Gaussian SSM with nonlinear transitions and linear observations: 
+
+pθ (zt+1 | zt) = N  zt+1 ; Fθc (zt), Γθs
+
+, pθs (xt | zt) = N  xt; Bz t, Λθs
+
+,
+
+with Γθs ∈ RM ×M and Λθs ∈ RN ×N denoting the process and observation covariance, and 
+
+B ∈ RN ×M denoting the observation mapping. The model parameters are partitioned into θ =(θc, θ s). The deterministic core θc controls the autonomous transition mapping. It determines the local Jacobians Jθc (z) := ∇z Fθc (z), whose long products govern local stretching and contraction, yielding the system’s dynamical invariants and shaping the attractor geometry [ 16 ]. The stochastic shell θs parametrizes the uncertainty around this deterministic core, here through Γθs and Λθs . The observation matrix B is fixed in our experiments. 
+
+2.2 Marginal likelihood, filtering, and covariance transport 
+
+Under the standard conditional independence and Markov assumptions of an SSM, the observed-data marginal likelihood (evidence) of a sequence x1: T is given by 
+
+pθ (x1: T ) = 
+
+Z TY
+
+> t=1
+
+pθs (xt | zt)
+
+!
+
+pθ (z1: T )dz1: T , (1) where pθ (z1: T ) = pθ (z1) QT −1 
+
+> t=1
+
+pθ (zt+1 | zt) is the surrogate’s open-loop latent trajectory prior 
+
+distribution, generated by rolling out the autonomous core and stochastic shell without conditioning on intermediate observations. In the following, we will see how this prior interacts with the likelihood. Evaluating Eq. 1 requires marginalizing the latent trajectory, typically via recursive filtering. This involves the predictive densities pθ (zt | x1: t−1) = R pθ (zt | zt−1)pθ (zt−1 | x1: t−1)dzt−1, which are intractable for nonlinear Fθc . A common approach is approximating the predictive distributions as Gaussian, p(zt | x1: t−1) ≈ N (zt|t−1, Σt|t−1), as in the EKF, where the predict step analytically propagates the filtered covariance through the local Jacobians [23]: 
+
+Σt|t−1 = Jθc,t Σt−1|t−1J⊤ 
+
+> θc,t
+
++ Γθs , Jθc,t = ∇z Fθc (zt−1|t−1). (2) The likelihood is then given recursively via pθ (x1: T ) = pθ (x1) QTt=2 pθ (xt | x1: t−1). This evaluates the innovations : xt − Bz t|t−1, which have covariance given by: 
+
+Ωt = BΣt|t−1B⊤ + Λθs . (3) Thus, the same local Jacobians that define the autonomous dynamics also determine how predictive uncertainty is transported. This coupling implies that uncertainty cannot be treated as an independent calibration layer in probabilistic DSR. 
+
+## 3 Theory and Methods 
+
+3.1 Defining the DPC gap 
+
+Let SH (θ) be a finite-horizon probabilistic training objective (e.g., NLL) and let D(θ) be a certification loss assessing the quality of probabilistic DSR; both defined such that lower values are better. 
+
+Definition 1 (Dynamic-Probabilistic Consistency gap) . A parameter refinement step θ → θ′ exhibits a DPC gap with respect to (SH , D) if 
+
+SH (θ′) < SH (θ) but D(θ′) > D(θ).
+
+That is, the optimized probabilistic criterion can favor an update that improves finite-horizon predictive fit while worsening the certification loss, which encodes properties required for probabilistic DSR. In our experiments, we instantiate D along three axes: Local probabilistic behavior, shell-on stochastic dynamical fidelity, and shell-off deterministic dynamical fidelity (see Section 4.2). 33.2 How the DPC gap manifests 
+
+How the DPC gap manifests depends on two design choices: on how the training objective scores uncertainty, and on how the model parameterizes that uncertainty. We focus on three failure modes that we discuss here and isolate empirically in Section 5. 
+
+Core collapse from open-loop Gaussian volume pressure. Learned surrogates are ultimately used as autonomous simulators. When surrogates are fit using only one-step ahead (teacher-forced) predictions given noisy data, these models can suffer from exposure bias, as autonomous generation uses purely model-generated states [28–31]. Finite-window rollout losses are therefore common in neural system identification and DSR [ 2, 32 – 34 ]. In probabilistic analogues of this setting, scoring multi-step predictive densities makes uncertainty propagation part of the objective [35, 36]. Suppose an h-step predictive density is approximated by a Gaussian, pθ (xt+h | x1: t) =
+
+N (xt+h; μθ,t +h, Ωθ,t +h). Its NLL then reads 
+
+− log pθ (xt+h | x1: t) = 12 log det Ωθ,t +h + 12 ∥xt+h − μθ,t +h∥2
+
+> Ω−1
+> θ,t +h
+
++ const .
+
+The Mahalanobis term rewards data fit, while the log-determinant term penalizes predictive volume. The latter term in the Bayesian marginal likelihood is referred to as an “automatic Occam’s razor” [ 15 , 14 ], favouring models that concentrate probability mass while penalizing unnecessarily large predictive volumes. In standard probabilistic forecasting this prevents the model from explaining errors by becoming arbitrarily diffuse. In chaotic DSR, however, physically correct local expansion also increases predictive volume. This mechanism becomes apparent by considering the h-step Jacobian product Φθ,t +h:t := 
+
+Jθc,t +h · · · Jθc,t +1 . Crucially, this same object governs chaotic expansion: its asymptotic singular values define the full Lyapunov spectrum λ1 ≥ · · · ≥ λM , with asymptotic stability defined by the leading exponent λ1 = lim h→∞ 1 
+
+> h
+
+log ∥Φθ,t +h:t∥2 [16]. Under local linearization, the open-loop covariance Σopen  
+
+> t+h
+
+∈ RM ×M of the surrogate’s latent predic-tive density p(zt+h | x1: t) is given by repeatedly applying Eq. 2 without intermediate assimilation: 
+
+Σopen  
+
+> t+h
+
+≈ Φθ,t +h:tΣtΦ⊤ 
+
+> θ,t +h:t
+
++
+
+> h−1
+
+X
+
+> j=0
+
+Φθ,t +h:t+j+1 Γθs Φ⊤
+
+> θ,t +h:t+j+1
+
+.
+
+The corresponding observation covariance is Ωopen  
+
+> θ,t +h
+
+= BΣopen  
+
+> t+h
+
+B⊤ + Λθs (cf. Eq. 3). Thus, the log-determinant term directly penalizes volumes generated by products of the learned Jacobians. Chaotic systems require expansion along unstable directions, causing these volumes to grow rapidly under autonomous propagation [ 13 , 17 ]. The optimizer can alleviate this volume pressure by shrinking these products, thereby compromising the autonomous dynamics, as we will demonstrate in our empirical experiments. Appx. A.1 formalizes this covariance-volume pressure by showing that the open-loop log-determinant term increases monotonically along local Jacobian-expansion paths. Note that this argument does not imply that likelihood is intrinsically biased. Under a correctly specified model and with the exact observed-data likelihood, maximum likelihood targets the true data-generating process under standard identifiability assumptions. DPC-type mechanisms arise from practical circumstances in probabilistic DSR: finite-window/open-loop rollout objectives, Gaussian approximations to highly non-Gaussian chaotic laws, and approximate latent marginalization. 
+
+Noise masking through flexible stochastic shells. The opposite shortcut is possible when predictive uncertainty is parametrized too flexibly or independently of Jacobian transport. In this case, the optimizer may inflate Γθs , Λθs (or a learned neural variance parametrization) to absorb transition errors without improving the deterministic core [ 29 ]. This can improve predictive scores despite dynamically incorrect autonomous rollouts. Related effects can also arise in variational state-space objectives when overly flexible components reduce the penalty on transition-model mismatch [37]. 
+
+Blind uncertainty from missing covariance transport. A third failure mode concerns the local uncertainty itself. A model can preserve reasonable autonomous dynamics and obtain competitive average predictive scores, while its predictive covariance remains insensitive to local expansion and contraction. This happens when the covariance propagation (Eq. 2) is state-invariant or parameterized 4separately from the learned Jacobians. Such a model may be calibrated on average, but its local uncertainty is not dynamically grounded. We treat this as a DPC-gap instance where D assesses whether predictive uncertainty evolves in accordance with the true local Jacobian dynamics (measured in our experiments by Gtan , see Section 4.2). Again, a related problem can arise in variational inference, with certain factorized variational families. If uncertainty is not propagated in the chosen factorization (such as in mean-field approximations, previously used for DSR [ 38 ]), learned dynamics can be biased [39, 40]. 
+
+Relation to noisy-state attenuation. The open-loop volume mechanism is related to, but distinct from, classical noisy-state attenuation. In noisy-state attenuation, noisy observations are treated directly as true states, turning one-step Gaussian prediction into an errors-in-variables regression and biasing the learned transition coefficient toward zero [ 41 , 42 ]. This explains some failures of one-step training on noisy data, as illustrated by the scalar diagnostic in Appx. A.2 and the non-chaotic controls in Appx. D.2. 
+
+3.3 KAFFEE: Dynamically grounded local uncertainty 
+
+The preceding mechanisms suggest two desiderata for probabilistic DSR: likelihood should be evaluated through filtered innovations, and the covariance entering this local objective should remain coupled to the learned transition map. KAFFEE implements both using a differentiable EKF [ 21 – 26 ]. KAFFEE maintains a filtered Gaussian belief p(zt | x1: t) = N (zt|t, Σt|t). At each step, the deterministic core predicts the filtered mean zt|t−1 = Fθc (zt−1|t−1), and the covariance is propagated by the same local Jacobians that define the autonomous core (Eq. 2). After prediction, observations 
+
+xt are assimilated through the Kalman gain Kt = Σt|t−1B⊤Ω−1 
+
+> t
+
+, with the innovation covariance 
+
+Ωt given by Eq. 3. The covariance update can be written as Σt|t = Σt|t−1 − KtBΣt|t−1. Thus, assimilation contracts uncertainty before the next prediction step: We have Σt|t ⪯ Σt|t−1; see Appx. A.1. This does not make the deterministic core contractive; but rather localizes the uncertainty scored by the likelihood before the next prediction. Appx. B.1 lists the complete EKF equations. KAFFEE minimizes the resulting innovation NLL with stochastic gradient descent: 
+
+LEKF = −
+
+> T
+
+X
+
+> t=1
+
+log pθ (xt | x1: t−1) = 
+
+> T
+
+X
+
+> t=1
+
+12 log det Ωt + 12 ∥xt − Bz t|t−1∥2
+
+> Ω−1
+> t
+
++ const . (4) In the linear-Gaussian case, the Kalman filter gives the exact NLL; in nonlinear chaotic surrogates, the EKF provides a structured inductive bias for dynamically grounded local uncertainty. Appx. A.4 shows that the innovation covariance term does not simply reward contraction when the model is underdispersed. While the underlying equations are those of a differentiable EKF, KAFFEE defines a dedicated training framework designed to translate deterministic DSR models into probabilistic surrogates with calibrated local uncertainty while reducing DPC-gap shortcuts. KAFFEE initializes the autonomous core Fθc from a pretrained deterministic surrogate (or zero-shot foundation model) and optimizes the full probabilistic model via windowed backpropagation through time (BPTT). This lets the model first capture the deterministic dynamical invariants, and then leverage the EKF’s covariance transport as a structural inductive bias for grounding local uncertainty. Furthermore, differentiating through the Kalman update makes KAFFEE a Bayesian-filtering analogue of forcing-based stabilization methods for chaotic recurrent training [2, 43–45]; see Section 6. 
+
+## 4 Experimental Setup 
+
+We examine the mechanism behind the DPC gap and evaluate KAFFEE in two complementary set-tings: an interpretable mechanistic ablation using piecewise-affine RNNs [ 46 , 47 ], and a macroscopic scale-up using the pretrained DSFM DynaMix on a range of chaotic systems [18]. 
+
+4.1 Deterministic priors and baselines 
+
+All probabilistic baselines are initialized from the same deterministic core: an almost-linear RNN (AL-RNN) [ 47 ] trained via BPTT with sparse teacher forcing (STF). AL-RNNs partition the state space 5into polyhedral regions with explicit local linear dynamics ( zt+1 = Az t + W ϕ ∗(zt) + h), where 
+
+ϕ∗ denotes ReLU activation, applied only to a subset of latent coordinates). This provides a powerful tangent space approximation of the underlying system with exact, closed-form regionwise Jacobians that KAFFEE exploits directly for covariance transport. To optimize the AL-RNN parameters end-to-end, all baselines employ a straight-through estimator (STE) to propagate gradients through the discrete gate transitions, see Appx. B.2. Details on AL-RNN pretraining are in Appx. C.1. To isolate the mechanisms behind the DPC gap, all probabilistic models share the same deterministic core and adaptation budget. As illustrated in Fig. 1, we structure our baselines as a mechanistic taxonomy along two axes: Objective (Open-Loop vs. Filtered Innovation) and Parameterization 
+
+(Jacobian covariance transport). This explicitly isolates the failure modes: open-loop objectives actively exploit the DPC gap ( core collapse and noise masking ), while no-transport parameterizations fail to dynamically ground uncertainty ( blind uncertainty ). For the “tied-transport” baselines, the predictive covariance is propagated through the learned local Jacobian (Eq. 2), whereas in no-transport rows this is replaced by a state-invariant recursion, Σt|t−1 = Σt−1|t−1 + Γ. The open loop objectives score Gaussian rollouts while filtered objectives optimize innovation NLL (Eq. 4). We also include a 
+
+Frozen-Core baseline to isolate the effect of post-hoc calibration. It uses the filtered covariance but keeps Fθc fixed. To demonstrate the pathology at scale, we probabilistically adapt DynaMix, a pretrained DSFM for zero-shot inference [ 18 ]. Here, the modular nature of KAFFEE allows us to embed the pretrained DSFM into an SSM framework. In particular, we attach a Gaussian shell to DynaMix and evaluate whether probabilistic fine-tuning destroys its zero-shot transferred physics. Additional model and implementation details are provided in Appx. C.5. 
+
+4.2 Three-Axis Evaluation Framework 
+
+To empirically expose the DPC gap, we evaluate surrogates along three separate axes (full definitions in Appx. C.4): 
+
+(1) Local probabilistic behavior assesses local predictive performance at a physically meaningful horizon ( H = 14 τλ, where τλ = λ−11 is the Lyapunov time) using 200 sampled rollouts / trajectories for held-out NLL and continuous ranked probability score (CRPS). Because these metrics are time-averaged, they are dominated by easily predictable, stable regions of the attractor and can obscure severe overconfidence during highly unstable episodes. To explicitly evaluate whether uncertainty is structurally tied to the immediate local physics, we introduce Gtan : a Spearman rank-correlation between the per-step log expansion factor of a surrogate’s predictive variance and the corresponding expansion factor obtained by pushing the same variance through the true local Jacobians, pooled across observed coordinates. 
+
+(2) Stochastic dynamical fidelity evaluates long shell-on rollouts of the surrogate against the noisy ground truth via state-space divergence ( Dstoch stsp ), which measures how well the state-space occupancy of generated trajectories agrees with that of the reference dynamics, and unstable-volume growth rate error ( |∆hstoch  
+
+> λ
+
+|), quantified by the cumulative reconstruction error in the positive exponents of the (stochastic) Lyapunov spectrum. 
+
+(3) Deterministic dynamical fidelity isolates the deterministic core (shell removed) and evaluates it against the noise-free true system using state-space divergence ( Dcore stsp ), spectral overlap using Hellinger distance ( Dcore H ), and deterministic unstable-volume growth rate error ( |∆hcore  
+
+> λ
+
+|). 
+
+## 5 Results 
+
+5.1 Diagnosing the DPC Gap: Mechanistic ablation on stochastic Lorenz-96 
+
+We examine the DPC gap on the Lorenz-96 system ( N = 20 , F = 8 ) under substantial noise (σproc = σobs = 0 .1 in standardized coordinates) [ 27 ]. Lorenz-96 is hyperchaotic, i.e., it exhibits multiple expanding directions. For details on dataset generation, see Appx. C.3. Fig. 2 shows the DPC failure modes in action: under matched covariance propagation and adaptation budgets, minimizing the open-loop NLL objective degrades the autonomous core, while filtered innovation objectives improve it (Fig. 2a–d). The remaining panels e–g of Fig. 2 visualize the 61.50                  
+
+> 1.87
+> 2.24
+> N L L
+> a
+> OL-tied
+> KAFFEE
+> 0.1
+> 1.8
+> 3.4
+> Dcore
+> stsp
+> b
+> 075 150
+> 0.7
+> 2.9
+> 5.1
+> | hcore |
+> c
+> 075 150
+> 0.2
+> 0.8
+> 1.3
+> Dstoch
+> stsp
+> d
+> 1234567
+> Lyapunov index i
+> 1
+> 0
+> 1
+> 2
+> i
+> eTruth
+> No-transport
+> KAFFEE
+> Prior
+> OL-tied
+> OL-no-transp.
+> Prior
+> OL-no-transp.
+> OL-tied
+> No-transport
+> KAFFEE
+> 0
+> 2
+> 4
+> h
+> Tr u t h
+> f
+> 0.0 0.5 1.0 1.5 2.0 2.5
+> 20
+> 10
+> 0
+> 10
+> z0
+> g
+> No-transport
+> KAFFEE
+> Optimization step
+> Truth
+> Horizon [ ]
+
+Figure 2: Stochastic Lorenz-96 (20D) results. Left: DPC gap. (a) Held-out NLL, (b) deterministic state-space divergence ( Dstsp ), (c) unstable-volume growth error, and (d) stochastic Dstsp . Right: Invariant reconstruction and dynamically grounded local uncertainty. (e) Median reconstruction of positive deterministic Lyapunov exponents λi. Only filtered innovations outperform the deter-ministic prior. (f) Corresponding KS entropy (hcore  
+
+> λ
+
+). (g) Single Lorenz-96 latent; shaded bands = predictive ±2σ; assimilation after two Lyapunov times. KAFFEE grounds local uncertainty through state-dependent Jacobians; No-transport exhibits blind uncertainty. Errors = SEs over 20 seeds. reconstruction of dynamical invariants and the local grounding of uncertainty. Specifically, panels e–f visualize (the sum of) positive Lyapunov exponents hcore  
+
+> λ
+
+(i.e., the unstable-volume growth rate, also called the Kolmogorov-Sinai (KS) entropy [ 16 ]). Both filtered objectives (KAFFEE, No-transport) successfully retain the system’s intrinsic hyperchaotic expansion that the open-loop objectives (OL-tied, OL-no-transp.) collapse and the deterministic prior struggles to capture. However, only KAFFEE combines this healthy filtered core with dynamically grounded local uncertainty (Fig. 2g). The no-transport baseline cannot do so, because its covariance recursion merely re-adds a fixed Γ at every step, leading to overconfidence during unstable episodes. Table 1 maps our empirical results to the mechanistic taxonomy of Fig. 1 and the three-axis evaluation framework (Section 4.2). The failure modes manifest as predicted. Core collapse (open-loop + tied transport) destroys long-run fidelity. Noise masking (open-loop + no transport) severs the covariance-transport gradient and abandons the deterministic dynamics, yielding poor predictive and autonomous scores, and a Gtan that is statistically indistinguishable from zero. Blind uncertainty 
+
+(filtered + no transport) preserves a healthy core, yet its state-invariant covariance recursion cannot track time-varying local physical expansion: Gtan collapses to essentially zero, confirming that the residual state-dependence in its predictive variance comes only indirectly through the Kalman update of the posterior and not from Jacobian-transported prior covariance. KAFFEE retains the only large positive Gtan and balances dynamically grounded local uncertainty with strong predictive calibration and stochastic fidelity, as well as substantially improved deterministic dynamics over the prior. The frozen-core baseline further shows that post-hoc noise calibration can ground local covariance but inherits the prior’s miscalibrated core. Local predictive metrics confirm the same picture from a probabilistic angle. Within filtered objectives, NLL and CRPS are tightly clustered: predictive calibration alone is unable to separate the dynamically grounded model from the blind-uncertainty and post-hoc-calibration controls, even though their downstream stochastic and deterministic dynamical scores differ markedly, underscoring the necessity of the three-axis evaluation. The open-loop methods are also worse on local NLL and CRPS in this canonical run, consistent with covariance-volume shortcuts harming calibration as well as long-run dynamics. Since all probabilistic rows share the same initialization, optimizer, schedule, and adaptation budget, the ablation isolates the tested objective. 
+
+5.2 In-context probabilistic adaptation of DynaMix 
+
+We next test whether the DPC gap appears when probabilistically adapting a pretrained DSFM. We use DynaMix [ 18 ], which can take in observations of a dynamical system in its context window, and 7Table 1: Mechanistic ablation on stochastic Lorenz-96. All probabilistic rows share the same 
+
+end-to-end training schedule and are initialized from the same deterministic AL-RNN core. Bold :median whose ±SE interval overlaps the column’s best; red: signature failure mode (bracketed label). Medians ± SEs across 20 seeds; see Appx. C.4.                                                                   
+
+> Local Probabilistic Behavior Stochastic Dynamics (Shell+Core) Deterministic Dynamics (Core) Model / Objective NLL ( 14τλ)↓CRPS ( 14τλ)↓Gtan ↑Dstoch stsp ↓|∆hstoch
+> λ| ↓ Dcore stsp ↓|∆hcore
+> λ| ↓ Dcore H↓
+> Deterministic prior
+> AL-RNN (no shell) –––––0.697 ±0.054 2.773 ±0.282 0.350 ±0.019
+> Frozen-Core Shell Calibration 1.572 ±0.007 0.635 ±0.003 0.283 ±0.010 0.268 ±0.005 1.728 ±0.068 0.697 ±0.054 2.773 ±0.282 0.350 ±0.019
+> Open-Loop objective
+> No transport [Noise Masking] 2.150 ±0.026 1.590 ±0.053 0.004 ±0.002 0.982 ±0.015 4.883 ±0.000 2.638 ±0.022 4.870 ±0.023 0.833 ±0.007
+> Tied transport [Core Collapse] 2.197 ±0.012 1.642 ±0.045 0.180 ±0.009 0.632 ±0.013 4.883 ±0.000 2.650 ±0.024 4.843 ±0.042 0.840 ±0.004
+> Filtered objective
+> No transport [Blind Uncertainty] 1.601 ±0.008 0.665 ±0.003 −0.008 ±0.004 0.453 ±0.021 0.200 ±0.051 0.300 ±0.027 0 .421 ±0.040 0 .130 ±0.005
+> Tied transport (KAFFEE) 1.535 ±0.004 0 .632 ±0.005 0 .475 ±0.004 0.294 ±0.005 0.696 ±0.068 0.295 ±0.005 0.999 ±0.069 0.138 ±0.005
+
+then simulate the system’s long-term evolution. Here, we adapt DynaMix to 13 held-out dynamical systems, contaminated by 10% observation noise. All target-system learning is restricted to the 2000 observations in DynaMix’s context window. We compare three probabilistic adaptation modes: KAFFEE-DynaMix jointly updates the DynaMix core and a diagonal process/observation covariance shell using the EKF innovation objective. The 
+
+open-loop control uses the same transferred core and shell initialization, but updates the core using a Gaussian open-loop NLL objective. Finally, the noise-only control optimizes only the diagonal shell under the EKF objective while freezing the DynaMix core; its autonomous dynamics are therefore identical to the pretrained core by construction. Full numerical summaries and additional baselines are reported in Appx. Table 3. Fig. 3a shows the resulting trade-off. After 10 optimization steps on 13 systems and 20 seeds, KAFFEE matches or improves the held-out NLL of the open-loop control while drifting less from the pretrained autonomous core. Yet, the autonomous geometry differs substantially. Noise-only adaptation preserves the core by construction, but performs worse in NLL. KAFFEE thus preserves most of the zero-shot DynaMix dynamics while obtaining nearly the same probabilistic improvement as open-loop fine-tuning. Fig. 3b illustrates the complementary filtering capability. After adaptation, DynaMix can be deployed as a Bayesian state estimator, where DynaMix acts as the transition model in an EKF. Uncertainty is propagated via local Jacobians, while sparse observations are assimilated online through measurement updates. This shows the consequence of the KAFFEE parameterization–a deterministic DSFM becomes a well-calibrated local filter without compromising its autonomous core. a       
+
+> 0.0 0.5 1.0 1.5 2.0 2.5
+> Horizon [ ]
+> -10
+> 0
+> 10
+> x
+> b
+> Truth
+> DynaMix
+> KAFFEE filter
+> Noisy obs.
+> 0.8 0.9
+> NLL
+> 0.9
+> 1.0
+> 1.1
+> 1.2
+> 1.3
+> Dstsp  (rel. to baseline)  Noise-only
+> Open-loop
+> KAFFEE-DynaMix
+
+Figure 3: DPC gap and online filtering in DynaMix. (a) KAFFEE improves NLL (x-axis) while drifting less from the pretrained attractor (y-axis) than open-loop. Markers show medians ± SEs over 13 systems. (b) KAFFEE turns DynaMix into an online Bayesian filter that assimilates sparse noisy observations; illustrated here on one Lorenz-63 coordinate [48]. 
+
+## 6 Related Work 
+
+Probabilistic DSR and data assimilation. Recovering chaotic attractors from data is a central challenge in DSR, where learned surrogates are expected to act as autonomous generative models that preserve long-run dynamical structure [ 29 , 1, 4, 3, 49 ]. Probabilistic neural SSMs and SDEs add latent uncertainty, typically via finite-horizon variational or marginal-likelihood objectives [ 38 , 50 ]. 8Recent work in ergodic theory shows that small finite-horizon test error in learned dynamical systems need not imply statistical accuracy, including recovery of moments, invariant measures, or Lyapunov structure [ 8]. We extend this insight by identifying objective-level shortcuts through which probabilistic objectives can degrade physical invariants or mask errors through inflated noise. Data assimilation (DA) is an overlapping field that combines dynamical models, noisy (partial) observations, and uncertainty information to estimate states and improve forecasts [ 12 , 51 ], with chaotic DA emphasizing how covariance structure is shaped by tangent dynamics and the unstable-neutral subspace [ 13 , 17 ]. Methods combining DA and machine learning use this machinery to learn dynamics, build emulators, or correct model error from sparse/noisy observations [ 52 – 54 , 29 , 55 ], and concurrent auto-differentiable DA co-learns states, dynamics, and filtering parameters [ 56 ]. KAFFEE shares this differentiable-filtering/DA machinery, but targets probabilistic DSR by asking whether probabilistic optimization preserves an autonomous scientific surrogate’s invariant structure and dynamically grounded local uncertainty, rather than only providing state-estimation accuracy or downstream forecasting skill. This distinction is also increasingly relevant for DSFMs [ 18 –20 ]. Here, concurrent work independently supports probabilistic adaptation of high-performing deterministic backbones rather than training probabilistic models from scratch, demonstrating CRPS-based retrofitting for learned PDE simulators, including a PDE foundation model [ 57 ]. Our results suggest that such proper scores should be complemented by dynamical-probabilistic diagnostics that test autonomous invariants and dynamically grounded local uncertainty when the scientific target goes beyond finite-horizon forecasting. 
+
+Differentiable EKFs. Parameter learning via differentiable EKFs is established in state-space model-ing [ 21 , 24 , 23 ], and has become increasingly practical in recent years via automatic differentiation frameworks [ 22 , 25 ]. Backpropagation through the EKF’s NLL estimate has recently been used for parameter learning in neuroscience models [ 26 ]. KAFFEE is not proposed as a new filtering algorithm; rather, it operationalizes a broader training principle for probabilistic DSR: evaluate a filtered, localized objective while keeping local uncertainty tied to the learned dynamics. In this work, the filtered objective is a Gaussian innovation NLL and the dynamic grounding is Jacobian-based covariance propagation, yielding a differentiable-EKF instantiation. We show that this instantiation mitigates the DPC gap and scales to in-context probabilistic adaptation of the DynaMix DSFM, equip-ping it with online Bayesian filtering capabilities while largely preserving its zero-shot dynamical fidelity. 
+
+Stabilizing BPTT for chaotic surrogates. Gradient-based optimization of recurrent surrogates in chaotic regimes is notoriously difficult due to exploding Jacobian product chains [ 43 ]. Methods like Generalized Teacher Forcing [ 2] and Error Forcing [ 44 ] stabilize training by geometrically projecting gradients or orthogonalizing errors toward the zero-error manifold. However, determining forcing strengths or intervals remains delicate [ 49 ]. For probabilistic DSR, KAFFEE provides a structural analogue: evaluating filtered innovations naturally induces a state/data-adaptive, anisotropic damping factor on the Jacobian product chain through the Kalman update. The effective damping strength is determined by the relative uncertainty between current state estimate and observations, paralleling the uncertainty-adaptive filtering/proposal perspective in [ 58 ]. We formalize this connection to the stabilization of exploding gradients in Appx. A.6. 
+
+## 7 Discussion 
+
+This work exposes the DPC gap: improving finite-horizon probabilistic training objectives can degrade properties required for probabilistic DSR, and thus reliable scientific use. In Gaussian open-loop rollout objectives, one mechanism causing the DPC gap is covariance-volume pressure: the same local expansion required for chaotic dynamics also increases predictive volume, creating shortcuts toward core collapse or noise masking. Additionally, we showed that the DPC gap can arise from a too flexible noise parametrization (noise masking), or when uncertainty is not properly propagated through the dynamics (blind uncertainty). Our three-axis evaluation makes the DPC gap visible by separating local probabilistic behavior, shell-on stochastic fidelity, and shell-off core fidelity. Across AL-RNN and DynaMix experiments, KAFFEE mitigates the DPC gap by scoring filtered innovations while keeping uncertainty tied to local Jacobian transport, thereby preserving autonomous dynamics and aligning local predictive uncertainty with local chaotic expansion. KAFFEE uses the EKF and thus inherits its local Gaussian approximation, which may not capture the full complexity of the true predictive distribution in highly nonlinear regimes. While the approxi-9mation is sufficient to mitigate the DPC gap in our experiments, it may limit the method’s ability to represent multimodal or heavy-tailed uncertainties that can arise in chaotic systems. Future work could explore richer filtering approaches, such as ensemble/unscented Kalman filters [ 59 , 60 ], particle filters [61], and (structured) variational approximations [37, 62, 58, 63, 64]. The EKF has a cubic cost in the number of latents (Appx. A.8). When fitting to intrinsically very high-dimensional systems, recent work on diagonal and low-rank approximations to the (E)KF’s covariances could be applied [ 65 –67 ]. In the case of noise-free perfect latent models, work in chaotic DA has shown that the Kalman error covariance concentrates on the unstable-neutral subspace, whose dimension is the number of non-negative Lyapunov exponents [ 13 , 17 ]. Under additive model/process noise, stable directions can retain bounded covariance [ 68 ]. This suggests that low-rank-plus-residual covariance approximations may be both efficient and dynamically aligned for high-dimensional probabilistic DSR. Another exciting future direction is to leverage the connection between KAFFEE’s Kalman update and gradient stabilization to design new physics-informed optimization algorithms for dynamically faithful probabilistic surrogates. Taken together, by diagnosing the DPC gap as well as demonstrating alleviating principles, our results mark a crucial step toward developing surrogate models that handle uncertainty in a principled way while remaining dynamically consistent. 
+
+## Acknowledgments and Disclosure of Funding 
+
+This work was funded under the Excellence Strategy of the German Federal and State Governments; by the Federal Ministry of Research, Technology and Space (BMFTR) under the NeuroAI initiative, grant number 01GQ2509B; by the German Research Foundation (DFG) through individual grant DU 354/15-1 and Research Unit FOR 5159, subproject 11; and by the Hector II Foundation. 
+
+## References 
+
+[1] D Durstewitz, G Koppe, and M. I Thurm. Reconstructing computational system dynamics from neural data with recurrent neural networks. Nature Reviews Neuroscience , 24(11):693–710, 2023. [2] F Hess, Z Monfared, M Brenner, and D Durstewitz. Generalized Teacher Forcing for Learning Chaotic Dynamics. In Proceedings of the 40th International Conference on Machine Learning (ICML) , volume 202 of Proceedings of Machine Learning Research , pages 13017–13049, 2023. [3] D Durstewitz, C. J Hemmer, F Hess, C. R Doll, and L Eisenmann. Position: Why a Dynamical Systems Perspective is Needed to Advance Time Series Modeling. arXiv preprint arXiv:2602.16864 , 2026. [4] N Göring, F Hess, M Brenner, Z Monfared, and D Durstewitz. Out-of-Domain Generalization in Dynamical Systems Reconstruction. In Proceedings of the 41st International Conference on Machine Learning ,ICML’24, 2024. [5] J Botvinick-Greenhouse, R Martin, and Y Yang. Invariant Measures in Time-Delay Coordinates for Unique Dynamical System Identification. Phys. Rev. Lett. , 135(16):167202, 2025. [6] R Jiang, P. Y Lu, E Orlova, and R Willett. Training neural operators to preserve invariant measures of chaotic attractors. In Proceedings of the 37th International Conference on Neural Information Processing Systems , NIPS ’23, 2023. [7] H Luo, Y Du, H Fan, X Wang, J Guo, and X Wang. Reconstructing bifurcation diagrams of chaotic circuits with reservoir computing. Phys. Rev. E , 109(2):024210, 2024. [8] J Park, N. T Yang, and N Chandramoorthy. When are dynamical systems learned from time series data statistically accurate? In Advances in Neural Information Processing Systems , volume 37, pages 43975–44008, 2024. [9] Y Schiff, Z. Y Wan, J. B Parker, S Hoyer, V Kuleshov, F Sha, and L Zepeda-Núñez. DySLIM: Dynamics stable learning by invariant measure for chaotic systems. In Proceedings of the 41st International Conference on Machine Learning , ICML’24, 2024. [10] G. A Gottwald and S Reich. Supervised learning from noisy observations: Combining machine-learning techniques with data assimilation. Physica D: Nonlinear Phenomena , 423:132911, 2021. ISSN 01672789. 
+
+10 [11] A. F Psaros, X Meng, Z Zou, L Guo, and G. E Karniadakis. Uncertainty quantification in scientific machine learning: Methods, metrics, and comparisons. Journal of Computational Physics , 477:111902, 2023. ISSN 00219991. [12] S Reich and C Cotter. Probabilistic Forecasting and Bayesian Data Assimilation . Cambridge University Press, 1 edition, 2015. ISBN 978-1-107-06939-8 978-1-107-66391-6 978-1-107-70680-4. [13] A Trevisan and L Palatella. On the Kalman filter error covariance collapse into the unstable subspace. 
+
+Nonlinear Processes in Geophysics , 18(2):243–250, 2011. [14] D. J. C MacKay. Bayesian interpolation. Neural Comput. , 4(3):415–447, 1992. ISSN 0899-7667. [15] C. E Rasmussen and C. K. I Williams. Gaussian Processes for Machine Learning . MIT Press, Cambridge, MA, 2006. [16] J. P Eckmann and D Ruelle. Ergodic theory of chaos and strange attractors. Rev. Mod. Phys. , 57(3): 617–656, 1985. [17] A Carrassi, M Bocquet, J Demaeyer, C Grudzien, P Raanes, and S Vannitsem. Data Assimilation for Chaotic Dynamics. In S. K Park and L Xu, editors, Data Assimilation for Atmospheric, Oceanic and Hydrologic Applications (Vol. IV) , pages 1–42. Springer International Publishing, Cham, 2022. ISBN 978-3-030-77721-0 978-3-030-77722-7. [18] C. J Hemmer and D Durstewitz. True Zero-Shot Inference of Dynamical Systems Preserving Long-Term Statistics. In The Thirty-ninth Annual Conference on Neural Information Processing Systems , 2025. [19] J. B Lai, A Bao, and W Gilpin. Panda: A pretrained forecast model for chaotic dynamics. In The Fourteenth International Conference on Learning Representations , 2026. [20] C Liu, B Zhao, J Ding, and Y Li. ChaosNexus: A Foundation Model for ODE-based Chaotic System Forecasting with Hierarchical Multi-scale Awareness. arXiv preprint arXiv:2602.16864 , 2025. [21] N Gupta and R Mehra. Computational aspects of maximum likelihood estimation and reduction in sensitivity function calculations. IEEE Transactions on Automatic Control , 19(6):774–783, 1974. ISSN 0018-9286. [22] A Gorad, Z Zhao, and S Särkkä. Parameter estimation in non-linear state-space models by automatic differentiation of non-linear kalman filters. In 2020 IEEE 30th International Workshop on Machine Learning for Signal Processing (MLSP) , pages 1–6, 2020. [23] S Särkkä and L Svensson. Bayesian Filtering and Smoothing . Institute of Mathematical Statistics Textbooks. Cambridge University Press, second edition, 2023. [24] J Kokkala, A Solin, and S Särkkä. Sigma-point filtering and smoothing based parameter estimation in nonlinear dynamic systems. Journal of advances in information fusion , 11(1):15, 2016. [25] T Haarnoja, A Ajay, S Levine, and P Abbeel. Backprop KF: Learning discriminative deterministic state estimators. In Proceedings of the 30th International Conference on Neural Information Processing Systems ,NIPS’16, pages 4383–4391, 2016. [26] I. C Tanoh, M Deistler, J. H Macke, and S Linderman. Identifying multi-compartment Hodgkin-Huxley models with high-density extracellular voltage recordings. In The Thirty-ninth Annual Conference on Neural Information Processing Systems , 2026. [27] E. N Lorenz. Predictability: A problem partly solved. In Proc. Seminar on Predictability, Reading, UK, ECMWF , volume 1, pages 1–18, 1996. [28] K Doya. Bifurcations in the Learning of Recurrent Neural Networks. In Proceedings of the 1992 IEEE International Symposium on Circuits and Systems , 1992. [29] M Levine and A Stuart. A framework for machine learning of model error in dynamical systems. 
+
+Communications of the American Mathematical Society , 2(7):283–344, 2022. ISSN 2692-3688. [30] S Bengio, O Vinyals, N Jaitly, and N Shazeer. Scheduled sampling for sequence prediction with recurrent Neural networks. In Proceedings of the 29th International Conference on Neural Information Processing Systems - Volume 1 , NIPS’15, pages 1171–1179, 2015. [31] M Ranzato, S Chopra, M Auli, and W Zaremba. Sequence Level Training with Recurrent Neural Networks. In 4th International Conference on Learning Representations, ICLR 2016 , 2016. 
+
+11 [32] M Forgione and D Piga. Continuous-time system identification with neural networks: Model structures and fitting criteria. European Journal of Control , 59:69–81, 2021. [33] G Beintema, R Toth, and M Schoukens. Nonlinear state-space identification using deep encoder networks. In Proceedings of the 3rd Conference on Learning for Dynamics and Control , volume 144 of Proceedings of Machine Learning Research , pages 241–250, 2021. [34] G. I Beintema, M Schoukens, and R Tóth. Deep subspace encoders for nonlinear system identification. 
+
+Automatica , 156(C), 2023. ISSN 0005-1098. [35] A Girard, C. E Rasmussen, and R Murray-Smith. Multiple-step ahead prediction for non linear dynamic systems–a Gaussian process treatment with propagation of the uncertainty. In Sixteenth Annual Conference on Neural Information Processing Systems , volume 15, pages 529–536, 2002. [36] A Doerr, C Daniel, M Schiegg, N.-T Duy, S Schaal, M Toussaint, and T Sebastian. Probabilistic recurrent state-space models. In International Conference on Machine Learning , pages 1280–1289, 2018. [37] Y Zhao and S Linderman. Revisiting structured variational autoencoders. In International Conference on Machine Learning , pages 42046–42057, 2023. [38] M Brenner, F Hess, J. M Mikhaeil, L. F Bereska, Z Monfared, P.-C Kuo, and D Durstewitz. Tractable Dendritic RNNs for Reconstructing Nonlinear Dynamical Systems. In Proceedings of the 39th International Conference on Machine Learning , volume 162 of Proceedings of Machine Learning Research , 2022. [39] R. E Turner and M Sahani. Two problems with variational expectation maximisation for time series models. In Bayesian Time Series Models , pages 104–124. Cambridge University Press, 2011. ISBN 978-0-511-98467-9. [40] J Bayer, M Soelch, A Mirchev, B Kayalibay, and P van der Smagt. Mind the Gap when Conditioning Amortised Inference in Sequential Latent-Variable Models. In International Conference on Learning Representations , 2021. [41] W. A Fuller. Measurement Error Models . Wiley Series in Probability and Statistics. John Wiley & Sons, New York, 1987. [42] J Staudenmayer and J. P Buonaccorsi. Measurement Error in Linear Autoregressive Models. Journal of the American Statistical Association , 100(471):841–852, 2005. ISSN 01621459. [43] J. M Mikhaeil, Z Monfared, and D Durstewitz. On the difficulty of learning chaotic dynamics with RNNs. In Proceedings of the 36th International Conference on Neural Information Processing Systems , NIPS ’22, 2022. [44] A. E Sa˘ gtekin, C Bredenberg, and C Savin. Error Forcing in Recurrent Neural Networks. In The Thirty-ninth Annual Conference on Neural Information Processing Systems , 2025. [45] A Herz, D Durstewitz, and G Koppe. Teacher Forcing as Generalized Bayes: Optimization Geometry Mismatch in Switching Surrogates for Chaotic Dynamics. arXiv preprint arXiv:2604.25904 , 2026. [46] G Koppe, H Toutounji, P Kirsch, S Lis, and D Durstewitz. Identifying nonlinear dynamical systems via generative recurrent neural networks with applications to fMRI. PLOS Computational Biology , 15(8):1–35, 2019. [47] M Brenner, C. J Hemmer, Z Monfared, and D Durstewitz. Almost-Linear RNNs Yield Highly Interpretable Symbolic Codes in Dynamical Systems Reconstruction. In Advances in Neural Information Processing Systems (NeurIPS) , 2024. [48] E. N Lorenz. Deterministic Nonperiodic Flow. Journal of the Atmospheric Sciences , 20(2):130–141, 1963. [49] V Sip, M Breyton, S Petkoski, and V Jirsa. Double projection for reconstructing dynamical systems: Between stochastic and deterministic regimes. arXiv preprint arXiv:2510.01089 , 2026. [50] X Li, T.-K. L Wong, R. T. Q Chen, and D Duvenaud. Scalable Gradients for Stochastic Differential Equations. In Proceedings of the Twenty Third International Conference on Artificial Intelligence and Statistics , volume 108 of Proceedings of Machine Learning Research , pages 3870–3882, 2020. [51] A Carrassi, M Bocquet, L Bertino, and G Evensen. Data assimilation in the geosciences: An overview of methods, issues, and perspectives. WIREs Climate Change , 9(5):e535, 2018. ISSN 1757-7780, 1757-7799. 
+
+12 [52] J Brajard, A Carrassi, M Bocquet, and L Bertino. Combining data assimilation and machine learning to emulate a dynamical model from sparse and noisy observations: A case study with the Lorenz 96 model. 
+
+Journal of Computational Science , 44:101171, 2020. ISSN 18777503. [53] M Bocquet, A Farchi, and Q Malartic. Online learning of both state and dynamics using ensemble Kalman filters. Foundations of Data Science , 3(3):305–330, 2021. ISSN 2639-8001. [54] A Farchi, M Bocquet, P Laloyaux, M Bonavita, and Q Malartic. A comparison of combined data assimilation and machine learning methods for offline and online model error correction. Journal of Computational Science , 55:101468, 2021. ISSN 18777503. [55] M Bocquet, A Farchi, T. S Finn, C Durand, S Cheng, Y Chen, I Pasmans, and A Carrassi. Accurate deep learning-based filtering for chaotic dynamics by identifying instabilities without an ensemble. Chaos: An Interdisciplinary Journal of Nonlinear Science , 34(9):091104, 2024. ISSN 1054-1500, 1089-7682. [56] M Adrian, D Sanz-Alonso, and R Willett. Auto-differentiable data assimilation: Co-learning of states, dynamics, and filtering algorithms. arXiv preprint arXiv:2603.20891 , 2026. [57] C Diaconu, M Cranmer, R. E Turner, T Marwah, and P Mukhopadhyay. Probabilistic Retrofitting of Learned Simulators. arXiv preprint arXiv:2603.01949 , 2026. [58] M Pals, A. E Sa˘ gtekin, F Pei, M Gloeckler, and J Macke. Inferring stochastic low-rank recurrent neural networks from neural data. In Advances in Neural Information Processing Systems 37 (NeurIPS 2024) ,volume 37, pages 18225–18264, 2024. [59] E. A Wan and R Van Der Merwe. The unscented Kalman filter for nonlinear estimation. In Proceedings of the IEEE 2000 Adaptive Systems for Signal Processing, Communications, and Control Symposium (Cat. No. 00EX373) , pages 153–158, 2000. [60] G Evensen. The ensemble Kalman filter: Theoretical formulation and practical implementation. Ocean Dynamics , 53(4):343–367, 2003. [61] A Doucet, N de Freitas, K Murphy, and S Russell. Rao–Blackwellised Particle Filtering for Dynamic Bayesian Networks. In Proceedings of the 16th Conference on Uncertainty in Artificial Intelligence (UAI) ,2000. [62] Y Zhao and I. M Park. Variational online learning of neural dynamics. Frontiers in computational neuroscience , 14:71, 2020. [63] M Dowling, Y Zhao, and I. M Park. eXponential FAmily dynamical systems (XFADS): Large-scale nonlinear gaussian state-space modeling. Advances in Neural Information Processing Systems , 37:13458– 13488, 2024. [64] M Brenner, F Hess, G Koppe, and D Durstewitz. Integrating Multimodal Data for Joint Generative Modeling of Complex Dynamics. In Proceedings of the 41st International Conference on Machine Learning (ICML) , 2024. [65] P. G Chang, K. P Murphy, and M Jones. On diagonal approximations to the extended Kalman filter for online training of Bayesian neural networks. In Continual Lifelong Learning Workshop at ACML 2022 ,2022. [66] P. G Chang, G Durán-Martín, A Shestopaloff, M Jones, and K. P Murphy. Low-rank extended Kalman filtering for online learning of neural networks from streaming data. In S Chandar, R Pascanu, H Sedghi, and D Precup, editors, Proceedings of The 2nd Conference on Lifelong Learning Agents , volume 232 of 
+
+Proceedings of Machine Learning Research , pages 1025–1071, 2023. [67] J Schmidt, P Hennig, J Nick, and F Tronarp. The Rank-Reduced Kalman Filter: Approximate Dynamical-Low-Rank Filtering In High Dimensions. In Thirty-Seventh Conference on Neural Information Processing Systems , 2023. [68] C Grudzien, A Carrassi, and M Bocquet. Chaotic dynamics and the role of covariance inflation for reduced rank Kalman filters with model error. Nonlinear Processes in Geophysics , 25(3):633–648, 2018. ISSN 1607-7946. [69] A. H Jazwinski. Stochastic Processes and Filtering Theory , volume 64 of Mathematics in Science and Engineering . Elsevier, 1970. ISBN 978-0-12-381550-7. [70] C Naesseth, S Linderman, R Ranganath, and D Blei. Variational Sequential Monte Carlo. In Proceed-ings of the Twenty-First International Conference on Artificial Intelligence and Statistics , volume 84 of 
+
+Proceedings of Machine Learning Research , 2018. 
+
+13 [71] T. A Le, M Igl, T Rainforth, T Jin, and F Wood. Auto-Encoding Sequential Monte Carlo. In International Conference on Learning Representations , 2018. [72] C. J Maddison, J Lawson, G Tucker, N Heess, M Norouzi, A Mnih, A Doucet, and Y Teh. Filtering Variational Objectives. In Advances in Neural Information Processing Systems , volume 30, 2017. [73] K Reif, S Gunther, E Yaz, and R Unbehauen. Stochastic stability of the discrete-time extended Kalman filter. IEEE Transactions on Automatic Control , 44(4):714–728, 1999. ISSN 00189286. [74] Y Bengio, N Léonard, and A Courville. Estimating or Propagating Gradients Through Stochastic Neurons for Conditional Computation. arXiv preprint arXiv:1308.3432 , 2013. [75] D Hendrycks and K Gimpel. Gaussian Error Linear Units (GELUs). arXiv preprint arXiv:1606.08415 ,2023. [76] D. P Kingma and J Ba. Adam: A Method for Stochastic Optimization. arXiv preprint arXiv:1412.6980 ,2014. [77] L Liu, H Jiang, P He, W Chen, X Liu, J Gao, and J Han. On the Variance of the Adaptive Learning Rate and Beyond. In International Conference on Learning Representations , 2020. [78] J. R Hershey and P. A Olsen. Approximating the Kullback Leibler Divergence Between Gaussian Mixture Models. In 2007 IEEE International Conference on Acoustics, Speech and Signal Processing - ICASSP ’07 , pages IV–317–IV–320, 2007. [79] G Benettin, L Galgani, A Giorgilli, and J.-M Strelcyn. Lyapunov Characteristic Exponents for smooth dynamical systems and for hamiltonian systems; a method for computing all of them. Part 1: Theory. 
+
+Meccanica , 15(1):9–20, 1980. ISSN 0025-6455, 1572-9648. [80] K Geist, U Parlitz, and W Lauterborn. Comparison of Different Methods for Computing Lyapunov Exponents. Progress of Theoretical Physics , 83(5):875–893, 1990. ISSN 0033-068X. [81] W Gilpin. Chaos as an interpretable benchmark for forecasting and data-driven modelling. In Advances in Neural Information Processing Systems , volume 34, 2021. 
+
+14 A Theory Details and Proofs 
+
+This section supplements the theory in the main text: the proof of volume pressure localization, a noisy-state attenuation diagnostic, and the anti-contractive mechanism of the innovation NLL objective. We also discuss and formalize KAFFEE’s connection to intervention-based gradient stabilization training methods, in particular generalized teacher forcing (GTF) [2]. 
+
+A.1 Alleviating core collapse via filtering localization 
+
+In Section 3.2, we discuss how Gaussian objectives applied to open-loop predictive distributions accumulate uncertainty under autonomous propagation. In contrast, filtered innovation likelihood objectives repeatedly pull forecasts back through data assimilation, such that each likelihood term scores uncertainty propagated from a local post-assimilation belief. Here, we demonstrate this contrast with a diagnostic that isolates the covariance-volume component of the Gaussian objective. As in the main text, we denote filtered estimates by writing τ | t for an estimate at time τ conditioned on observations up to time t. Under local linearization, the open-loop covariance analyzed below is the 
+
+free-forecast covariance known in Bayesian filtering/data assimilation [ 17 ]; in the linear time-varying case, its accumulated process-noise term is known as the controllability matrix [69]. The following Proposition 1 is a diagnostic result for the covariance-volume term in the Gaussian NLL. It does not claim that the full Gaussian objective always contracts the learned dynamics; the Mahalanobis term can oppose this pressure, especially when the predictive distribution is underdis-persed. Instead, the proposition identifies a structural optimization shortcut available to open-loop likelihood training. With open-loop Jacobian covariance transport, shrinking Jacobian products di-rectly reduces the volume penalty. Removing transport avoids this penalty, but also makes predictive uncertainty dynamically blind. Filtered innovation likelihood keeps Jacobian transport, yet scores it after assimilation has reset the belief state, so the long-horizon volume pressure is localized. 
+
+Proposition 1 (Open-loop volume pressure and filtering localization) . Assume Λθs ≻ 0, Γθs ⪰ 0,and Σt ⪰ 0. Fix time step t and horizon h ≥ 1. Along a local expansion path Jθc,k (s) = esJθc,k ,the open-loop observed covariance can be written as 
+
+Ωopen 
+
+> θ,t +h
+
+(s) = Λθs +
+
+> h
+
+X
+
+> ℓ=0
+
+e2ℓs Aℓ, Aℓ ⪰ 0,
+
+where Aℓ collects the observed-space covariance contributions that have undergone ℓ Jacobian transports. Hence 
+
+∂∂s 
+
+12 log det Ωopen 
+
+> θ,t +h
+
+(s) = 
+
+> h
+
+X
+
+> ℓ=1
+
+ℓe 2ℓs tr 
+
+h
+
+Ωopen 
+
+> θ,t +h
+
+(s)−1Aℓ
+
+i
+
+≥ 0,
+
+with strict inequality whenever some transported contribution Aℓ̸ = 0 for ℓ ≥ 1. Thus the open-loop log-determinant term penalizes covariance contributions in proportion to how many Jacobian transports they have undergone. If the covariance recursion uses no Jacobian transport, this derivative is zero. For a filtered one-step score, let 
+
+Σt|t−1(s) = e2sJθc,t Σt−1|t−1J⊤ 
+
+> θc,t
+
++ Γθs , Ωt(s) = BΣt|t−1(s)B⊤ + Λθs .
+
+Then ∂∂s 
+
+12 log det Ωt(s) = e2str Ωt(s)−1BJ θc,t Σt−1|t−1J⊤
+
+> θc,t
+
+B⊤ .
+
+Moreover, with Kalman gain Kt = Σt|t−1B⊤Ω−1 
+
+> t
+
+, the covariance update satisfies 
+
+Σt|t = Σt|t−1 − Σt|t−1B⊤Ω−1 
+
+> t
+
+BΣt|t−1 ⪯ Σt|t−1.
+
+Thus filtered innovation scoring keeps Jacobian-based covariance transport, but evaluates it locally from a post-assimilation belief instead of on a long open-loop covariance product. Proof. Fix a forecast origin t and horizon h ≥ 1. For notational clarity, we write 
+
+Jk := Jθc,k .
+
+15 Consider the local expansion path 
+
+Jk(s) = esJk.
+
+For ℓ ≥ 1, define the ℓ-step Jacobian product ending at time t + h by 
+
+Φ(ℓ) 
+
+> t+h
+
+:= Jt+hJt+h−1 · · · Jt+h−ℓ+1 ,
+
+and set Φ(0)  
+
+> t+h
+
+:= I. Under the scaled path, 
+
+Φ(ℓ)
+
+> t+h
+
+(s) = eℓs Φ(ℓ)
+
+> t+h
+
+.
+
+The open-loop latent covariance at time t + h consists of the initial covariance transported through h
+
+Jacobians plus process-noise contributions transported through fewer Jacobians. Thus, after projection to observation space, 
+
+Ωopen 
+
+> θ,t +h
+
+(s) = Λθs + e2hs BΦ(h)
+
+> t+h
+
+Σt(Φ(h)
+
+> t+h
+
+)⊤B⊤ +
+
+> h−1
+
+X
+
+> ℓ=0
+
+e2ℓs BΦ(ℓ)
+
+> t+h
+
+Γθs (Φ(ℓ)
+
+> t+h
+
+)⊤B⊤.
+
+Equivalently, this can be written as 
+
+Ωopen 
+
+> θ,t +h
+
+(s) = Λθs +
+
+> h
+
+X
+
+> ℓ=0
+
+e2ℓs Aℓ,
+
+where 
+
+Ah := BΦ(h)
+
+> t+h
+
+Σt(Φ(h)
+
+> t+h
+
+)⊤B⊤,
+
+and, for 0 ≤ ℓ ≤ h − 1,
+
+Aℓ := BΦ(ℓ)
+
+> t+h
+
+Γθs (Φ(ℓ)
+
+> t+h
+
+)⊤B⊤.
+
+Since Σt ⪰ 0 and Γθs ⪰ 0, each Aℓ ⪰ 0. Since Λθs ≻ 0, we also have 
+
+Ωopen 
+
+> θ,t +h
+
+(s) ≻ 0 for all s ∈ R.
+
+Now differentiate the log-determinant term. Using 
+
+∂∂s log det Ω(s) = tr  Ω(s)−1Ω′(s) ,
+
+we obtain ∂∂s 
+
+12 log det Ωopen 
+
+> θ,t +h
+
+(s) = 12 tr 
+
+
+
+Ωopen 
+
+> θ,t +h
+
+(s)−1 ∂∂s Ωopen 
+
+> θ,t +h
+
+(s)
+
+
+
+.
+
+Because 
+
+∂∂s Ωopen 
+
+> θ,t +h
+
+(s) = 
+
+> h
+
+X
+
+> ℓ=1
+
+2ℓe 2ℓs Aℓ,
+
+this gives 
+
+∂∂s 
+
+12 log det Ωopen 
+
+> θ,t +h
+
+(s) = 
+
+> h
+
+X
+
+> ℓ=1
+
+ℓe 2ℓs tr 
+
+h
+
+Ωopen 
+
+> θ,t +h
+
+(s)−1Aℓ
+
+i
+
+.
+
+For each ℓ, the matrix Ωopen 
+
+> θ,t +h
+
+(s)−1 is positive definite and Aℓ is positive semidefinite. Therefore 
+
+tr 
+
+h
+
+Ωopen 
+
+> θ,t +h
+
+(s)−1Aℓ
+
+i
+
+≥ 0.
+
+Moreover, if Aℓ̸ = 0 , then this trace is strictly positive. To see this, write 
+
+tr Ω−1Aℓ
+
+ = tr 
+
+h
+
+Ω−1/2AℓΩ−1/2i
+
+,
+
+where the matrix inside the trace is nonzero positive semidefinite whenever Aℓ̸ = 0 . Hence the derivative is nonnegative, and it is strictly positive whenever at least one transported contribution 
+
+Aℓ̸ = 0 for some ℓ ≥ 1.16 If the covariance recursion uses no Jacobian transport, then the observed covariance has no dependence on the scaled Jacobians along this path. Equivalently, all terms with ℓ ≥ 1 are absent. The same derivative is then zero. This proves the open-loop part. We next prove the filtered localization statement. The one-step filtered predictive covariance along the same scaling path is 
+
+Σt|t−1(s) = e2sJθc,t Σt−1|t−1J⊤ 
+
+> θc,t
+
++ Γθs .
+
+The corresponding innovation covariance is 
+
+Ωt(s) = BΣt|t−1(s)B⊤ + Λθs .
+
+Since Λθs ≻ 0, Ωt(s) ≻ 0. Differentiating as above gives 
+
+∂∂s 
+
+12 log det Ωt(s) = 12 tr 
+
+
+
+Ωt(s)−1 ∂∂s Ωt(s)
+
+
+
+.
+
+Moreover, ∂∂s Ωt(s) = 2 e2sBJ θc,t Σt−1|t−1J⊤
+
+> θc,t
+
+B⊤.
+
+Therefore ∂∂s 
+
+12 log det Ωt(s) = e2str Ωt(s)−1BJ θc,t Σt−1|t−1J⊤
+
+> θc,t
+
+B⊤ ,
+
+as claimed. Finally, write the Kalman gain as 
+
+Kt = Σt|t−1B⊤Ω−1 
+
+> t
+
+, Ωt = BΣt|t−1B⊤ + Λθs .
+
+The covariance update can be written as 
+
+Σt|t = ( I − KtB)Σt|t−1.
+
+Substituting the expression for Kt gives 
+
+Σt|t = Σt|t−1 − Σt|t−1B⊤Ω−1 
+
+> t
+
+BΣt|t−1.
+
+The subtracted term is positive semidefinite, since 
+
+Σt|t−1B⊤Ω−1 
+
+> t
+
+BΣt|t−1 =
+
+
+
+Σt|t−1B⊤Ω−1/2
+
+> t
+
+  
+
+Σt|t−1B⊤Ω−1/2
+
+> t
+
+⊤
+
+⪰ 0.
+
+Hence 
+
+Σt|t ⪯ Σt|t−1.
+
+Thus the filtered objective still scores Jacobian-transported covariance, but after each observation the covariance is contracted before the next prediction. 
+
+A.2 Noisy-state attenuation and innovation identifiability 
+
+Here we discuss a scalar diagnostic of classical noisy-state attenuation [ 41 , 42 ] and its relationship to the filtered innovation likelihood. The preceding argument concerned Gaussian objectives applied to open-loop predictive distributions, where uncertainty accumulates under autonomous propagation. The filtered innovation likelihood however behaves differently in the linear-Gaussian setting, because it evaluates only local post-assimilation uncertainty. We emphasize that the result is deliberately local; it does not imply global consistency of EKF training for nonlinear chaotic systems. Its role is to separate two mechanisms: If noisy observations are directly treated as states, Gaussian prediction estimates an attenuated observation-to-observation regression coefficient. If, however, the latent state is inferred and the exact Kalman innovation likelihood is used in a correctly specified linear-Gaussian state-space model, the latent multiplier is identifiable. Let the true data-generating model be 
+
+z1 ∼ N (0 , p ⋆), zt+1 = a⋆zt + ξt, xt = zt + εt,
+
+with 
+
+ξt
+
+> i.i.d.
+
+∼ N (0 , q ⋆), εt
+
+> i.i.d.
+
+∼ N (0 , r ⋆),
+
+17 with z1, {ξt}t≥1, and {εt}t≥1 mutually independent, p⋆, q ⋆, r ⋆ > 0, and a⋆̸ = 0 . We assume zero-mean only for notational convenience, the same calculations hold with affine offsets after centering. We write 
+
+P ⋆t := Var( zt).
+
+Noisy-state predictive attenuation. Consider the misspecified noisy-state predictive family 
+
+qa,v (xt+1 | xt) = N (xt+1 ; ax t, v ), v > 0.
+
+The expected Gaussian NLL at a fixed time t is 
+
+Lpred (a, v ) = 12 log(2 πv ) + 12v E⋆
+
+(xt+1 − ax t)2 ,
+
+where E⋆ denotes expectation under the true data-generating model. For fixed a, the optimal variance is 
+
+v†(a) = E⋆
+
+(xt+1 − ax t)2 .
+
+Therefore minimizing the profiled (i.e., variance-optimized) Gaussian NLL over a is equivalent to minimizing the mean squared prediction error. Hence the optimal multiplier is the classical population least-squares coefficient under errors-in-variables [41, 42]: 
+
+a† 
+
+> pred
+
+= E⋆[xt+1 xt]
+
+E⋆[x2 
+
+> t
+
+] .
+
+Using 
+
+xt = zt + εt, xt+1 = a⋆zt + ξt + εt+1 ,
+
+and independence of zt, ξ t, ε t, ε t+1 , we obtain 
+
+E⋆[xt+1 xt] = a⋆ Var( zt) = a⋆P ⋆t ,
+
+and 
+
+E⋆[x2 
+
+> t
+
+] = Var( zt) + Var( εt) = P ⋆t + r⋆.
+
+Thus 
+
+a† 
+
+> pred
+
+= a⋆
+
+P ⋆t
+
+P ⋆t + r⋆
+
+.
+
+Since P ⋆t > 0 and r⋆ > 0, the attenuation factor lies strictly in (0 , 1) . Consequently, 
+
+|a†
+
+> pred
+
+| < |a⋆|.
+
+In particular, an expanding latent direction can be estimated as stable if 
+
+|a⋆| P ⋆t
+
+P ⋆t + r⋆
+
+< 1.
+
+For reference, the same calculation gives the pooled one-step version often implicit in finite-window objectives. If a single coefficient a and a shared variance are fit over times t = 1 , . . . , T − 1, then 
+
+a† 
+
+> pred ,T
+
+= a⋆
+
+PT −1 
+
+> t=1
+
+P ⋆t
+
+PT −1 
+
+> t=1
+
+(P ⋆t + r⋆) ,
+
+again a strict attenuation whenever r⋆ > 0.
+
+Innovation identifiability in the correctly specified family. Now consider the correctly specified state-space family 
+
+z1 ∼ N (0 , p ), zt+1 = az t + ξt, xt = zt + εt,
+
+with 
+
+ξt
+
+> i.i.d.
+
+∼ N (0 , q ), εt
+
+> i.i.d.
+
+∼ N (0 , r ),
+
+independently of z1 and of each other with p, q, r > 0. Let θ = ( a, q, r, p ), and let P1: Tθ denote the joint distribution of x1: T , with density pθ (x1: T ). Since the model is linear-Gaussian, the Kalman innovation factorization is the exact likelihood: 
+
+pθ (x1: T ) = pθ (x1)
+
+> T
+
+Y
+
+> t=2
+
+pθ (xt | x1: t−1) = pθ (x1)
+
+> T
+
+Y
+
+> t=2
+
+N (xt; ˆ xθt|t−1, Ωθt ).
+
+18 The expected innovation NLL is therefore 
+
+LKF (θ) := Eθ⋆ [− log pθ (x1: T )] ,
+
+with θ⋆ the true data-generating parameters. Equivalently, 
+
+LKF (θ) = H(P1: Tθ⋆ ) + KL  P1: Tθ⋆ ∥ P1: Tθ
+
+ .
+
+Since θ⋆ belongs to the candidate family and the KL term is non-negative, the minimum value is attained at θ⋆. Therefore every population-risk minimizer must satisfy 
+
+P1: Tθ = P1: Tθ⋆ .
+
+Conversely, θ⋆ = ( a⋆, q ⋆, r ⋆, p ⋆) achieves equality, so it remains only to show identifiability. Because all laws are zero-mean Gaussian, equality of P1: Tθ and P1: Tθ⋆ is equivalent to equality of their covariance matrices. For T ≥ 3, the covariance entries are: 
+
+σ11 := Cov θ (x1, x 1) = p + r, σ21 := Cov θ (x2, x 1) = ap, σ31 := Cov θ (x3, x 1) = a2p, 
+
+and 
+
+σ22 := Cov θ (x2, x 2) = a2p + q + r. 
+
+Since a⋆̸ = 0 and p⋆ > 0,
+
+σ⋆ 
+
+> 21
+
+= a⋆p⋆̸ = 0 .
+
+Hence equality of the observation laws implies 
+
+a = σ31 
+
+σ21 
+
+= σ⋆
+
+> 31
+
+σ⋆
+
+> 21
+
+= a⋆.
+
+Then 
+
+p = σ21 
+
+a = σ⋆
+
+> 21
+
+a⋆
+
+= p⋆.
+
+Next, 
+
+r = σ11 − p = σ⋆ 
+
+> 11
+
+− p⋆ = r⋆.
+
+Finally, 
+
+q = σ22 − a2p − r = σ⋆ 
+
+> 22
+
+− a2
+
+> ⋆
+
+p⋆ − r⋆ = q⋆.
+
+Therefore equality of the observation laws implies 
+
+(a, q, r, p ) = ( a⋆, q ⋆, r ⋆, p ⋆),
+
+and the expected Kalman innovation NLL has the unique population-risk minimizer 
+
+(a†
+
+> KF
+
+, q †
+
+> KF
+
+, r †
+
+> KF
+
+, p †
+
+> KF
+
+) = ( a⋆, q ⋆, r ⋆, p ⋆).
+
+A.3 Large-sample targets of noisy-state and innovation objectives 
+
+The preceding discussion identifies the population targets of two objectives. We now record the corresponding large-sample limit consequences. The asymptotic regime here is n → ∞ independent finite windows, with the window length T fixed and with t and H fixed in the relevant parts. The statement is formulated for independent finite windows, so it does not require stationarity of the scalar process. Let 
+
+X(i)1: T = ( x(i)1 , . . . , x (i) 
+
+> T
+
+), i = 1 , . . . , n, 
+
+be independent length-T windows generated by the true data-generating model xt = zt + εt in Appx. A.2. All expectations are under the true data-generating parameters 
+
+θ⋆ = ( a⋆, q ⋆, r ⋆, p ⋆).
+
+19 Proposition 2 (Large-sample inconsistency of noisy-state open-loop training) . Assume that the optimization domains for a, p, q, r , and all fitted variances v, v 1: H are compact, with all variance parameters bounded below by a positive constant, and that the relevant population minimizers lie in the interior of these domains. Also assume that θ⋆ lies in the interior of the state-space model parameter domain. Then: 
+
+(i) Noisy-state one-step objective. For fixed t, define 
+
+bLpred ,n (a, v ) = 1
+
+n
+
+> n
+
+X
+
+> i=1
+
+− log N
+
+
+
+x(i)
+
+> t+1
+
+; ax (i) 
+
+> t
+
+, v 
+
+
+
+.
+
+Every sequence of empirical global minimizers (ˆ an, ˆvn) satisfies, as n → ∞ ,
+
+ˆan −→ a⋆
+
+P ⋆t
+
+P ⋆t + r⋆
+
+almost surely .
+
+Thus the noisy-state predictor is inconsistent for a⋆ whenever r⋆ > 0.
+
+(ii) Noisy-state H-step open-loop objective. Assume a⋆ > 0 and optimize a over a compact subset of 
+
+(0 , ∞) containing the relevant population minimizers. For H ≥ 1 and t + H ≤ T , define 
+
+bLopen ,n (a, v 1: H ) = 1
+
+n
+
+> n
+
+X
+
+> i=1
+> H
+
+X
+
+> h=1
+
+− log N
+
+
+
+x(i)
+
+> t+h
+
+; ahx(i) 
+
+> t
+
+, v h
+
+
+
+.
+
+Let 
+
+κt := P ⋆t
+
+P ⋆t + r⋆
+
+∈ (0 , 1) .
+
+Every accumulation point of empirical global minimizers ˆan as n → ∞ lies in the population minimizer set, and every population minimizer satisfies 
+
+κta⋆ ≤ a† 
+
+> open ,H
+
+≤ κ1/H t a⋆ < a ⋆.
+
+In particular, the noisy-state open-loop objective is inconsistent for the latent multiplier. If a⋆ > 1
+
+and 
+
+κ1/H t a⋆ < 1,
+
+then every population minimizer is stable even though the true latent multiplier is expanding. 
+
+(iii) Exact innovation objective. Let 
+
+bLKF ,n (θ) = 1
+
+n
+
+> n
+
+X
+
+> i=1
+
+− log pθ (x(i)1: T )
+
+be the exact Kalman innovation NLL for the correctly specified state-space family defined in Appx. A.2. For T ≥ 3, every sequence of empirical global minimizers ˆθn satisfies, as n → ∞ ,
+
+ˆθn −→ θ⋆ = ( a⋆, q ⋆, r ⋆, p ⋆) almost surely .
+
+Proof. We use the argmin argument for empirical risk minimization. Because the parameter domains are compact, the variances are bounded away from zero, and the Gaussian log-scores are continuous with finite moments under the true linear-Gaussian model, the empirical objectives converge uniformly almost surely to their expected objectives. Therefore empirical global minimizers converge to the set of population global minimizers. We now identify those population minimizers. Part (i) follows directly from the attenuation calculation in Appx. A.2: the expected one-step noisy-state Gaussian objective has the unique multiplier 
+
+a† 
+
+> pred
+
+= a⋆
+
+P ⋆t
+
+P ⋆t + r⋆
+
+.
+
+Since r⋆ > 0, |a†
+
+> pred
+
+| < |a⋆|, so the noisy-state objective attenuates the multiplier toward zero. For part (ii), Gaussian conditioning gives 
+
+E⋆[zt | xt] = κtxt, κt = P ⋆t
+
+P ⋆t + r⋆
+
+.
+
+20 For each h ≥ 1,
+
+xt+h = ah⋆ zt +
+
+> h−1
+
+X
+
+> ℓ=0
+
+aℓ⋆ξt+h−1−ℓ + εt+h.
+
+Hence 
+
+E⋆[xt+h | xt] = κtah⋆ xt.
+
+Writing 
+
+xt+h = κtah⋆ xt + ηt,h , E⋆[ηt,h | xt] = 0 ,
+
+with conditional variance τ 2,⋆ t,h > 0, the expected squared residual of the h-step open-loop mean ahxt
+
+is 
+
+E⋆[( xt+h − ahxt)2] = τ 2,⋆ t,h + Var ⋆(xt)  ah − κtah⋆
+
+2 .
+
+For fixed a, the optimal vh is this expected squared residual. Since each vh is optimized independently, profiling (optimizing) out v1: H yields the population objective 
+
+JH (a) = 12
+
+> H
+
+X
+
+> h=1
+
+log 
+
+h
+
+τ 2,⋆ t,h + Var ⋆(xt)  ah − κtah⋆
+
+2i
+
+.
+
+For a > 0, the derivative of the h-th summand has sign 
+
+sign 
+
+
+
+a − κ1/h t a⋆
+
+
+
+.
+
+Because κt ∈ (0 , 1) ,
+
+κta⋆ = κ1/1 
+
+> t
+
+a⋆ ≤ κ1/h t a⋆ ≤ κ1/H t a⋆ < a ⋆.
+
+Therefore J′ 
+
+> H
+
+(a) < 0 for 0 < a < κ ta⋆, and J′ 
+
+> H
+
+(a) > 0 for a > κ 1/H t a⋆. Every population minimizer lies in 
+
+[κta⋆, κ 1/H t a⋆],
+
+which proves the stated open-loop inconsistency. The stability claim follows immediately from the upper bound. For part (iii), the identifiability calculation in Appx. A.2 shows that the expected innovation NLL has the unique minimizer 
+
+θ⋆ = ( a⋆, q ⋆, r ⋆, p ⋆)
+
+for T ≥ 3. Uniform convergence of bLKF ,n to its expectation and uniqueness of the population minimizer imply 
+
+ˆθn → θ⋆
+
+almost surely. 
+
+A.4 Local anti-contraction of the innovation NLL 
+
+We next turn to a discussion of the anti-contractive mechanism of the innovation NLL objective, which underlies KAFFEE’s ability to mitigate the compounding volume-pressure in optimization of open-loop likelihoods. The following result explains why, once Jacobian-based covariance transport makes the innovation covariance too small relative to the true one-step predictive covariance, further contraction cannot minimize the expected innovation NLL. In this sense, KAFFEE can be seen as a data-dependent tangent-space regularization. To isolate a single contraction direction, fix a window and a reference pair θ = ( θc, θ s). Restrict to Jacobians of the form 
+
+Jθc,t (s) = s ¯Jθc,t 
+
+along a chosen covariance direction, and write 
+
+Aθ,t := B ¯Jθc,t Σt−1|t−1 ¯J⊤
+
+> θc,t
+
+B⊤, Cθs := BΓθs B⊤ + Λθs .
+
+Assume Cθs ≻ 0. Define 
+
+Ωθ,t (s) := s2Aθ,t + Cθs , Ω⋆t := Cov( xt | x1: t−1),
+
+and 
+
+L(s) := 12
+
+> T
+
+X
+
+> t=1
+
+log det Ωθ,t (s) + tr  Ωθ,t (s)−1Ω⋆t
+
+ .
+
+21 Lemma 1 (Anti-contraction along a covariance-rescaling path) . This lemma studies a local covariance-scaling path at fixed filtered covariances {Σt−1|t−1}Tt=1 and fixed innovation means. It therefore characterizes the partial derivative of the covariance part of the expected innovation NLL with respect to a local Jacobian-rescaling direction (ignoring the recursion through all earlier EKF covariances). If there exists s0 > 0 such that 
+
+Ωθ,t (s0) ⪯ Ω⋆t ∀t, 
+
+with 
+
+Ωθ,t ⋆ (s0) ≺ Ω⋆t⋆
+
+for at least one t⋆ satisfying Aθ,t ⋆̸ = 0 , then 
+
+∂∂s L(s) < 0 for all 0 < s ≤ s0.
+
+Thus no local minimizer of L lies in (0 , s 0] of this contraction path. 
+
+A.5 Proof of Lemma 1 
+
+Proof. Since Σt−1|t−1 ⪰ 0, we have Aθ,t ⪰ 0. The assumption Cθs ≻ 0 implies Ωθ,t (s) ≻ 0 for all s ≥ 0, so the inverse square roots below are well-defined. Write θ = ( θc, θ s) and Ω⋆t := Cov( xt | x1: t−1). For each t,
+
+Ωθ,t (s) = s2Aθ,t + Cθs , ∂∂s Ωθ,t (s) = 2 sAθ,t .
+
+Differentiating L gives 
+
+∂∂s L(s) = 12
+
+> T
+
+X
+
+> t=1
+
+ tr  Ωθ,t (s)−1Ω′
+
+> θ,t
+
+(s) − tr  Ωθ,t (s)−1Ω′
+
+> θ,t
+
+(s)Ωθ,t (s)−1Ω⋆t
+
+ .
+
+Substituting Ω′
+
+> θ,t
+
+(s) = 2 sAθ,t yields 
+
+∂∂s L(s) = s
+
+> T
+
+X
+
+> t=1
+
+ tr  Ωθ,t (s)−1Aθ,t 
+
+ − tr  Ωθ,t (s)−1Aθ,t Ωθ,t (s)−1Ω⋆t
+
+ .
+
+Define 
+
+Mt(s) := Ωθ,t (s)−1/2Aθ,t Ωθ,t (s)−1/2 ⪰ 0, Zt(s) := Ωθ,t (s)−1/2Ω⋆t Ωθ,t (s)−1/2.
+
+Using cyclicity of the trace, 
+
+tr  Ω−1 
+
+> θ,t
+
+Aθ,t 
+
+ = tr  Mt
+
+, tr  Ω−1 
+
+> θ,t
+
+Aθ,t Ω−1 
+
+> θ,t
+
+Ω⋆t
+
+ = tr  MtZt
+
+,
+
+so 
+
+∂∂s L(s) = s
+
+> T
+
+X
+
+> t=1
+
+tr  Mt(s)( I − Zt(s)) .
+
+Assume now that 0 < s ≤ s0. Since Ωθ,t (s) = s2Aθ,t + Cθs is monotone increasing in s,
+
+Ωθ,t (s) ⪯ Ωθ,t (s0) ⪯ Ω⋆t ∀t. 
+
+Therefore 
+
+Zt(s) = Ωθ,t (s)−1/2Ω⋆t Ωθ,t (s)−1/2 ⪰ I,
+
+so I − Zt(s) ⪯ 0. Because Mt(s) ⪰ 0, each summand is non-positive. Indeed, writing I − Zt =
+
+−Nt with Nt ⪰ 0,
+
+tr  Mt(I − Zt) = −tr  MtNt
+
+ ≤ 0,
+
+since tr( AC ) ≥ 0 for positive semidefinite A, C.For index t⋆, the assumption Ωθ,t ⋆ (s0) ≺ Ω⋆t⋆ implies 
+
+Ωθ,t ⋆ (s) ⪯ Ωθ,t ⋆ (s0) ≺ Ω⋆t⋆ ,
+
+hence Zt⋆ (s) ≻ I. Since Aθ,t ⋆̸ = 0 , we also have Mt⋆ (s)̸ = 0 . Therefore 
+
+tr  Mt⋆ (s)( I − Zt⋆ (s))  < 0.
+
+Summing over t yields 
+
+∂∂s L(s) < 0 for all 0 < s ≤ s0.
+
+Hence no local minimizer can lie in (0 , s 0].22 A.6 Kalman updates as adaptive anisotropic forcing 
+
+Isolating the optimization mechanism by which filtering alters chaotic Jacobian product chains connects the KAFFEE objective to recent literature on exploding BPTT gradients and generalized teacher forcing (GTF) [ 43 , 2]. Recent work in this direction extended GTF to project the network orthogonally toward the zero-error manifold [ 44 ], and interpreted identity teacher forcing as an intervention-based generalized-Bayes objective [ 45 ]. While these methods stabilize BPTT-gradients geometrically via the pseudoinverse and a forcing-strength hyperparameter, KAFFEE instead induces state/data-adaptive error forcing through Bayesian filtering updates, without introducing a separate forcing-strength hyperparameter. This parallels the filtering/proposal perspective in [ 58 ], where uncertainty-adaptive interpolation between model-predicted and data-inferred states is related to GTF. 
+
+Proposition 3 (KAFFEE induces an anisotropic filtering factor) . Let μ := Fθc (zt−1|t−1) = zt|t−1,and write 
+
+zt|t = μ + Kt(zt−1|t−1)( xt − Bμ ).
+
+Let Jt = ∂F θc /∂ zt−1|t−1 and let kt,j (zt−1|t−1) denote the jth column of Kt(zt−1|t−1). Then 
+
+∂zt|t
+
+∂zt−1|t−1
+
+= ( I − KtB)Jt +
+
+> N
+
+X
+
+> j=1
+
+(xt − Bz t|t−1)j
+
+∂kt,j 
+
+∂zt−1|t−1
+
+.
+
+If, in addition, the Kalman gain is treated as a differentiable function of the predicted mean, Kt =
+
+Kt(zt|t−1), then the mean-to-mean Jacobian of the filtered step satisfies 
+
+∂zt|t
+
+∂zt−1|t−1
+
+= ( I − KtB + Rt)Jt,
+
+with 
+
+Rt =
+
+> N
+
+X
+
+> j=1
+
+(xt − Bz t|t−1)j
+
+∂kt,j 
+
+∂μ (zt|t−1),
+
+so the mean-state component of the BPTT chain contains an observation-dependent anisotropic filtering factor. Proof of Proposition 3. Let 
+
+u := zt−1|t−1, μ := Fθc (u) = zt|t−1, rt := xt − Bμ .
+
+Write kt,j (u) for the j-th column of Kt(u). Then 
+
+zt|t = μ + Kt(u)rt = Fθc (u) + 
+
+> N
+
+X
+
+> j=1
+
+rt,j (u) kt,j (u).
+
+For any perturbation δu, the directional derivative is 
+
+Dzt|t[δu] = Jtδu − KtBJ tδu +
+
+> N
+
+X
+
+> j=1
+
+rt,j 
+
+∂kt,j 
+
+∂zt−1|t−1
+
+δu,
+
+where 
+
+Jt := ∂F θc
+
+∂zt−1|t−1
+
+.
+
+Therefore 
+
+∂zt|t
+
+∂zt−1|t−1
+
+= ( I − KtB)Jt +
+
+> N
+
+X
+
+> j=1
+
+(xt − Bz t|t−1)j
+
+∂kt,j 
+
+∂zt−1|t−1
+
+.
+
+If, in addition, Kt is treated as a differentiable function of the predicted mean zt|t−1, then 
+
+∂kt,j 
+
+∂zt−1|t−1
+
+= ∂kt,j 
+
+∂μ (zt|t−1)Jt.
+
+23 Substituting this into the previous display yields 
+
+∂zt|t
+
+∂zt−1|t−1
+
+= ( I − KtB + Rt)Jt,
+
+with 
+
+Rt =
+
+> N
+
+X
+
+> j=1
+
+(xt − Bz t|t−1)j
+
+∂kt,j 
+
+∂μ (zt|t−1).
+
+Thus iterating the chain rule gives, for every 1 ≤ r < t ≤ T ,
+
+∂zt|t
+
+∂zr|r
+
+=
+
+> t
+
+Y
+
+> k=r+1
+
+∂zk|k
+
+∂zk−1|k−1
+
+=
+
+> t
+
+Y
+
+> k=r+1
+
+ I − KkB + Rk
+
+Jk.
+
+This proves the factorization. Proposition 3 makes the connection to GTF explicit: in the (simplified) scalar state-independent-gain case B = I, Kt = αI, and Rt = 0 , the filtered multiplier becomes (1 − α)Jt, recovering the GTF damping factor α of Hess et al. [2] . Under a sufficiently strong Kalman gain, the factor 
+
+(I − KtB + Rt)Jt can be substantially less expansive than Jt and can even have a dominant singular value smaller than one even when Jt is expansive, thus attenuating the exponential explosion of gradients that would otherwise occur in chaotic regimes [ 43 ]. However, unlike GTF, the damping factor is not a free parameter; it is a function of the surrogate’s local Jacobian and the current predictive covariance, so it cannot be tuned independently of the surrogate’s dynamical fidelity. 
+
+A.7 Empirical density representations and particle methods 
+
+The main-text contraction argument specifically targets fixed-form density projections, such as Gaussian predictive laws with an explicit covariance volume penalty. Sample-based methods such as Variational Sequential Monte Carlo [ 70 – 72 , 58 ] can avoid that specific parametric bottleneck because they represent posterior mass empirically rather than through one global covariance ellipsoid. However, in high-dimensional chaotic settings this relief may come with particle degeneracy and the need for enough particles to cover a highly curved posterior support. So these methods sidestep one version of the DPC gap mechanism while paying a separate scalability cost. 
+
+A.8 Computational cost and scaling 
+
+At a high level, KAFFEE inherits the scaling profile of EKF-style Gaussian filtering: it propagates one mean/covariance pair rather than a particle cloud or a large forecast ensemble. In the implementations, the learned shell covariances are diagonal, that is, Γ and Λ are parameterized by only O(M + N )
+
+log-standard-deviation parameters rather than full M × M and N × N matrices. However, after those diagonal shells initialize the filter, the predictive and filtered state covariances produced by Jacobian-based covariance transport are propagated as full dense matrices in latent space. Consequently, the dominant forward cost is the dense EKF recursion, not the shell parameterization itself: with latent dimension M and observation dimension N , the forward step is dominated by the Jacobian transport and Kalman update, with cost on the order of O(M 3 + M 2N + N 3) per step when full latent covariance is retained. Note that for diagonal observation covariances, we can completely avoid the O(N 3) inversion of the innovation covariance, via the Woodbury inversion lemma (at an additional O(M 3) cost), which is practical for settings with high-D observations [ 15 ]. For a batched training window, the cost scales linearly in the batch size and loss horizon. The gain-variation term Rt from Proposition 3 matters mainly for the exact backward path rather than the forward EKF pass. In our implementation the differentiable EKF is optimized end-to-end, and automatic differentiation captures the dependence of Rt by differentiating through the Kalman gain and the Jacobian-based covariance transport. In the applied straight-through-estimator (STE) variant, the forward mean remains ReLU-gated while the filter linearization in the backward pass uses the temperature-smoothed surrogate Jacobian described in Appendix C.1. Because Kt depends on the dense predictive covariance and that covariance depends on Jt(μ), the exact backward pass 24 inherits second-order sensitivities of the transition map associated with Rt, effectively requiring Hessian-vector product information (even when no dense Hessian tensor is formed explicitly). The practical high-dimensional bottleneck in the present paper implementation is instead the exact dense training path, which combines full M ×M covariance transport, dense Jacobian evaluation, and the implicit higher-order backward terms induced by the gain dependence. In this sense, KAFFEE remains attractive in moderately high dimensions, but much larger latent states would likely require structured approximations such as diagonal-, block-, or low-rank covariance transport [ 65 –67 ] and approximate Jacobian/backward passes. Such reductions are further motivated by results in chaotic data assimilation: in “perfect surrogate model” scenarios, Kalman error covariances concentrate on the unstable-neutral subspace [ 13 , 17 ]. With additive model/process noise, however, covariance in stable directions can be replenished by the noise and remain bounded instead of vanishing; this motivates low-rank-plus-residual approximations rather than purely unstable-subspace approximations [68]. 
+
+Compute resources. In practice, the dense EKF training path is cheap on the benchmarks presented in this work: On the 20-dimensional stochastic Lorenz-96 ablation, the median per-seed train time on a single Nvidia TITAN Xp GPU is 75s for KAFFEE and 62 –68s for the matched open-loop Gaussian NLL controls (no-transport / tied transport), all under the same 150 -iteration schedule (Section C.2). The DynaMix in-context adaptation experiments are also modest: for the 10-iteration adaptation budget reported in the main text and tables, a full sweep per (system, seed) pair has a median wall-clock time of ≈ 12min on a single TITAN Xp GPU. While the DynaMix core is a pretrained foundation model, the Lorenz-96 experiments used deterministic AL-RNN cores. Training these cores takes approximately 75 minutes per seed on a single TITAN Xp GPU; Table 1 uses 20 
+
+independently pretrained cores. 
+
+## B KAFFEE algorithm and filtering equations 
+
+B.1 EKF Predict-update equations 
+
+For completeness, we provide the full recursive equations for the EKF utilized in the KAFFEE architecture. Let Fθc denote the autonomous transition map parameterized by the deterministic core, and let Γθs and Λθs denote the learned diagonal process and observation noise covariances parameterizing the stochastic shell. We assume a linear observation model B.Given a filtered state belief N (zt−1|t−1, Σt−1|t−1) at time t − 1, the forward pass of KAFFEE performs the EKF’s predict-update cycle at time t [23]: 
+
+1. Predict step (autonomous expansion). We first obtain the predictive density: 
+
+p(zt | x1: t−1) = 
+
+Z
+
+p(zt | zt−1)p(zt−1 | x1: t−1)dzt−1.
+
+We apply the dynamics p(zt | zt−1) and marginalize the previous latent zt−1. While the integral is intractable for nonlinear dynamics, the EKF proceeds by linearizing around zt−1|t−1. This results in a Gaussian approximation to p(zt | x1: t−1), where the deterministic core projects the state mean forward, while the local Jacobian Jθc,t = ∇z Fθc (zt−1|t−1) transports the covariance: 
+
+zt|t−1 = Fθc (zt−1|t−1), (5) 
+
+Σt|t−1 = Jθc,t Σt−1|t−1 J⊤ 
+
+> θc,t
+
++ Γθs . (6) 
+
+2. Update step (data assimilation). Next, we correct the state and covariance using the observations [12, 51]. This step (typically) contracts the predictive variance (Proposition 1). Using p(xt | zt, x1: t−1) = p(xt | zt) and p(zt | x1: t−1) obtained in the last step, we have the following expression for the joint predictive distribution p(xt, zt | x1: t−1):
+
+zt
+
+xt
+
+
+
+∼ N 
+
+ zt|t−1
+
+Bz t|t−1
+
+
+
+,
+
+ Σt|t−1 Σt|t−1B⊤
+
+BΣt|t−1 BΣt|t−1B⊤ + Λθs
+
+ 
+
+,
+
+where we can read off the innovation covariance 
+
+Ωt = BΣt|t−1B⊤ + Λθs . (7) 25 Given this joint distribution, we can apply standard Gaussian conditioning identities to obtain the filtered distribution p(zt | x1: t), with mean and covariance given by: 
+
+zt|t = zt|t−1 + Kt(xt − Bz t|t−1), (8) 
+
+Σt|t = ( I − KtB)Σt|t−1. (9) Where Kt, is the Kalman Gain, which determines the optimal blending weight between the prediction and the incoming noisy observation xt:
+
+Kt = Σt|t−1B⊤Ω−1 
+
+> t
+
+. (10) Equivalently, for numerical stability, one may use the symmetric Joseph form for the covariance: 
+
+Σt|t = ( I − KtB)Σt|t−1(I − KtB)⊤ + KtΛθs K⊤ 
+
+> t
+
+.
+
+During training, the innovation (xt − Bz t|t−1) and their covariance Ωt are passed directly to the innovation NLL objective (Eq. 4) to compute the (localized) loss before proceeding to t + 1 .Interleaving prediction and assimilation prevents the innovation objective from scoring a single long open-loop covariance product. Under standard linear-Gaussian regularity conditions, this recursion approaches a stable equilibrium [ 73 ]. In the nonlinear setting, we use the same local mechanism as a stabilizing inductive bias, see also Appx. 1. 
+
+B.2 KAFFEE optimization details 
+
+We now proceed to describe additional training details of KAFFEE. The differentiable EKF described in Appendix B.1 is optimized end-to-end. Algorithm 1 then states the generic KAFFEE optimization loop: each step samples one or more truncated windows, propagates the predict–transport–update recursion through every step, accumulates the innovation NLL, and backpropagates jointly through the core parameters θ and the shell parameters (Γ, Λ).
+
+Straight-through estimator (STE). The exact one-step Jacobian of the AL-RNN is (cf. Eq. 11) 
+
+∂F θ
+
+∂z (z) = A + W D (c(z)) .
+
+While the exact hard transition is used for the forward-mean in KAFFEE (and for all shell-off deterministic metrics), we employ an STE by using sigmoid-smoothed surrogates for both back-propagation and the EKF covariance transport [ 74 ]. Specifically, we replace each of the P gated coordinates by zi 7 → σ(1 .7zi/τ )zi. This specific scaling factor of 1.7 is chosen because it forms a smooth approximation of the ReLU, equivalent to the Gaussian error linear unit (GeLU) activation [ 75 ]. For all models, we set the straight-through temperature to τ = 1 without further tuning, as our experiments indicated the framework is robust to this hyperparameter. 
+
+Shell initialization and optimization details. KAFFEE jointly optimizes the AL-RNN core and diagonal shell from the AL-RNN checkpoint with the initialization embedding E fixed. The diagonal noise shell is initialized from the same-seed AL-RNN’s teacher-forcing residual scale (in standardized observation coordinates). Writing ˆr0 ∈ RN 
+
+> +
+
+for the coordinate-wise standard deviation of the teacher-forcing residuals on the noisy training observations, we use a fixed 90 /10 variance split ( α = 0 .9 in Algorithm 1) 
+
+Λ0 = diag  (√0.9 ˆ r0)2, Γ0 = ¯ q20 IM , ¯q0 := 1
+
+N
+
+> N
+
+X
+
+> j=1
+
+√0.1 ˆ r0,j ,
+
+At each gradient step we sample 16 contiguous windows of total length 40 from the standardized noisy training trajectory, propagate the EKF through the full window, and include only the final 32 
+
+innovation terms in the loss after an 8-step burn-in. Optimization uses Adam ( β1 = 0 .9, β2 = 0 .999 )[ 76 ] with learning rate 5 × 10 −3, gradient clipping 2.0 and 150 joint iterations. This configuration was the winning configuration under observable Dstoch stsp , evaluated against the noisy training data and chosen via grid search using one of the 20 seeds. 
+
+Windowed truncation and covariance burn-in. During training, KAFFEE is optimized over contiguous truncated windows rather than the full, uninterrupted trajectory. Consequently, at the 26 start of each window, the filter mean is anchored to the observed state and the predictive covariance is reinitialized from the static shell parameters. If those first few innovation terms enter the loss immediately, the optimizer can partly improve the objective by exploiting transient covariance geometry that exists only because the window was truncated there. The goal is to couple predictive uncertainty to the learned transition map through Jacobian-transported covariance, so the loss-contributing portion of each window should reflect covariance transport that has already had a short opportunity to align with the local dynamics. For that reason, KAFFEE runs use a short covariance burn-in. We sample windows of total length 
+
+Lburn + L with burn-in phase Lburn = 8 and loss horizon L = 32 , propagate the filter recursion across all 40 steps, but exclude the first 8 innovation terms from the loss. Writing the per-step innovation contribution as 
+
+ℓt = 12
+
+h
+
+log det Ωt + v⊤ 
+
+> t
+
+Ω−1 
+
+> t
+
+vt + N log(2 π)
+
+i
+
+,
+
+the loss on one sampled window becomes 
+
+Lburn EKF = 1
+
+LN 
+
+> Lburn +L
+
+X
+
+> t=Lburn +1
+
+ℓt, Lburn = 8 , L = 32 .
+
+The filter state and predictive covariance are still propagated through the full 40 -step window; only the burn-in phase is “hidden” from the objective. This modification thus keeps the scored loss horizon and batch construction unchanged while removing the optimizer’s incentive to fit a covariance transient that is caused by window truncation rather than by the learned dynamics. To match schedules, the open-loop NLL control mirrors the same sampled window length. We choose Lburn only to remove the short window-start covariance transient; in practice it should be long enough that the predictive covariance is no longer dominated by its initialization and kept fixed across baselines. 
+
+## C Experimental Details 
+
+This section consolidates model, dataset, metric, and optimization protocol details required to reproduce Tables 1 and 3. 
+
+C.1 AL-RNN architecture and deterministic training 
+
+All rows in Table 1 share the same AL-RNN core and deterministic pretraining protocol. Its deterministic transition for zt ∈ RM is 
+
+zt+1 = Fθ (zt) = Az t + W ϕ ∗(zt) + h, (11) where A ∈ RM ×M , W ∈ RM ×M are diagonal and full matrices, respectively. ϕ∗ applies a ReLU gating to the last P coordinates only, and the first M − P coordinates are linear [ 47 ]. Equivalently, writing the binary switching code ct ∈ { 0, 1}P and diagonal gate matrix 
+
+D(ct) = diag   1, . . . , 1
+
+| {z } 
+
+> M−P
+
+, c t, 1, . . . , c t,P 
+
+,
+
+the transition can be written as 
+
+zt+1 =  A + W D (ct)zt + h. (12) We use latent dimension M = 100 , N = 20 , and P = 50 ReLU-gates. Observations are always the first N latent coordinates, so the observation operator is fixed to 
+
+B = [ IN 0] ∈ RN ×M , xt = Bz t. (13) To initialize a rollout from the first observation x1 ∈ RN , a learned linear embedding E ∈ RM ×N is applied to overwrite the observed coordinates [47], 
+
+z1 ← Ex 1, z1 ← z1 + B⊤(x1 − Bz 1).
+
+Deterministic prior pretraining. Each deterministic AL-RNN core is pretrained on the standardized noisy Lorenz-96 training observations described in Appx. C.3. Training uses BPTT with sparse 27 Algorithm 1 KAFFEE optimization protocol  
+
+> 1:
+
+Input: observations x1: T , transition map Fθ , observation matrix B, deterministic prior model 
+
+θ(0)  
+
+> c
+
+, covariance burn-in length Lburn , scored length L, variance split α ∈ (0 , 1) (here, α = 0 .9
+
+throughout).  
+
+> 2:
+
+Initialization. Compute one-step teacher-forcing residual scales ˆr0 ∈ RN 
+
+> +
+
+on noisy training trajectory under θ(0)  
+
+> c
+
+. Set 
+
+Λ0 = diag  α ˆr 20
+
+, Γ0 = ¯ q20 IM , ¯q0 = 1
+
+N
+
+> N
+
+X
+
+> j=1
+
+√1 − α ˆr0,j .
+
+Set θc ← θ(0)  
+
+> c
+
+, θs ← (Γ0, Λ0), and initialize θ ← (θc, θ s). 
+
+> 3:
+
+for each optimization step do  
+
+> 4:
+
+Sample a mini-batch B of windows xt0:t0+Lburn +L. 
+
+> 5:
+
+Form the current diagonal shell covariances Γ and Λ. 
+
+> 6:
+
+Set Lbatch ← 0. 
+
+> 7:
+
+for each window in B do  
+
+> 8:
+
+Initialize filtered belief: Set ¯zt0 to the latent state from the deterministic prior at t0.Initialize the filter by applying the identity teacher forcing projection (Appx. C.1): 
+
+zt0|t0 = ¯ zt0 + B⊤(xt0 − B ¯zt0 ), Σt0|t0 = Γ. 
+
+> 9:
+
+for t = t0 + 1 , . . . , t 0 + Lburn + L do  
+
+> 10:
+
+Predict: 
+
+zt|t−1 = Fθ (zt−1|t−1), Jt = ∂F θ
+
+∂z (zt−1|t−1). 
+
+> 11:
+
+Transport covariance: 
+
+Σt|t−1 = JtΣt−1|t−1J⊤ 
+
+> t
+
++ Γ. 
+
+> 12:
+
+Form innovation: 
+
+vt = xt − Bz t|t−1, Ωt = BΣt|t−1B⊤ + Λ. 
+
+> 13:
+
+if t > t 0 + Lburn then  
+
+> 14:
+
+Accumulate innovation NLL 
+
+Lbatch ← L batch + 12|B| LN 
+
+log det Ωt + v⊤ 
+
+> t
+
+Ω−1 
+
+> t
+
+vt + N log(2 π) . 
+
+> 15:
+
+end if  
+
+> 16:
+
+Update: 
+
+Kt = Σt|t−1B⊤Ω−1 
+
+> t
+
+,
+
+zt|t = zt|t−1 + Ktvt, Σt|t = ( I − KtB)Σt|t−1. 
+
+> 17:
+
+end for  
+
+> 18:
+
+end for  
+
+> 19:
+
+Backpropagate Lbatch through the predict–transport–update computation and update θ. 
+
+> 20:
+
+end for 
+
+28 identity teacher forcing and forcing interval τ = 20 [ 43 , 47 ]. Because the observation map is the identity projection onto the first N coordinates, this is identity teacher forcing (ITF): at forcing times 
+
+Tτ = {t : t ≡ 0 (mod τ ), t > 0} we apply 
+
+˜zt = zt + B⊤(xt − Bz t),
+
+which overwrites the observed coordinates and leaves the remaining coordinates untouched. Be-tween forcing times the model is free-running. Training minimizes next-step MSE on the observed coordinates along these interleaved rollouts, 
+
+LITF = 1
+
+LBPTT N
+
+> LBPTT
+
+X
+
+> t=1
+
+∥Bz t+1 − xt+1 ∥22, LBPTT = 50 ,
+
+using mini-batches of 16 contiguous windows, 50 batches per epoch, and 2 · 10 3 epochs on the 
+
+Ttrain = 8 · 10 4 time steps long training trajectory. Optimization uses RAdam with an exponential learning-rate decay from 10 −3 to 10 −5 [ 77 ]. Initialization follows [ 47 ]: h = 0, the entries of W are i.i.d. N (0 , 0.01) , the diagonal of A is taken from a normalized random positive-definite matrix, and the embedding E is initialized entrywise from U(−1/√N , 1/√N ). Table 1 reports 20 independent AL-RNNs trained with this same protocol. Every probabilistic AL-RNN row in this table inherits the corresponding deterministic core and initializer E.
+
+C.2 Probabilistic baselines 
+
+For Lorenz-96, the matched controls use the same AL-RNN initializations and the same diagonal noise parametrization and initialization as KAFFEE. For BPTT optimization, KAFFEE and all controls use Adam with learning rate 5 × 10 −3, gradient clipping 2.0, and 150 joint iterations. Each sampled window has 40 total steps: 8-steps are propagated for covariance burn-in and the final 32 steps are scored. 
+
+Open-loop objectives. The two open-loop baselines in Table 1 are trained using a open-loop Gaussian NLL. At each window time t, we compute the predictive mean zt|t−1 = Fθc (zt−1|t−2) and covariance Σt|t−1, score the Gaussian observation density log N  xt; Bz t|t−1, BΣt|t−1B⊤ +Λθs
+
+
+
+without any Kalman update/assimilation, and propagate (z, Σ) using only the predict step. The two open-loop methods differ only in their covariance recursion: tied transport (core collapse) uses the Jacobian recursion (Eq. 2); no transport (noise masking) replaces this by the state-invariant recursion 
+
+Σt+1 |t = Σt|t−1 + Γθs , so the only path through which the core enters the loss is the predicted mean. 
+
+Filtered no covariance transport. This control instantiates the filtered no-transport (blind uncer-tainty) control. The objective and optimization schedule are identical to KAFFEE. The only difference is the covariance recursion: Σt|t−1 = Σt−1|t−1 + Γθs replaces the Jacobian-transported recursion of Eq. 2, so the core no longer enters the predictive covariance and the only state dependence in the predictive uncertainty comes (indirectly) through the Kalman update of the posterior. We can see this as running the regular KF but using an identity approximation for the local Jacobians. The mean update and Kalman gain are otherwise unchanged. 
+
+Frozen-Core Shell Calibration. This row in Table 1 quantifies how much of the improvement is attainable by post-hoc noise calibration alone. We freeze the AL-RNN prior and optimize only the diagonal stochastic shell (Γθs , Λθs ) under the EKF innovation NLL. By construction the shell-off core metrics are identical to the deterministic AL-RNN prior; this control therefore exposes how much filtered probabilistic and stochastic dynamical performance is achievable without ever updating the deterministic core. 
+
+C.3 Lorenz-96 dataset 
+
+For Table 1 we use the N = 20 -dimensional Lorenz-96 system [27]: 
+
+dzi
+
+dt = ( zi+1 − zi−2)zi−1 − zi + F, i = 1 , . . . , 20 ,
+
+with forcing F = 8 and discretization step ∆t = 0 .04 . We denote the corresponding discrete-time latent state by zt ∈ R20 . Let μtrain ∈ R20 and strain ∈ R20 + denote the coordinate-wise mean and 29 standard deviation of the clean training trajectory in raw coordinates. The models are trained on trajectories generated in standardized coordinates, 
+
+˜zt = diag( strain )−1(zraw  
+
+> t
+
+− μtrain ), ˜xt = diag( strain )−1(xraw  
+
+> t
+
+− μtrain ).
+
+The process noise ( σproc ) is defined on a standardized scale. Concretely, we first fix reference coordinate scales sref ∈ R20 + from a long clean run and then simulate the raw stochastic dynamics as a Runge–Kutta 4-th order drift step plus Euler–Maruyama diffusion, 
+
+zraw  
+
+> t+1
+
+= RK4 ∆t(zraw  
+
+> t
+
+) + σproc 
+
+√∆t diag( sref )εt, εt ∼ N (0, I20 ).
+
+Thus σproc specifies the diffusion magnitude relative to a fixed standardized scale, while the numerical integration itself is carried out in raw coordinates. After standardization by strain , the resulting per-step diffusion in standardized coordinates is therefore approximately σproc 
+
+√∆t per coordinate. Observation noise is added separately, after latent simulation, in raw coordinates: 
+
+xraw  
+
+> t
+
+= zraw  
+
+> t
+
++ σobs diag( strain )ηt, ηt ∼ N (0, I20 ),
+
+After standardization, this becomes exactly 
+
+˜xt = ˜ zt + σobs ηt,
+
+so σobs is the observation-noise standard deviation in standardized coordinates. Table 1 uses σobs =
+
+σproc = 0 .1 in this sense. All Lorenz-96 models (AL-RNN, KAFFEE, probabilistic baselines) train on these standardized noisy observations. 
+
+C.4 Metric computation and aggregation 
+
+For the predictive metrics in Table 1, the forecast horizon used is a quarter of a Lyapunov time, i.e.  
+
+> 14
+
+τλ = 0 .25 λ−11,ref :
+
+H =
+
+ 0.25 
+
+λ1,ref ∆t
+
+
+
+= 4 steps, where λcore 1,ref is the leading Lyapunov exponent of the ground truth deterministic dynamics. To evaluate the local predictive metrics, each seed/ensemble cohort first averages its predictive metrics over evenly spaced forecast starts, and the table medians and robust SE values are then formed across those independent runs. Throughout, we use 200 ensemble members for probabilistic forecasts and an observation-noise floor of 10 −3 for the standard deviation inside the Gaussian likelihood. 
+
+NLL ( H-step path mean). For each forecast start, we autoregressively propagate an ensemble forward H steps. At every h = 1 , . . . , H we compute the ensemble mean μh and the sample standard deviation σh, and evaluate the per-step Gaussian NLL against the noisy reference yh by 
+
+NLL( yh; μh, σh) = 1
+
+N
+
+> N
+
+X
+
+> j=1
+
+12
+
+"
+
+log(2 πσ 2 
+
+> h,j
+
+) + (yh,j − μh,j )2
+
+σ2
+
+> h,j
+
+#
+
+.
+
+The reported NLL is the path mean over horizon H, then averaged over the 100 forecast starts. 
+
+CRPS. The CRPS is evaluated at the endpoint of the bounded horizon H, using 10 evenly spaced forecast starts. For the reference observation y at the endpoint and the corresponding ensemble 
+
+{x(k)}Kk=1 , we compute the marginal ensemble CRPS 
+
+CRPS( y, {x(k)}) = 1
+
+N
+
+> N
+
+X
+
+> j=1
+
+"
+
+1
+
+K
+
+> K
+
+X
+
+> k=1
+
+|x(k) 
+
+> j
+
+− yj | − 12K2
+
+> K
+
+X
+
+> k=1
+> K
+
+X
+
+> ℓ=1
+
+|x(k) 
+
+> j
+
+− x(ℓ) 
+
+> j
+
+|
+
+#
+
+.
+
+The reported entry is the average of this endpoint CRPS over the 10 starts. 
+
+Dynamical grounding correlation Gtan . To measure whether a model’s local uncertainty is dynami-cally grounded, this metric correlates the one-step predictive variance growth against the local tangent expansion of the true system. We use Gtan as a controlled probabilistic DSR certification metric: it requires access to the true local Jacobians and is therefore not directly available on real-world 30 datasets. In such settings, analogous diagnostics would need to rely on proxy tangent estimates, withheld-observation spread growth, or innovation residual checks rather than oracle Jacobians. Let Σmt|t be the posterior covariance of method/model m, and let 
+
+Ωmt|t := BΣmt|tB⊤
+
+be its observed-space posterior covariance. Let Σmt+1 |t be the model’s one-step predictive covariance, and let J⋆t be the true one-step Jacobian at the corresponding clean state. We define the model-predicted observed-coordinate log-growth 
+
+∆umj,t := log 
+
+h
+
+BΣmt+1 |tB⊤i
+
+> jj
+
+− log 
+
+h
+
+Ωmt|t
+
+i
+
+> jj
+
+,
+
+and the oracle tangent log-growth 
+
+∆u⋆,m j,t := log 
+
+h
+
+J⋆t Ωmt|tJ⋆⊤
+
+> t
+
+i
+
+> jj
+
+− log 
+
+h
+
+Ωmt|t
+
+i
+
+> jj
+
+.
+
+The first quantity is the variance growth assigned by the surrogate; the second one is the variance growth that the true local tangent dynamics would assign to the same posterior covariance. We then report the rank correlation 
+
+Gtan (m) := Spearman (j,t )
+
+ ∆umj,t , ∆u⋆,m j,t 
+
+ , (14) pooled over observed coordinates and time. We set Gtan = 0 if either argument is constant up to numerical precision. Subtracting the posterior variance baseline on both sides makes the metric focus on local variance growth, rather than on absolute covariance magnitude. Unless otherwise stated, Gtan denotes this one-step diagnostic. It is computed after a 200 -step filter warm-up and then pooled over the following 4 · 10 3 prediction/update steps. For the forecast-skill spectrum in Appx. D.1, we also use an H-step extension, denoted G(H)tan . Here we start from the same filtered covariance Σmt|t, but we then propagate the model’s covariance for H
+
+prediction steps without intermediate measurement updates. 
+
+Stochastic dynamical fidelity. For shell-on stochastic evaluation, we initialize on a noisy state on held-out data, then store a total length of 10 5 time steps after discarding the first 10 3 steps to account for a potential transient phase, and compare them with the corresponding post-burn reference window. For the benchmark systems of the DynaMix experiments, the state-space divergence is the histogram KL divergence 
+
+Dstoch stsp = X
+
+> b
+
+pref (b) log pref (b)
+
+pgen (b) ,
+
+using 30 bins per coordinate. For Lorenz-96, the exponential scaling of bins with data dimension renders this histogram approach infeasible, so density estimation is executed instead by Gaussian mixture models (GMMs) [ 46 , 2, 47 ]. The reference and generated distributions are approximated by isotropic Gaussian mixtures centered on the trajectories, 
+
+pref (x) ≈ 1
+
+T
+
+> T
+
+X
+
+> t=1
+
+N (x | zt, Σ), pgen (x | z) ≈ 1
+
+L
+
+> L
+
+X
+
+> ℓ=1
+
+N (x | zℓ, Σ), (15) and the KL divergence between them is estimated via Monte Carlo [78]: 
+
+˜Dstsp 
+
+ pref (x), p gen (x | z) ≈ 1
+
+n
+
+> n
+
+X
+
+> i=1
+
+log 
+
+> 1
+> T
+
+PTt=1 N (xi | zt, Σ)
+
+> 1
+> L
+
+PLℓ=1 N (xi | zℓ, Σ) , (16) using n Monte Carlo samples xi ∼ pref . The covariance Σ = σ2I is a scaled identity, and for compatibility with [ 2 , 47 ] we set σ2 = 1 . In our implementation we use T = L = 10 5 samples and 
+
+n = 10 3 MC draws. The unstable-volume growth rate of the stochastic dynamics and its error are given by the sum of positive Lyapunov exponents λstoch  
+
+> i
+
+:
+
+hstoch  
+
+> λ
+
+:= X
+
+> i
+
+max( λstoch  
+
+> i
+
+, 0) , |∆hstoch  
+
+> λ
+
+| := |ˆhstoch  
+
+> λ
+
+− hstoch  
+
+> λ, ref
+
+|,
+
+31 using QR re-orthonormalization on the (shell-on) one-step Jacobian recursion after the rollout burn-in to estimate Lyapunov spectra [ 79 , 80 ]. For the reference values, the same algorithm is applied on the true Jacobians. 
+
+Deterministic dynamical fidelty. To evaluate the autonomous core we initialize the deterministic rollout from a clean (noise-free) state, and apply the same rules (rollout lengths, transient burn-in) as for the stochastic dynamical fidelity, using the noise-free ground truth. The autonomous deterministic versions of the state space divergence Dcore stsp and unstable-volume growth rate (KS entropy) hcore 
+
+> λ
+
+are evaluated analogously, by stripping the shell, i.e. generating rollouts only using the autonomous transition map. To evaluate spectral overlap, we use the mean Hellinger distance between the per-coordinate power spectra, Dcore  
+
+> H
+
+, after each signal is centered, standardized, transformed with a real Fourier transform, smoothed by a Gaussian kernel of width 20 (chosen according to prior literature [ 2, 47 ]), and renormalized to unit mass. Writing the smoothed normalized spectra as pj (ω) and qj (ω), we report 
+
+Dcore  
+
+> H
+
+= 1
+
+N
+
+> N
+
+X
+
+> j=1
+
+s
+
+1 − X
+
+> ω
+
+q
+
+pj (ω)qj (ω).
+
+Aggregation. We first compute every metric per seed or per disjoint ensemble cohort and then report the median together with the robust standard error of the median, 
+
+SE median ≈ 0.929 IQR 
+
+√n .
+
+Both Table 1 and Table 3 use 20 independent seeds. 
+
+C.5 DynaMix architecture and probabilistic adaptation protocol 
+
+This section records the complete numerical results and additional details of the DynaMix benchmark experiment in Section 5.2. We do not re-state the full DynaMix architecture; for that we refer to [ 18 ]. The purpose here is to state the state-space interpretation of DynaMix used in the benchmark, the shell parameterization, the Jacobian construction, the KAFFEE protocol, and the definitions of the applied baselines. 
+
+State-space form of DynaMix. DynaMix is a DSR foundation model, in the sense that its zero-shot dynamics are not supposed to (only) constitute accurate forecasts, but also capture the long-term structure underlying the (chaotic) data-generating system [ 18 , 3]. While DynaMix is aligned with deterministic DSR, our present work emphasizes the need for uncertainty-aware, probabilistic DSR (foundation) models. To pursue this with DynaMix, we apply KAFFEE to embed it into a Bayesian filter/state-space model framework. In particular, we treat DynaMix as a pretrained latent transition model with fixed context. Let zt ∈ RM denote the latent state, xt ∈ RN the observed state, and ctx the context supplied to the pretrained model. This context consists of a reference sequence of observations from the target system, from which DynaMix is asked to zero-shot the underlying dynamics. The transition is written as 
+
+zt+1 = FDynaMix (zt, ctx , εgate  
+
+> t
+
+), εgate  
+
+> t
+
+∼ N (0 , Σgate ),
+
+with DynaMix’s mixture-of-experts form 
+
+FDynaMix (zt, ctx) = 
+
+> E
+
+X
+
+> k=1
+
+wt,k fk(zt), wt = gψ (ctx , zt, εgate  
+
+> t
+
+),
+
+where fk : RM → RM denotes the k-th (AL-RNN) expert’s transition map, and wt,k is its state-and context-dependent mixture weight. The gating network gψ combines a convolutional neural network encoding of the context trajectory with the current latent state via a state attention mechanism to produce these expert-weights for the E experts on a simplex wt ∈ ∆E−1. This state attention mechanism contains an internal diagonal Gaussian perturbation (“exploration noise”) εgate  
+
+> t
+
+.
+
+Gate stochasticity. The pretrained DynaMix model carries a small internal standardized per-coordinate noise in its attention computation: before context-attention weights are formed, the 32 Table 2: Held-out DynaMix benchmark systems. The table lists the 13 3 -dimensional ODE systems we used for the DynaMix in-context KAFFEE adaptation, together with the system parameters, numerical integration step size ∆t, transient discarding (burn-in) length, and the reference leading Lyapunov exponent λref 1 . The exponents listed here are computed using the ground-truth Jacobians along 10 4 steps of reference rollouts using QR re-orthonormalization [ 80 , 79 ]. For a complete description, visualization and sources of these systems we refer to [81]. 
+
+System Parameters ∆t Burn-in λref 1
+
+Aizawa a=0 .95 , b =0 .7, c =0 .6, d =3 .5, e =0 .25 , f =0 .1 0.02 1000 0.088 Burke–Shaw s=10 , v =4 .272 0.005 1000 0.678 Chen a=35 , b =3 , c =28 0.005 2000 2.042 Chua α=15 .6, β =28 , m 0=−1.143 , m 1=−0.714 0.02 500 0.407 Dadras p=3 , q =2 .7, r =1 .7, s =2 , e =9 0.02 500 0.367 Genesio–Tesi a=0 .44 , b =1 .1, c =1 0.02 500 0.108 Hadley a=0 .2, b =4 , f =8 , g =1 0.02 500 2e-4 Halvorsen a=1 .89 0.01 1000 0.005 Lorenz–63 σ=10 , ρ =28 , β =8 /3 0.02 500 0.902 Nose–Hoover a=1 .5 0.02 500 0.005 Qi–Chen a=38 , b =8 /3, c =80 0.005 2000 3.677 Rabinovich–Fabrikant γ=0 .87 , α =1 .1 0.01 1000 0.215 Sprott B — 0.05 500 0.207 
+
+current latent state is projected to observation space and perturbed by a learnable diagonal Gaussian noise term. In the model used here, Σgate ≈ diag(0 .003 , 0.003 , 0.008) in standardized coordinates. We retain this mechanism during adaptation rather than modifying the pretrained foundation model, see Eq. 17. Given the relatively small variance of the gate stochasticity relative to the observation and process noise variances, we forego analytical marginalization in favor of a Monte Carlo approxima-tion (with a single sample). We interpret the learned diagonal process covariance Γ as an effective process noise term that absorbs residual error from this approximation. We refer to FDynaMix with the external Gaussian shell removed as the shell-off core transition. 
+
+DynaMix specifications. The model specifications were directly adopted from [ 18 ]. Specifically, the model uses has M = 30 latent dimensions, N = 3 observed dimensions, E = 10 AL-RNN experts with P = 2 ReLU-gated coordinates, respectively. Each expert is therefore piecewise affine, 
+
+fk(z) = Akz + Wkϕ∗
+
+> k
+
+(z) + hk,
+
+with AL-RNN parametrization as described in Appx. C.1. Throughout the DynaMix experiments, the first N latent coordinates are identified with the observable state. In other words, we apply the same observation operator B that was used for the single AL-RNN experiments on Lorenz-96 (Eq. 13). 
+
+Shell parameterization. All probabilistic DynaMix baselines embed the model into a state-space framework using an external Gaussian shell around the deterministic core. We use the same diagonal parameterization for every DynaMix variant: 
+
+zt+1 = FDynaMix (zt, ctx , εgate  
+
+> t
+
+) + Γ1/2ξt, xt = Bz t + Λ1/2ηt, (17) where ξt ∼ N (0, IM ) and ηt ∼ N (0, IN ), and 
+
+Γ = diag( q21 , . . . , q 2 
+
+> M
+
+), Λ = diag( r21 , . . . , r 2 
+
+> N
+
+).
+
+These initial scales are chosen analogously to the Lorenz-96 AL-RNN experiments, via teacher-forced residuals and variance split α = 0 .9 (see Appx. B.2). 
+
+In-context KAFFEE protocol. We use the released model dynamix-3d-alrnn-v1.0 , published alongside [ 18 ] in https://github.com/DurstewitzLab/DynaMix-python . This model was pretrained on a benchmark of three-dimensional chaotic attractors [ 81 ]. In our experiments, we adapt it to previously unseen systems. Table 2 reports the 13 held-out chaotic ODEs we evaluated and Table 3 shows the corresponding aggregated results. For each system, the first 2 · 10 3 points form the fixed context. Our probabilistic KAFFEE-adaptation is only training on windows drawn inside this context. The scored window length Wscored is chosen 33 per system according to its Lyapunov time: 
+
+Wscored = round 
+
+ τλ
+
+∆t
+
+
+
+.
+
+We clipped Wscored to a range between 24 and 128 steps. For evaluation, we applied the same protocol that was used in the Lorenz-96 experiments. For KAFFEE, the same 8-steps covariance burn in and variance split α = 0 .9 detailed in Appx. B.2 was applied for every of the 13 systems, which also highlights robustness with respect to these KAFFEE-hyperparameters. 
+
+Jacobian construction. To apply KAFFEE on the shell-off DynaMix core, we require a local transition Jacobian. We adopt an analytical mixture-Jacobian construction: the gating network is evaluated once at the current latent state under one realization of the gate noise εgate  
+
+> t
+
+, the resulting mixture weights wt ∈ ∆E−1 are detached (i.e., treated as locally constant in z), and the local Jacobian is assembled as the convex combination of the experts’ closed-form AL-RNN Jacobians, 
+
+Jt ≈
+
+> E
+
+X
+
+> k=1
+
+wt,k Jk(zt|t) ∈ RM ×M , Jk(z) = ∇z fk(z) = Ak + Wk Dk(ct),
+
+using the AL-RNN expert transition maps fk, where Ak is diagonal, Wk is full, and Dk(ct) = diag(1 , . . . , 1, c t, 1, . . . , c t,P ) is the binary switching matrix evaluated at the current latent state (i.e., 
+
+ct,j = 1{zt,M −P +j > 0}), see Eq. 12. Two consequences are worth noting. First, the gradient of the objective with respect to the DynaMix core parameters flows through both the experts {Ak, Wk, hk}
+
+and (via FDynaMix and the shell) the propagated covariance, but not through the gating-weight derivatives ∂wt/∂ z. Second, the omitted gating-derivative term is 
+
+> E
+
+X
+
+> k=1
+
+fk(z)∇z wt,k (z)⊤.
+
+Because the DynaMix gating depends on the current latent state only through its observed projection 
+
+Bz , this term is low-rank (its rank is at most N ). We omit this term in the Jacobian-based covariance propagation and use the same convention for all four probabilistic DynaMix adaptation methods that update the core (Tab. 3). 
+
+KAFFEE-DynaMix training. The DynaMix ablations shown in Table 3 use the same general procedure as the AL-RNN study (see Algorithm 1): starting from a teacher-forced-residual shell initialization ( α = 0 .9), KAFFEE jointly optimizes the DynaMix core and the process/observation noise under the innovation NLL. Optimization uses Adam ( β1 = 0 .9, β2 = 0 .999 ) [ 76 ], learning rate 5 × 10 −5, batch size 16 , gradient clipping 1.0, and proceeds for 10 iterations. This rapid fine-tuning phase reflects the fact that DynaMix is a pretrained foundation model requiring only minimal adaptation to the target system. The context representation is held fixed for all windows of a given target system. 
+
+C.5.1 DynaMix evaluation protocol 
+
+Training objectives differ across rows, but all predictive metrics are evaluated by the same finite-ensemble protocol. Held-out ensemble evidence is evaluated with 256 members. Local predictive metrics are one-step NLL and the ten-step forecast root-mean-square error 
+
+RMSE 10 = Et
+
+q 1 
+
+> N
+
+¯xt+10 |t − x⋆t+10 
+
+> 22
+
+
+
+, (18) where ¯xt+10 |t is the ensemble-mean ten-step forecast given the filtered state zt|t on the held-out trajectory and x⋆t+10 is the corresponding clean reference observation; the expectation is taken over starts on held-out windows. We report RMSE 10 in standardized observation units. To probe the local probabilistic structure, we additionally report the dynamical grounding correlation Gtan (Eq. 14) computed in observed coordinates, with the true local Jacobians J⋆t taken from the analytic flow of the target ODE (Runge-Kutta-4th order step). Deterministic dynamical fidelity metrics ( Dstsp , DH )are computed from deterministic rollouts of the adapted core model with the stochastic shell removed, since the evaluation question is whether the transferred dynamics “survive” probabilistic adaptation. 34 Table 3: In-context probabilistic adaptation of DynaMix on 13 held-out ODE systems. All proba-bilistic rows share the same 10-step in-context adaptation schedule, diagonal noise parametrization, and are initialized from the same pretrained DynaMix core. Bold : median whose ± SE interval over-laps the column’s best among methods that update the core; red: signature failure mode (bracketed label). Medians ± SEs across 13 systems × 20 seeds; see Appx. C.5.1–C.5.2.                                         
+
+> Local Probabilistic Behavior Deterministic Dynamics (Core) Model / Objective NLL (1-step) ↓RMSE 10 ↓Gtan ↑Dcore stsp /D base stsp ↓Dcore
+> H↓
+> Zero-shot transferred core
+> DynaMix base (no adaptation) ---1.000 ±0.000 0.232 ±0.007
+> Frozen-Core Shell Calibration 0.890 ±0.028 0.223 ±0.004 0 .690 ±0.016 1.000 ±0.000 0.232 ±0.007
+> Open-Loop objective
+> No transport [Noise Masking] 0.929 ±0.038 0.232 ±0.005 0.298 ±0.023 1.183 ±0.023 0.357 ±0.014
+> Tied transport [Core Collapse] 0.887 ±0.036 0.227 ±0.005 0.268 ±0.023 1.102 ±0.016 0.307 ±0.012
+> Filtered objective
+> No transport [Blind Uncertainty] 0.766 ±0.030 0 .219 ±0.004 0.308 ±0.017 1.053 ±0.014 0.273 ±0.007
+> Tied transport (KAFFEE-DynaMix) 0.806 ±0.030 0 .216 ±0.004 0 .688 ±0.016 1 .038 ±0.012 0.256 ±0.006
+
+C.5.2 DynaMix baseline definitions How to read Table 3. In the main text we report a compact comparison between KAFFEE-DynaMix, frozen-core shell calibration (“noise-only”), and the open-loop tied-transport control (“open-loop”). The full table in this section expands this comparison to the complete objective 
+
+× covariance-propagation taxonomy from Fig. 1. Table 3 thus mirrors the mechanistic two-axis taxonomy of the Lorenz-96 ablation (Table 1, Fig. 1): Objective ∈ { open-loop , filtered } × Covari-ance transport ∈ { tied (Jacobian) , no transport (identity) }. All four probabilistic baselines share one common training schedule, the only varying factor between them is the per-step objective and the covariance recursion. The full DynaMix table mirrors the Lorenz-96 taxonomy at the foundation-model scale. The filtered no-transport row obtains strong 1-step NLL and ten-step RMSE, but has much lower Gtan than KAFFEE-DynaMix, consistent with locally blind uncertainty despite good average predictive scores. Conversely, the open-loop rows degrade the shell-off core metrics after adaptation, consistent with the core-damaging shortcuts identified in the Lorenz-96 ablation: tied transport exhibits the core-collapse signature, while no transport exhibits the noise-masking signature. Among methods that update the DynaMix core, KAFFEE-DynaMix is the only one tested here that combines high local grounding of uncertainty with small deterministic core drift. Overall, the DynaMix results support the same qualitative picture as the Lorenz-96 experiment in Table 1. 
+
+DynaMix base. The pretrained shell-off model with no adaptation. This is the core transition model for all probabilistic adaptation methods in this experiment. 
+
+Frozen core shell calibration. The diagonal shell is optimized under the EKF innovation objective (Eq. 4) while the pretrained DynaMix core is held fixed. The autonomous core rollout is therefore identical to the DynaMix base rollout by construction; the row exists to isolate the contribution of shell-only calibration from any adaptation of the transition map. 
+
+Open-loop, tied transport. This is the direct DynaMix analogue of the Lorenz-96 “Open-loop, tied transport” control: DynaMix core and shell are updated jointly under a Gaussian open-loop NLL, where at each scored step the predictive mean and covariance are propagated by the EKF predict step (Eq. 2). 
+
+Open-loop, no transport. Identical to the Open-loop tied baseline, except that the predictive covariance recursion is replaced by the state-invariant version Σt−1|t−1 + Γθs (see also the Lorenz-96 analogue, Appx. C.2). 
+
+Filtered, tied transport (KAFFEE-DynaMix). Shell and core are updated jointly under the EKF innovation NLL (Eq. 4) with full Jacobian-transported predictive covariance, according to Algorithm 1. This is the direct analogue of the Lorenz-96 KAFFEE method. 
+
+Filtered, no transport. Identical to KAFFEE-DynaMix except that the predict-step covariance recursion is replaced by the state-invariant version; the EKF update is still applied at every step. This is the direct analogue of the Lorenz-96 Blind-Uncertainty control. 35 D Additional Experiments 
+
+This section contains two supporting checks. First, we verify that the Lorenz-96 ablation is not tied to the particular forecast horizon used in Table 1. Second, we use two simple non-chaotic systems to isolate the classical noisy-state attenuation mechanism discussed in Appx. A.2. These controls are deliberately simpler than the chaotic benchmarks. Their purpose is to separate a known source of contraction bias from the covariance-volume mechanism studied in the main text: if noisy observations are treated directly as states, a predictive Gaussian objective can learn an attenuated observation-to-observation map rather than the latent transition [41, 42]. 
+
+D.1 Forecast-skill spectrum across lead times on Lorenz-96 
+
+Table 1 reports local predictive scores at H = 14 τλ. To check that the conclusions do not depend on this single choice, Fig. 4 evaluates the same 20 Lorenz-96 seeds across H ∈ { 0.13 , 0.27 , 0.60 , 1.00 }τλ.The NLL is the autoregressive ensemble NLL, CRPS is scored at the endpoint t + H, and G(H)tan 
+
+measures whether predictive variance growth over the assimilation cycle follows local tangent expansion. 0.2  0.4  0.6  0.8  1.0                
+
+> Horizon [ ]
+> 1.2
+> 1.3
+> 1.4
+> 1.5
+> 1.6
+> 1.7
+> 1.8
+> 1.9
+> NLL
+> a
+> 0.2 0.4 0.6 0.8 1.0
+> Horizon [ ]
+> 0.5
+> 0.7
+> 1.0
+> 1.5
+> CRPS
+> b
+> 0.2 0.4 0.6 0.8 1.0
+> Horizon [ ]
+> 0.0
+> 0.1
+> 0.2
+> 0.3
+> 0.4
+> 0.5
+> G(H)
+> tan
+> c
+> Open-loop no transport Open-loop (tied) KAFFEE No-transport Table 1 horizon = 0.25
+
+Figure 4: Lorenz-96 forecast-skill spectrum across horizons. Predictive scores targeted at marginal calibration alone do not certify a dynamically grounded probabilistic surrogate. The no-transport baselines remain competitive in NLL/CRPS (a-b), but its uncertainty is locally blind (c). Filtered objectives maintain Jacobian-transported uncertainty across horizons. Lines show medians across 20 
+
+seeds; shaded bands are bootstrap 95% CIs. The spectrum over horizons supports the same conclusion as Table 1. Open-loop objectives deteriorate as the forecast horizon grows. In contrast, filtered objectives remain competitive on average predictive scores. However, NLL and CRPS still do not separate KAFFEE from the filtered no-transport control: the latter remains close in average forecast skill while failing to transport covariance through the local Jacobians. The grounding metric separates these cases. KAFFEE maintains a large positive G(H)tan ,whereas the no-transport recursion stays near zero at short horizons and only gains a weak residual correlation at longer horizons from monotone reaccumulation of Γ. Thus the blind-uncertainty failure mode is not a horizon-specific artifact. 
+
+D.2 Non-chaotic controls: isolating noisy-state attenuation 
+
+This work examines DPC mechanisms in the context of chaotic DSR. A related but simpler mechanism is classical noisy-state attenuation: if noisy observations are treated directly as states, then one-step Gaussian prediction estimates an observation-to-observation map rather than the latent transition (i.e., it becomes errors-in-variables regression). Appx. A.2 shows this analytically in the scalar linear-Gaussian case. The following controls isolate this simpler mechanism. In both experiments, the competing methods use the same transition family and initialization. The difference is only the objective. The noisy-state predictive objective (“naive maximum likelihood estimation (MLE)”) scores Gaussian predictions directly on noisy observations, i.e. it treats xt as if it were the latent state. KAFFEE instead fits the corresponding state-space model by filtering the latent state and scoring innovations. In the 36 linear-Gaussian case, the EKF used by KAFFEE is the standard Kalman filter, so KAFFEE’s training objective reduces to the exact Kalman innovation maximum likelihood. The deterministic core of KAFFEE and the noisy-state predictive objectives are not pretrained models here, but initialized randomly by drawing from Gaussian distributions. 
+
+Stable linear spiral. We first consider a two-dimensional stable linear spiral observed with additive Gaussian noise. As shown in Fig 5, the noisy-state predictive objective collapses the spectral radius, while KAFFEE recovers the correct autonomous damping rate. The same pattern persists across an observation-noise sweep: as observation noise increases, the noisy-state objective becomes increasingly contractive, whereas the filtering remains close to the true expansion until extreme noise levels. Fig. 6 shows the same effect across observation-noise levels: the noisy-state objective becomes progressively more contractive as measurement noise increases, whereas KAFFEE remains close to the true transition until extreme noise levels. 0 50  100  150         
+
+> epoch
+> 2.7
+> 2.8
+> 2.9
+> 3.0
+> 3.1
+> 3.2
+> 3.3
+> objective
+> Experiment 1 losses
+> Naive MLE train
+> Naive MLE val
+> KAFFEE train
+> KAFFEE val
+> 1.0 0.5 0.0 0.5 1.0
+> real
+> 1.0
+> 0.5
+> 0.0
+> 0.5
+> 1.0
+> imag
+> Learned eigenvalues
+> True
+> Naive MLE
+> KAFFEE
+> 101
+> x
+> 2.0
+> 1.5
+> 1.0
+> 0.5
+> 0.0
+> 0.5
+> 1.0
+> y
+> Autonomous rollout, same init
+> 101
+> x
+> 2.0
+> 1.5
+> 1.0
+> 0.5
+> 0.0
+> 0.5
+> 1.0
+> y
+> Stochastic state rollouts, same init
+> True
+> Naive MLE
+> KAFFEE
+> Start
+
+Figure 5: Attenuation on a noisy linear spiral. From left to right: optimization traces, eigenvalues of learned Jacobians, deterministic autonomous rollouts from the common initialization, and stochastic state rollouts from that same initialization. Both models share the same linear Gaussian state-space parametrization and initialization. The noisy state predictive objective over-damps the learned autonomous map, while KAFFEE recovers the correct spectral radius and rollout geometry. 0.2  0.4  0.6  0.8  1.0  1.2      
+
+> observation noise std
+> 0.2
+> 0.4
+> 0.6
+> 0.8
+> 1.0
+> learned spectral radius
+> Spectral radius versus observation noise
+> true radius
+> KAFFEE
+> Naive MLE Objective
+> 0.2 0.4 0.6 0.8 1.0 1.2
+> observation noise std
+> 0.2
+> 0.4
+> 0.6
+> 0.8
+> 1.0
+> 1.2
+> ||A learned  - A true || F
+> Matrix error versus observation noise
+> KAFFEE
+> Naive MLE Objective
+
+Figure 6: Observation-noise sweep for the linear spiral. The noisy-state predictive objective becomes progressively more contractive as observation noise increases. KAFFEE remains closer to the true stable transition because it separates latent-state inference from observation noise. Error bars show 95% confidence intervals over 10 seeds. 
+
+Van der Pol limit cycle. We next use a nonlinear but non-chaotic system: a noisy Van der Pol limit cycle. The data are generated from 
+
+˙z =
+
+ vμ(1 − x2)v − x
+
+
+
+, μ = 1 .6,
+
+with RK4 step size ∆t = 0 .05 , process noise σproc = 0 .035 , and observation noise σobs = 0 .25 . Both methods fit the same nonlinear Gaussian state-space model with diagonal process and observation covariances and a cubic polynomial transition function 
+
+fθ (z) = Az + W ϕ (z) + h, z = [ x, v ]⊤,
+
+37 where 
+
+ϕ([ x, v ]⊤) = x2, xv, v 2, x 3, x 2v, xv 2, v 3⊤.
+
+Fig. 7 shows the same qualitative failure in a nonlinear setting. The noisy-state predictive NLL learns an overcontractive autonomous map: its shell-off rollout does not return to the limit cycle and instead collapses to a spurious fixed point. The stochastic shell-on rollout can partly “mask” this deterministic failure, but it does not repair the learned core. KAFFEE preserves the transient and returns to the correct orbit, with local Jacobian spectra closer to those of the true flow map. Autonomous rollout, same init              
+
+> 025 50 75 100
+> epoch
+> 0.2
+> 0.4
+> 0.6
+> 0.8
+> 1.0
+> 1.2
+> objective
+> Experiment 2 losses
+> Naive MLE train
+> Naive MLE val
+> KAFFEE train
+> KAFFEE val
+> 1.0 0.5 0.0 0.5 1.0
+> real
+> 1.0
+> 0.5
+> 0.0
+> 0.5
+> 1.0
+> imag
+> Local Jacobian eigenvalues
+> true
+> Naive MLE
+> KAFFEE
+> 202
+> x
+> 3
+> 2
+> 1
+> 0
+> 1
+> 2
+> 3
+> v
+> true
+> Naive MLE
+> KAFFEE
+> start
+> 202
+> x
+> 4
+> 3
+> 2
+> 1
+> 0
+> 1
+> 2
+> 3
+> 4
+> v
+> Stochastic state rollouts, same init
+
+Figure 7: Noisy Van der Pol. From left to right: optimization traces, Jacobian eigenvalues along a deterministic reference rollout, deterministic autonomous rollouts from the common initialization, and stochastic state rollouts from that same initialization. Both methods use the same cubic polynomial transition family. The noisy-state predictive objective learns an overcontractive autonomous map that collapses to a spurious fixed point, while the stochastic rollout “masks”’ this. KAFFEE preserves the limit-cycle geometry by fitting the latent state-space model through innovation scoring. Figure 8 shows a covariance propagation diagnostic for this example. At each state we initialize the same isotropic reference covariance and transport it for one or twenty steps under either the true flow Jacobian or the learned Jacobian products. Because the additive noise terms are omitted from this diagnostic, darker colors correspond directly to stronger local contraction of the transported reference covariance. Additive process noise is omitted in this diagnostic, so darker values correspond to stronger contraction of the transported covariance. The noisy-state objective is systematically more contractive than the reference, whereas KAFFEE better matches the reference covariance-propagation pattern. Together, these controls isolate the simple failure mode known as attenuation bias [ 41 , 42 ], and relate it to the DPC perspective: a finite-horizon predictive objective can improve local fit by contracting the learned transition when noisy observations are used as states. Scoring innovations removes this shortcut in the correctly specified linear-Gaussian case and remains a useful inductive bias in the nonlinear control. 38 Figure 8: Van der Pol covariance propagation map. (top row) One-step transported reference-covariance trace over the same sampled state cloud: left for the true flow Jacobian, center for the noisy-state predictive objective, right for KAFFEE. (bottom row) Analogous twenty-step covariance propagation map with the same ordering of panels. Overall, the noisy-state predictive objective yields damped/contracted uncertainty transport, while KAFFEE recovers a dynamically grounded covariance propagation. 39

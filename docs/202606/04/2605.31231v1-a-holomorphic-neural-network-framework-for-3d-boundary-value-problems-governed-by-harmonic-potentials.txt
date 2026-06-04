@@ -1,0 +1,996 @@
+Title: A holomorphic neural network framework for 3D boundary value problems governed by harmonic potentials
+
+URL Source: https://arxiv.org/pdf/2605.31231v1
+
+Published Time: Mon, 01 Jun 2026 01:41:29 GMT
+
+Number of Pages: 29
+
+Markdown Content:
+# A holomorphic neural network framework for 3D boundary value problems governed by harmonic potentials 
+
+## Enrico Ballini 1, Allan Peter Engsig-Karup 2, Tito Andriollo 1
+
+> 1
+
+Department of Mechanical and Production Engineering, Aarhus University, Aarhus, Denmark 
+
+> 2
+
+Department of Applied Mathematics and Computer Science, Technical University of Denmark, Kongens Lyngby, Denmark 
+
+Abstract 
+
+We present a neural-network-based framework for the solution of three-dimensional boundary value problems where the solution is expressible in terms of harmonic potentials. The approach leverages the Whittaker integral formula, which allows representing the solution through functions that are holomorphic with respect to a suitable complex variable. These functions are subsequently approximated using holomorphic neural networks, which guaranty fulfillment of the holomorphicity requirement. A key feature of the proposed formulation is that the governing partial differential equations (PDEs) are satisfied exactly by construction. Therefore, in contrast to standard physics-informed neural networks, no residual minimization of PDEs is required in the interior of the domain, and training is based exclusively on boundary collocation points. The method is validated against three-dimensional Laplace and linear elasticity problems, where, in the latter case, displacement and stress fields are expressed via the Papkovich-Neuber potentials. The numerical results show an accurate approximation of both scalar and vector fields, with errors remaining controlled throughout the domain. Overall, the work demonstrates that the incorporation of analytical structures into neural network architectures provides a natural and effective framework for the meshless approximation of three-dimensional boundary value problems while preserving the underlying properties of the governing equations. 
+
+# 1 Introduction 
+
+Partial differential equations play a central role in the mathematical description of physical phenomena and engi-neering processes. Among the many classes of boundary value problems, harmonic problems, namely those whose solution can be expressed via harmonic functions, occupy a particularly important position, as they arise in a wide range of contexts. Examples include potential flow in fluid mechanics [1, 2], diffusion and transport phenomena [3], elastic deformation of solid materials [4], mechanical bending of thin plates [5], and even stochastic processes [6]. The widespread occurrence of harmonic problems, together with the increasing demand for accurate and compu-tationally efficient simulations, motivates the continued development of numerical methods for their solution. In this regard, several methods have been proposed for the numerical solution of PDEs, including the finite element method (FEM) [3], the spectral element method [7, 8], isogeometric analysis [9] and the boundary element method [10]. Neural networks have also been used to solve differential equations [11, 12, 13]. Early approaches combined neural networks with collocation methods to incorporate residuals of differential equations in the objective func-tion, e.g. [14, 15] and later [16, 17], providing a basis on which trainable parameters were optimized to satisfy both the governing PDE and the associated boundary conditions. Along these lines, the work of Raissi et al. [18] revisited the original ideas and utilized modern deep neural network software that includes support for automatic differentiation and introduced the so-called physics-informed neural networks (PINNs). In this framework, neural networks are employed as global ansatz functions for the approximation of the PDE solution, and are trained by minimizing a loss function that incorporates both the PDE residuals and the boundary condition mismatch. Also, it is possible to incorporate a loss function for data mismatch, which makes it a general hybrid modeling framework particularly well-suited to address a broad range of problems. For example, PINNs have demonstrated remarkable flexibility across a wide range of PDE classes and formulations [19], including fluid flow problems [20], advection– diffusion–reaction systems [21, 22], harmonic problems [23], and solid mechanics applications [24, 25]. Among the latter, linear elasticity has attracted particular attention due to its broad range of engineering applications [25], with existing studies addressing both forward [26, 27, 28, 29, 30] and inverse problems [31, 32]. 1
+
+> arXiv:2605.31231v1 [math.NA] 29 May 2026
+
+Within the PINN framework, fully-connected real-valued neural networks have proven effective for approximating PDE solutions, as supported by several approximation results, e.g., [33, 34, 35, 36]. However, the convergence of PINN approximations to the exact solution may be slow for certain classes of problems, which can significantly affect the overall efficiency of the method [37]. Consequently, problem-specific formulations and architectures are often required to improve the performance of neural-network-based solvers, as research in several areas indicates [38, 39]. One common strategy is to design loss functions that more closely reflect the underlying physical structure of the problem. For example, Samaniego et al. [40] proposed the so-called deep energy method, which takes advantage of the principle of minimum potential energy to optimize the neural network. Building on this idea, subsequent devel-opments have sought to more closely couple the discretization strategy with the governing equation, for example, by approximating potential functions that inherently satisfy the underlying physical principles [41]. Another important research direction concerns the reduction of the highest derivative order appearing in the loss function. This can be achieved by employing weak formulations of the governing equations [28, 42] or through variational formulations, as proposed by Kharazmi et al. [43, 44]. Similarly, Sun et al. [45] reduced the derivative order by defining the loss function exclusively in terms of the residuals of boundary integral equations. Problem-specific mathematical structures can also be incorporated directly into the neural network architecture, in order to enforce intrinsic properties of the PDE solution. Examples include the work of Ghosh et al. [46], where 
+
+harmonic neural networks were proposed to solve two-dimensional Laplace problems, and that of Calaf` a et al. [47], where holomorphic neural networks were introduced to solve boundary value problems where the solution can be represented via holomorphic functions. Although problem-specific, this line of research appears particularly promising because it exploits well-established analytical representation frameworks to construct approximations that satisfy the governing PDEs a priori . Compared to the standard PINN approach, this results in more efficient training, since evaluations are only required at the domain boundary, and in lower memory requirements due to the reduced number of training points [47, 48, 49, 50, 51]. On the other hand, the approaches developed thus far have been limited to two-dimensional settings, which restricts their large-scale applicability. 
+
+Contributions and outline. Motivated by the approaches proposed in [46, 47], we introduce a novel neural-network-based framework for solving harmonic boundary value problems in the general three-dimensional setting. The method is based on the Whittaker integral representation [52], which allows generation of three-dimensional harmonic functions from complex-valued functions of two variables – one complex and one real. To approximate these generator functions, a dedicated complex-valued neural network architecture is developed that is holomorphic in one argument only. The key feature of the proposed approach is that the governing PDEs are satisfied exactly, independently of the training accuracy that results from approximating the solution of these PDEs by a neural network. Indeed, the networks are trained exclusively through the mismatch between the predicted and prescribed values of the boundary conditions, without requiring evaluation of the PDE residual at interior points. Moreover, the method avoids the computation of higher-order derivatives, resulting in improved numerical efficiency. To assess the strengths and limitations of the proposed methodology, standard Laplace and linear elasticity boundary value problems are considered. Both problems are first recast in terms of suitable holomorphic functions and then approximated using the proposed neural network architecture. The paper is structured as follows. In Section 2, we present the governing equations of the considered boundary value problems. In Section 3, we describe the adopted numerical strategies together with the proposed neural network architecture. Finally, in Section 4, we present several test cases to assess the performance of the method in different scenarios. 
+
+# 2 Mathematical models 
+
+We present in this section the mathematical models of the problems of interest, providing their formulation in terms of complex-valued functions. To ease the readability of the following sections, we recall here the definition of a holomorphic function and its properties. Consider an open domain Ω 2D ⊂ C. Using the standard identification C ≃ R2, each point ζ ∈ Ω2D is written as ζ = ξ + iη , with ( ξ, η ) ∈ R2. Let g : Ω 2D → C be given by g(ζ) = u(ξ, η ) + iv (ξ, η ), where u, v : R2 → R.2The function g is said to be holomorphic in Ω 2D if the limit 
+
+g′ = lim 
+
+> ζ→ζ0
+
+g(ζ) − g(ζ0)
+
+ζ − ζ0
+
+exists for any point ζ0 ∈ Ω2D , see [53, 54]. A direct consequence of holomorphicity is that the Cauchy–Riemann equations are satisfied: 
+
+∂u ∂ξ − ∂v ∂η = 0 ,∂u ∂η + ∂v ∂ξ = 0 .
+
+(1) By computing the mixed derivatives of the terms in (1), we obtain that u and v are harmonic functions as specified in the following equations: 
+
+∂2u∂ξ 2 + ∂2u∂η 2 = 0 ,∂2v∂ξ 2 + ∂2v∂η 2 = 0 .
+
+(2) 
+
+## 2.1 3D Laplace problem 
+
+In this section, we address the solution of the Laplace problem by deriving a formulation that is well suited for discretization using the neural networks presented in Section 3. Let Ω ⊂ R3 be a simply-connected open domain with boundary ∂Ω, decomposed into two disjoint subsets ∂ΩD and 
+
+∂ΩN such that ∂Ω = ∂ΩD ∪ ∂ΩN . We denote by n the outward unit normal vector on ∂Ω. We consider the Laplace equation in Ω supplemented with boundary conditions: 
+
+∇2V = 0 , in Ω , (3a) 
+
+BL(V ) = 0 , on ∂Ω, (3b) where ∇2· = ∂2· 
+
+> ∂x 2
+
++ ∂2· 
+
+> ∂y 2
+
++ ∂2· 
+
+> ∂z 2
+
+is the Laplace operator; V : R3 → R denotes the scalar potential; BL(V ) represents the prescribed boundary operator. Typical examples include 
+
+V = V0, on ∂ΩD ,
+
+∇V · n = g0, on ∂ΩN ,
+
+where V0 and g0 are given functions. A general representation formula for solutions of (3a) was derived by Whittaker [52]: 
+
+V (x, y, z ) = 
+
+Z 2π
+
+> 0
+
+f (ζ(x, y, z, θ ), θ ) dθ, (4) where θ ∈ R; the coordinate ζ : R4 → C is a non-injective complex valued function defined as 1
+
+ζ = ax + by + cz, 
+
+(a, b, c ) is a permutation of (cos( θ), sin( θ), i ). (5) Here, the function f : C × R → R is harmonic in x, y, z through ζ
+
+∇2f (ζ(x, y, z, θ ), θ ) = 0 . (6)                             
+
+> 1In the original formulation found in [52], the potential is written as V=R2π
+> 0f(r, θ )dθ , with r(x, y, z, θ ) = z+i(cos θ x + sin θ y ). Noticing that, without loss of generality, r=iζ , with ζ(x, y, z, θ ) = cos θ x + sin θ y +iz , we may write f(r, θ ) = f(iζ, θ ). Related generalizations are discussed in [55, 56, 57].
+
+3We now proceed by determining how to replace f with a holomorphic function. For the sake of exposition, we consider here a = cos( θ), b = sin( θ), c = i and, using the identification C ≃ R2, we write ζ = ξ + iη and f = f (ξ, η ). Applying the Laplace operator to f yields 
+
+∇2f = a2 ∂2f∂ξ 2 + b2 ∂2f∂ξ 2 + ∂2f∂η 2 = ∂2f∂ξ 2 + ∂2f∂η 2 ,
+
+since a2 + b2 = 1. Then, using (6), we obtain 
+
+∂2f∂ξ 2 + ∂2f∂η 2 = 0 ,
+
+which shows that f is harmonic in the two-dimensional complex plane. As recalled in (2), both the real and imaginary parts of a holomorphic function are harmonic. Moreover, on simply connected domains, every harmonic function admits a representation as the real or imaginary part of a holomorphic function [54]. Therefore, without loss of generality, we may write 
+
+f (ζ, θ ) = Re( ˜f (ζ, θ )) ,
+
+where ˜f is holomorphic in ζ.It follows that the Laplace problem (3) can be reformulated in the following form. 
+
+Problem 1 (Holomorphic Laplace formulation) . Find a holomorphic function ˜f (ζ, θ ) such that 
+
+BL(V ) = 0 , on ∂Ω,
+
+where 
+
+V =
+
+Z 2π
+
+> 0
+
+Re   ˜f (ζ, θ ) dθ. (7) We notice that the problem of finding a harmonic function has been transferred to finding a holomorphic function. This observation is particularly relevant when combined with the following property of holomorphic functions: given 
+
+h and g both holomorphic, their composition h ◦ g is holomorphic [53]. This property enables us to approximate ˜f as a composition of “simple” holomorphic functions, ˜f ≈ g ◦ h ◦ . . . , allowing the use of fully connected neural networks, presented in the following Section 3, as they are a composition of affine and nonlinear functions. 
+
+Remark 2.1 (Separated variable form is not complete) . Assume, by contradiction, that f in (4) can be written in separated variable form f (ζ, θ ) = g(ζ)h(θ). Moreover, let consider a particular V in the form V = V1 + V2. From (4) and from the separated variable assumption, it follows that V1 can be expressed as V1 = R 2π 
+
+> 0
+
+g(ζ1)h1(θ) dθ and similarly for V2. By linearity, we obtain V = R g1h1 + R g2h2̸ = R gh as initially assumed. This remark shows that a generic non-linear dependence on both ζ and θ is required, justifying the need of a semi-holomorphic neural networks, see Section 3. 
+
+## 2.2 3D Linear elasticity problem 
+
+In this section, we address the solution of the standard boundary value problem of linear elasticity. We consider a isotropic and homogeneous solid that occupies a simply-connected domain, denoted by Ω, with Lipschitz continuous boundary. The mechanical behavior of the solid is linear elastic, characterized by shear modulus μ and Lam´ e first parameter λ. Neglecting body forces, the linear elastic problem is defined as [4] 
+
+μ∇2u + ( λ + μ)∇(∇ · u) = 0 , in Ω , (8a) 
+
+BM (u, σ) = 0 , on ∂Ω, (8b) where u is the unknown displacement vector and BM is an operator defining proper boundary conditions in terms of u and of the stress tensor σ. This last quantity is related to u via the expression 
+
+σ = μ  ∇u + ( ∇u)⊤ + λTr( ∇u)I (9) 4where Tr( ·) denotes the trace operator and I is the identity tensor. A typical choice for the boundary conditions is 
+
+u = u0, on ∂ΩD ,
+
+σ · n = t0, on ∂ΩN ,
+
+where ∂ΩD and ∂ΩN are disjoint subsets of ∂Ω and u0 and t0 are prescribed displacement and traction vector. Let 
+
+P = ( Px, P y , P z ) : R3 → R3 and B : R3 → R be such that ∇2P = 0 and ∇2B = 0; these functions are referred to as 
+
+potentials . Under the aforementioned hypothesis, the solution of (8) can be expressed using the Papkovich–Neuber representation [4]: 
+
+u = 12μ
+
+ P − ∇ (B + κ(Pxx + Py y + Pz z)) , in Ω . (10) where κ = ( λ + μ)/(2 λ + 4 μ). Hence, the system (8) can be replaced by the following: 
+
+∇2P = 0 , in Ω , (11a) 
+
+∇2B = 0 , in Ω , (11b) 
+
+BM (u(P , B ), σ(P , B )) = 0 , on ∂Ω. (11c) The primary variables in (11) are P and B. The number of unknown functions is thus four, the three components of P plus B, instead of the original three components of u. As a consequence, the solution may not be unique, as discussed in e.g. [58]. Without loss of generality, P and B can be written using the integral representation (7); therefore, we set 
+
+P =
+
+Z 2π
+
+> 0
+
+Re( Φ(ζ, θ )) dθ, B =
+
+Z 2π
+
+> 0
+
+Re( χ(ζ, θ )) dθ, 
+
+(12) where Φ = ( ϕx, ϕ y , ϕ z ) : ( C×[0 , 2π)) 3 → R3 and χ : C×[0 , 2π) → R are holomorphic functions in the first argument. Since the governing PDEs in (11) are identically satisfied by the properties of Φ and χ, the linear elasticity problem can be formulated in the following way: 
+
+Problem 2 (Holomorphic linear elasticity) . Find Φ(ζ, θ ) and χ(ζ, θ ), holomorphic functions in ζ, such that 
+
+BM (u(Φ, χ ), σ(Φ, χ )) = 0 , on ∂Ω,
+
+where, by replacing (12) into (10) , the displacement components can be expressed as 
+
+ux = 12μ
+
+Z 2π
+
+> 0
+
+Re ((1 − κ)ϕx − aχ ′ − aκ (xϕ ′ 
+
+> x
+
++ yϕ ′ 
+
+> y
+
++ zϕ ′ 
+
+> z
+
+)) ,uy = 12μ
+
+Z 2π
+
+> 0
+
+Re ((1 − κ)ϕy − bχ ′ − bκ (xϕ ′ 
+
+> x
+
++ yϕ ′ 
+
+> y
+
++ zϕ ′ 
+
+> z
+
+)) ,uz = 12μ
+
+Z 2π
+
+> 0
+
+Re ((1 − κ)ϕz − cχ ′ − cκ (xϕ ′ 
+
+> x
+
++ yϕ ′ 
+
+> y
+
++ zϕ ′ 
+
+> z
+
+)) ,
+
+(13) 
+
+and the stress tensor, σ, is defined by the relationship (9) . The coefficients a, b, c are defined in (5) .
+
+In this work, the unknown functions Φ and χ are approximated by neural networks as described in the following Section 3. 
+
+# 3 Numerical strategies 
+
+In this section, we first review the notion of holomorphic neural network, originally introduced by Calaf` a et al. [47]. We then present an architecture that preserves the holomorphicity of the network output with respect to a prescribed input argument, while relaxing the corresponding constraint for the remaining arguments. 5We consider a L-layer neural network. Since the composition of holomorphic functions is itself holomorphic, the holomorphic property can be enforced in a neural network in a layer-wise manner. Consequently, we focus on a layer ℓ ∈ 1, . . . , L − 1, whose width is denoted by nℓ. The relationship between the input zℓ ∈ Cnℓ
+
+and the output 
+
+zℓ+1 ∈ Cnℓ+1 of the layer ℓ is given by 
+
+zℓ+1 = ρℓ(Aℓ(zℓ)) ,
+
+where Aℓ(zℓ) = W ℓzℓ + bℓ, the coefficients W ℓ ∈ Cnℓ+1 ×nℓ
+
+and bℓ ∈ Rnℓ+1 
+
+are the trainable weights of the unknown affine transformation, and ρℓ is a non-linear holomorphic activation function. It follows that the holomorphic multi-layered neural network can be written as the following composition 
+
+zL+1 = ( AL+1 ◦ ρL ◦ . . . ◦ ρ1 ◦ A1)( ζ),
+
+where ζ ∈ C and z(L+1) ∈ C are the input and the output of the neural network, respectively. When non-polynomial activation functions that are holomorphic on the whole complex plane are used, the holomorphic neural network possesses the universal approximation property on simply connected domains [47, 59]. We focus now in specifying the requirements for obtaining a network that approximates a function of the form 
+
+f (ζ, θ ) : C × R → C that is holomorphic with respect to the first argument ζ. The use of a single network which considers general nonlinear interactions of the inputs ζ and θ is required, as discussed in Remark 2.1. To this end, let us consider a split value mℓ such that 1 ≤ mℓ < n ℓ, and let us consider zℓ ∈ Cnℓ−mℓ
+
+, and xℓ ∈ Cmℓ
+
+. Then, we consider a neural network whose layer ℓ, with input [ zℓ⊤, x ℓ⊤]⊤ ∈ Cnℓ and output [ zℓ+1 ⊤, x ℓ+1 ⊤]⊤ ∈ Cnℓ+1 
+
+, is constructed in the following form: 
+
+zℓ+1 
+
+xℓ+1 
+
+
+
+=
+
+ρℓ
+
+> 1
+
+ρℓ
+
+> 2
+
+  W ℓ 
+
+> 11
+
+W ℓ
+
+> 12
+
+0 W ℓ
+
+> 22
+
+  zℓ
+
+xℓ
+
+
+
++
+
+bℓ
+
+> 1
+
+bℓ
+
+> 2
+
+ 
+
+,
+
+where ρℓ 
+
+> 1
+
+is a holomorphic activation function, ρℓ 
+
+> 2
+
+is a non-holomorphic activation function, W ℓ 
+
+> 11
+
+∈ Rmℓ+1 ×mℓ
+
+,
+
+W ℓ 
+
+> 12
+
+∈ Rmℓ+1 ×pℓ
+
+, W ℓ 
+
+> 21
+
+∈ Rpℓ+1 ×pℓ
+
+, where pℓ is such that mℓ + pℓ = nℓ. We call ςℓ = [ ρℓ
+
+> 1
+
+, ρ ℓ
+
+> 2
+
+]⊤, and Hℓ(·) = W ℓ 
+
+> 11
+
+W ℓ
+
+> 12
+
+0 W ℓ
+
+> 22
+
+
+
+(·)+ 
+
+bℓ
+
+> 1
+
+bℓ
+
+> 2
+
+
+
+. It follows that the multi-layered neural network can be written as the following composition: 
+
+zL+1 = ( HL+1 ◦ ςL ◦ . . . ◦ ς1 ◦ H1)([ ζ⊤, θ ⊤]⊤). (14) It can be readily verified that the architecture defined by (14), which is schematically shown in Figure 1, has the holomorphic property in ζ and not necessarily in θ, as desired. Semi-holomorphic neural networks constructed in this way are used to approximate the function ˜f in Problem 1 and the potentials ϕx, ϕ y , ϕ z and χ in Problem 2. We denote these neural networks as NV , Nϕx , N ϕy , N ϕz , and Nχ respectively. 
+
+Figure 1: Example of a semi-holomorphic neural network with 2 hidden layers. 
+
+Training. To simplify the notation, we denote by W the union of all trainable parameters, and by |W| their total number. The trainable parameters are initialized using the strategy proposed in [47] and their optimal values, denoted by Wopt , are obtained by solving the following optimization problem: 
+
+Wopt = arg min  
+
+> W∈ Ξ
+
+L (W),
+
+6where Ξ denotes the admissible search space for W and L is the loss function. The loss function must measure a suitable error on the boundary conditions. Considering the ℓ2-norm, we can write 
+
+L = 1
+
+ntrain 
+
+> ntrain
+
+X
+
+> i=1
+
+Lp(xi),
+
+Lp(x) = ∥B j |x∥2, j = L,M , x ∈ ∂Ω,
+
+where Lp is the per-sample loss, xi are the training point, ntrain the total number of trainig points. Depending on the specific problem at hand, examples of per-sample losses are: Lp = ∥V − V0∥2 
+
+> ∂ΩD
+
++ α1∥∇ V · n − g0∥2 
+
+> ∂ΩN
+
+for Problem 1, and Lp = ∥u − u0∥2 
+
+> ∂ΩD
+
++ α2∥σ · n − t0∥2 
+
+> ∂ΩN
+
+for Problem 2, where · are the quantities derived from the neural networks and α1, α 2 ∈ R+ are weighting factors. We highlight that the holomorphic property holds for any W ∈ Ξ, which means that this is not a property obtained after training convergence, but rather an intrinsic property of the presented neural network. 
+
+Remark 3.1 (Comparison with PINN) . In the standard PINN approach [18], the loss function is defined as the sum of the errors associated with the residual of the governing PDEs and the corresponding boundary conditions, namely L = α∥D∥ 2 + ∥B∥ 2, where D denotes the differential operator and α ∈ R+. In the present approach, the term ∥D∥ 2 vanishes identically by construction, therefore the loss function reduces to L = ∥B∥ 2. Moreover, since the operator D involves derivatives of higher order than those appearing in B [60], the proposed training strategy avoids the computation of derivatives of order higher than that strictly required in the computation of the boundary conditions. Moreover, let d be the characteristic inter-point distance, assumed approximately constant throughout the domain. Also, let ntrain ,Ω and ntrain ,∂ Ω denote the total number of training points in Ω and ∂Ω, respectively. These quantities scale as ntrain ,Ω ∼ |Ω| 
+
+> d3
+
+and ntrain ,∂ Ω ∼ |∂Ω| 
+
+> d2
+
+. In the standard PINN approach, a total of ntrain ,Ω + ntrain ,∂ Ω points must be considered, whereas in the proposed method only ntrain ,∂ Ω is required. As a consequence, the proposed method exhibits a more favourable scaling in d compared to standard PINNs. 
+
+Integration. The integrals in (4) and (13) are approximated through a quadrature rule of the form R 2π 
+
+> 0
+
+f (θ) dθ ≈
+
+P 
+
+> i
+
+wif (θi), where wi are proper scalar weights. We denote by Q(·) such approximation of R 2π 
+
+> 0
+
+· dθ . Moreover, we denote by V : R3 → R the quantity 
+
+V = Q(Re( NV )) , (15) which serves as the neural network approximation of V via a discrete integral. Similarly, we denote by u and σ the approximated displacement and stress. 
+
+Remark 3.2 (Null error on PDE) . We observe that the error introduced by the discretization of the integral does not affect the satisfaction of the governing PDEs. Indeed, ∇2V = ∇2Q(Re( NV )) = Q(∇2Re( NV )) = 0. Similarly for P and B. This implies that (3a), (11a), (11b) are satisfied exactly, independently of the accuracy of the integration method and the training of the network. Therefore, the only source of error introduced by the proposed method is the approximation of the boundary conditions. 
+
+Remark 3.3 (Max error on boundary) . For Problem 1, the discretization error in Ω is bounded by the discretization error on ∂Ω. Indeed, let ∆ V denote the discrepancy between the exact V and the approximated one, so that 
+
+V = V + ∆ V . We have ∇2V = ∇2(V + ∆ V ) = ∇2∆V = 0. The maximum principle [61] applies to ∆ V ,meaning that the maximum value of the discrepancy between the exact and approximated solution is attained on the boundary. It follows that the error ∥∆V ∥ has its maximum on the boundary. 
+
+# 4 Test cases 
+
+We present in this section a series of test cases to assess the effectiveness and limitations of the proposed method. Two cases, in Section 4.1, refer to the Laplace problem, presented in Section 2.1, while the remaining two, in Section 4.2, deal with the linear elastic problem, presented in Section 2.2. To train neural networks, points are required on the boundary of the domain geometry. These can be determined using any suitable meshing strategy. In this work, for simplicity, such boundary points are computed as the centroids 7of a simplex grid. Nevertheless, we emphasize that the method is meshless, and the use of a mesh is solely the result of a practically convenient procedure for defining a proper representation of the geometry and its boundary points. A similar remark applies to the figures presented in this section: the meshed appearance of some geometries is merely the outcome of a convenient procedure for illustrating three-dimensional structures. The points on the boundary are partitioned into a training set and a test set: the former contains ntrain points, while the latter contains ntest points. For each case, the train–test split is defined by ntrain = 0 .9( ntrain + ntest ). When multiple networks are used, as in the elasticity-related test cases, the trainable parameters of the four networks are combined into a single set, Wtot = Wϕx ∪ W ϕy ∪ W ϕz ∪ W χ, where Wϕx , . . . denote the parameters of Nϕx , . . . .The set Wtot thus becomes the collection of trainable weights to be optimized concurrently using an appropriate strategy. In each test case, the neural networks are trained using the ADAM algorithm, with the parameters suggested in [62]. Preliminary studies reveal no meaningful improvements from adopting different strategies. To assess the accuracy of the proposed method, we make use of the following norms, defined analogously for scalars 
+
+a, vectors with components bi, and matrices with components cij :
+
+∥a∥Ω := 
+
+sZ
+
+> Ω
+
+a2, ∥b∥Ω := 
+
+sZ 
+
+> Ω
+
+X
+
+> i
+
+b2 
+
+> i
+
+, ∥c∥Ω := 
+
+sZ 
+
+> Ω
+
+X
+
+> ij
+
+c2 
+
+> ij
+
+.
+
+The proper evaluation and comparison of the method with existing approaches is challenging due to the lack of appropriate metrics for comparing different methods, see, e.g., [63]. In this work, we restrict ourselves to assessing the accuracy of the method against a reference solution, either analytical or obtained with FEM on a sufficiently fine grid, and to highlighting its main properties. To ease the readability, we restrict the discussion to the main features of each test case. Further implementation details are provided in Section A. All numerical values of the physical quantities reported in the following test cases are considered dimensionless. 
+
+## 4.1 Laplace problem 
+
+In this section, we show two test cases regarding the Laplace problem. To assess the accuracy of the results, we introduce the following relative errors: 
+
+εV =
+
+p|Ω| | V − Vref |∥Vref ∥Ω
+
+, (16a) 
+
+εV = ∥V − Vref ∥Ω
+
+∥Vref ∥Ω
+
+, (16b) 
+
+ε∇V =
+
+p|Ω| |∇ V − ∇ Vref |∥∇ Vref ∥Ω
+
+, (16c) 
+
+ε∇V = ∥∇ V − ∇ Vref ∥Ω
+
+∥∇ Vref ∥Ω
+
+, (16d) where the reference solution, Vref , is obtained either analytically or via FEM. 
+
+4.1.1 Manufactured solution on complex geometry 
+
+This first test case involves a domain with complex geometry, which is illustrated in Figure 2, and the use of an analytical reference solution: 
+
+Vref = exp( √13 x) cos(2 y) cos(3 z), in Ω .
+
+We define the boundary operator as 
+
+BL(V ) := V − Vref .
+
+Dirichlet boundary conditions are then imposed as 
+
+BL(V ) = 0 on ∂Ω.
+
+8This problem may be interpreted, for example, as a heat conduction process in a mechanical device with pre-scribed temperature on the boundary. We employ a semi-holomorphic neural network whose layer sizes are (2 , 16 , 16 , 16 , 16 , 1), where the first and last entries denote the input and output dimensions, respectively. The value of mℓ, which determines the split between the holomorphic and non-holomorphic components, is set to 
+
+mℓ = nℓ/2, ℓ = 1 , . . . , 5. The exponential activation function is used at each layer of the holomorphic part, while a complex PReLU function, that we denote by cPReLU, is used for the non-holomorphic part. The latter is defined as: cPReLU( z) = PReLU(Re( z)) + iPReLU(Im( z)) , where PReLU( x) = 
+
+(
+
+x if x > 0,
+
+0.1 x if x ≤ 0.
+
+In this case, we set ζ = sin( θ)y +cos( θ)z +ix and we adopt the composite midpoint rule [64] with 64 intervals equally spaced in [0 , 2π) to discretize the integral in (7). The data used to train the neural network consist of a discrete set of coordinate points on the boundary, shown in panel (a) of Figure 2, with ntrain = 2 232 and ntest = 248. The network is trained by minimizing the following loss function, L , associated with Dirichlet boundary conditions: 
+
+L = 1
+
+ntrain 
+
+> ntrain
+
+X
+
+> i=1
+
+Lp(xi),
+
+Lp(x) = BL(V (x)) 2 , x ∈ ∂Ω,
+
+where V is defined in (15). Training lasts 3 000 epochs, until the loss function reaches a fairly stationary low value. Further details can be found in Section A.1. The results are reported in Figure 2. Panel (b) shows good agreement between the exact solution and its approx-imation. This qualitative observation is quantitatively confirmed by the relative error displayed in panel (c) of the same figure. Indeed, its local maximum value is about 3%. Moreover, we observe that the error peaks on the boundary, as noted in Remark 3.3.         
+
+> (a) Domain and dataset points
+> (b) Vref and V(c) Relative error, εV
+
+Figure 2: Domain and numerical results. (a) Domain and dimensions; the training points (dark color) and test points (light color) are displayed below. (b) Analytical harmonic function Vref on top and its neural network approximation below, V . The two solutions are graphically similar. (c) Relative error (16a) on both the boundary and interior points, visualized through two slices of the geometry. The error remains low across the entire domain. 9To assess the robustness of the results, we report in Table 1 a sensitivity study in which the number of quadrature intervals and the layer width are varied independently, while all remaining hyperparameters, e.g., the number of layers and the training settings, are kept fixed. We observe that the mean relative error ε∇V remains low across all tested configurations, increasing only slightly for the coarser settings. This suggests that the method is not strongly sensitive to these particular choices of hyperparameters within the explored ranges. # Intervals Layer widths |W| εV
+
+16 16 881 9.67 × 10 −3
+
+32 16 881 8.91 × 10 −3
+
+64 † 16 881 8.36 × 10 −3
+
+128 16 881 7.76 × 10 −3
+
+64 4 77 1.11 × 10 −2
+
+64 8 249 9.00 × 10 −3
+
+64 32 3 297 8.98 × 10 −3
+
+> †
+
+Shown in Figure 2. Table 1: Sensitivity study: mean relative error εV for varying numbers of quadrature intervals and layer widths. The total number of trainable parameters, |W| , is reported for reference. Results remain moderately stable across all tested configurations. 
+
+4.1.2 Neumann problem on a quarter torus 
+
+The main features of this example are the absence of Dirichlet boundary conditions, implying that V is defined up to a constant, and the lack of an analytical solution for V .The domain represents a quarter of a torus with inner radius 0 .5 and outer radius 1 .5, see panel (a) of Figure 3. We define the following boundary operators: 
+
+BL,1(V ) := ∇V · n, on ∂Ω1,
+
+BL,2(V ) := ∇V · n + 1 , on ∂Ω2,
+
+BL,3(V ) := ∇V · n − 1, on ∂Ω3,
+
+where ∂Ω1, ∂Ω2, and ∂Ω3 are shown in Figure 3, panel (a). Consequently, we set the following boundary conditions 
+
+BL,1(V ) = 0 , BL,2(V ) = 0 , BL,3(V ) = 0 .
+
+This test can be interpreted as an inviscid, irrotational fluid flow, where V denotes the velocity potential and ∇V
+
+the velocity field [1]. The boundary operators correspond to imposing in the normal direction at the different boundaries no net flow, constant inflow, and constant outflow, respectively. The layer widths of the neural networks, NV , including input and output, are (2 , 16 , 16 , 16 , 1), with the splitting 
+
+mℓ = nℓ/2 for ℓ = 1 , . . . , 4. We employ the exponential function and cPReLU as activation functions. We set 
+
+ζ = sin( θ)y + cos( θ)z + ix and employ the composite midpoint rule with 32 intervals uniformly spaced in [0 , 2π). Let us define the mask function ω as follows: 
+
+ωi(x) = 
+
+(1 if x ∈ ∂Ωi,
+
+0 otherwise . (17) The loss function is given by 
+
+L = 1
+
+ntrain 
+
+> ntrain
+
+X
+
+> i=1
+
+Lp(xi) + Lc(xi), (18a) 
+
+Lp(x) = α1 ω1(x)∥B L,1(V (x)) ∥2 + α2 ω2(x)∥B L,2(V (x)) ∥2 + α3 ω3(x)∥B L,3(V (x)) ∥2, (18b) 
+
+Lc = 10 −4 V 2, (18c) 10 where ntrain = 3 128 while ntext = 348 points form the test dataset; the weights αi, i = 1 , 2, 3, are manually tuned and set to 1, 10, and 10, respectively, in order to balance the accuracy across the domain of the potential V defined in (15); Lc is a small penalty term added to the loss function to promote potentials with a small average over the training dataset. This regularization is beneficial because, under the prescribed boundary conditions, the problem is ill-posed as the solution is not unique. However, the primary quantity of interest is the gradient of V , rather than 
+
+V itself. Therefore, to stabilize the training procedure, we introduce the penalty term mentioned earlier. Training lasts 2 000 epochs, until the loss function reaches a low stationary value. More details can be found in Section A.2. The reference solution is obtained with the FEM software Abaqus using a mesh of 10-node, second order tetrahedral elements with mean size 0.05. The solution is represented in panel (b) of Figure 3, which provides a graphical representation of the flow field. The vectors follow the geometric boundaries and increase in magnitude near the inner radius of the torus, as expected. In panel (d) of the same figure, we report the gradient of the solution, 
+
+∇V , obtained with the proposed method. Compared with the reference solution, a good visual agreement can be observed. This qualitative result is further confirmed quantitatively by the relative error ε∇V , displayed in panel (f) of Figure 3. The error remains below 5% throughout the domain. 
+
+Evaluation against PINN. To better assess the properties of the proposed method, hereafter referred to as HOL (from holomorphic), we present a comparison with a standard PINN formulation [18]. Specifically, we adopt a PINN approach based on a single neural network to approximate the mapping ( x, y, z ) → V . Also, we design the network to have both a comparable number of layers and total trainable parameters to NV , which is equal to 609. Accordingly, the network has layers of width (3 , 16 , 16 , 16 , 1), yielding a total number of trainable parameters equal to 625. To ensure smoothness of the output, the Softsign activation function is employed. The PINN loss function is defined as 
+
+LPINN =
+
+> ntrain
+
+X
+
+> i=1
+
+Lp(xi) + Lc(xi) + 
+
+> ntrain ,Ω
+
+X
+
+> i=1
+
+Lin (xi),
+
+Lin (x) = ∥∇ 2V (x)∥2,
+
+where Lp and Lc ar defined in (18b) and (18c) respectively; ntrain ,Ω denotes the number of training points in the domain, equal to 44 514. Training lasts 2 000 epochs, until the loss function reaches a fairly stationary low value. The training times for both PINN and HOL methods are reported in Table 2. We observe that, for the same number of epochs, equal to 2000, the ratio between the two training times is approximately 5 in favour of the HOL method. Further details can be found in Section A.2. In panel (c) of Figure 3, we report the gradient of the solution, representing the velocity field, obtained with the PINN method. The corresponding relative error with respect to the reference solution is shown in panel (e). The peak local error ε∇V associated with the PINN approach is higher than that of the proposed method, reported in panel (f) of the same figure. The same trend is observed for the global error ε∇V , which is larger for the PINN method ( ε∇V = 0 .1856 against ε∇V = 0 .0166 for the proposed method), as reported in Table 2. An additional relevant feature is illustrated in panels (g) and (h) of Figure 3, which report the values of ∇2V in Ω, expressed as ∇·∇ V to emphasize its connection with the physical incompressibility constraint, namely the vanishing divergence of the velocity field. Owing to the properties of the proposed method, this constraint is satisfied up to machine precision. In contrast, for the PINN approach, this quantity is influenced by the training procedure and does not attain comparably small values. 
+
+|W| Tot. trainig points Training [min] ε∇V
+
+PINN 625 47 642 43 0.1856 HOL 609 3128 8 0.0166 Table 2: Comparison between the physics-informed neural network (PINN) approach and the proposed method (HOL), in terms of number of trainable parameters, number of training points, training time, and global relative error defined in (16d). 11 (a) Domain and b.c. (b) Velocity - FEM    
+
+> (c) Velocity - PINN (d) Velocity - HOL
+> (e) Relative error - PINN (f) Relative error - HOL
+> (g) Mass conservation - PINN (h) Mass conservation - HOL
+
+Figure 3: Domain and numerical results. (a) The boundary conditions are imposed only to ∇V . (a)-(c) Visualization of ∇V , which can be interpreted as the velocity field of an incompressible and inviscid flow. (e)-(f) Relative error defined in (16c). The proposed method (HOL) shows an error below 5%. (g)-(h) The term ∇ · ∇ V is displayed; it can be interpreted as the divergence of the velocity field, which vanishes by incompressibility. The proposed method satisfies this property up to machine precision. 12 4.2 Linear elasticity problem 
+
+In this section, we show two test cases regarding the problem described in Section 2.2. To assess the accuracy of the results, we introduce the following relative errors 
+
+εu(x, y, z ) = 
+
+p|Ω| ∥ u − uref ∥2
+
+∥uref ∥Ω
+
+, (19a) 
+
+εσ (x, y, z ) = 
+
+p|Ω| ∥ σ − σref ∥2
+
+∥σref ∥Ω
+
+, (19b) 
+
+εu = ∥u − uref ∥Ω
+
+∥uref ∥Ω
+
+, (19c) 
+
+εσ = ∥σ − σref ∥Ω
+
+∥σref ∥Ω
+
+, (19d) where the reference quantities, denoted by ·ref , are obtained either analytically or via FEM. 
+
+4.2.1 Elementary cases under uniform stress 
+
+This test is chosen because it illustrates the fundamental elastic responses, namely uniform uniaxial stretch, uniform biaxial stretch, and simple shear. Moreover, a wide range of boundary conditions is adopted to provide reliable tests of the proposed method. We consider a material with λ = 1 and μ = 1. In each case, the domain is a cube of side length L = 1, and different boundary conditions are applied to obtain the three cases mentioned above; see Figure 4. The same figure also shows the corresponding deformed configurations, which facilitate the physical interpretation of the elastic responses. In the following, we detail the boundary conditions and the corresponding analytical solution. 
+
+• Uniaxial stretch. This case is displacement-driven: the three components of the displacement are prescribed on the cube faces as u = (0 , 0, wz/L ), where w is the vertical displacement prescribed at the top, given by 
+
+w = 0 .1. The analytical expressions of the non-zero stress and displacement components are 
+
+σxx = λ wL , uz (z) = wL z, σyy = λ wL ,σzz = λ wL .
+
+• Biaxial stretch. In this case, zero shear traction boundary conditions are applied on all faces. Also, vanishing normal displacement is prescribed on all faces, except for the top and right faces where the normal displacement is set to w = 0 .1. The exact non-zero stress and displacement components are 
+
+σxx = 2 λ wL , uy (z) = wL z, σyy = 2( λ + μ) wL , uz (z) = wL z, σzz = 2( λ + μ) wL .
+
+• Simple shear. This case is stress-driven, with the bottom face fixed and traction applied on all the other faces. The applied shear stress is τ = 0 .5. The exact non-zero stress and displacement components are 
+
+σyz = τ , uz = τ z/μ. 
+
+In each case, we employ four semi-holomorphic neural networks, Nϕx , Nϕy , Nϕz , and Nχ, all sharing the same architecture with layer sizes (2 , 32 , 1). The value mℓ, which defines the split between the holomorphic and non-holomorphic parts, is set to mℓ = nℓ/2. An exponential activation function is used in each layer for the holomorphic 13 component, while the cPReLU function is adopted for the non-holomorphic component. We set, for the uniaxial and biaxial cases, ζ = sin( θ)x+cos( θ)y+iz , and, for the shear case, ζ = sin( θ)y+cos( θ)z+ix .In each case, due to the simplicity of the problems at hand, we adopt the composite midpoint rule [64] with only 4 intervals equally spaced in [0 , 2π). In each case, the loss function used depends on the squared Euclidean norm of the residual of the boundary conditions: 
+
+L =
+
+> ntrain
+
+X
+
+> i=1
+
+Lp,
+
+Lp(x) = 
+
+> 6
+
+X
+
+> j=1
+
+αj ωj (x)∥B M ,j (u(x), σ(x)) ∥2,
+
+where BM ,j is the boundary condition operator on the face j of the six faces of the cube, as described above and illustrated in Figure 4; the weights are αj = 1, ∀j; u and σ are, respectively, the displacement and the stress obtained through the neural networks. We remind that σ is computed through (9) where the derivatives of the displacement are computed using the automatic differentiation. Here, ntrain = 238 while ntest = 26 points form the test dataset. Training lasts 2 000 epochs, until the loss function reaches a fairly stationary low value. Further details can be found in Section A.3. The relative errors defined in (19a)-(19b) are represented in Figure 4. We observe that the method accurately captures the elementary displacement states as well as the corresponding stress states. In each case, the error is indeed small, with a local maximum value across all cases of approximately 1 .4%. 14 Uniaxial stretch Biaxial stretch Simple shear 
+
+> Deformed domain Stress error Displacement error
+
+Figure 4: First row: domain and boundary conditions for the three cases. Second row: visualization of the deformed geometries obtained through the proposed method, together with the norm of the displacement. Third and fourth rows: displacement and stress errors. The maximum error across all the cases is 1 .4%. 
+
+4.2.2 3D device subjected to non-uniform stress 
+
+In this case, we adopt a generic three-dimensional geometry that cannot be obtained by extrusion of a two-dimensional domain; see Figure 5. The lengths along the x- and y-axes are equal to 1, while the length along the z-axis is equal to 0 .5. Moreover, this test is chosen because both the stress and displacement fields exhibit nonlinear variations along all three spatial directions. The elastic material is characterized by ν = 1 .1 and λ = 3 .5. Zero displacement is prescribed on the circular face, while a vertical displacement of magnitude 0 .2 is applied on the opposite square face, see Figure 5. Zero traction is imposed on the remaining faces. These boundary conditions 15 are defined by the following boundary operators: 
+
+BM ,1(u, σ) := u, on ∂Ω1,
+
+BM ,2(u, σ) := u − (0 , 0, 0.2) , on ∂Ω2,
+
+BM ,3(u, σ) := σn , on ∂Ω3,
+
+where the face indexing is depicted in Figure 5. The neural networks share the same architecture, with layer sizes (2 , 64 , 64 , 64 , 64 , 1). The split value is set to 
+
+mℓ = nℓ/2. An exponential activation function is used in each layer for the holomorphic component, while the cPReLU function is adopted for the non-holomorphic component. Here, we set ζ = sin( θ)y + cos( θ)z + ix . The integral in (13) is discretized using the composite two-point Gauss–Legendre quadrature rule [64], with 16 integration intervals equally spaced in [0 , 2π). Preliminary investigations show no improvement in accuracy when increasing the number of integration intervals. The loss function is given by 
+
+L =
+
+> ntrain
+
+X
+
+> i=1
+
+Lp(xi),
+
+Lp(x) = α1ω1(x)∥B M ,1(u(x), σ(x)) ∥2 + α2ω2(x)∥B M ,2(u(x), σ(x)) ∥2 + α3ω3(x)∥B M ,3(u(x), σ(x)) ∥2, (20) where ωi are defined in (17). We set αi = 1 , i = 1 , 2, 3. The stress and displacement fields σ and u are those obtained from the neural networks. The number of training points is ntrain = 7 745 while ntest = 861 form the test dataset. Training lasts 40 000 epochs, until the loss function reaches a stationary low value. More details can be found in Section A.4. Since an analytical solution is not available for this case, we consider as reference a numerical solution obtained with the FEM software Abaqus using 10-node, second order tetrahedral elements with mean size 0.04. In Figure 5, we report the stress and deformation fields for this test. In particular, the second row shows a comparison of the deformed configurations, together with the corresponding relative error. The latter does not exceed approximately 1 .6%, indicating good precision in the representation of the displacement field. The third row of Figure 5 presents the stress field and the associated relative error. The stress is well reproduced throughout most of the domain, except in small regions near the edges of the constrained faces, which correspond to stress concentration zones. Furthermore, the first row of the same figure compares the boundary tractions obtained from the FEM solution and the proposed method. The tractions are computed as σ · n. We observe that the tractions are qualitatively well captured. It is worth noting that the FEM solution exhibits non-physical tractions near the edges; this is due to the interpolation of the stress tensor from integration points to face centers, where the normal vector needed to compute the traction is defined. By contrast, the proposed method does not exhibits this issue, as the solution can be evaluated directly at any point in the domain. 16 (a) Domain and b.c. (b) Traction - FEM (c) Traction - HOL     
+
+> (d) Def. domain - FEM (e) Def. domain - HOL (f) Relative err. - Displacement
+> (g) Stress - FEM (h) Stress - HOL (i) Relative err. - Stress
+
+Figure 5: First row: domain with boundary conditions and tractions. The tractions obtained through the proposed method, denoted by HOL in the label, are similar to those from FEM. Note that interpolation of stresses introduces spurious tractions near the edges in the FEM case. Second row: deformed geometries and displacement error. The error is low and peaks on the boundary. Third row: stress and error. The stresses are well reproduced throughout the domain, except in small regions corresponding to stress concentrations. 
+
+Evaluation against PINN. As done in Section 4.1.2, we present a comparison with a standard PINN formulation to better assess the properties of the proposed method. In this case, we use a single neural network to approximate the mapping ( x, y, z ) → (ux, u y , u z ). We design the network to have both a comparable number of layers and total trainable parameters to Nϕx , Nϕy , Nϕz , and Nχ, which is equal to 4 ×12 737 = 50 948. Accordingly, the network used for the PINN approach has layers of width (3 , 128 , 128 , 128 , 128 , 3), yielding a total number of trainable parameters equal to 50 435, as summarized in Table 3. The SiLU activation function is employed, ensuring sufficient smoothness of the displacement field. Preliminary experiments using other common smooth activation functions, e.g., softsign and tanh, produced ineffective results for this test case. The PINN loss function is defined as 
+
+LPINN =
+
+> ntrain
+
+X
+
+> i=1
+
+Lp(xi) + 
+
+> ntrain ,Ω
+
+X
+
+> i=1
+
+Lin (xi),
+
+Lin (x) = ∥μ∇2u + ( λ + μ)∇(∇ · u)∥2,
+
+where Lp is defined in (20), and ntrain ,Ω denotes the number of training points in the domain, equal to 37 971. Note that, in this case ntrain ,Ω ≈ 14 ntrain and in the proposed method, these training points in the interior domain are not required, significantly reducing the total number of training points, as summarized in Table 3. In Figure 6, we present the stress field obtained with the PINN approach, which is similar to the FEM solution shown in Figure 5. Quantitative results are reported in Table 3, which presents the global errors on the displacement 17 and stress fields for both the PINN and the proposed method. The two methods yield comparable overall accuracy. The PINN proves marginally more accurate in reproducing the displacement field ( εu = 0 .04595 for PINN versus 
+
+εu = 0 .04823 for HOL), whereas it is less accurate in reproducing the stress field ( εσ = 0 .3117 for PINN versus 
+
+εσ = 0 .2527 for HOL). This discrepancy may be attributed to the fact that, in the PINN, the displacement is approximated directly as the output of a neural network, whereas in the proposed method it is recovered through a less direct computation, as shown in (13). Concerning efficiency, Table 3 shows that, contrary to the results seen for the Laplace problem of Section 4.1.2, the proposed method provides only a moderate speed-up (674 min for PINN versus 575 min for HOL, see Section A.4 for further details). A possible explanation is that, as noted in Section 2.2, the Papkovich-Neuber representation increases the number of unknown functions from three to four, which may confer an advantage to the PINN approach. Finally, to highlight a key difference between the proposed method and the PINN approach, we consider the equilibrium equation: 
+
+∇ · σ = 0 . (21) The satisfaction of (11a)–(11b) implies an equilibrated solution; therefore, (21) is satisfied exactly [4]. The residual of (21) is shown in Figure 6, where we can observe that the equilibrium is exactly satisfied with the proposed method, whereas in the PINN approach the precision with which the governing equations are satisfied depends on the quality of the training. 
+
+|W tot | Tot. training points Training [min] εu εσ
+
+PINN 50 435 45 716 674 0.04594 0.3117 HOL 50 948 7 745 575 0.04823 0.2527 Table 3: Comparison between the physics-informed neural network (PINN) approach and the proposed method (HOL), in terms of number of trainable parameters, number of training points, training time, and global relative errors defined in (19c)-(19d).   
+
+> (a) Stress - PINN (b) Equilibrium - PINN (c) Equilibrium - HOL
+
+Figure 6: Leftmost panel: stress obtained with a standard PINN approach. Fairly accurate stress field is obtained using this approach. Central and right panels: visualization of the residual of the equilibrium equation, namely 
+
+∥∇ · σ − 0∥ = ∥∇ · σ∥, in logarithmic scale. The proposed method, denoted by HOL, satisfies the equilibrium equation exactly as the residual is of the order of machine precision. For the standard PINN approach instead, the satisfaction of the equilibrium depends on the quality of the training. 18 5 Conclusion 
+
+This work introduced a neural-network-based framework for the solution of three-dimensional Laplace-type prob-lems, as well as for a broader class of boundary value problems that admit a reformulation in terms of harmonic potentials. From a methodological standpoint, the proposed framework can be regarded as a physics-informed neural network approach. As in standard PINNs, neural networks are employed as global ansatz spaces and the training procedure is driven by the governing equations. However, substantial differences compared to conventional PINN approaches exist. In the latter, the PDE is enforced approximately through the minimization of a residual evaluated at inte-rior collocation points. In the proposed approach instead, the PDE residual vanishes identically by construction, independently of the optimization process, training accuracy, and numerical quadrature adopted for the integral representation. As a consequence, the obtained approximation satisfies exactly the underlying governing equations. Moreover, since no interior residual evaluation is required, training involves only collocation points located on the boundary. This avoids the computation of higher-order derivatives associated with the PDE residual and leads to a more favorable scaling of the number of training points with respect to the characteristic discretization length. The starting point of the proposed framework is the integral representation of harmonic functions introduced by Whittaker. This representation leads to reformulations of the original boundary value problems, where the unknown fields are expressed in terms of functions that are holomorphic with respect to the first argument, while remaining generally non-holomorphic with respect to the second argument. This structure motivated the introduction of the 
+
+semi-holomorphic neural network architecture, specifically designed to preserve holomorphicity in the first input component, while allowing nonlinear interaction with the second, non-holomorphic, input. The proposed methodology has been validated through several numerical experiments involving Laplace and linear elasticity problems under different geometries and boundary conditions. The results show that the method is ca-pable of accurately reproducing both scalar and vector fields in complex three-dimensional settings. Comparison with standard PINN formulations highlights both strengths and limitations of the proposed approach. The exact satisfaction of the governing equations constitutes a significant advantage, particularly for solid mechanics applica-tions in which equilibrium and compatibility are fundamental physical constraints. Moreover, the numerical results demonstrate a reduction in training time compared with the PINN method. The observed speedup is approximately a factor of 5 for the considered Laplace problem and about 15% for the considered linear elasticity problem. The comparatively modest improvement in the latter case may be partly attributed to the adopted Papkovich-Neuber representation, which increases the number of unknown functions from three to four. Some limitations and open questions remain. For example, the dependence of the solution on the angular vari-able θ may be discontinuous or exhibit sharp transitions, whereas neural networks are naturally better suited for approximating smooth functions. This issue may limit the approximation capabilities of the present architecture in specific cases. Additional developments are also required from the computational standpoint. Although the method avoids the evaluation of PDE residuals in the domain, the training process remains relatively slow, which is a common limitation of PINN-type approaches. Different optimization algorithms, pruning techniques [65], or problem-tailored acceleration procedures may improve the overall computational performance. Along these lines, we note that, for the linear elasticity problem, the number of potentials, and thus the number of neural networks, can be reduced under suitable hypotheses [58]. This would shrink the search space and potentially improve training efficiency. Also, further investigations may benefit from alternative complex representations [66, 67], or from the use of different potential functions in both the stress and displacement formulations [4]. Overall, the present work shows that incorporating analytical structures directly into the neural network archi-tecture provides an effective strategy for the solution of three-dimensional PDEs. More generally, the proposed framework illustrates how classical analytical representations and modern neural-network-based methodologies can be combined in a mathematically consistent way, preserving intrinsic properties of the governing equations while retaining the flexibility of meshless learning approaches. This can potentially open new research directions, both in the mathematical analysis of property-preserving neural network approximations and in the development of computational methods for PDEs. 19 Acknowledgement 
+
+This work was supported by the Danish Research Council for Independent Research through the grant no. 2035-00142B “Network-inspired models to predict the strength of heterogeneous materials”. The authors declare that they have no known competing financial interests or personal relationships that could have appeared to influence the work reported in this paper. 
+
+# Data availability 
+
+The code for all test cases is available at https://github.com/enricoballini/Holomorphic-NN-for-3D-BVP. git .20 References 
+
+[1] Landau, L.D., Lifshitz, E.M., 1987. Fluid Mechanics. volume 6 of Course of Theoretical Physics . Pergamon Press. [2] Engsig-Karup, A.P., Glimberg, S.L., Nielsen, A.S., Lindberg, O., 2013. Fast hydrodynamics on heteroge-neous many-core hardware, in: Couturier, R. (Ed.), Designing Scientific Applications on GPUs, Chapman & Hall/CRC. doi: 10.1201/b16051-20 .[3] Quarteroni, A., Valli, A., 1994. Numerical Approximation of Partial Differential Equations. Springer Berlin Heidelberg. doi: 10.1007/978-3-540-85268-1 .[4] Sadd, M.H., 2021. Elasticity Theory, Applications, and Numerics. 4th ed., Elsevier. doi: 10.1016/ c2017-0-03720-5 .[5] Meleshko, V., 2003. Selected topics in the history of the two-dimensional biharmonic problem. Texts in Applied MathematicsApplied Mechanics Reviews 56, 33–85. doi: 10.1115/1.1521166 .[6] Redner, S., 2001. A Guide to First-Passage Processes. Cambridge University Press. doi: 10.1017/ cbo9780511606014 .[7] Engsig-Karup, A.P., Eskilsson, C., Bigoni, D., 2016. A stabilised nodal spectral element method for fully nonlinear water waves. Journal of Computational Physics 318. doi: 10.1016/j.jcp.2016.04.060 .[8] Xu, H., Cantwell, C.D., Monteserin, C., Eskilsson, C., Engsig-Karup, A.P., Sherwin, S.J., 2018. Spectral/hp element methods: Recent developments, applications, and perspectives. Journal of Hydrodynamics 30, 1–22. doi: 10.1007/s42241-018-0001-1 .[9] Hughes, T., Cottrell, J., Bazilevs, Y., 2005. Isogeometric analysis: CAD, finite elements, NURBS, exact geometry and mesh refinement. Computer Methods in Applied Mechanics and Engineering 194, 4135–4195. doi: 10.1016/j.cma.2004.10.008 .[10] Gu, Y., Liu, G., 2001. A coupled element free Galerkin/boundary element method for stress analysis of two-dimensional solids. Computer Methods in Applied Mechanics and Engineering 190, 4405–4419. doi: 10.1016/ s0045-7825(00)00324-8 .[11] Lee, H., Kang, I.S., 1990. Neural algorithm for solving differential equations. Journal of Computational Physics 91, 110–131. doi: 10.1016/0021-9991(90)90007-N .[12] Psichogios, D.C., Ungar, L.H., 1992. A hybrid neural network-first principles approach to process modeling. AIChE Journal 38, 1499–1511. doi: 10.1002/aic.690381003 .[13] Dissanayake, M.W.M.G., Phan-Thien, N., 1994. Neural-network-based approximations for solving partial differential equations. Communications in Numerical Methods in Engineering 10, 195–201. doi: 10.1002/cnm. 1640100303 .[14] Lagaris, I., Likas, A., Fotiadis, D., 1998. Artificial neural networks for solving ordinary and partial differential equations. IEEE Transactions on Neural Networks 9, 987–1000. doi: 10.1109/72.712178 .[15] Lagaris, I.E., Likas, A.C., Papageorgiou, D.G., 2000. Neural-network methods for boundary value problems with irregular boundaries. IEEE Transactions on Neural Networks 11, 1041–1049. doi: 10.1109/72.870037 .[16] Rudd, K., 2013. Solving Partial Differential Equations Using Artificial Neural Networks. Ph.D. thesis. Duke University. Durham, NC, USA. [17] Berg, J., Nystr¨ om, K., 2018. A unified deep artificial neural network approach to partial differential equations in complex geometries. Neurocomputing 317, 28–41. doi: 10.1016/j.neucom.2018.06.056 .[18] Raissi, M., Perdikaris, P., Karniadakis, G., 2019. Physics-informed neural networks: A deep learning frame-work for solving forward and inverse problems involving nonlinear partial differential equations. Journal of Computational Physics 378, 686–707. doi: 10.1016/j.jcp.2018.10.045 .21 [19] Toscano, J.D., Oommen, V., Varghese, A.J., Zou, Z., Ahmadi Daryakenari, N., Wu, C., Karniadakis, G.E., 2025. From PINNs to PIKANs: recent advances in physics-informed machine learning. Machine Learning for Computational Science and Engineering 1. doi: 10.1007/s44379-025-00015-1 .[20] Wassing, S., Langer, S., Bekemeyer, P., 2025. Physics-informed neural networks for inviscid transonic flows around an airfoil. Physics of Fluids 37. doi: 10.1063/5.0276518 .[21] Lekaba, T., Ndou, N., Muzhinji, K., Moyo, S., 2026. Enhanced solution for the advection–diffusion–reaction equation using the physics-informed neural network technique. Mathematics 14, 1194. doi: 10.3390/ math14071194 .[22] Huang, B., Hua, H., Han, H., He, S., Zhou, Y., Liu, S., Zuo, Z., 2024. Physics-informed neural networks for advection–diffusion–langmuir adsorption processes. Physics of Fluids 36. doi: 10.1063/5.0221924 .[23] Vaishampayan, M., 2024. Shallow neural networks and laplace’s equation on the half-space with dirichlet boundary data. Pittsburgh Interdisciplinary Mathematics Review 2, 59–70. doi: 10.5195/pimr.2024.39 .[24] Herrmann, L., Kollmannsberger, S., 2024. Deep learning in computational mechanics: a review. Computational Mechanics 74, 281–331. doi: 10.1007/s00466-023-02434-4 .[25] Hu, H., Qi, L., Chao, X., 2024. Physics-informed neural networks (PINN) for computational solid mechanics: Numerical frameworks and applications. Thin-Walled Structures 205, 112495. doi: 10.1016/j.tws.2024. 112495 .[26] Henkes, A., Wessels, H., Mahnken, R., 2022. Physics informed neural networks for continuum micromechanics. Computer Methods in Applied Mechanics and Engineering 393, 114790. doi: 10.1016/j.cma.2022.114790 .[27] Vahab, M., Haghighat, E., Khaleghi, M., Khalili, N., 2022. A physics-informed neural network approach to solution and identification of biharmonic equations of elasticity. Journal of Engineering Mechanics 148. doi: 10.1061/(asce)em.1943-7889.0002062 .[28] Rezaei, S., Harandi, A., Moeineddin, A., Xu, B.X., Reese, S., 2022. A mixed formulation for physics-informed neural networks as a potential solver for engineering problems in heterogeneous domains: Comparison with finite element method. Computer Methods in Applied Mechanics and Engineering 401, 115616. doi: 10.1016/ j.cma.2022.115616 .[29] Roy, A.M., Bose, R., Sundararaghavan, V., Arr´ oyave, R., 2023. Deep learning-accelerated computational framework based on physics informed neural network for the solution of linear elasticity. Neural Networks 162, 472–489. doi: 10.1016/j.neunet.2023.03.014 .[30] Kadlag, D., Birk, C., Natarajan, S., Gravenkamp, H., 2026. On the performance and convergence of PINNs for problems in linear elasticity. Proceedings in Applied Mathematics and Mechanics 26. doi: 10.1002/pamm.70113 .[31] Xu, C., Cao, B.T., Yuan, Y., Meschke, G., 2023. Transfer learning based physics-informed neural networks for solving inverse problems in engineering structures under different loading scenarios. Computer Methods in Applied Mechanics and Engineering 405, 115852. doi: 10.1016/j.cma.2022.115852 .[32] Zhang, E., Dao, M., Karniadakis, G.E., Suresh, S., 2022. Analyses of internal structures and defects in materials using physics-informed neural networks. Science Advances 8. doi: 10.1126/sciadv.abk0644 .[33] Park, S., Yun, C., Lee, J., Shin, J., 2020. Minimum width for universal approximation doi: 10.48550/ARXIV. 2006.08859 , arXiv:2006.08859 .[34] Cai, Y., 2022. Achieve the minimum width of neural networks for universal approximation doi: 10.48550/ ARXIV.2209.11395 , arXiv:2209.11395 .[35] Li, L., Duan, Y., Ji, G., Cai, Y., 2023. Minimum width of leaky-relu neural networks for uniform universal approximation doi: 10.48550/ARXIV.2305.18460 , arXiv:2305.18460 .[36] Hanin, B., Sellke, M., 2017. Approximating continuous functions by ReLU nets of minimal width doi: 10. 48550/ARXIV.1710.11278 , arXiv:1710.11278 .22 [37] Mishra, S., Molinaro, R., 2022. Estimates on the generalization error of physics-informed neural networks for approximating PDEs. IMA Journal of Numerical Analysis 43, 1–43. doi: 10.1093/imanum/drab093 .[38] Fukushima, K., 1980. Neocognitron: A self-organizing neural network model for a mechanism of pattern recognition unaffected by shift in position. Biological Cybernetics 36, 193–202. doi: 10.1007/bf00344251 .[39] Vaswani, A., Shazeer, N., Parmar, N., Uszkoreit, J., Jones, L., Gomez, A.N., Kaiser, L., Polosukhin, I., 2017. Attention is all you need, in: Advances in Neural Information Processing Systems 30 (NeurIPS 2017), pp. 5998–6008. [40] Samaniego, E., Anitescu, C., Goswami, S., Nguyen-Thanh, V., Guo, H., Hamdia, K., Zhuang, X., Rabczuk, T., 2020. An energy approach to the solution of partial differential equations in computational mechanics via machine learning: Concepts, implementation and applications. Computer Methods in Applied Mechanics and Engineering 362, 112790. doi: 10.1016/j.cma.2019.112790 .[41] Wang, Y., Sun, J., Rabczuk, T., Liu, Y., 2024. Dcem: A deep complementary energy method for linear elasticity. International Journal for Numerical Methods in Engineering 125. doi: 10.1002/nme.7585 .[42] von Tresckow, M., Kurz, S., De Gersem, H., Loukrezis, D., 2022. A neural solver for variational problems on cad geometries with application to electric machine simulation. Journal of Machine Learning for Modeling and Computing 3, 49–75. doi: 10.1615/jmachlearnmodelcomput.2022041753 .[43] Kharazmi, E., Zhang, Z., Karniadakis, G.E., 2019. Variational physics-informed neural networks for solving partial differential equations doi: 10.48550/ARXIV.1912.00873 , arXiv:1912.00873 .[44] Kharazmi, E., Zhang, Z., Karniadakis, G.E., 2021. hp-vpinns: Variational physics-informed neural networks with domain decomposition. Computer Methods in Applied Mechanics and Engineering 374, 113547. doi: 10. 1016/j.cma.2020.113547 .[45] Sun, J., Liu, Y., Wang, Y., Yao, Z., Zheng, X., 2023. Binn: A deep learning approach for computational mechanics problems based on boundary integral equations. Computer Methods in Applied Mechanics and Engineering 410, 116012. doi: 10.1016/j.cma.2023.116012 .[46] Ghosh, A., Gentile, A.A., Dagrada, M., Lee, C., Kim, S.H.S., Cha, H., Choi, Y., Kim, D., Kye, J.I., Elfving, V.E., 2023. Harmonic neural networks, in: Krause, A., Brunskill, E., Cho, K., Engelhardt, B., Sabato, S., Scarlett, J. (Eds.), Proceedings of the 40th International Conference on Machine Learning, PMLR. pp. 11340– 11359. [47] Calaf` a, M., Hovad, E., Engsig-Karup, A.P., Andriollo, T., 2024. Physics-informed holomorphic neural networks (PIHNNs): Solving 2D linear elasticity problems. Computer Methods in Applied Mechanics and Engineering 432, 117406. doi: 10.1016/j.cma.2024.117406 .[48] Calaf` a, M., Andriollo, T., Engsig-Karup, A.P., Jeong, C.H., 2025a. A holomorphic Kolmogorov-Arnold network framework for solving elliptic problems on arbitrary 2D domains doi: 10.48550/ARXIV.2507.22678 ,
+
+arXiv:2507.22678 .[49] Calaf` a, M., Jensen, H.M., Andriollo, T., 2025b. Solving plane crack problems via enriched holomorphic neural networks. Engineering Fracture Mechanics 322, 111133. doi: 10.1016/j.engfracmech.2025.111133 .[50] Zhou, S., H¨ affner, C., Stebner, S., Fehlemann, N., Wei, Z., M¨ unstermann, S., 2026a. A variational Kolosov– Muskhelishvili network for elasticity and fracture doi: 10.48550/ARXIV.2605.02310 , arXiv:2605.02310 .[51] Zhou, S., H¨ affner, C., Wang, S., Stebner, S., Liao, Z., Yang, B., Wei, Z., M¨ unstermann, S., 2026b. Transfer-learned Kolosov–Muskhelishvili informed neural networks for fracture mechanics. Theoretical and Applied Fracture Mechanics 144, 105582. doi: 10.1016/j.tafmec.2026.105582 .[52] Whittaker, E.T., 1903. On the partial differential equations of mathematical physics. Mathematische Annalen 57, 333–355. doi: 10.1007/bf01444290 .23 [53] Stein, E.M., 2003. Complex Analysis. 1st ed. ed., Princeton University Press, Princeton. Description based on publisher supplied metadata and other sources. [54] Ahlfors, L.V., 2021. Complex Analysis An Introduction to the Theory of Analytic Functions of One Complex Variable. American Mathematical Society. [55] Ketchum, P.W., 1928. Analytic functions of hypercomplex variables. Transactions of the American Mathe-matical Society 30, 641–667. doi: 10.1090/s0002-9947-1928-1501452-7 .[56] Piltner, R., 1987. The use of complex valued functions for the solution of three-dimensional elasticity problems. Journal of Elasticity 18, 191–225. doi: 10.1007/bf00044194 .[57] Plaksa, S.A., Pukhtaievych, R.P., 2014. Monogenic functions in a finite-dimensional semi-simple commu-tative algebra. Analele Universitatii “Ovidius” Constanta - Seria Matematica 22, 221–235. doi: 10.2478/ auom-2014-0018 .[58] Tran-Cong, T., 1989. On the completeness of the Papkovich–Neuber solution. Quarterly of Applied Mathe-matics 47, 645–659. doi: 10.1090/qam/1031682 .[59] Geuchen, P., 2025. Approximation properties of complex-valued neural networks: An overview, in: 2025 International Conference on Sampling Theory and Applications (SampTA), IEEE. pp. 1–5. doi: 10.1109/ sampta64769.2025.11133560 .[60] Reddy, B.D., 1998. Introductory Functional Analysis: With Applications to Boundary Value Problems and Finite Elements. Springer New York. doi: 10.1007/978-1-4612-0575-3 .[61] Evans, L.C., 2022. Partial differential equations. Number 19 in Graduate studies in mathematics. second ed., American Mathematical Society, Providence, Rhode Island. Literaturverzeichnis: Seite 689-701. [62] Kingma, D.P., Ba, J., 2014. Adam: A method for stochastic optimization doi: 10.48550/ARXIV.1412.6980 ,
+
+arXiv:1412.6980 .[63] McGreivy, N., Hakim, A., 2024. Weak baselines and reporting biases lead to overoptimism in ma-chine learning for fluid-related partial differential equations. Nature Machine Intelligence 6, 1256–1269. doi: 10.1038/s42256-024-00897-5 .[64] Burden, R.L., Faires, J.D., 2011. Numerical Analysis. 9 ed., Brooks/Cole, Cengage Learning. [65] Ballini, E., Muscarnera, L., Fumagalli, A., Scotti, A., Regazzoni, F., 2026. Elimination-compensation pruning for fully-connected neural networks doi: 10.48550/ARXIV.2602.20467 , arXiv:2602.20467 .[66] Piltner, R., 2001. Overview about solution representations for elasticity problems and some selected particular solutions. Mathematics and Mechanics of Solids 6, 193–220. doi: 10.1177/108128650100600205 .[67] Mares Carre˜ no, J., Ortega Herrera, J. ´A.L., Abarca Jim´ enez, G.S., 2021. A displacement potential function using complex variables for numerical computations of three-dimensional elasticity problems. Archive of Applied Mechanics 91, 2331–2344. doi: 10.1007/s00419-021-01885-6 .[68] Bradbury, J., Frostig, R., Hawkins, P., Johnson, M.J., Katariya, Y., Leary, C., Maclaurin, D., Necula, G., Paszke, A., VanderPlas, J., Wanderman-Milne, S., Zhang, Q., 2018. JAX: composable transformations of Python+NumPy programs. Open-source software. [69] NVIDIA, . CUDA Toolkit. https://developer.nvidia.com/cuda-toolkit .[70] Reddi, S.J., Kale, S., Kumar, S., 2018. On the convergence of Adam and beyond, in: International Conference on Learning Representations. [71] Liu, D.C., Nocedal, J., 1989. On the limited memory BFGS method for large scale optimization. Mathematical Programming 45, 503–528. 24 [72] Glorot, X., Bengio, Y., 2010. Understanding the difficulty of training deep feedforward neural networks. Journal of Machine Learning Research 9, 249–256. [73] He, K., Zhang, X., Ren, S., Sun, J., 2015. Delving deep into rectifiers: Surpassing human-level performance on ImageNet classification, in: 2015 IEEE International Conference on Computer Vision (ICCV). doi: 10.1109/ iccv.2015.123 .25 A Computational framework and implementation details 
+
+We provide in this appendix information on practical aspects of the test cases presented in Section 4. The code for all test cases is available, cf. info in the Data availability section. It is written in Python 3 and relies on JAX [68] neural network routines and uses CUDA [69] for GPU acceleration. The computation of the discrete form of V , (15), and u, (13), is parallelized over the quadrature points and the training points within each minibatch. The functions related to the weight updates are compiled using jax.jit . We remark that optimizing the code to achieve the best performance is beyond the scope of this work as well as accurate timing and evaluation of the computational costs. 
+
+## A.1 Implementation details - Manufactured solution on complex geometry 
+
+This test case was run on an NVIDIA GeForce RTX 4060. The training computations are performed in single precision, while the post-processing is carried out in double precision. By single precision, we mean that both the real and imaginary parts of any complex number are represented as single-precision floating-point numbers. Similarly for double precision. The characteristic dimension of the domain is approximately 300 length units, which is not a suitable input scale for neural networks. The coordinates are therefore scaled by a factor of 300 before being provided to the networks. The weights are initialized following the strategy proposed in [47]. During training with the ADAM algorithm, with hyperparameters β1 = 0 .9, β2 = 0 .999, and ϵ = 10 −8 (see [62]), the training data are shuffled at each epoch. The minibatch has size 32. The training lasts a few minutes. Preliminary results shows that no meaningful advantages are provided by adopting different first-order or second-order optimization strategy, e.g. AMSgrad [70] or L-BFGS [71]. The learning rate, ℓr , is varied according to the following schedule: 
+
+ℓr =
+
+
+
+10 −4 if nepoch < 1000 ,
+
+5 × 10 −5 if 1000 ≤ nepoch < 2000 ,
+
+10 −5 if 2000 ≤ nepoch ,
+
+where nepoch denotes the number of epochs. In Figure 7, the loss function computed using the point on the training dataset and the same function but using the point of the test dataset are reported. The training is carried out for a large number of epochs to ensure a stable value of the loss in the final stages. No overfitting is observed. 0 500 1000 1500 2000 2500 3000 epoch 
+
+> 10 −4
+> 10 −3
+> 10 −2
+> 10 −1
+> L
+> train test
+
+Figure 7: Value of the loss versus the epochs for the test case presented in Section 4.1.1. 
+
+## A.2 Implementation details - Neumann problem in a quarter torus 
+
+This test case was run on an NVIDIA GeForce RTX 4060. The training computations are performed in single precision, while the post-processing is carried out in double precision. The weights of the network associated to the PINN method are initialized following the strategy proposed in [72] while the weights of the network associated to the proposed method are initialized following the strategy proposed in [47]. Different seeds are used for different networks. The following hyperparameters are used for both the PINN and the proposed method. During training with the ADAM algorithm, with hyperparameters β1 = 0 .9, β2 = 0 .999, and ϵ = 10 −8 (see [62]), the training data are 26 shuffled at each epoch. The minibatch has size 64. The learning rate, ℓr , is varied according to the following schedule: 
+
+ℓr =
+
+(
+
+5 × 10 −3 if nepoch < 1000 ,
+
+10 −5 if 1000 ≤ nepoch .
+
+In Figure 7, the loss values are reported, both for the PINN strategy, in panel (a), and the proposed method, in panel (b). The training is carried out for a large number of epochs to ensure a stable value of the loss in the final stages. No overfitting is observed. 0 500 1000 1500 2000 epoch      
+
+> 10 −1
+> 10 0
+> L
+> train test
+> (a) PINN 0500 1000 1500 2000 epoch
+> 10 −1
+> 10 0
+> L
+> train test (b) HOL
+
+Figure 8: Value of the loss versus the epochs for the test case presented in Section 4.1.2. 
+
+## A.3 Implementation details - Elementary cases under uniform stress 
+
+Each subcase of this test was run on an NVIDIA GeForce RTX 4060. The training computations are performed in single precision, while the post-processing is carried out in double precision. The same training hyperparameters described below are used for each subcase. The weights are initialized following the strategy proposed in [47]. Different seeds are used for different networks. During training with the ADAM algorithm, with hyperparameters β1 = 0 .9, β2 = 0 .999, and ϵ = 10 −8 (see [62]), the training data are shuffled at each epoch. The minibatch has size 32. The training lasts a few seconds. The learning rate, ℓr , is varied according to the following schedule: 
+
+ℓr =
+
+
+
+10 −3 if nepoch < 1000 ,
+
+2 × 10 −4 if 1000 ≤ nepoch < 1500 ,
+
+5 × 10 −5 if 1500 ≤ nepoch .
+
+In Figure 9, the loss values are reported. The training is carried out for a large number of epochs to ensure a stable value of the loss in the final stages. No overfitting is observed. Additionally, for this simple shear case (see Section 4.2.1), the training was repeated 3 times with different weight initialization. The loss value is fairly stable among the different initializations as visible in Figure 9. To ensure stability of the updates, denoted by ∆ W , we apply a clipping operation to the weight updates, defined as follows: ∆W ← clip(Re(∆ W ), t h) + i clip(Im(∆ W ), t h), (22) where the function clip is clip( x, t h) = 
+
+
+
+−th if x < −th,x if − th ≤ x ≤ th,th if x > t h.
+
+We set th = 10 −2. Figure 9 also reports the minimum and maximum values of the modulus of the output of the activation function in the hidden layers of the neural network. These values are depicted for each epoch. They remain stable throughout training, with the maximum across the four networks being approximately 10. This indicates overall stability of the training process, despite the use of an exponential activation function, which could potentially lead to uncontrolled large outputs. 27 0 500 1000 1500 2000 epoch              
+
+> 10 −5
+> 10 −4
+> 10 −3
+> 10 −2
+> 10 −1
+> L
+> Seed 0, train Seed 0, test Seed 1, train Seed 1, test Seed 2, train Seed 2, test (a) Loss 0500 1000 1500 2000 epoch
+> 10 −1
+> 10 0
+> 10 1
+> |ρ(z)|min( ρ1(z) of χ)max( ρ1(z) of χ)min( ρ1(z) of φ1)max( ρ1(z) of φ1)min( ρ1(z) of φ2)max( ρ1(z) of φ2)min( ρ1(z) of φ3)max( ρ1(z) of φ3)(b) Stability of the layers
+
+Figure 9: (a) Loss versus epoch for different weight initialization. (b) maximum and minimum module of the output of the activation function for the hidden layer, i.e. layer number 1. 
+
+## A.4 Implementation details - 3D device subjected to non-uniform sterss 
+
+This test was run on an Nvidia Tesla A100 GPU. Both the training and the post-processing computations are performed in double precision. The training and test coordinates point are shown in panel (a) of Figure 10. Afine point distribution is applied on the sharp borders, where the error of the stress is higher than the error on the other part of the domain, see Figure 5. The weights of the network associated to the PINN method are initialized following the strategy proposed in [73] while the weights of the networks associated to the proposed method are initialized following the strategy proposed in [47]. Different seeds are used for different networks. The following hyperparameters are used for both the PINN and the proposed method. During training with the ADAM algorithm, with hyperparameters β1 = 0 .9, β2 = 0 .999, and ϵ = 10 −8 (see [62]), the training data are shuffled at each epoch. The minibatch has size 128. The learning rate, ℓr , is varied according to the following schedule: 
+
+ℓr =
+
+
+
+10 −3 if nepoch < 22000 ,
+
+2 × 10 −4 if 22000 ≤ nepoch < 33000 ,
+
+5 × 10 −5 if 33000 ≤ nepoch .
+
+In Figure 10, the loss values are reported. The training is carried out for a large number of epochs to ensure a stable value of the loss in the final stages. However, only a slightly higher loss is observed if the training was stopped after a shorter number of epochs. This would lead to comparable results in terms of u and σ, while reducing the training time. To ensure stability of the updates, denoted by ∆ W , we apply a clipping operation to the weight updates, defined in (22), with th = 10 −5. Panel (c) of Figure 10 reports the minimum and maximum values of the modulus of the output of the activation function in the hidden layers of the neural network. The maximum values remain stable throughout training. This indicates overall stability of the training process, despite the use of an exponential activation function and 4 hidden layers which could potentially lead to uncontrolled large outputs. 28 (a) Training and test points. 0 10000 20000 30000 40000 epoch 
+
+10 −4
+
+10 −3
+
+> L
+
+train test 
+
+(b) Loss - PINN 0 10000 20000 30000 40000 epoch 
+
+10 −4
+
+10 −3
+
+> L
+
+train test (c) Loss - HOL 0 10000 20000 30000 40000 epoch 
+
+10 −10 
+
+10 −7
+
+10 −4
+
+10 −1
+
+10 2
+
+> |ρ(z)|
+
+min( ρ1(z) of χ)max( ρ1(z) of χ)min( ρ2(z) of χ)max( ρ2(z) of χ)min( ρ3(z) of χ)max( ρ3(z) of χ)min( ρ4(z) of χ)max( ρ4(z) of χ)min( ρ1(z) of φ1)max( ρ1(z) of φ1)min( ρ2(z) of φ1)max( ρ2(z) of φ1)min( ρ3(z) of φ1)max( ρ3(z) of φ1)min( ρ4(z) of φ1)max( ρ4(z) of φ1)min( ρ1(z) of φ2)max( ρ1(z) of φ2)min( ρ2(z) of φ2)max( ρ2(z) of φ2)min( ρ3(z) of φ2)max( ρ3(z) of φ2)min( ρ4(z) of φ2)max( ρ4(z) of φ2)min( ρ1(z) of φ3)max( ρ1(z) of φ3)min( ρ2(z) of φ3)max( ρ2(z) of φ3)min( ρ3(z) of φ3)max( ρ3(z) of φ3)min( ρ4(z) of φ3)max( ρ4(z) of φ3)
+
+(d) Stability of the layers 
+
+Figure 10: (a) Training points in dark color, test points in light color. (b) Loss versus epoch for different weight initialization. (c) maximum and minimum module of the output of the activation function for the hidden layer, i.e. layer 1. 29
