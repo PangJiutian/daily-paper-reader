@@ -1,0 +1,1735 @@
+Title: Bayesian Tensor Decomposition with Diffusion Model Prior
+
+URL Source: https://arxiv.org/pdf/2606.03212v1
+
+Published Time: Wed, 03 Jun 2026 00:49:26 GMT
+
+Number of Pages: 23
+
+Markdown Content:
+# Bayesian Tensor Decomposition with Diffusion Model Prior 
+
+Zerui Tao 1 Qibin Zhao 1
+
+# Abstract 
+
+Low-rank tensor decomposition (TD) is usually effective on clean, fully observed data, but it often degrades under severe missingness or noise. Low-rankness is itself a useful but limited structural 
+
+prior, and additional handcrafted priors ( e.g. , spar-sity or smoothness) still fall short of capturing the rich statistics of real-world data. To com-pensate for this weak inductive bias under heavy corruption, one would like to inject a learned ,data-driven prior; however, the state-of-the-art diffusion models are not readily compatible with current TD and tractable posterior inference. To address these challenges, we introduce DiffBCP, a hybrid-prior Bayesian CP decomposition frame-work that couples a cumulative shrinkage pro-cess prior over the CP factors for automatic rank selection with an off-the-shelf pre-trained diffu-sion model as an implicit data prior on the re-constructed tensor. To make posterior inference tractable despite the coupling among the likeli-hood, low-rank constraint, and diffusion prior, we develop a split Gibbs sampler: CP factors admit conjugate updates, while the diffusion block is sampled via low-rank-guided denoising. A noise-adaptive coupling schedule further reduces sensi-tivity to hand-tuned annealing. Experiments on image inpainting and denoising, including high-resolution out-of-distribution images, show con-sistent gains over Bayesian, nonlinear, and plug-and-play TD baselines. 
+
+# 1. Introduction 
+
+Tensor decomposition (TD) is a powerful tool for multi-dimensional data analysis, with applications in machine learning, signal processing, and scientific computing (Kolda               
+
+> 1RIKEN Center for Advanced Intelligence Project (AIP), Tokyo, Japan. Correspondence to: Qibin Zhao
+> <qibin.zhao@riken.jp >.
+> Proceedings of the 43 rd International Conference on Machine Learning , Seoul, South Korea. PMLR 306, 2026. Copyright 2026 by the author(s).
+
+& Bader, 2009; Cichocki et al., 2016). By factorizing high-order tensors into contractions of much smaller factors, TD enables efficient representation, compression, and interpre-tation of complex data structures. One important applica-tion is signal recovery from incomplete and noisy observa-tions, where TD can exploit the low-rank structure of the underlying data to reconstruct missing or corrupted entries (Sidiropoulos et al., 2017). In the research field of TD, one scheme is to study effec-tive decomposition structures to incorporate prior beliefs about the data latent representations, such as CP (Hitchcock, 1927), Tucker (Tucker, 1966), tensor networks (Oseledets, 2011; Zhao et al., 2016), and many other decompositions (Kolda & Bader, 2009; Kilmer & Martin, 2011; Cichocki et al., 2016). The motivation behind is that when the model structure matches the data hidden pattern better, the TD method can achieve better representation and recovery per-formances. Motivated by this, efforts have been made to design more flexible TD models that can learn richer struc-tures from the data, from traditional multi-linear models to non-linear models (Zhe et al., 2016; Liu et al., 2019). Ironically, in real applications such as image processing, we usually observe that, when the data are complete and clean, even the simplest TD structure like CP decomposi-tion achieves strong performances; on the contrary, when the data are partially observed or noisy, more sophisticated TD models may not lead to satisfactory results. The main challenge is that the low-rank assumption, while itself an ef-fective structural prior, becomes insufficient on its own once the observations are noisy or incomplete. To reduce this gap, previous work augments TD with additional handcrafted pri-ors such as sparsity or smoothness (Sun et al., 2017; Wang et al., 2017), but these handcrafted priors still may not fully exploit the rich information present in real-world data. This raises a natural question: Can we complement the structural low-rank prior with a more powerful, learned data prior for noisy and incomplete data? 
+
+To address this issue, we adopt a Bayesian framework that can naturally couple a handcrafted structural prior with a learned, data-driven prior in a single probabilistic model. In particular, we propose DiffBCP, a hybrid-prior proba-bilistic CP decomposition model that leverages the recent advances in diffusion models (Karras et al., 2022). Con-1
+
+> arXiv:2606.03212v1 [cs.LG] 2 Jun 2026 Bayesian Tensor Decomposition with Diffusion Model Prior
+
+cretely, a powerful pre-trained diffusion model is placed in the Bayesian CP model as an implicit prior on the re-constructed tensor, enabling the model to capture complex data distributions effectively. To ensure low-rank structure and automatic rank determination, we adopt the cumulative shrinkage process (CUSP) prior (Legramanti et al., 2020) on the CP component weights. The resulting model com-bines the strengths of Bayesian tensor decomposition and diffusion models, allowing for robust learning from noisy and partially observed tensors. To sample from the posterior distribution, we adopt the split Gibbs sampler (SGS, Vono et al., 2019) with an auxiliary variable, which decouples the likelihood, the implicit diffusion prior, and the low-rank constraint. This leads to closed-form updates for the la-tent factors and conjugate sampling. The diffusion prior block is sampled via low-rank–guided denoising, turning plug-and-play guidance into a structured Bayesian inference procedure. While the noise level is an important factor in the SGS, our fully Bayesian framework allows us to infer it automatically from the data, eliminating the need for man-ual tuning. We conduct experiments on image inpainting and denoising tasks. Results show that our method performs well on various types of images, demonstrating the effec-tiveness of combining diffusion model priors with Bayesian tensor decomposition. 
+
+1.1. Contributions 
+
+Our main contributions are summarized as follows: • We propose a hybrid-prior Bayesian CP model with the sparse CUSP prior on the latent factors and powerful pre-trained diffusion model prior on the reconstructed tensor to capture complex data distributions. • The inference is fully probabilistic, giving better noise adaptation and annealing ability. • The proposed method achieves superior performance on image datasets, even outperforms non-linear TDs. 
+
+1.2. Related Work Bayesian tensor decomposition Bayesian TD has been studied for various forms of decompositions, including CP (Zhao et al., 2015; Rai et al., 2014; Cheng et al., 2022), Tucker (Schein et al., 2016; Fang et al., 2021; Stolf & Canale, 2025), tensor train/ring (Long et al., 2021; Tao et al., 2023a; Xu et al., 2023), and non-parametric TD (Zhe et al., 2016; Tao et al., 2024). Previous work mainly fo-cuses on developing better priors on the latent factors, for example sparsity-inducing priors (Zhou et al., 2015; Tilling-hast et al., 2022) or smoothness priors (Chen & Sun, 2022). In particular, Stolf & Canale (2025) develop a Bayesian Tucker using a similar CUSP prior on Tucker factor matri-ces. Other methods learn more flexible likelihood models, such as mixture-of-Gaussians (Chen et al., 2016) and deep generative models (Tao et al., 2023b; Chen et al., 2025). However, these works do not consider powerful data-driven priors on the reconstructed tensor itself. 
+
+Generative priors for inverse problems Generative pri-ors for general inverse problems have a long history, ranging from plug-and-play denoisers (Venkatakrishnan et al., 2013) and regularization-by-denoising (Romano et al., 2017) to generator-based priors such as CSGM (Bora et al., 2017) and Deep Image Prior (Ulyanov et al., 2018). The rise of diffusion models has produced much stronger natural-image priors, leading to a family of diffusion posterior samplers including DPS (Chung et al., 2023), SNIPS/DDRM (Kawar et al., 2021; 2022), and split-Gibbs-style samplers (Wu et al., 2024; Xu & Chi, 2024; Heurtel-Depeiges et al., 2024), with the recent benchmark of Zheng et al. (2025). In the TD literature, Zhao et al. (2020; 2022) pair CNN denoiser priors with ADMM, but the denoiser is much less expressive than a diffusion model and the framework is non-probabilistic. DiffBCP sits at the intersection of these two lines: built on the split Gibbs sampler (Vono et al., 2019; Wu et al., 2024), it additionally imposes a Bayesian low-rank CP structure with CUSP shrinkage on the factor weights, yielding a hybrid-prior formulation within a fully probabilistic framework. 
+
+# 2. Preliminaries 
+
+Notations We use bold lowercase letter, capital letters, and caligraphical capital letters to denote vectors, matrices, and tensors respectively, e.g. , x ∈ RI , X ∈ RI1×I2 , and 
+
+X ∈ RI1×I2···× IN . Subscripts represent slices of sub-arrays, 
+
+e.g. , Xi:: is the i-th slice of X along the first dimension. The mode-n matricization is denoted as X[n], where x[n],i n: =
+
+vec (X··· in··· ) , ∀in = 1 , . . . , I n. We use underlined vectors to represent the set of indices, e.g. , i = ( i1, i 2, . . . , i N ).We use ◦ to denote outer product, ⊙ to denote Khatri-Rao product, and ∗ to denote Hadamard product. DTV and DKL 
+
+denote the total variation and Kullback-Leibler divergence. 
+
+2.1. Tensor Decomposition 
+
+The goal of tensor decomposition is to learn parsimo-nious representations of multi-dimensional arrays, e.g. ,
+
+X ∈ RI1×I2×···× IN , where N is the order of the tensor and In is the dimension along the n-th mode. In this work, we focus on the CP decomposition, denoted as, 
+
+X = CP 
+
+
+
+λ, A(1) , A(2) , . . . , A(N )
+
+(1) 
+
+=
+
+> R
+
+X
+
+> r=1
+
+λr a(1) :r ◦ a(2) :r · · · ◦ a(N ):r ,
+
+where the number R is the CP rank. The CP form fac-torizes a tensor into a sum of rank-one tensors. A(n) ∈
+
+2Bayesian Tensor Decomposition with Diffusion Model Prior 
+
+RIn×R, ∀n = 1, . . . , N are called factor matrices, and 
+
+λ ∈ RR is the weight vector. Usually, TD problems are solved by minimizing the loss functions such as, 
+
+min  
+
+> λ,A(1) ,..., A(N)
+
+O ∗
+
+
+
+Y − CP 
+
+
+
+λ, A(1) , . . . , A(N ) 2
+
+> F
+
+,
+
+where Y is the observation and O is the binary mask. Usu-ally, adding prior information or regularization on the latent factors A(1: N ) or the estimate tensor X can improve the performance. However, these priors are usually heuristic and handcrafted such as smoothness (Chen & Sun, 2022) or sparsity (Zhou et al., 2015; Tillinghast et al., 2022). 
+
+2.2. Diffusion Model 
+
+Diffusion models have become the most powerful class of generative models, especially for images. Diffusion mod-els have been proposed from different disciplines (Sohl-Dickstein et al., 2015; Ho et al., 2020; Song et al., 2021). The work of EDM (Karras et al., 2022) provides a unified framework to understand different diffusion models. Sup-pose the data is diffused by xt = s(t)x + σ(t)ϵ, where s(t)
+
+and σ(t) are two functions of time t, and ϵ ∼ N (0, I). De-note p(xt; σ(t)) as the diffused distribution. The reversed denoising process follows the SDE, 
+
+dxt =
+
+
+
+u(t)xt − v(t)∇xt log p
+
+ xt
+
+s(t) ; σ(t)
+
+ 
+
+dt
+
++ pv(t) d ¯ wt,
+
+(2) where u(t) = ˙ s(t)/s (t), v(t) = 2 s(t)2 ˙σ(t)σ(t), and ¯w is the standard Wiener process. The only unknown term is the score function ∇x log p(x; σ(t)) , which is approximated by a neural network sψ (xt, t ) and trained by score matching techniques. By solving the SDE from a large t to 0, we can sample from the data distribution or denoise noisy data. Nowadays, diffusion models have become the state-of-the-art generative models, and there are many off-the-shelf pre-trained diffusion models for different types of data. 
+
+# 3. Proposed Model and Algorithm 
+
+3.1. Probabilistic CP Decomposition 
+
+To incorporate powerful data priors into the CP decomposi-tion, we develop the probabilistic CP decomposition model. The joint probability of the proposed decomposition is, 
+
+p(Y, X, λ, A(1: N ), τ ) ∝
+
+p(Y | X, τ ) p(X | A(1: N ), λ) p(A(1: N )) p(λ) p(X) p(τ ),
+
+(3) where λ, A(1: N ) are the CP factors in Eq. (1) and X
+
+is the reconstructed tensor. The structural factor p(X |
+
+A(1: N ), λ) = δ(X − CP 
+
+
+
+λ, A(1) , A(2) , . . . , A(N )
+
+) en-codes the low-rank CP constraint; p(A(1: N )), p(λ), and 
+
+p(τ ) are the conjugate factor priors specified below; and 
+
+p(X) is a powerful pre-trained diffusion prior placed di-rectly on the reconstructed tensor. Although X enters the joint through two factors, they play complementary roles: 
+
+p(X | A(1: N ), λ) is a hard structural constraint that ties 
+
+X to the CP factors, while p(X) is a soft data-driven reg-ularizer on the reconstructed tensor. The two priors p(X)
+
+and p(A(1: N ))p(λ) jointly form a hybrid prior that fuses a structural low-rank component with a learned data-driven component in a single posterior. To our knowledge, this is the first Bayesian tensor decomposition that admits an off-the-shelf diffusion model as the data prior, extending the plug-and-play paradigm (Venkatakrishnan et al., 2013; Romano et al., 2017; Wu et al., 2024) from generic inverse problems to a fully probabilistic CP model with automatic rank and noise inference. For the likelihood, we consider each element is independently observed from the Normal distribution, 
+
+yi | xi, τ ∼ Normal( yi | xi, τ −1), ∀i ∈ Ω,
+
+where Ω denotes the set of observed entries in O.
+
+Latent variable priors Let {τ, λ, A(1: N )} be latent vari-ables. The precision follows a conjugate Gamma prior, 
+
+τ ∼ Gamma( τ | α0, κ 0),
+
+where α0, κ0 are the shape and rate parameters respec-tively. For the weight, we adopt the CUmulative Shrink-age Process (CUSP) prior (Legramanti et al., 2020), which provides column-wise shrinkage that, combined with the rank-adaptation procedure below, makes DiffBCP adaptive to unknown CP rank, 
+
+λr | θr ∼ N (0 , θ r ), θ r | πr ∼ (1 − πr )P0 + πr δθ∞ ,πr =
+
+> r
+
+X
+
+> l=1
+
+ωl, ωl = νll−1Y
+
+> m=1
+
+(1 − νm),
+
+where νl
+
+> iid
+
+∼ Beta(1 , β ), θ∞ is a small positive constant, 
+
+δθ∞ is the Dirac delta function, and P0 is a starting continu-ous distribution. As the rank r increases, the distribution of 
+
+λr gradually diffuses from P0 to δθ∞ almost surely. This is similar to a spike-and-slab prior, but with hierachical mix-ture proabability that can increasingly shrink factors. In practice, we set P0 = InvGamma( αθ , β θ ) with αθ > 1
+
+and θ∞ = 1e −3. For the factor matrices, we assume each element follows a Gaussian prior, 
+
+a(n) 
+
+> ir
+
+∼ Normal(0 , 1) , ∀n, i, r. 
+
+This prior regularizes the norm of factor matrices, so that we can truncate the rank based on the value of λ.3Bayesian Tensor Decomposition with Diffusion Model Prior 
+
+Diffusion model prior In the whole probabilistic model in Eq. (3), we still need to specify the data prior p(X). Most existing probabilistic TD methods leave p(X) implicit or treat it as a non-informative constant, in which case Eq. (3) reduces to a classical Bayesian CP (Rai et al., 2014; Zhao et al., 2015) (up to the CUSP shrinkage on the weights) and the model only exploits low-rank structure. We instead instantiate p(X) as a pre-trained diffusion model, which con-tributes a learned natural-data expert on the reconstructed tensor and is the key ingredient that allows DiffBCP to re-cover rich textures and structures under heavy missingness and noise. We assume the reconstructed tensor X follows a diffusion model prior, that means, the diffused proabability follows, 
+
+∇Xt log p(Xt; σ(t)) = sψ (Xt, t ),
+
+where sψ is a pre-trained score network. Given this prior, we can sample X by solving the SDE in Eq. (2). Considering the above probability formulation, we show that the CUSP prior can effectively shrink the residual of the CP decomposition. 
+
+Theorem 3.1. Denote the i-th element in the r-th component as xr, i = λr
+
+QNn=1 a(n) 
+
+> inr
+
+. Suppose the factor is bounded by 
+
+η in second moment, i.e. , E(a(n) 
+
+> inr
+
+)2 < η n, ∀n, i n, r . Then 
+
+∀ϵ > 0, we have, 
+
+p(( xr, i)2 ≥ ϵ) ≤
+
+1
+
+ϵ
+
+ β
+
+1 + β
+
+r  βθ
+
+αθ − 1 − θ∞
+
+
+
++ θ∞
+
+ NY
+
+> n=1
+
+ηn.
+
+Remark 3.2 . The proof is deferred to appendix Section B.1. Since θ∞ is usually set to a small value, the CUSP prior effectively shrinks the tail probability of each component as the rank r increases. We can constrol the tail probability by adjusting the hyperparameter β. If we desire larger shrinkage, we may set a smaller β.
+
+3.2. Split Gibbs Sampler 
+
+To get posterior samples, we need to sample from the joint distribution, 
+
+exp( −ℓ(Y; X, τ ) − g(X)−
+
+fλ(λ | θ) − fθ (θ) − fA(A) − fτ (τ )) ,s.t. X = CP 
+
+
+
+λ, A(1) , A(2) , . . . , A(N )
+
+.
+
+(4) Directly sampling from this distribution is difficult, because the likelihood, the prior on X, and the prior of factors A are coupled together. Moreover, since the diffusion prior on X
+
+is implicit, even Langevin samplers for A are infeasible to implement. To solve this problem, we adopt the Split Gibbs Sampler (SGS, Vono et al., 2019). Introducing an augmented variable 
+
+Z, the sampling problem becomes, 
+
+exp( −ℓ(Y; X, τ ) − g(Z) − ϕ(Z, X; ρ)−
+
+fλ(λ | θ) − fθ (θ) − fA(A) − fτ (τ )) ,s.t. X = CP 
+
+
+
+λ, A(1) , A(2) , . . . , A(N )
+
+,
+
+where ϕ is some distance measure and ρ > 0 is a hyperpa-rameter controlling the coupling strength. If this distance measure converges to zero when X and Z are close, the marginal distribution converges to the original distribution (Vono et al., 2019). Then, we can derive the Gibbs sampler of each random variable. Following Vono et al. (2019); Wu et al. (2024), the distance is defined as, 
+
+ϕ(Z, X; ρ) = 12ρ2 ∥Z − X∥2 
+
+> F
+
+. (5) 3.2.1. L ATENT VARIABLE STEPS 
+
+First, we show how to sample all latent variables including the CP weight, factor matrices, the noise precision, and CUSP parameters. To sample from the CUSP prior, we introduce an augmentation variable ζ ∈ { 0, 1}.
+
+Sample λ For r = 1 , . . . , R ,
+
+λr | · · · ∼ N (μr , σ r ), (6) where, 
+
+σr =
+
+
+
+θr + τ ∥O ∗ Cr ∥2 
+
+> F
+
++ 1
+
+ρ2 ∥Cr ∥2
+
+> F
+
+−1
+
+, μr =
+
+σr Sum 
+
+
+
+τ O ∗ Cr ∗ (Y − Dr ) + 1
+
+ρ2 Cr ∗ (Z − Dr )
+
+
+
+,
+
+with Cr = a(1) :r ◦ a(2) :r ◦ · · · ◦ a(N ):r , Dr = P  
+
+> j̸=r
+
+λj Cj , and 
+
+Sum (·) the sum of all elements. 
+
+Sample A(n) For n = 1 , . . . , N and i = 1 , . . . , I n, the full conditional distribution of a(n) 
+
+> i:
+
+is, 
+
+a(n) 
+
+> i
+
+| · · · ∼ N (μ(n) 
+
+> i
+
+, Σ(n)), (7) where, 
+
+Σ(n) =
+
+
+
+I + B(n)diag (τ o[n],i : + 1 /ρ 2)B(n)T−1
+
+,
+
+μ(n) 
+
+> i
+
+= Σ(n)
+
+
+
+τ y[n],i :diag (o[n],i :) + 1
+
+ρ2 z[n],i :
+
+
+
+B(n)T.
+
+with B(n) defined by, 
+
+B(n) = Λ
+
+
+
+A(N ) ⊙ · · · A(n+1) ⊙ A(n−1) ⊙ · · · A(1) T
+
+.
+
+4Bayesian Tensor Decomposition with Diffusion Model Prior 
+
+Remark 3.3 . We follow Rai et al. (2014) to adaptively adjust the number of components in λ (the CP rank). This proce-dure is denoted as adapt factor (λ, A) and details are shown in the appendix Section A. At sampling step i, we adapt the rank with probability p(i) = exp( α0 + α1i), where α0 and 
+
+α1 are hyperparameters. If there are inactive factors, we remove them. If all factors are active, we add a new factor (and associated parameters) from the priors. Together with the CUSP prior, this yields a bidirectional rank-adaptation scheme: CUSP shrinks redundant components toward δθ∞
+
+which are then physically pruned, while a new component is sampled whenever the current rank turns out to be insuffi-cient. Consequently, DiffBCP is robust to mis-specification of the initial rank in either direction. 
+
+Sample τ The noise precision can be sampled from a conjugate Gamma distribution, 
+
+τ | · · · ∼ Gamma 
+
+α0 + |Ω|
+
+2 , κ 0 + 12
+
+X
+
+> i∈Ω
+
+(yi − xi)2
+
+ ,
+
+(8) where |Ω| is the number of observed entries. 
+
+Sample ζ For r = 1 , . . . , R , the posterior ζr = h | · · · ∝ 
+
+ωh ·
+
+(
+
+Normal( λr ; 0 , θ ∞), h ≤ r
+
+Student -t2αθ (λr ; 0 , β θ /α θ ), h > r. (9) 
+
+Sample ν For r = 1 , . . . , R − 1, the posterior νr | · · · ∼ 
+
+Beta 1 + 
+
+> R
+
+X
+
+> h=1
+
+1(ζh = r), β +
+
+> R
+
+X
+
+> h=1
+
+1(ζh > r )
+
+!
+
+, (10) and set νR = 1 .
+
+Sample θ For r = 1 , . . . , R , the posterior θr | · · · ∼ 
+
+InvGamma 
+
+
+
+αθ + 12 , β θ + λ2
+
+> r
+
+2
+
+1(ζr >r )
+
+· δ1(ζr ≤r) 
+
+> θ∞
+
+. (11) 3.2.2. A UGMENTED VARIABLE STEP 
+
+Second, we show how to sample the augmented variable given the diffusion model prior. Suppose we have a pre-trained score network sψ (Xt, t ), following the EDM frame-work described in Section 2.2. The conditional distribution of Z is, 
+
+Z | · · · ∼ exp( −g(Z) − ϕ(Z, X; ρ)) , (12) where g(Z) is the implicit prior defined by the diffusion model. Since the distance ϕ is defined as the squared error in Eq. (5), sampling from the posterior Eq. (12) is essentially a 
+
+Algorithm 1: Gibbs sampler for DiffBCP 
+
+Input: Data Y, Diffusion Model sψ , Coupling constant 
+
+c, Hyper-priors. 
+
+Output: Posterior samples of CP factors λ, A(1: N ).
+
+for i = 1 , . . . , M do 
+
+Compute ρ = pc/τ ;Sample λ from Eq. (6); Sample A(n), ∀n from Eq. (7); 
+
+adapt factor (λ, A(1: N ));Sample τ from Eq. (8); Sample ζr , ∀r from Eq. (9); Sample νr , ∀r from Eq. (10); Sample θr , ∀r from Eq. (11); Find Ti according to σ(Ti) = ρ;
+
+for t = Ti, . . . , 1 do 
+
+Denoising step by Eq. (2); 
+
+end 
+
+Collect samples after burn-in; 
+
+end 
+
+denoising problem with prior g(Z) and observation X with noise level ρ (Wu et al., 2024). Different from PnP-DM (Wu et al., 2024) where the guidance is unconstrained, here the guidance X is constrained by the CP decomposition structure. The sampling can be solved by running the EDM denoising process Eq. (2). Specifically, for given noise level 
+
+ρ, we find the corresponding time step t such that σ(t) = ρ.Then, we solve the SDE in Eq. (2) from t to 0 to get the sample of Z.
+
+Noise-adaptive coupling schedule As we will discuss in the next subsection, the coupling parameter ρ plays an important role in the sampling process. Thus, we need to de-sign a proper annealing schedule for ρ. In Wu et al. (2024); Xu & Chi (2024), heuristic and deterministic schedules are tested. However, the performances may be sensitive to the choice of scheduler. In our formulation, τ and ρ always ap-pear jointly in the conditional updates, e.g. , Eqs. (6) and (7). Thus the optimization/sampling landscape seen by the la-tent variables is shaped by the relative magnitude between 
+
+τ and ρ−2 rather than ρ alone. Motivated by this, we set 
+
+τ ρ 2 = c, where c is a hyperparameter constant. When τ is inferred during the sampling procedure, this rule automati-cally adjusts ρ to maintain a fixed relative scale between the likelihood and coupling terms. The overall algorithm is summarized in Algorithm 1. More details and derivation can be find in appendix Section A. 3.2.3. T HEORETICAL PROPERTIES 
+
+In this subsection, we investigate the approximations in the sampling algorithm and how the noise parameter ρ af-5Bayesian Tensor Decomposition with Diffusion Model Prior 
+
+fects the sampling process. Define the set of all hyperpa-rameters ( τ, ζ, ν, θ) and CP factors ( λ, A(1: N )) as Θ. The 
+
+ρ-smoothed prior induced by the diffusion model is, 
+
+pρ(X) = 1
+
+Cρ
+
+Z
+
+p(Z) exp( −φ(Z, X; ρ)) d Z,
+
+where Cρ is the normalizing constant. Denote the marginal-ized posterior as, 
+
+πρ, X(Θ) ∝ p(Y | X(Θ) , τ )p(Θ) pρ(X(Θ)) , (13) and the original posterior π0(Θ) defined in Eq. (4). Under some conditions on the joint probability, Vono et al. (2019) shows that the smoothed posterior πρ, X(Θ) converges to the original posterior π0(Θ) as ρ → 0, i.e., 
+
+lim  
+
+> ρ→0
+
+DTV (πρ, X, π 0) = 0 . (14) This indicates that by choosing a smaller ρ, we can reduce the bias introduced by the split Gibbs sampler. However, using small ρ also makes the denoising step more challeng-ing, especially when the score function is approximated by a neural network. Let πρ(Z, Θ) be the target joint density of the augmented form, 
+
+πρ(Z, Θ) ∝ p(Y | X(Θ) , τ )p(Θ) p(Z) exp( −ϕ(Z, X; ρ)) ,
+
+(15) with conditionals πρ(Z | Θ) and πρ(Θ | Z), and let 
+
+πρ, X(Θ) = R πρ(Z, Θ) dZ be its marginal on Θ. Assume that the practical diffusion sampler used in the denoising step induces a conditional density qρ(Z | Θ) ≈ πρ(Z | Θ) 
+
+(for each fixed Θ), and consider the inexact block Gibbs chain that alternates 
+
+Zk+1 ∼ qρ( · | Θk), Θk+1 ∼ πρ( · | Zk+1 ).
+
+Assume moreover that the two families of conditionals 
+
+πρ(Θ | Z) and qρ(Z | Θ) are compatible, so that the above Markov chain admits a stationary joint distribu-tion ˜πρ(Z, Θ) . Denote ˜πρ, X(Θ) = R ˜πρ(Z, Θ) d Z and 
+
+πρ, Z(Z) = R πρ(Z, Θ) dΘ . The following theorem quanti-fies the stationary bias on Θ induced by the inexact diffusion denoising step. 
+
+Theorem 3.4. For any Θ in the support of πρ, X, the station-ary bias on Θ can be quantified as 
+
+DKL (πρ, X ∥ ˜πρ, X) = 
+
+EΘ∼πρ, X
+
+
+
+log EZ∼πρ, Z
+
+ qρ(Z | Θ) 
+
+πρ(Z | Θ) 
+
+ 
+
+. (16) The proof follows Heurtel-Depeiges et al. (2024) and we defer it to appendix Section B.2. Eq. (14) and Theorem 3.4 can be used to explain the overall bias in the following corollary. 
+
+Corollary 3.5. For any bounded measurable function f ,
+
+E˜πρ, X [f (Θ)] − Eπ0,X [f (Θ)] ≤
+
+Eπρ, X [f (Θ)] − Eπ0,X [f (Θ)] +
+
+∥f ∥∞
+
+q
+
+2DKL (πρ, X ∥ ˜πρ, X),
+
+(17) 
+
+where the last term is given by Eq. (16) .Remark 3.6 . The first term on the RHS of Eq. (17) con-verges to 0 as ρ → 0 by Eq. (14). The second term instead quantifies the stationary bias induced by the inexact dif-fusion step, as characterized in Theorem 3.4. It becomes smaller as qρ(Z | Θ) gets closer to πρ(Z | Θ) , which is expected to happen when ρ increases, since the denoising becomes easier. Thus there is a trade-off in the choice of ρ.
+
+# 4. Experiments 
+
+Experiments are conducted on single NVIDIA A100 GPU with 40GB VRAM unless otherwise specified. More details and results are provided in appendix Section D. The code is available at https://github.com/taozerui/ DiffBCP .
+
+4.1. Image Inpainting and Denoising 
+
+In this experiment, we evaluate our method on natural image inpainting and denoising tasks, with pre-trained diffusion models on corresponding datasets as priors. 
+
+Datasets and pre-trained models We adopt FFHQ (Kar-ras et al., 2019) and ImageNet (Deng et al., 2009). We use the pre-trained diffusion model for both datasets with checkpoints from Chung et al. (2023). For each dataset, 128 images from the test set are randomly selected for evalu-ation. We adopt three types of masks for inpainting: (1) Uniform(0.9/0.7) randomly masks 90%/70% pixels in a uni-form manner; (2) Stripe randomly masks pixels in horizontal and vertical stripes; (3) Irregular masks pixels using lines with random lengths and angles. Finally, all images are scaled to range [0 , 1] and iid Gaussian noise with standard variance σ = 0 .05 is added for denoising. 
+
+Baselines We compare with Bayesian CP (BCP, Zhao et al., 2015), Bayesian Tensor Ring (BTR, Long et al., 2021), Hierarchical Low-Rank Tensor Factorization (HLRTF, Luo et al., 2022), TD with Deep network priors (DeepTensor, Saragadam et al., 2024), TD with a tensor Correlated Total Variation regularization (tCTV, Wang et al., 2023), and TD with Global-LOcal-Nonlocal priors (GLON, Zhao et al., 2022). BCP and BTR are two traditional Bayesian TD for CP and TR decompositions. HLRTF and DeepTensor are two deep learning-based TD methods. GLON is a TD method that leverages pre-trained neural networks as priors. 6Bayesian Tensor Decomposition with Diffusion Model Prior                                                                                                                                                                                          
+
+> Table 1. Results for FFHQ and ImageNet datasets. PSNR ↑, SSIM ↑, and LPIPS ↓metrics are reported, while SSIM and LPIPS are multiplied by 100 for better readability. Purple rows indicate TDs with deep (neural network) structures. Green rows indicate TDs with smooth or pre-trained model priors.
+> Uniform(0.7) Uniform(0.9) Stripe Irregular Method PSNR SSIM LPIPS PSNR SSIM LPIPS PSNR SSIM LPIPS PSNR SSIM LPIPS
+> FFHQ
+> BCP 26.28 64.53 51.56 21.61 44.56 61.95 9.26 25.28 65.68 22.64 62.52 47.30 BTR 27.32 68.22 45.16 24.22 58.58 56.23 19.63 50.35 53.22 24.91 66.74 43.98 HLRTF 28.16 77.92 40.94 25.12 66.55 52.08 25.21 75.15 40.20 25.84 77.42 37.27 DeepTensor 28.23 72.23 30.83 26.11 61.66 40.65 26.44 75.70 29.53 28.01 79.49 26.19 tCTV 26.40 59.18 38.19 25.18 59.94 48.16 24.32 58.61 43.59 24.97 53.98 36.03 GLON 13.02 27.18 62.89 7.47 17.65 36.83 21.38 53.53 47.84 22.69 53.21 40.89 DiffBCP 32.13 88.83 17.70 28.28 81.18 28.93 27.91 85.11 19.89 30.34 88.60 15.98
+> ImageNet
+> BCP 24.34 61.07 47.97 20.17 39.71 59.46 10.05 28.62 62.56 21.33 61.21 41.93 BTR 25.03 63.44 43.58 21.80 48.37 56.15 18.68 49.45 49.79 22.44 60.81 42.94 HLRTF 26.00 73.94 38.56 22.65 59.35 50.66 23.30 70.09 38.34 22.01 71.83 35.73 DeepTensor 26.03 68.81 32.60 23.74 56.46 42.85 23.87 68.64 32.60 25.16 73.10 29.30 tCTV 24.94 60.13 36.78 23.03 54.83 48.50 22.87 58.14 41.47 23.62 55.96 33.89 GLON 12.47 27.46 60.45 7.02 15.39 70.43 20.65 53.14 45.60 21.54 54.86 41.01 DiffBCP 28.95 84.53 21.27 25.03 71.49 35.58 25.07 77.58 24.83 27.02 83.09 19.66
+
+However, GLON only applies for pre-trained denoising networks with fixed noise levels. 
+
+Results We evaluate reconstruction quality using three complementary metrics: peak signal-to-noise ratio (PSNR) measuring pixel-wise accuracy, structural similarity index (SSIM) capturing perceptual similarity, and learned percep-tual image patch similarity (LPIPS, Zhang et al., 2018) quan-tifying semantic fidelity. Higher PSNR/SSIM and lower LPIPS indicate better performance. The quantitative results in Table 1 demonstrate that Diff-BCP consistently outperforms all baselines across different datasets and missing patterns. Specifically, on FFHQ with Uniform(0.9) mask, DiffBCP achieves 28.28 dB PSNR, im-proving over the best baseline (DeepTensor) by 2.17 dB. The gains are even more pronounced on Irregular masks (+2.33 dB) where structured priors matter most. On ImageNet, DiffBCP maintains strong performance on all metrics, with average improvements of 1.82 dB in PSNR and 12.42 in SSIM over the best competing method. The qualitative comparisons in Fig. 1 reveal that DiffBCP reconstructs sharper textures and more coherent structures. Traditional multi-linear methods (BCP and BTR) produce overly coarse results due to limited prior expressiveness, 
+
+e.g. , we can easily identify the low-rank structures. Non-linear decompositions (HLRTF and DeepTensor) generate finer-grained details but suffer from artifacts. GLON ex-hibits severe instability, particularly at high missing ratios (90%+), often converging to trivial solutions (predicting all missing pixels as zero); this explains its poor quantitative performance in Table 1. In contrast, DiffBCP leverages the powerful diffusion prior while maintaining stable inference through the split Gibbs sampler. We ablate the diffusion prior and the CUSP shrinkage prior in Section D.3, and report sensitivity to the scheduling hy-perparameters c and ρmin in Section D.5. The two ablations show that (i) the diffusion prior is the main source of gain on structured masks, and (ii) CUSP enables strong recovery even when the initial CP rank is severely under-specified, so the model is not sensitive to the choice of initial rank. 
+
+4.2. Out-of-Distribution and High-Resolution Images 
+
+A critical challenge for practical deployment is handling images from distributions different from the diffusion prior’s training data, as well as varying resolutions. To assess generalization capability, we evaluate on out-of-distribution (OOD) high-resolution images. We select three diverse 2048 × 2048 images: Marseille (urban landscape), Tokyo (nighttime cityscape), and West-erlund (astronomical image). See appendix Section D for their sources. These images are deliberately chosen to be OOD relative to the FFHQ/ImageNet training distributions. The images also test multi-scale reasoning since the dif-fusion prior was trained on 256 × 256 images. We com-pare with PuTT (Loeschcke et al., 2024), a recent coarse-to-fine method achieving state-of-the-art results on high-dimensional tensors. For DiffBCP, we apply the reshape 7Bayesian Tensor Decomposition with Diffusion Model Prior 
+
+Original Observe BCP BTR HLRTF DeepTensor tCTV GLON DiffBCP 
+
+Figure 1. Visualization for FFHQ and ImageNet datasets. From top to bottom: ImageNet with Uniform(0.7), FFHQ with Uniform(0.9), ImageNet with Stripe, and FFHQ with Irregular masks. 
+
+Table 2. Results for high-resolution images. PSNR ↑ and SSIM ↑
+
+metrics are reported, while SSIM is multiplied by 100 for better readability.                                                               
+
+> Uni(0.9) Uni(0.95) Irr Method PSNR SSIM PSNR SSIM PSNR SSIM
+> Marseille
+> BCP 16.94 29.42 15.89 26.55 17.63 33.55 PuTT 19.63 36.47 17.86 28.26 19.83 40.84 DiffBCP 20.15 39.08 18.01 28.42 20.94 46.75
+> Tokyo
+> BCP 17.89 37.61 16.90 36.67 18.62 40.40 PuTT 19.98 39.52 18.33 30.74 20.27 45.03 DiffBCP 20.66 44.90 18.90 35.50 21.36 51.38
+> Westerlund
+> BCP 21.12 65.60 20.08 65.09 22.26 68.34 PuTT 24.43 65.68 23.00 55.70 24.38 68.21 DiffBCP 23.85 68.33 21.86 66.16 25.27 74.03
+
+operation in Eq. (5) to match the prior’s expected input dimensions while preserving spatial structure. Results in Table 2 show that DiffBCP maintains strong per-formance even on OOD high-resolution data. On Marseille with Irregular mask, DiffBCP achieves 20.94 dB PSNR ver-
+
+Original Observe BCP PuTT DiffBCP 
+
+Figure 2. Visualization for high-resolution images. From top to bottom: Marseille with Uniform(0.9), Tokyo with Uniform(0.95), and Westerlund with Irregular masks. 
+
+sus 19.83 dB for PuTT, despite the significant distribution shift. Qualitative results (Fig. 2) reveal that DiffBCP better preserves fine details and global coherence. PuTT’s coarse-to-fine strategy can introduce boundary artifacts when transi-tioning between scales, whereas our joint low-rank and diffu-sion modeling maintains consistency across resolutions. The relatively smaller gaps compared to in-distribution results suggest that the low-rank structure provides an inductive bias that partially compensates for distribution mismatch. 8Bayesian Tensor Decomposition with Diffusion Model Prior (a) (b)   
+
+> Figure 3. (a) Trace plot of PSNR for ImageNet with Uniform(0.7) mask. Thinner lines correspond to individual images and thicker lines show the average. (b) PnP-DM recovery of Tokyo with Uniform(0.95) mask.
+
+4.3. Improving Diffusion Posterior Sampling 
+
+Finally, we investigate how the low-rank structure in Diff-BCP can improve diffusion posterior sampling, especially comparing with PnP-DM (Wu et al., 2024) which shares a similar split Gibbs sampler framework but without tensor decomposition. A direct quantitative comparison with DPS (Chung et al., 2023) and PnP-DM under both single-sample and posterior-mean evaluation is deferred to Section D.2. 
+
+Faster mixing As shown in Fig. 3(a), the low-rank as-sumption leads to an easier posterior distribution, which may lead to faster mixing (Roberts & Sahu, 2002). How-ever, we should note that faster mixing does not necessarily lead to better performance, because the low-rank assumption may introduce bias if the data are not exactly low-rank. 
+
+Robust to noise level and scheduling Following Wu et al. (2024), we clip ρ to [ρmin , ρ max ] in each sampling step. As shown in Fig. 3(a), PnP-DM could be sensitive to the scheduling of noise level ( e.g. , ρmin ), while our noise-adaptive coupling schedule tends to be more robust. More results are shown in Section D.5. 
+
+High-resolution images As shown in Fig. 3(b), PnP-DM fails to recover the high-resolution images. As comparison, our method produces much better results as shown in Fig. 2. The corresponding wall-clock time and peak GPU memory are reported in Section D.7. 
+
+# 5. Conclusion and Discussion 
+
+We propose DiffBCP, a principled Bayesian framework for tensor decomposition that integrates pre-trained diffusion models as implicit priors. By combining the structural induc-tive bias of low-rank CP decomposition with the expressive power of diffusion priors, DiffBCP achieves state-of-the-art performance on tensor completion and denoising tasks. Key contributions include: (1) a cumulative shrinkage prior for automatic rank determination, (2) a split Gibbs sampler enabling tractable posterior inference despite the complex coupling between likelihood, low-rank constraint, and diffu-sion prior, and (3) an adaptive noise scheduling strategy that removes hyperparameter sensitivity. The performance of DiffBCP rely on the underlying signal admitting a meaning-ful low-rank structure: when this assumption is violated, the structural contribution of the CP block vanishes while its factor updates remain comparatively more expensive than a pure diffusion sampler. For future research, several directions merit further inves-tigation. First, while we focus on tensor completion and denoising, the framework naturally extends to other linear in-verse problems (e.g., compressed sensing, super-resolution). Second, the current implementation processes the full ten-sor in Steps Eqs. (6) and (7); stochastic mini-batch updates could reduce memory overhead for extremely large tensors. Third, we employ CP decomposition in this work, but the framework is compatible with other decompositions that may better capture specific structural patterns; we sketch the extension to tensor train and tensor ring in Section C. We hope this work inspires future research at the intersection of tensor decomposition and modern generative models. 
+
+# Acknowledgement 
+
+We thank the anonymous reviewers and AC for their con-structive feedback. ZT was supported by the JSPS KAK-ENHI Grant Number JP26K21321 and RIKEN Incentive Re-search Project. QZ was supported by the JSPS KAKENHI Grant Number JP23K28109 and JSPS Bilateral Program Number JPJSBP120257420. 
+
+# Impact Statement 
+
+This paper presents work whose goal is to advance the field of machine learning, especially tensor decomposition and diffusion models. There are many potential societal con-sequences of our work, none of which we feel must be specifically highlighted here. 
+
+# References 
+
+Bhattacharya, A. and Dunson, D. B. Sparse bayesian infinite factor models. Biometrika , 98(2):291–306, 2011. Bora, A., Jalal, A., Price, E., and Dimakis, A. G. Com-pressed sensing using generative models. In International conference on machine learning , pp. 537–546. PMLR, 2017. Cardoso, M. J., Li, W., Brown, R., Ma, N., Kerfoot, E., Wang, Y., Murrey, B., Myronenko, A., Zhao, C., Yang, D., et al. Monai: An open-source framework for deep learning in healthcare. arXiv preprint arXiv:2211.02701 ,2022. 9Bayesian Tensor Decomposition with Diffusion Model Prior 
+
+Chen, P., Sun, Y., Cheng, L., Yang, Y., Li, W., Liu, Y., Liu, W., Bian, J., and Fang, S. Generating full-field evolu-tion of physical dynamics from irregular sparse observa-tions. In The Thirty-ninth Annual Conference on Neural Information Processing Systems , 2025. URL https: //openreview.net/forum?id=5d83SyLm0Z .Chen, X. and Sun, L. Bayesian temporal factorization for multidimensional time series prediction. IEEE Transac-tions on Pattern Analysis and Machine Intelligence , 44(9): 4659–4673, 2022. doi: 10.1109/TPAMI.2021.3066551. Chen, X., Han, Z., Wang, Y., Zhao, Q., Meng, D., and Tang, Y. Robust tensor factorization with unknown noise. In 
+
+proceedings of the IEEE Conference on Computer Vision and Pattern Recognition , pp. 5213–5221, 2016. Cheng, L., Chen, Z., Shi, Q., Wu, Y.-C., and Theodoridis, S. Towards flexible sparsity-aware modeling: Automatic tensor rank learning using the generalized hyperbolic prior. IEEE Transactions on Signal Processing , 70:1834– 1849, 2022. doi: 10.1109/TSP.2022.3164200. Chung, H., Kim, J., Mccann, M. T., Klasky, M. L., and Ye, J. C. Diffusion posterior sampling for general noisy inverse problems. In The Eleventh International Confer-ence on Learning Representations , 2023. URL https: //openreview.net/forum?id=OnD9zGAGT0k .Cichocki, A., Lee, N., Oseledets, I., Phan, A.-H., Zhao, Q., Mandic, D. P., et al. Tensor networks for dimensionality reduction and large-scale optimization: Part 1 low-rank tensor decompositions. Foundations and Trends® in Ma-chine Learning , 9(4-5):249–429, 2016. Deng, J., Dong, W., Socher, R., Li, L.-J., Li, K., and Fei-Fei, L. Imagenet: A large-scale hierarchical image database. In 2009 IEEE conference on computer vision and pattern recognition , pp. 248–255. Ieee, 2009. Fang, S., Kirby, R. M., and Zhe, S. Bayesian streaming sparse tucker decomposition. In Uncertainty in Artificial Intelligence , pp. 558–567. PMLR, 2021. Heurtel-Depeiges, D., Margossian, C., Ohana, R., and R ´egaldo-Saint Blancard, B. Listening to the noise: Blind denoising with gibbs diffusion. In International Confer-ence on Machine Learning , pp. 18284–18304. PMLR, 2024. Hitchcock, F. L. The expression of a tensor or a polyadic as a sum of products. Journal of Mathematics and Physics ,6(1-4):164–189, 1927. Ho, J., Jain, A., and Abbeel, P. Denoising diffusion proba-bilistic models. Advances in neural information process-ing systems , 33:6840–6851, 2020. Karras, T., Laine, S., and Aila, T. A style-based genera-tor architecture for generative adversarial networks. In 
+
+Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR) , June 2019. Karras, T., Aittala, M., Aila, T., and Laine, S. Elucidating the design space of diffusion-based generative models. 
+
+Advances in neural information processing systems , 35: 26565–26577, 2022. Kawar, B., Vaksman, G., and Elad, M. Snips: Solving noisy inverse problems stochastically. Advances in neural information processing systems , 34:21757–21769, 2021. Kawar, B., Elad, M., Ermon, S., and Song, J. Denoising diffusion restoration models. Advances in neural infor-mation processing systems , 35:23593–23606, 2022. Kilmer, M. E. and Martin, C. D. Factorization strategies for third-order tensors. Linear Algebra and its Applications ,435(3):641–658, 2011. Kolda, T. G. and Bader, B. W. Tensor decompositions and applications. SIAM review , 51(3):455–500, 2009. Legramanti, S., Durante, D., and Dunson, D. B. Bayesian cu-mulative shrinkage for infinite factorizations. Biometrika ,107(3):745–752, 2020. Liu, H., Li, Y., Tsang, M., and Liu, Y. Costco: A neural tensor completion model for sparse tensors. In Proceed-ings of the 25th ACM SIGKDD International Conference on Knowledge Discovery & Data Mining , pp. 324–334, 2019. Loeschcke, S. B., Wang, D., Leth-Espensen, C. M., Be-longie, S., Kastoryano, M., and Benaim, S. Coarse-to-fine tensor trains for compact visual representations. In Forty-first International Conference on Machine Learning ,2024. URL https://openreview.net/forum? id=lGZUvfP2ZF .Long, Z., Zhu, C., Liu, J., and Liu, Y. Bayesian low rank tensor ring for image recovery. IEEE Transactions on Image Processing , 30:3568–3580, 2021. Luo, Y., Zhao, X., Meng, D., and Jiang, T. Hlrtf: Hier-archical low-rank tensor factorization for inverse prob-lems in multi-dimensional imaging. In 2022 IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR) , pp. 19281–19290, 2022. Oseledets, I. V. Tensor-train decomposition. SIAM Journal on Scientific Computing , 33(5):2295–2317, 2011. Rai, P., Wang, Y., Guo, S., Chen, G., Dunson, D., and Carin, L. Scalable bayesian low-rank decomposition of incomplete multiway tensors. In International conference on machine learning , pp. 1800–1808. PMLR, 2014. 10 Bayesian Tensor Decomposition with Diffusion Model Prior 
+
+Roberts, G. O. and Sahu, S. K. Updating schemes, correla-tion structure, blocking and parameterization for the gibbs sampler. Journal of the Royal Statistical Society: Series B (Methodological) , 59(2):291–317, 01 2002. ISSN 0035-9246. doi: 10.1111/1467-9868.00070. URL https: //doi.org/10.1111/1467-9868.00070 .Romano, Y., Elad, M., and Milanfar, P. The little engine that could: Regularization by denoising (red). SIAM journal on imaging sciences , 10(4):1804–1844, 2017. Saragadam, V., Balestriero, R., Veeraraghavan, A., and Bara-niuk, R. G. Deeptensor: Low-rank tensor decomposition with deep network priors. IEEE Transactions on Pattern Analysis and Machine Intelligence , 46(12):10337–10348, 2024. Schein, A., Zhou, M., Blei, D., and Wallach, H. Bayesian poisson tucker decomposition for learning the structure of international relations. In International Conference on Machine Learning , pp. 2810–2819. PMLR, 2016. Sidiropoulos, N. D., De Lathauwer, L., Fu, X., Huang, K., Papalexakis, E. E., and Faloutsos, C. Tensor decomposi-tion for signal processing and machine learning. IEEE Transactions on signal processing , 65(13):3551–3582, 2017. Sohl-Dickstein, J., Weiss, E., Maheswaranathan, N., and Ganguli, S. Deep unsupervised learning using nonequi-librium thermodynamics. In International conference on machine learning , pp. 2256–2265. pmlr, 2015. Song, Y., Sohl-Dickstein, J., Kingma, D. P., Kumar, A., Ermon, S., and Poole, B. Score-based generative mod-eling through stochastic differential equations. In In-ternational Conference on Learning Representations ,2021. URL https://openreview.net/forum? id=PxTIG12RRHS .Stolf, F. and Canale, A. Bayesian adaptive tucker decom-positions for tensor factorization. Journal of Computa-tional and Graphical Statistics , 0(0):1–10, 2025. doi: 10.1080/10618600.2025.2509585. Sun, W. W., Lu, J., Liu, H., and Cheng, G. Provable sparse tensor decomposition. Journal of the Royal Statistical Society Series B: Statistical Methodology , 79(3):899–916, 2017. Tao, Z., Tanaka, T., and Zhao, Q. Scalable bayesian tensor ring factorization for multiway data analysis. In Interna-tional Conference on Neural Information Processing , pp. 490–503. Springer, 2023a. Tao, Z., Tanaka, T., and Zhao, Q. Undirected probabilistic model for tensor decomposition. Advances in Neural In-formation Processing Systems , 36:25837–25853, 2023b. Tao, Z., Tanaka, T., and Zhao, Q. Efficient nonparametric tensor decomposition for binary and count data. Pro-ceedings of the AAAI Conference on Artificial Intelli-gence , 38(14):15319–15327, Mar. 2024. doi: 10.1609/ aaai.v38i14.29456. URL https://ojs.aaai.org/ index.php/AAAI/article/view/29456 .Tillinghast, C., Wang, Z., and Zhe, S. Nonparamet-ric sparse tensor factorization with hierarchical gamma processes. In Chaudhuri, K., Jegelka, S., Song, L., Szepesvari, C., Niu, G., and Sabato, S. (eds.), Pro-ceedings of the 39th International Conference on Ma-chine Learning , volume 162 of Proceedings of Machine Learning Research , pp. 21432–21448. PMLR, 17–23 Jul 2022. URL https://proceedings.mlr.press/ v162/tillinghast22a.html .Tucker, L. R. Some mathematical notes on three-mode factor analysis. Psychometrika , 31(3):279–311, 1966. Ulyanov, D., Vedaldi, A., and Lempitsky, V. Deep image prior. In Proceedings of the IEEE conference on computer vision and pattern recognition , pp. 9446–9454, 2018. Venkatakrishnan, S. V., Bouman, C. A., and Wohlberg, B. Plug-and-play priors for model based reconstruction. In 
+
+2013 IEEE global conference on signal and information processing , pp. 945–948. IEEE, 2013. Vono, M., Dobigeon, N., and Chainais, P. Split-and-augmented gibbs sampler—application to large-scale in-ference problems. IEEE Transactions on Signal Process-ing , 67(6):1648–1661, 2019. Wang, H., Peng, J., Qin, W., Wang, J., and Meng, D. Guar-anteed tensor recovery fused low-rankness and smooth-ness. IEEE Transactions on Pattern Analysis and Ma-chine Intelligence , 45(9):10990–11007, 2023. doi: 10. 1109/TPAMI.2023.3259640. Wang, Y., Peng, J., Zhao, Q., Leung, Y., Zhao, X.-L., and Meng, D. Hyperspectral image restoration via total vari-ation regularized low-rank tensor decomposition. IEEE Journal of Selected Topics in Applied Earth Observations and Remote Sensing , 11(4):1227–1243, 2017. Wu, Z., Sun, Y., Chen, Y., Zhang, B., Yue, Y., and Bouman, K. Principled probabilistic imaging using diffusion mod-els as plug-and-play priors. In The Thirty-eighth Annual Conference on Neural Information Processing Systems ,2024. URL https://openreview.net/forum? id=Xq9HQf7VNV .Xu, L., Cheng, L., Wong, N., and Wu, Y.-C. Tensor train factorization under noisy and incomplete data with auto-matic rank estimation. Pattern Recognition , 141:109650, 2023. ISSN 0031-3203. doi: https://doi.org/10.1016/j. patcog.2023.109650. 11 Bayesian Tensor Decomposition with Diffusion Model Prior 
+
+Xu, X. and Chi, Y. Provably robust score-based diffusion posterior sampling for plug-and-play image reconstruc-tion. In The Thirty-eighth Annual Conference on Neural Information Processing Systems , 2024. URL https: //openreview.net/forum?id=SLnsoaY4u1 .Zhang, R., Isola, P., Efros, A. A., Shechtman, E., and Wang, O. The unreasonable effectiveness of deep features as a perceptual metric. In Proceedings of the IEEE conference on computer vision and pattern recognition , pp. 586–595, 2018. Zhao, Q., Zhang, L., and Cichocki, A. Bayesian cp fac-torization of incomplete tensors with automatic rank de-termination. IEEE transactions on pattern analysis and machine intelligence , 37(9):1751–1763, 2015. Zhao, Q., Zhou, G., Xie, S., Zhang, L., and Cichocki, A. Tensor ring decomposition. arXiv preprint arXiv:1606.05535 , 2016. Zhao, X.-L., Xu, W.-H., Jiang, T.-X., Wang, Y., and Ng, M. K. Deep plug-and-play prior for low-rank tensor completion. Neurocomputing , 400:137–149, 2020. Zhao, X.-L., Yang, J.-H., Ma, T.-H., Jiang, T.-X., Ng, M. K., and Huang, T.-Z. Tensor completion via complementary global, local, and nonlocal priors. IEEE Transactions on Image Processing , 31:984–999, 2022. doi: 10.1109/TIP. 2021.3138325. Zhe, S., Zhang, K., Wang, P., Lee, K.-c., Xu, Z., Qi, Y., and Ghahramani, Z. Distributed flexible nonlinear tensor factorization. Advances in neural information processing systems , 29, 2016. Zheng, H., Chu, W., Zhang, B., Wu, Z., Wang, A., Feng, B., Zou, C., Sun, Y., Kovachki, N. B., Ross, Z. E., Bouman, K., and Yue, Y. Inversebench: Benchmarking plug-and-play diffusion priors for inverse problems in physical sciences. In The Thirteenth International Conference on Learning Representations , 2025. URL https:// openreview.net/forum?id=U3PBITXNG6 .Zhou, J., Bhattacharya, A., Herring, A. H., and Dunson, D. B. Bayesian factorizations of big sparse tensors. Jour-nal of the American Statistical Association , 110(512): 1562–1576, 2015. 12 Bayesian Tensor Decomposition with Diffusion Model Prior 
+
+# A. Derivation of the Gibbs Sampler 
+
+The augmented joint distribution is, 
+
+exp( −ℓ(Y; X, τ ) − g(Z) − ϕ(Z, X; ρ) − fλ(λ | θ) − fθ (θ) − fA(A) − fτ (τ )) ,s.t. X = CP 
+
+
+
+λ, A(1) , A(2) , . . . , A(N )
+
+.
+
+To enable Gibbs sampling of the spike-and-slab prior, we further introduce the augmented variable ζ = ( ζ1, . . . , ζ R),following p(ζr = l) = ωl, ∀l = 1 , . . . , R . This augmentation variable indicate which slab the component r belongs to, 
+
+θr | ζr ∼ 1(ζr > r )InvGamma( αθ , β θ ) + 1(ζr ≤ r)δθ∞ , ∀r = 1 , . . . , R, 
+
+where 1(·) is the indicator function. After the augmentation, the joint distribution becomes, 
+
+exp( −ℓ(Y; X, τ ) − g(Z) − ϕ(Z, X; ρ) − fλ(λ | θ) − fθ (θ | ζ) − fζ (ζ | ν) − fν (ν) − fA(A) − fτ (τ )) ,s.t. X = CP 
+
+
+
+λ, A(1) , A(2) , . . . , A(N )
+
+,
+
+where the likelihood is defined as, 
+
+ℓ(Y; X, τ ) = τ
+
+2 ∥O ∗ (Y − X)∥2 
+
+> F
+
+,
+
+and the priors are defined as, 
+
+ϕ(Z, X; ρ) = 12ρ2 ∥Z − X∥2 
+
+> F
+
+,fλ(λ | θ) = 12
+
+> R
+
+X
+
+> r=1
+
+(θr )−1λ2 
+
+> r
+
+,fθ (θ | ζ) = 
+
+> R
+
+X
+
+> r=1
+
+InvGamma( αθ , β θ )1(ζr >r )δ1(ζr ≤r) 
+
+> θ∞
+
+,fζ (ζ | ν) = Categorical( ω),fν (ν) = 
+
+> R
+
+Y
+
+> r=1
+
+Beta( νr ; 1 , β ),fA(A) = 12
+
+> N
+
+X
+
+> n=1
+
+∥A(n)∥2 
+
+> F
+
+,fτ (τ ) = (1 − α0) log τ + κ0τ. 
+
+A.1. Latent Variable Steps Sample τ When sampling τ , it is not dependent on ϕ, thus we have, 
+
+τ | · · · ∝ exp( −f (Y; X, τ ) − l(τ )) 
+
+∝ exp 
+
+− τ
+
+2
+
+X
+
+> i∈Ω
+
+(yi − xi)2
+
+ · exp( −(1 − α0) log τ − κ0τ )
+
+∝ exp 
+
+−
+
+κ0 + 12
+
+X
+
+> i∈Ω
+
+(yi − xi)2
+
+ τ
+
+ · exp 
+
+
+
+−(1 − α0 + |Ω|
+
+2 ) log τ
+
+
+
+.
+
+This is a Gamma distribution, 
+
+τ | · · · ∼ Gamma 
+
+α0 + |Ω|
+
+2 , κ 0 + 12
+
+X
+
+> i∈Ω
+
+(yi − xi)2
+
+ .
+
+13 Bayesian Tensor Decomposition with Diffusion Model Prior 
+
+Sample A The factors A are dependent on f, h, ϕ . For CP decomposition, we have, 
+
+X[n] = A(n)Λ
+
+
+
+A(N ) ⊙ · · · ⊙ A(n+1) ⊙ A(n−1) ⊙ · · · ⊙ A(1) T
+
+,
+
+where Λ = diag (λ) and ⊙ is the Khatri-Rao product. For simplicity, we denote, 
+
+B(n) = Λ
+
+
+
+A(N ) ⊙ · · · ⊙ A(n+1) ⊙ A(n−1) ⊙ · · · ⊙ A(1) T
+
+.
+
+The joint distribution becomes, 
+
+p(A(n) | · · · ) ∝ exp 
+
+
+
+− τ
+
+2 ∥O ∗ (Y − X)∥2 
+
+> F
+
+− 12 ∥A(n)∥2 
+
+> F
+
+− 12ρ2 ∥Z − X∥2
+
+> F
+
+
+
+∝ exp 
+
+
+
+− τ
+
+2 ∥O[n] ∗ (Y[n] − A(n)B(n))∥2 
+
+> F
+
+− 12 ∥A(n)∥2 
+
+> F
+
+− 12ρ2 ∥Z[n] − A(n)B(n)∥2
+
+> F
+
+
+
+.
+
+For i = 1 , . . . , I N , we have 
+
+p(a(n) 
+
+> i:
+
+| · · · ) ∝ exp 
+
+
+
+− τ
+
+2 ∥o[n],i : ∗ (y[n],i : − a(n) 
+
+> i:
+
+B(n))∥2 − 12 ∥a(n) 
+
+> i:
+
+∥2 − 12ρ2 ∥z[n],i : − a(n) 
+
+> i:
+
+B(n)∥2
+
+
+
+∝ exp 
+
+
+
+− 12 a(n) 
+
+> i:
+
+[I + τ (B(n)diag (o[n],i :)B(n)T) + 1
+
+ρ2 (B(n)B(n)T)] a(n)T 
+
+> i:
+
++
+
+a(n) 
+
+> i:
+
+(τ y[n],i :diag (o[n],i :)B(n)T + 1
+
+ρ2 z[n],i :B(n)T)
+
+
+
+.
+
+This is a Gaussian distribution, 
+
+a(n) 
+
+> i
+
+| · · · ∼ N (μ(n) 
+
+> i
+
+, Σ(n)),
+
+where, 
+
+Σ(n) =
+
+
+
+I + τ (B(n)diag (o[n],i :)B(n)T) + 1
+
+ρ2 (B(n)B(n)T)
+
+−1
+
+,
+
+μ(n) 
+
+> i
+
+= Σ(n)
+
+
+
+τ y[n],i :diag (o[n],i :)B(n)T + 1
+
+ρ2 z[n],i :B(n)T
+
+
+
+.
+
+We can easily sample from this Gaussian distribution. 
+
+Sample λ We express the CP decomposition as, 
+
+X =
+
+> R
+
+X
+
+> r=1
+
+λr a(1) :r ◦ a(2) :r · · · ◦ a(N ):r
+
+= λr a(1) :r ◦ a(2) :r · · · ◦ a(N ):r +
+
+> R
+
+X
+
+> h=1 ,h ̸=r
+
+λha(1) :h ◦ a(2) :h · · · ◦ a(N ):h ,
+
+= λr Cr + Dr ,
+
+where we denote Cr = a(1) :r ◦ a(2) :r · · · ◦ a(N ):r and Dr = PRh=1 ,h ̸=r λhCh. For each component r, we have, 
+
+p(λr | · · · ) ∝ exp 
+
+− 12 θr λ2 
+
+> r
+
+− τ
+
+2 ∥O ∗ (Y − λr Cr − X
+
+> r=1 ,h ̸=r
+
+λhCh)∥2 
+
+> F
+
+− 12ρ2 ∥Z − λr Cr − X
+
+> r=1 ,h ̸=r
+
+λhCh∥2
+
+> F
+
+
+
+∝ exp 
+
+− 12
+
+θr + τ X
+
+> i∈Ω
+
+c2 
+
+> i
+
++ 1
+
+ρ2
+
+X
+
+> i
+
+c2
+
+> i
+
+ λ2 
+
+> r
+
++
+
+τ X
+
+> i∈Ω
+
+ci(yi − di) + 1
+
+ρ2
+
+X
+
+> i
+
+ci(zi − di)
+
+ λr
+
+ .
+
+14 Bayesian Tensor Decomposition with Diffusion Model Prior 
+
+This is a Gaussian distribution, 
+
+λr | · · · ∼ N (μr , σ r ),
+
+where, 
+
+σr =
+
+
+
+θr + τ ∥O ∗ Cr ∥2 
+
+> F
+
++ 1
+
+ρ2 ∥Cr ∥2
+
+> F
+
+−1
+
+,μr = σr Sum 
+
+
+
+τ O ∗ Cr ∗ (Y − Dr ) + 1
+
+ρ2 Cr ∗ (Z − Dr )
+
+
+
+,
+
+with Sum (·) the sum of all elements. 
+
+Sample θ For each component r, the full conditional distribution of θr is, 
+
+p(θr | · · · ) ∝ exp( − 12 θr λ2 
+
+> r
+
+) · InvGamma( θr ; αθ , β θ )1(ζr >r ) · δ1(ζr ≤r)
+
+> θ∞
+
+∝ θ−(αθ +1)  
+
+> r
+
+exp 
+
+
+
+−
+
+
+
+βθ + λ2
+
+> r
+
+2
+
+
+
+θ−1
+
+> r
+
+1(ζr >r )
+
+· δ1(ζr ≤r) 
+
+> θ∞
+
+.
+
+Thus, we have, 
+
+θr | · · · ∼ InvGamma 
+
+
+
+αθ + 12 , β θ + λ2
+
+> r
+
+2
+
+1(ζr >r )
+
+· δ1(ζr ≤r) 
+
+> θ∞
+
+.
+
+Sample ζ To sample ζr , we can marginalize out θr . If ζr ≤ r, we have, 
+
+p(ζr = l | · · · ) ∝
+
+Z
+
+p(ζr = l) · p(θr | ζr ) · p(λr | θr ) d θr
+
+∝
+
+Z
+
+ωlδθ∞ Normal( λr ; 0 , θ r ) d θr
+
+= ωlNormal( λr ; 0 , θ ∞).
+
+Else, if ζr > r , we have, 
+
+p(ζr = l | · · · ) ∝
+
+Z
+
+p(ζr = l) · p(θr | ζr ) · p(λr | θr ) d θr
+
+∝
+
+Z
+
+ωlInvGamma( θr ; αθ , β θ ) · Normal( λr ; 0 , θ r ) d θr
+
+= ωl · Student -t2αθ (λr ; 0 , β θ /α θ ).
+
+Sample ν From r = 1 to R − 1, we have, 
+
+p(νr | · · · ) ∝ p(νr ) · p(ζ | νr )
+
+∝ Beta( νr ; 1 , β ) ·
+
+> R
+
+Y
+
+> h=r
+
+ωζh
+
+∝ ν  
+
+> PRh=r1(ζh=r)
+> r
+
+(1 − νr )β−1+ PRh=r+1 1(ζh>r ).
+
+This is a Beta distribution, 
+
+νr | · · · ∼ Beta 1 + 
+
+> R
+
+X
+
+> h=1
+
+1(ζh = r), β +
+
+> R
+
+X
+
+> h=1
+
+1(ζh > r )
+
+!
+
+.
+
+Rank adaptation We follow Rai et al. (2014); Bhattacharya & Dunson (2011) to adaptively adjust the number of components in λ (the CP rank). At time step i, we adapt the rank with probability p(i) = exp( α0 + α1i), where α0 and 
+
+α1 are hyperparameters. If there are inactive factors, we remove them. If all factors are active, we add a new factor (and associated parameters) from the priors. Details are shown in Algorithm 2. 15 Bayesian Tensor Decomposition with Diffusion Model Prior 
+
+Algorithm 2: Rank adaptation adapt factor (λ, A)
+
+Input: CP factors λ, A1, . . . , AD , hyperparameters α0, α 1, current iteration i.
+
+if rand () ≤ exp( α0 + α1i) then 
+
+// Adapt with probability exp( α0 + α1i)
+
+if min( ∥λr ∥) < 10 −4 then 
+
+Remove all components r with |λr | < 10 −4;
+
+else 
+
+Add a new component with λnew ∼ N (0 , 1) and a(d)new ∼ N (0, I), ∀d = 1 , . . . , D ;
+
+end end 
+
+# B. Proof of Theorems 
+
+B.1. Proof of Theorem 3.1 
+
+Proof. In the BCP with CUSP prior, since λr and a(n) 
+
+> inr
+
+are independent, and the means are zero, we have, 
+
+E[λrNY
+
+> n=1
+
+a(n) 
+
+> inr
+
+]2 = Eλ2
+
+> rN
+
+Y
+
+> n=1
+
+E[a(n) 
+
+> inr
+
+]2
+
+≤ Eλ2
+
+> rN
+
+Y
+
+> n=1
+
+ηn, (18) where ηn bounds E[a(n) 
+
+> inr
+
+]2. For the first term, we have 
+
+Eλ2 
+
+> r
+
+= E[Eλ2 
+
+> r
+
+| θr ]= E[1 − πr ] βθ
+
+αθ − 1 + E[πr ]θ∞.
+
+For the expectation of πr , we have, 
+
+E[πr ] = 
+
+> r
+
+X
+
+> l=1
+
+E[ωl]=
+
+> r
+
+X
+
+> l=1
+
+E[νl]
+
+> l−1
+
+Y
+
+> m=1
+
+(1 − E[νm]) =
+
+> r
+
+X
+
+> l=1
+
+11 + β
+
+ β
+
+1 + β
+
+l−1
+
+= 1 −
+
+ β
+
+1 + β
+
+r
+
+.
+
+Thus, we have, 
+
+Eλ2 
+
+> r
+
+=
+
+ β
+
+1 + β
+
+r  βθ
+
+αθ − 1 − θ∞
+
+
+
++ θ∞. (19) Injecting Eq. (19) into Eq. (18), we get, 
+
+E[λrNY
+
+> n=1
+
+a(n) 
+
+> inr
+
+]2 ≤
+
+ β
+
+1 + β
+
+r  βθ
+
+αθ − 1 − θ∞
+
+
+
++ θ∞
+
+ NY
+
+> n=1
+
+ηn.
+
+16 Bayesian Tensor Decomposition with Diffusion Model Prior 
+
+Using the Markov inequality, we have, 
+
+p(( xr, i)2 ≥ ϵ) ≤ E[( xr, i)2]
+
+ϵ
+
+≤ 1
+
+ϵ
+
+ β
+
+1 + β
+
+r  βθ
+
+αθ − 1 − θ∞
+
+
+
++ θ∞
+
+ NY
+
+> n=1
+
+ηn,
+
+which concludes the proof. 
+
+B.2. Proof of Theorem 3.4 
+
+Proof. First, by Bayes’ rule, for any (Z, Θ) with πρ(Θ | Z) > 0,
+
+πρ, Z(Z) = πρ, X(Θ) πρ(Z | Θ) 
+
+πρ(Θ | Z) .
+
+Integrating both sides over Z yields 1 = πρ, X(Θ) R πρ(Z|Θ)  
+
+> πρ(Θ |Z)
+
+dZ, hence 
+
+πρ, X(Θ) = 
+
+Z πρ(Z | Θ) 
+
+πρ(Θ | Z) dZ
+
+−1
+
+. (20) Similarly, using the compatibility assumption, ˜πρ(Θ | Z) = πρ(Θ | Z) and ˜πρ(Z | Θ) = qρ(Z | Θ) imply 
+
+˜πρ, Z(Z) = ˜ πρ, X(Θ) qρ(Z | Θ) 
+
+πρ(Θ | Z) .
+
+Integrating over Z yields 
+
+˜πρ, X(Θ) = 
+
+Z qρ(Z | Θ) 
+
+πρ(Θ | Z) dZ
+
+−1
+
+. (21) Subtracting (20) and (21) in reciprocal form gives 
+
+˜πρ, X(Θ) − πρ, X(Θ) 
+
+πρ, X(Θ)˜ πρ, X(Θ) =
+
+Z πρ(Z | Θ) − qρ(Z | Θ) 
+
+πρ(Θ | Z) dZ.
+
+Using again πρ, Z(Z) = πρ, X(Θ) πρ(Z|Θ)  
+
+> πρ(Θ |Z)
+
+, we obtain 
+
+˜πρ, X(Θ) − πρ, X(Θ) ˜πρ, X(Θ) = 1 −
+
+Z qρ(Z | Θ) 
+
+πρ(Z | Θ) πρ, Z(Z) dZ,
+
+which rearranges, 
+
+πρ, X(Θ) ˜πρ, X(Θ) =
+
+Z qρ(Z | Θ) 
+
+πρ(Z | Θ) πρ, Z(Z) dZ.
+
+Taking logarithm and expectation w.r.t. Θ ∼ πρ, X yields (16). Pinsker’s inequality concludes the TV bound. 
+
+B.3. Proof of Corollary 3.5 
+
+Proof. By the triangle inequality, 
+
+E˜πρ, X [f ] − Eπ0,X [f ] ≤ E˜πρ, X [f ] − Eπρ, X [f ] + Eπρ, X [f ] − Eπ0,X [f ] .
+
+For the first term, by the characterization of the total variation distance |EP [f ] − EQ[f ]| ≤ 2∥f ∥∞DTV (P ∥ Q) for bounded measurable f , we have, 
+
+E˜πρ, X [f ] − Eπρ, X [f ] ≤ 2∥f ∥∞ DTV (˜ πρ, X ∥ πρ, X) .
+
+Using the Pinsker’s inequality DTV (P ∥ Q) ≤
+
+q 12 KL( P ∥ Q), we have, 
+
+E˜πρ, X [f ] − Eπ0,X [f ] ≤ Eπρ, X [f ] − Eπ0,X [f ] + 2 ∥f ∥∞ DTV (˜ πρ, X ∥ πρ, X)
+
+≤ Eπρ, X [f ] − Eπ0,X [f ] + ∥f ∥∞
+
+q
+
+2DKL (˜ πρ, X ∥ πρ, X).
+
+17 Bayesian Tensor Decomposition with Diffusion Model Prior 
+
+# C. Generalization to Tensor Train and Tensor Ring Decompositions 
+
+The DiffBCP framework is largely agnostic to the specific low-rank decomposition. Replacing CP with other decompositions such as TT (Oseledets, 2011) or TR (Zhao et al., 2016) only requires changing the contraction map X(Θ) that connects latent factors to the reconstructed tensor; the likelihood p(Y | X, τ ), the augmented variable block on Z, and the overall split Gibbs framework remain unchanged. Concretely, for an N -th order tensor X ∈ RI1×···× IN , a TT decomposition writes each entry as 
+
+xi = G(1)  
+
+> i1
+
+G(2)  
+
+> i2
+
+· · · G(N ) 
+
+> iN
+
+,
+
+where G(n) ∈ RRn−1×In×Rn are the TT cores with R0 = RN = 1 ; TR relaxes the boundary to R0 = RN and replaces the matrix product with a trace. A key observation is that, conditional on all other cores, each core G(n) enters the reconstruction 
+
+linearly . Placing an isotropic Gaussian prior on the entries of each core therefore preserves Gaussian conjugacy for its full conditional given Y, Z, τ , and the other cores, yielding the same matrix-normal update form as the CP factor update in Eq. (7), with B(n) replaced by the appropriate contraction of the remaining cores. The CUSP rank-shrinkage prior generalizes analogously: it can be placed on the slices of G(n) along the rank dimensions Rn−1, R n to shrink redundant TT/TR ranks, and the Gibbs updates of the CUSP auxiliaries remain unchanged because they depend only on the prior structure, not on the specific form of X(Θ) .The diffusion-prior block in Eq. (12) is independent of the choice of decomposition, since it only depends on X as a noisy observation of Z via the coupling ϕ(Z, X; ρ). Consequently, the theoretical results in Theorem 3.4 and Corollary 3.5 also hold verbatim, as they are stated in terms of the augmented posterior πρ(Z, Θ) without any CP-specific structure. A full empirical study of DiffBCP for TT/TR decompositions is left to future work. 
+
+# D. Experiments 
+
+D.1. Image Inpainting and Denoising Implementations For baseline models, we use their official implementations. BCP, BTR, tCTV, and GLON are im-plemented in MATLAB. We run them on a server with Intel Xeon Silver 4316 CPU@2.30GHz CPU and 512 GB RAM. HLRTF, DeepTensor, and our method are implemented in PyTorch. 
+
+Hyperparameters Bayesian tensor decomposition including BCP and BTR uses fully Bayesian inference, so they do not require extensive hyperparameter tuning. We choose CP rank 100 and TR rank 30, which are sufficiently large for the 
+
+256 × 256 × 3 images. For other baselines, we tune their hyperparameters for the best performance on the validation set. For our method, we re-arrange images into patches of shape 16 × 16 × 3 with strite 8, so the resulting image tensor has shape 16 × 16 × 3 × 961 . We set the CP rank as 200 and adaptively tune the rank during sampling. The hyperparameters for the CUSP prior are set as follows, 
+
+α0 = 1e −3, κ 0 = 1e −3, β = 5 .0, α θ = 2 .0, β θ = 2 .0, θ ∞ = 1e −3.
+
+Most of these hyperparameters are noninformative and we do not tune them. The constant for the coupling parameter is set as c = 100 .0, and we further clip ρ into [0 .3, 10 .0] following Wu et al. (2024). We study the sensitivity to both c and ρmin in Section D.5. For the Gibbs sampler, we run 100 iterations in total with 40 burn-in iterations. We collect one sample every four iterations after burn-in. 
+
+Evaluation We report averaged value of peak signal-to-noise ratio (PSNR), structural similarity index (SSIM), and learned perceptual image patch similarity (LPIPS). PSNR and SSIM metrics are computed using the implementation from the 
+
+MONAI library (Cardoso et al., 2022) with default parameters. LPIPS is computed using the implementation in the VQGAN project 1.
+
+D.2. Comparison with Diffusion Posterior Samplers 
+
+We further compare DiffBCP against representative diffusion posterior samplers, including DPS (Chung et al., 2023) and PnP-DM (Wu et al., 2024), on the FFHQ inpainting benchmark. We use the same pre-trained diffusion checkpoint and the 
+
+> 1https://github.com/CompVis/taming-transformers
+
+18 Bayesian Tensor Decomposition with Diffusion Model Prior 
+
+Table 3. Comparison with diffusion posterior samplers (DPS and PnP-DM) on FFHQ inpainting. PSNR ↑, SSIM ↑, and LPIPS ↓ are reported, with SSIM and LPIPS multiplied by 100 for readability. “Single-sample reconstruction” denotes the reconstruction from a single posterior sample; “Posterior-mean reconstruction” denotes the posterior-mean estimate averaged over the collected samples. DPS does not produce multiple posterior samples and is therefore evaluated in the single-sample regime only. Within each block, bold marks the best value per column.                                                                            
+
+> Uniform(0.7) Uniform(0.9) Stripe Irregular Method PSNR SSIM LPIPS PSNR SSIM LPIPS PSNR SSIM LPIPS PSNR SSIM LPIPS
+> Single-sample reconstruction
+> DPS (Chung et al., 2023) 30.75 87.31 15.61 26.98 78.81 21.22 27.37 85.27 14.84 29.87 88.70 12.67
+> PnP-DM (Wu et al., 2024) 29.45 70.87 24.65 27.21 65.30 31.91 25.82 68.20 25.42 28.04 71.04 22.79 DiffBCP 31.49 85.94 21.31 27.80 77.24 33.67 27.51 81.36 23.93 29.84 85.53 19.71
+> Posterior-mean reconstruction
+> PnP-DM (Wu et al., 2024) 33.20 88.92 17.30 28.41 81.22 25.88 27.30 86.10 17.74 30.56 89.38 14.60
+> DiffBCP 32.13 88.83 17.70 28.28 81.18 28.93 27.91 85.11 19.89 30.34 88.60 15.98
+
+Table 4. Ablation study on FFHQ inpainting. “Full” is our default DiffBCP with both the CUSP shrinkage prior and the diffusion-prior block, using an initial CP rank of R = 200 . “w/o DM” removes the diffusion-prior block while keeping CUSP. “rank= R, w/ CUSP” keeps CUSP active but starts from an initial CP rank of R. “rank= R” disables CUSP and fixes the CP rank at R. The Full row (highlighted in green) achieves the best value in every column; the other rows are ordered to isolate the contribution of each component.                                                                                                    
+
+> Uniform(0.7) Uniform(0.9) Stripe Irregular Method PSNR SSIM LPIPS PSNR SSIM LPIPS PSNR SSIM LPIPS PSNR SSIM LPIPS
+> DiffBCP (Full) 32.13 88.83 17.70 28.28 81.18 28.93 27.91 85.11 19.89 30.34 88.60 15.98
+> Ablating the diffusion-prior block
+> DiffBCP (w/o DM) 32.05 88.00 18.88 28.10 79.24 32.52 25.82 79.35 28.97 28.64 85.28 21.39
+> CUSP under rank misspecification (adaptive vs. fixed rank)
+> DiffBCP (rank=10, w/ CUSP) 29.60 84.69 23.86 27.64 79.40 31.41 26.51 79.38 28.51 28.12 82.62 25.58 DiffBCP (rank=10) 26.35 75.17 37.39 25.83 73.42 40.75 23.60 68.80 44.17 25.23 72.68 40.64 DiffBCP (rank=100) 31.79 87.96 18.99 28.09 79.20 32.28 25.56 78.42 29.76 28.33 84.44 22.36 DiffBCP (rank=200) 32.09 87.85 19.06 28.06 78.80 33.07 25.84 79.55 28.92 28.75 85.52 21.30 DiffBCP (rank=300) 32.11 87.58 19.33 28.01 78.62 33.46 25.95 79.89 28.83 28.92 85.80 21.10
+
+same masks as in Section D.1, so that all three methods share an identical observation model and prior network. For PnP-DM and DiffBCP, both of which produce posterior samples via a split Gibbs framework, we report two evaluation modes. The single-sample reconstruction uses a single posterior sample as the reconstruction, which directly reflects the quality of a single draw from the posterior. The posterior-mean reconstruction averages the collected samples after burn-in (see Section D.1 for the sampling schedule), and is closer in spirit to a minimum-mean-squared-error estimator. DPS does not produce a posterior distribution, and is therefore evaluated in the single-sample regime only. Table 3 summarizes the results. Under single-sample evaluation, DiffBCP attains the best PSNR on three of the four masks (Uniform 0.7/0.9 and Stripe) and is essentially tied with DPS on Irregular, while consistently improving over PnP-DM on PSNR and SSIM across all four masks. Compared with DPS, however, DiffBCP trails on SSIM and LPIPS in all four masks. We interpret this as a pixel-vs-perceptual trade-off: the explicit low-rank CP structure regularizes each individual posterior sample and brings it closer to the underlying signal in ℓ2 sense, but it also discourages the kind of high-frequency texture that perceptual metrics (SSIM and especially LPIPS) reward. DPS, which collapses to a single MAP-like reconstruction guided by the diffusion prior, is comparatively well aligned with this perceptual axis. Under posterior-mean evaluation, DiffBCP is competitive with PnP-DM across all metrics, with the two methods alternating as the best across the twelve metric/mask cells. 
+
+D.3. Ablation Studies 
+
+We ablate the two main components of DiffBCP — the diffusion-prior block on Z and the CUSP shrinkage prior on the CP factor weights — on the FFHQ inpainting benchmark from Section D.1. Table 4 reports posterior-mean reconstruction quality for the Full model, a variant without the diffusion-prior block, and a series of variants where CUSP is replaced by a fixed CP rank. For such case, we replace the CUSP prior with simple Gaussian priors on the CP factors. 19 Bayesian Tensor Decomposition with Diffusion Model Prior 
+
+Contribution of the diffusion-prior block. Comparing Full and “w/o DM” shows that the diffusion prior contributes only a small PSNR gain on uniformly random masks (e.g., +0 .08 dB on Uniform 0.7, +0 .18 dB on Uniform 0.9), but a substantially larger gain on structured corruption: +2 .09 dB on Stripe and +1 .70 dB on Irregular, with the LPIPS gap widening even more (e.g., 19 .89 vs. 28 .97 on Stripe). This pattern is consistent with the intuition that uniformly missing pixels are mostly recoverable from low-rank structure alone, whereas stripe and irregular masks remove contiguous spatial structure that the data-driven diffusion prior is uniquely positioned to fill in. 
+
+CUSP under rank misspecification. The remaining rows isolate the role of CUSP by removing the shrinkage prior and fixing the CP rank. The pure “rank=10” variant collapses across all masks, reflecting severe under-parameterization. Activating CUSP on top of the same initial rank of 10 (“rank=10, w/ CUSP”) substantially mitigates this failure. A residual gap to Full remains, which we attribute to the limited Gibbs budget used in the ablation: CUSP introduces and activates new components incrementally, and at 100 Gibbs iterations a chain that starts at R = 10 has not yet reached its equilibrium rank — the corresponding trajectory in Fig. 4 is still expanding past iteration 100 and only plateaus around iteration 400 . By contrast, the Full model starts at R = 200 (close to or above the equilibrium for these masks), so its CP factor pool only needs to be shrunk, which converges within the same 100 -iteration budget. The practical takeaway is that CUSP makes the model robust to misspecified initial rank but does not eliminate it as a hyperparameter when the sampling budget is tight; a moderately large initial rank remains preferable, and an under-specified initial rank can be compensated by lengthening the chain. Finally, simply increasing the fixed rank to 100 , 200 , or 300 without CUSP closes the gap on uniform masks but does 
+
+not reach Full on the structured masks, confirming that the contribution of CUSP is not reducible to simply allocating a larger CP rank. 
+
+D.4. Effective Rank Evolution under CUSP         
+
+> Figure 4. Effective CP rank as a function of Gibbs iteration on FFHQ inpainting with the Uniform(0.9) mask, for four initial ranks
+> R∈ { 10 ,100 ,200 ,300 }. Thick lines are the median across 10
+> images; thin lines are individual images. Regardless of whether the chain starts from an under-specified ( R= 10 ) or over-specified (R= 300 ) initial rank, CUSP drives the effective rank toward a common band of active components.
+
+To complement the static ablation in Section D.3, we track how the effective CP rank evolves over the course of the Gibbs sampler when CUSP is enabled. For each setting we run 10 FFHQ images and record the active component count 
+
+|{ r : |λr | ≥ 10 −4}| at every iteration (cf. Algorithm 2). We extend the chain to 500 Gibbs iterations in this analysis because rank adaptation under CUSP converges noticeably more slowly than the reconstruction metrics. Fig. 4 shows the characteristic behavior on the Uniform(0.9) mask. The chain initialized at R = 10 monotonically ex-pands its effective rank — CUSP activates additional compo-nents in response to residual fitting error — while the chains initialized at R ∈ { 100 , 200 , 300 } all shrink their effective rank. By 500 iterations the four trajectories collapse onto a narrow common band, with the spread reflecting genuine per-image variability in the underlying low-rank structure to-gether with the slow tail of rank adaptation when starting far above equilibrium. This is a direct empirical confirmation that CUSP is bidirectionally adaptive : it prunes redundant components when over-specified and expands the active set when under-specified, removing the need to choose the initial CP rank carefully. 
+
+D.5. Hyperparameter Sensitivity 
+
+Table 5 reports posterior-mean reconstruction quality under perturbations of the coupling constant c and the lower clip 
+
+ρmin for DiffBCP, alongside the corresponding sensitivity of PnP-DM (Wu et al., 2024) to its own scheduling and noise hyperparameters. 
+
+DiffBCP is stable across c and ρmin . Sweeping the coupling constant c ∈ { 30 , 50 , 100 } moves Uniform 0.7 PSNR by at most 0.24 dB and Stripe/Irregular PSNR by at most 0.05 dB. On the most ill-posed mask (Uniform 0.9), c = 30 degrades 20 Bayesian Tensor Decomposition with Diffusion Model Prior 
+
+Table 5. Sensitivity to scheduling hyperparameters on FFHQ inpainting (posterior-mean reconstruction). For DiffBCP, the defaults are the coupling constant c = 100 and the lower clip ρmin = 0 .3; for PnP-DM, the defaults are ρmin = 0 .1 and the observation noise σ set to the ground-truth value σ = 0 .05 . Default configurations are highlighted in green; all other entries change a single hyperparameter and keep the rest at the default value.                                                                                                                                  
+
+> Uniform(0.7) Uniform(0.9) Stripe Irregular Method PSNR SSIM LPIPS PSNR SSIM LPIPS PSNR SSIM LPIPS PSNR SSIM LPIPS
+> DiffBCP — varying coupling constant cand lower clip ρmin
+> DiffBCP ( c= 100 ,ρmin = 0 .3, default) 32.13 88.83 17.70 28.28 81.18 28.93 27.91 85.11 19.89 30.34 88.60 15.98 DiffBCP ( c= 50 )31.93 88.82 17.63 27.69 80.03 29.58 27.91 85.15 19.79 30.35 88.69 15.88 DiffBCP ( c= 30 )31.89 88.79 17.69 26.83 77.51 32.60 27.90 85.17 19.83 30.35 88.60 15.87 DiffBCP ( ρmin = 0 .1)33.04 86.80 16.22 28.31 80.90 29.64 27.71 83.92 21.61 30.01 87.66 17.39
+> PnP-DM — varying lower clip ρmin and observation noise σ
+> PnP-DM ( ρmin = 0 .1,σ= 0 .05 , default) 33.20 88.92 17.30 28.41 81.22 25.88 27.30 86.10 17.74 30.56 89.38 14.60 PnP-DM ( ρmin = 0 .3)29.48 81.72 25.80 25.44 73.50 33.37 26.20 81.34 24.15 28.89 79.05 21.30 PnP-DM ( σ= 0 .025 )33.56 89.56 16.31 28.78 82.30 24.68 27.30 86.39 17.12 30.61 89.70 13.90 PnP-DM ( σ= 0 .1)32.05 86.78 20.37 27.07 77.60 29.73 30.31 88.21 16.75 27.20 84.99 19.74
+
+by 1.45 dB relative to c = 100 , but no setting catastrophically fails. Reducing ρmin from the default 0.3 to 0.1 actually 
+
+improves Uniform 0.7 PSNR by 0.91 dB while losing 0.20 dB on Stripe and 0.33 dB on Irregular — a small re-balancing rather than a regime change. 
+
+PnP-DM is more sensitive to scheduling. By contrast, increasing PnP-DM’s ρmin from the default 0.1 to 0.3 causes a sharp collapse: PSNR drops by 3.72 dB on Uniform 0.7 and by 2.97 dB on Uniform 0.9. The noise-adaptive coupling schedule in DiffBCP, in which ρ is automatically set by the inferred precision τ (Section 3.2.2), removes the need for delicate manual scheduling of the diffusion noise level. 
+
+PnP-DM benefits from carefully tuned observation noise. We additionally vary the observation-noise parameter σ that PnP-DM passes to its diffusion denoiser. With the ground-truth value σ = 0 .05 already used in the default row, doubling to 
+
+σ = 0 .1 degrades all four masks (e.g., −1.15 dB on Uniform 0.7), while halving to σ = 0 .025 improves PnP-DM further and matches or surpasses DiffBCP (Full) on most cells (e.g., Uniform 0.7 PSNR 33 .56 vs. 32 .13 ). We report this row openly: it confirms that a well-tuned PnP-DM, with σ chosen below the true noise to drive more aggressive denoising, can outperform DiffBCP on uniform masks. The point of this comparison is not to claim universal superiority, but to highlight a different operating mode: DiffBCP automatically infers τ from the data and couples ρ accordingly, so no analogous hand-tuning of σ is required. We view the tuning-free regime as the relevant axis for practical deployment, especially in settings where the true noise level is unknown. 
+
+D.6. Out-of-Distribution and High-Resolution Images Datasets We test our algorithm on out-of-distribution high-resolution images. We choose three images with 2048 × 2048 
+
+resolution, including Marseille 2, Tokyo 3, and Westerlund 4. We generate the masks in the same way with Section D.1, and use the same iid Gaussian noise with σ = 0 .05 for denoising. 
+
+Implementations In this experiment, we compare with PuTT (Loeschcke et al., 2024), as it shows SOTA performances for such high-dimensional data. We use the official implementation of PuTT in PyTorch. Additionally, we compare with BCP (Zhao et al., 2015) as a direct comparison to CP decomposition. For our method, recall that the image size ( 2048 × 2048 ) is inconsistent with the training size of the diffusion model (256 × 256 ). In specific, the reconstructed tensor X has shape 2048 × 2048 × 3, while the augmented tensor Z has shape 
+
+256 × 256 × 3. Here we use bicubic interpolation for resizing. When compute the coupling distant Eq. (5), we downsample 
+
+X to 256 × 256 × 3. When sampling CP factors Eqs. (6) and (7), we upsample Z back to 2048 × 2048 × 3.
+
+> 2
+
+https://www.pexels.com/photo/aerial-drone-view-of-urban-buildings-from-top-18644280/ 
+
+> 3
+
+https://www.flickr.com/photos/trevor_dobson_inefekt69/29314390837 
+
+> 4
+
+https://science.nasa.gov/asset/hubble/westerlund-2/ 
+
+21 Bayesian Tensor Decomposition with Diffusion Model Prior          
+
+> Table 6. Wall-clock time and peak GPU memory per image, measured on a single A100 GPU. FFHQ uses 256 ×256 images (Section D.1); Marseille uses 2048 ×2048 images (Section D.6).
+
+FFHQ ( 256 ×256 ) Marseille ( 2048 ×2048 )Method Time Peak Mem. Time Peak Mem. 
+
+HLRTF 11.7 s 593 MB 137 s 12.8 GB DeepTensor 27.3 s 736 MB 456 s 35.3 GB PnP-DM 37.4 s 744 MB 109 s 5.3 GB DiffBCP 239 s 821 MB 250 s 12.5 GB 
+
+Hyperparameters PuTT learns the Quantized Tensor Train (QTT) representations in a coarse-to-fine manner. We set the downsampling resolution as [64 , 128 , 256 , 512 , 1024 , 2048] , which means that the image is downsampled to 64 × 64 at the coarsest level and upsampled in sequence. The total number of iterations is set as 2560 , and we upsample the image at 
+
+64 , 128 , 256 , 512 , 1024 iterations. The learning rate is 8e −3 using Adam optimizer and batch size 262144 . The maximum QTT rank is set as 100 .For BCP and our method, we reshape the images into 64 × 32 × 64 × 32 × 3 tensors. For BCP, we set the initial CP rank as 
+
+100 , because it quickly exceeds the maximum memory limit (512 GB) when the rank is larger. Besides, even with rank 100, we find BCP quickly shrinks the effective rank. For our method, we set the initial CP rank as 500 . Other hyperparameters are the same as in Section D.1. Note that due to the different rank definition of QTT and CP, our CP format still yields larger compression rate than QTT. 
+
+Evaluation The evaluation is the same as in Section D.1. We run each experiment with five different random seeds and report the averaged results. 
+
+D.7. Computational Cost 
+
+Table 6 reports wall-clock time and peak GPU memory per image on a single A100 GPU, for the FFHQ 256 × 256 setup of Section D.1 and the Marseille 2048 × 2048 setup of Section D.6. DiffBCP is slower than PnP-DM, reflecting the cost of running full-batch CP factor updates. In the high-resolutional Marseille case, DiffBCP runs in 250 s with 12 .5 GB peak memory, which is 1.8× faster and 2.8× more memory-efficient than the strongest deep tensor baseline DeepTensor ( 456 s, 35 .3 GB). The main bottleneck of DiffBCP is the full-batch Gibbs update on A and λ. As noted in the conclusion, replacing this with stochastic mini-batch sampling is a natural direction to further reduce runtime and memory, particularly when scaling to even larger tensors. 
+
+D.8. More Visualizations 
+
+22 Bayesian Tensor Decomposition with Diffusion Model Prior 
+
+Original Observe BCP BTR HLRTF DeepTensor tCTV GLON DiffBCP 
+
+Figure 5. More visualization for FFHQ and ImageNet datasets. 
+
+23
