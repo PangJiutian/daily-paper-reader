@@ -1,0 +1,642 @@
+Title: Rethinking Amortized Neural Representations for High-Resolution Terrain Elevation Data
+
+URL Source: https://arxiv.org/pdf/2606.00404v1
+
+Published Time: Tue, 02 Jun 2026 00:23:48 GMT
+
+Number of Pages: 12
+
+Markdown Content:
+# Rethinking Amortized Neural Representations for High-Resolution Terrain Elevation Data 
+
+# Haoan Feng 
+
+University of Maryland, College Park MD, USA hfengac@umd.edu 
+
+# Xin Xu 
+
+University of Maryland, College Park MD, USA xinxu629@umd.edu 
+
+# Leila De Floriani 
+
+University of Maryland, College Park MD, USA deflo@umd.edu 
+
+## Abstract 
+
+Implicit neural representations (INRs) model a signal as a continu-ous coordinate-to-value function. For terrain elevation data, this supports analytic derivatives, arbitrary-resolution decoding, and a smooth surface model of the underlying heightfield. However, fit-ting and storing a separate INR for every tile does not scale to large terrain datasets. Amortized neural representations reduce this cost with a shared network: a new tile is mapped to a compact per-tile payload, and a shared decoder reconstructs the heightfield from it. Most such methods are hypernetworks that predict the payload in a single forward pass, while others recover it through a short per-tile optimization. These methods were developed primarily for natural images, and their suitability for terrain heightfields remains unclear. We introduce a controlled benchmark on a 1 m/pixel terrain dataset and evaluate three representative methods under a unified proto-col. Observing a clear cross-domain gap, we propose HUVR+SIREN ,a hypernetwork that adapts the strongest benchmarked method (HUVR) by replacing its coordinate decoder with a smooth, analyt-ically differentiable one. It attains the best height and derivative fidelity on the benchmark with no additional per-tile storage and lower decode cost, and tolerates aggressive post-training quantiza-tion with negligible quality loss, giving a compact terrain neural format. Ablations and diagnostics further identify which design choices transfer to terrain and show that the per-tile bottleneck is already near its useful limit, leaving the remaining gap in the shared hypernetwork’s architectural design. 
+
+## CCS Concepts 
+
+• Computing methodologies → Neural networks ; Shape mod-eling ; Image compression; • Information systems → Geographic information systems .
+
+## Keywords 
+
+Implicit neural representations, Digital elevation model, Amortized neural network, Hypernetwork 
+
+## 1 Introduction 
+
+High-resolution digital elevation models (DEMs) are increasingly captured at sub-meter ground sampling by airborne and satellite programs, and they sit at the center of much downstream geospatial analysis, from slope and curvature estimation in geomorphology to hydrological flow modeling and visibility computation. A growing body of work treats such a terrain heightfield not as a discrete raster but as a continuous implicit surface, represented by a small coordinate network whose analytic derivatives can be evaluated at arbitrary resolutions and used directly for downstream geomor-phological analysis [9]. Implicit neural representations (INRs) [ 22 , 27 ] provide a compact way to encode this continuous-surface view. An INR represents a terrain tile as a neural function that maps a continuous coordinate to elevation. The fitted network can be queried at arbitrary locations, supports analytic derivatives, and represents the surface through learned parameters rather than fixed raster samples. The practical obstacle is that classical INR fitting trains a new network from scratch for every tile, which scales poorly to large DEM datasets. Fitting a single tile to good fidelity takes minutes of per-tile op-timization on a GPU, whereas a trained amortized hypernetwork produces a comparable per-tile representation in a single forward pass, on the order of milliseconds. 
+
+Amortized neural representations are a candidate remedy for this scaling cost. A shared model is trained once across the dataset so that each new tile is represented by a small per-tile token payload, and a shared coordinate decoder reconstructs the signal from that to-ken. Most such methods are hypernetworks that predict the payload in a single forward pass. A second family instead recovers it through a short per-tile optimization at inference (Figure 1). Either way, the stored or transmitted artifact is the per-tile token payload rather than a full per-tile network. These constructions have been studied primarily on natural images. Their behavior on high-resolution ter-rain heightfields remains unclear, because terrain differs strongly from RGB images in channel structure, smoothness, and derivative requirements. This paper addresses that cross-domain adaptation problem: whether amortized neural representations can serve as effective terrain data formats, and which design choices are needed for them to transfer. Our main contributions are threefold: 
+
+• We benchmark three representative amortized-INR meth-ods (TransINR [ 2 ], Functa [ 6], and HUVR [ 12 ]) on a high-resolution ( 1 m/pixel ) swisstopo terrain dataset under a unified protocol, characterizing each across height fidelity, gradient and Laplacian fidelity, decode cost, and storage cost under post-training quantization. To our knowledge this is the first controlled comparison of amortized INRs on high-resolution terrain DEMs. 
+
+• Motivated by the overall smoothness of terrain surfaces and the derivative fidelity requirements of downstream geomorphological analysis [ 9], we introduce HUVR+SIREN ,a bounded adaptation that replaces the ReLU coordinate decoder of the strongest benchmarked method (HUVR) with SIREN [ 27 ]. This terrain data adaptation raises fitting accuracy (PSNR +2.83 dB ) at identical per-tile storage, with consistent gains in derivative fidelity, and yields a post-training quantization frontier that dominates HUVR’s full-precision (fp32) configuration. 
+
+> 1
+> arXiv:2606.00404v1 [cs.CV] 29 May 2026 Feng et al.
+
+Figure 1: Unified view of the four amortized neural representations compared. TransINR, HUVR, and HUVR+SIREN share a Transformer-based hypernetwork that conditions a neural coordinate decoder, and differ in the conditioning signal, the decoder family, and the reconstruction domain. Functa bypasses the hypernetwork; its per-tile latent code is optimized at test time by a short meta-learner inner loop and directly conditions a SIREN neural coordinate decoder. 
+
+• To locate the source of the residual quality gap, we com-bine ablation studies with two dedicated diagnostics on 
+
+> HUVR+SIREN
+
+, a per-instance fitting bound and a per-tile full-model upper bound. These analyses localize the per-formance gap to the shared post-bottleneck pipeline, in-dicating that closing it will likely require improving the shared hypernetwork architecture rather than enlarging the per-tile token capacity. 
+
+## 2 Related Work 2.1 Implicit neural representations and amortized neural representations 
+
+Implicit neural representations encode a signal as a coordinate net-work whose weights parameterize the signal itself. The foundational constructions span three signal domains: signed distance fields (DeepSDF [ 24 ]) and occupancy fields [ 21 ] for shape, scene represen-tation networks (SRN [ 28 ]) and neural radiance fields (NeRF [ 22 ]) for 3D scenes, and sinusoidal-activation networks (SIREN [ 27 ]) for general signals with analytic derivatives. Two architectural ingre-dients enable these networks to fit high-frequency content from low-dimensional coordinate inputs: input-side Fourier-feature en-codings [ 31 ] and SIREN’s sinusoidal first layer [ 27 ]. INR fitting is per-instance: each new signal requires its own optimization, which becomes the bottleneck that this paper’s setting aims to remove. Two approaches amortize this per-instance fit. The first is the hypernetwork [ 13 ], in which one network generates the weights of another. Applied to INRs, a single encoder forward pass re-places gradient-based fitting, predicting either the full coordinate-network weights or a low-rank modulation of a shared coordinate network [ 2, 16 ]. The second is gradient-based meta-learning [ 10 ], in which a learned initialization is adapted to each new signal by a small inner-loop optimization at inference time. Tancik et al. [ 30 ] applied this template directly to coordinate-based INRs and showed that meta-learned initializations converge to high-fidelity reconstructions in tens of inner-loop steps. Although the two ap-proaches obtain the per-instance payload differently (a forward pass versus an inner loop), both can target the same payload form, a feature-wise affine (FiLM) modulation [ 20 , 25 ] of a shared coordi-nate network’s activations. Amortized-INR architectures combine these ingredients into a small set of named structural components: a Transformer-based hypernetwork [2] that ingests an input signal and produces, in one forward pass, the per-instance conditioning of a shared neural coor-dinate decoder queried at spatial coordinates. TransINR [ 2 ] realizes the hypernetwork monolithically and predicts the full weights of a ReLU MLP decoder; Instance Pattern Composers [ 16 ] keep the monolithic transformer but produce a small set of per-instance content tokens that modulate a shared pattern-composer MLP, an early move toward the FiLM-style conditioning route. HUVR [ 12 ]factors it into a Vision Transformer [ 4 ] encoder and a separate transformer decoder around a low-dimensional patch-token bot-tleneck, with DINOv3 distillation [ 26 ] tapped at both endpoints; the decoder outputs FiLM-style [ 20 , 25 ] modulations of a shared ReLU MLP decoder. Functa [ 6] takes a different route: it removes the hypernetwork and instead uses a meta-learning strategy in which a meta-learned initialization and a shared SIREN decoder reach each per-tile modulation by a short inner loop on the per-tile reconstruction loss, recovering the per-tile token at test time rather than by a forward pass. Spatial Functa [ 1] keeps the inner loop but replaces the global modulation vector with a 2D grid of latents. We take the global-latent Functa as this family’s representative in our benchmark. These methods are the set we port to terrain height-fields in Section 4.2; Section 3.2 gives the implementation-level account. 
+
+> 2Rethinking Amortized Neural Representations for High-Resolution Terrain Elevation Data
+
+## 2.2 Learned representations of terrain heightfields 
+
+Treating terrain as a continuous implicit surface, rather than as a discrete raster, is comparatively recent in the geospatial litera-ture. ImplicitTerrain [ 9] fits a per-tile SIREN to high-resolution heightfields and shows that the analytic gradient and Laplacian of the fitted network track raster-derived slope and curvature refer-ences closely enough to support downstream geomorphological extraction, which establishes derivative fidelity rather than only pixel PSNR as a relevant evaluation criterion. Neural Elevation Models [ 3] push the per-tile fitting idea further and report favor-able rate-distortion trade-offs on aerial DEM. A related but dis-tinct strand targets resolution increase rather than fixed-resolution storage: DEM super-resolution [ 14 ] and continuous DEM upsam-pling [ 33 ] both build on INR-style decoders without amortizing across a dataset. None of these prior constructions amortizes the per-tile fitting cost in the sense used in this paper. 
+
+## 2.3 Compact DEM storage and the INR-compression bridge 
+
+Compact DEM storage has a long history, including raster-side codecs such as LERC [ 8], COG [ 23 ], and ZFP [ 18 ], slope-preserving DEM quantization methods [ 32 ], and quadtree- and level-of-detail-based terrain representations [ 11 , 19 ]. These methods define im-portant production baselines for terrain data formats. In this paper we focus on a complementary question: whether amortized-INR architectures developed for natural images can transfer to high-resolution terrain heightfields. We therefore compare against re-produced amortized-INR baselines in Section 4.2 and a per-tile INR fitting ceiling in Section 4.4. A direct rate-distortion comparison with production DEM codecs is left for future work. A related neural-compression line represents each signal by fit-ting and quantizing its own INR. COIN [ 5], COIN++ [ 7 ], Strümpler et al. [ 29 ], and Cool-chic [ 17 ] follow this per-instance compression setting, where the stored artifact is typically the quantized network or its weights. Our setting is amortized rather than per-instance: a shared encoder-decoder is trained across tiles, and each tile is rep-resented only by a compact bottleneck token payload. Accordingly, the quantization analysis in Section 4.2 acts on the per-tile token payload rather than on per-instance network weights. 
+
+## 3 Method 3.1 Amortized INRs: a coordinate-decoder formulation 
+
+An implicit neural representation encodes a single signal as a coordi-nate network 𝑓 𝜃 : [− 1, 1]2 → R𝑑 that maps each spatial coordinate 
+
+x ∈ [− 1, 1]2 to the corresponding signal value 𝑓 𝜃 (x). For a height-field S(𝑖 ) ∈ R𝐻 ×𝑊 viewed as discrete samples of an underlying continuous surface 𝑠 (𝑖 ) : [− 1, 1]2 → R𝑑 , per-instance fitting solves 
+
+𝜃 (𝑖 ) = arg min  
+
+> 𝜃
+
+Ex
+
+h
+
+𝐿 
+
+
+
+𝑓 𝜃 (x), 𝑠 (𝑖 ) (x)
+
+ i 
+
+(1) independently for each tile 𝑖 under a per-coordinate reconstruc-tion loss 𝐿 (mean-squared error throughout this paper). Terrain has 𝑑 =1; 𝑑 =3 recovers the natural-image setting of TransINR and Functa. This per-instance recipe requires a separate optimization and a separate stored network for every tile, which scales poorly to dataset-level use. 
+
+Amortized neural representations remove this cost by sharing a pipeline across the dataset (Figure 1). A Transformer-based hypernet-work (the term introduced by TransINR [ 2]) maps an input tile S(𝑖 )
+
+to a per-tile bottleneck token 𝜁 (𝑖 ) . Both TransINR and HUVR [ 12 ]realize this hypernetwork as a Vision Transformer [ 4] that ingests the tile as image patches. We write the conversion as a transfor-mation 𝜁 (𝑖 ) = 𝑇 Φ (S(𝑖 ) ) with shared parameters Φ. A shared neural coordinate decoder 𝑓 ¯𝜃 , a small network with weights ¯𝜃 shared across the dataset, is queried at a coordinate x and conditioned on 𝜁 (𝑖 ) to return the predicted signal value, so the full per-tile reconstruction is 𝑓 (𝑖 ) (x) = 𝑓 (x; ¯𝜃, 𝜁 (𝑖 ) ). The bottleneck token 𝜁 (𝑖 ) is the only per-tile object stored, and its dimensionality sets the per-tile storage budget. The hypernetwork parameters Φ and the shared decoder weights 
+
+¯𝜃 are trained once across the dataset by jointly minimizing 
+
+min  
+
+> Φ,¯𝜃
+
+E𝑖, x
+
+h
+
+𝐿 
+
+
+
+𝑓 (x; ¯𝜃, 𝜁 (𝑖 ) (Φ)) , 𝑠 (𝑖 ) (x)
+
+ i 
+
+, (2) where 𝜁 (𝑖 ) (Φ) is produced by the hypernetwork 𝑇 Φ in a single for-ward pass (TransINR, HUVR) or recovered by the meta-learner inner loop on a meta-learned initialization (Functa), as shown in Figure 1. Per-instance fitting (Equation (1)) generally achieves higher per-tile reconstruction quality than amortized inference on the same tile, and we refer to the resulting difference as the amortization gap .Continuing the optimization of Equation (1) for a single tile while freezing ¯𝜃 and updating only 𝜁 (𝑖 ) from its amortized initialization defines the per-instance fitting bound , which Section 4.4 uses as an analytical diagnostic. 
+
+## 3.2 Method inventory 
+
+The four methods compared in this paper, summarized in Figure 1, instantiate Equation (2) with different realizations of the hyper-network and different choices for the bottleneck token 𝜁 (𝑖 ) and the decoder 𝑓 ¯𝜃 it conditions. Three of them (TransINR, Functa, and HUVR) are prior work that we reproduce; the fourth, HUVR+SIREN ,is introduced in Section 3.3. Two interfaces for injecting 𝜁 (𝑖 ) into the decoder appear: weight prediction , where the hypernetwork outputs the decoder’s weights themselves, and feature-wise modula-tion (FiLM) [ 25 ], where the decoder weights are shared across tiles and the per-tile token enters as per-layer scale and shift vectors applied to each pre-activation; shift-only FiLM is common when the underlying decoder is a SIREN [20]. 
+
+TransINR [2 ] uses the monolithic hypernetwork: a single trans-former ingests the input as image patches together with learnable weight-prediction tokens and predicts in one forward pass the full weights of a ReLU MLP neural coordinate decoder. There is no sep-arate encoder, no bottleneck, and no intermediate supervision; the per-tile tokens are the learned weight-prediction tokens themselves. 
+
+Functa [6] contains no Transformer-based hypernetwork. It sets 
+
+𝜁 (𝑖 ) = 𝝋 (𝑖 ) ∈ R512 , a single global modulation vector that conditions every hidden layer of a shared SIREN [ 27 ] decoder through shift-only FiLM with per-layer linear maps. The SIREN base weights and the per-layer modulation maps are meta-learned across the training set; at inference, 𝝋 (𝑖 ) is recovered from a zero initialization by 𝑇 inner gradient steps on the per-tile reconstruction loss with a 
+
+> 3Feng et al.
+
+meta-learned per-element learning rate. Spatial Functa [ 1] keeps the inner loop and replaces the global vector with a 2D grid of latents; the rest is structurally identical. 
+
+HUVR [12 ] uses the factored hypernetwork. A Vision Trans-former [ 4] encoder of the B/16 variant partitions the 256 × 256 tile into 𝑃 =256 non-overlapping 16 × 16 -pixel patches and produces one 768 -dimensional embedding per patch plus a global [CLS] em-bedding; a learned linear projection compresses each embedding from width 768 down to a smaller bottleneck width 𝐷 , giving 
+
+𝜁 (𝑖 ) =  c(𝑖 ) , {e(𝑖,𝑝 ) }𝑃 𝑝 =1
+
+ ∈ R(1+𝑃 ) × 𝐷 , (3) with one global token c(𝑖 ) and 𝑃 per-patch tokens e(𝑖,𝑝 ) . We use 
+
+𝐷 =32 , so the per-tile token is 257 · 32 = 8,224 floats. A separate transformer decoder consumes 𝜁 (𝑖 ) and outputs, per patch, a rank-1 multiplicative modulation of the shared base weights of a 3-layer ReLU MLP decoder; per-patch outputs are stitched and refined by a Conv+PixelShuffle upsampler. HUVR’s training combines height-field reconstruction with semantic distillation from a frozen DI-NOv3 teacher [26], which we retain unchanged. TransINR and HUVR are therefore both feed-forward at infer-ence, producing 𝜁 (𝑖 ) for a new tile in a single forward pass with no per-tile optimization. Functa is the exception: the per-tile 𝝋 (𝑖 )
+
+must be solved for from scratch by the meta-learner inner loop, which we account for separately when reporting inference cost (Section 4.2). 
+
+## 3.3 HUVR+SIREN : a domain-adapted decoder for terrain heightfields 
+
+This paper treats a terrain heightfield as a smooth surface. The ReLU activations in HUVR’s neural coordinate decoder are piecewise-linear, with derivatives that are piecewise-constant and discontin-uous at the activation breakpoints, and higher-order derivatives that are identically zero almost everywhere. This is a poor match for a surface whose downstream geomorphological interpretation relies on continuous gradients and Laplacians [ 9 ]. We therefore replace the ReLU MLP with a SIREN [ 27 ], whose sinusoidal activa-tions are infinitely differentiable, so the resulting coordinate field is smooth on [− 1, 1]2 and its analytic gradient ∇𝑓 and Laplacian 
+
+∇2 𝑓 are defined everywhere. A plain SIREN has no per-tile degree of freedom. To condition it on the patch token we extend ModulatedSIREN’s per-layer ampli-tude [20] with an additive shift inside the sinusoid: 
+
+hℓ = 𝜶 (𝑝 ) 
+
+> ℓ
+
+⊙ sin  𝜔 0 (𝑊 ℓ hℓ −1 + bℓ ) + 𝝋 (𝑝 )
+
+> ℓ
+
+, (4) where hℓ is the layer-ℓ activation, 𝑊 ℓ , bℓ are the layer-ℓ weights and bias, 𝜔 0 is a fixed base-frequency scalar, ⊙ is the elementwise prod-uct, and 𝜶 (𝑝 ) 
+
+> ℓ
+
+, 𝝋 (𝑝 ) 
+
+> ℓ
+
+are amplitude and phase-shift vectors produced from the hypernetwork decoder’s per-patch output by small Layer-Norm+linear heads. The heads are initialized so that 𝜶 ≈ 1 and 𝝋 ≈ 0
+
+at the start of training, giving a plain SIREN at initialization; the network then learns to use both modulation channels jointly. The  
+
+> HUVR+SIREN
+
+decoder is a 4-layer SIREN with hidden width 256 and 
+
+𝜔 0=10 , the operating frequency matched to the 16 × 16 per-patch sub-tile regime; its first three layers are modulated as in Equation (4) and the fourth is the unmodulated linear output, mapping to the single-channel terrain signal. Section 4.3 reports robustness to 𝜔 0
+
+and to alternative modulation interfaces (amplitude-only, shift-only, INCODE [15]). Since HUVR+SIREN evaluates the SIREN decoder directly at each pixel coordinate, it no longer requires HUVR’s convolutional up-sampler: the 132 ,609 -parameter SIREN body has a per-pixel de-code cost of 268 k FLOPs versus 329 k for HUVR’s ReLU MLP plus Conv+PixelShuffle, a 19% reduction. Total per-tile inference cost de-creases modestly from 95 .3 to 92 .0 GFLOPs because the encoder and hypernetwork decoder dominate. Our contribution is this bounded domain-adapted variant of HUVR, where only the post-modulation neural coordinate decoder is replaced and the encoder, hypernet-work decoder, token structure, and modulation interface are kept un-changed. Section 4.2 reports the resulting benchmark deltas across all four evaluation criteria; the decoder-by-decoder architecture comparison is in Appendix A. 
+
+## 4 Experimental Results 4.1 Benchmark protocol 
+
+We benchmark on a large-scale aerial-photogrammetric digital ter-rain model of Switzerland derived from swisstopo’s swissALTI3D 
+
+(alt3d ) product, a bare-earth elevation model that excludes vegeta-tion and buildings, sampled at 1 m/pixel . The raster is partitioned into 256 × 256 tiles covering 256 m × 256 m each, with each tile’s elevation values normalized to zero mean and unit variance before training. The benchmark contains 3338 training, 420 validation, and 432 test tiles. Splits are assigned at the source-region level so that no two tiles in different splits overlap spatially. All numbers reported in this section are computed on the held-out test split unless stated otherwise. All experiments are conducted on a single compute node with NVIDIA RTX A5000 GPUs. Each method is evaluated on four criteria as a candidate terrain data format: height fidelity , reported as PSNR on the normalized tile and as RMSE in meters on the de-normalized tile; derivative fidelity , the RMSE (in m/px and m/px 2 on the de-normalized tile) of the reconstruction’s gradient and Laplacian against central finite-difference references from the ground-truth tile, obtained analyt-ically by automatic differentiation of the coordinate network for the SIREN-based decoders ( HUVR+SIREN and Functa) and by central finite differences of the reconstruction for the ReLU-based decoders (TransINR and HUVR), whose activations are not smooth; decode cost , the analytical FLOPs for encoding a tile and for evaluating the decoder at one pixel coordinate; and storage , the per-tile payload in bits per pixel (BPP), reported both in floating-point and under post-training quantization (PTQ) of the bottleneck token. The detailed conventions for decode cost and the PTQ sweep are introduced alongside the corresponding tables in Section 4.2. For TransINR, Functa, and HUVR, the reproduction starts from the published implementation, with a single edit to the input layer that adapts a three-channel image-regression input to the single-channel heightfield. TransINR uses the optimizer and learning-rate schedule from its upstream image-regression configuration. HUVR and HUVR+SIREN use the schedule from HUVR’s published code, and HUVR+SIREN reuses HUVR’s encoder, patch and global tokens, and hypernetwork decoder unchanged, differing from HUVR only in the post-modulation neural decoder as described in Section 3.3. Functa is reproduced as a meta-learned shared SIREN with 𝑇 inner = 3                                                
+
+> 4Rethinking Amortized Neural Representations for High-Resolution Terrain Elevation Data GT
+> z(m) |z|2zz(m) |z|2zz(m) |z|2z
+> HUVR HUVR+SIREN
+> 374 376 378 380 0.2 0.4 0.1 0.0 0.1 375 380 385 0.0 0.2 0.4 0.6 0.2 0.0 0.2 760 780 800 0.2 0.4 0.6 0.1 0.0 0.1
+> flat ( = 1.36 m) hilly ( = 4.61 m) mountainous ( = 15.59 m)
+
+Figure 2: Reconstruction comparison on three terrain tiles selected at the 10% , 50% , and 90% quantiles of the per-tile elevation standard deviation 𝜎 (in meters), giving representative flat , hilly , and mountainous cases. Columns within each tile group show elevation 𝑧 , gradient magnitude |∇ 𝑧 |, and Laplacian ∇2𝑧 ; rows are ground truth, HUVR, and HUVR+SIREN . Per-tile colorbars under the bottom row are shared by all three rows in the same tile column. 
+
+inner-loop steps at inference. Each method is trained under its own published schedule until its validation reconstruction loss plateaus, so the cross-method differences in Section 4.2 reflect the meth-ods rather than truncated optimization. The per-method hyper-parameter tables and the parent code revision are documented in Appendix A. Two per-tile optimization diagnostics, a per-instance fitting bound 
+
+and a per-tile full-model upper bound , support the gap analysis of Section 4.4, where they are defined. 
+
+## 4.2 Cross-method benchmark 
+
+We evaluate four amortized-INR methods on the swisstopo bench-mark, treating each as a candidate terrain data format and assess-ing it along the four criteria defined in Section 4.1. Table 1 sum-marizes the result. Among the three reproduced methods, HUVR achieves the highest height fidelity, the only competitive derivative reconstruction, and a per-tile representation an order of magnitude smaller than TransINR’s. HUVR+SIREN , our adaptation, improves further on HUVR across every criterion we evaluate. The largest single height-fidelity gain comes from the decoder re-placement. HUVR+SIREN reaches 51 .69 dB PSNR and 0.066 m RMSE, compared with 48 .86 dB and 0.092 m for HUVR. This corresponds to a +2.83 dB gain and a 28% reduction in height error, while using the same encoder, hypernetwork decoder, and per-tile representa-tion size. The improvement also extends to derivative fidelity, with RMSE ∇ reduced from 0.068 to 0.053 and RMSE ∇2 from 0.091 to 
+
+0.076 . TransINR ( 41 .56 dB / 0.222 m) and Functa ( 35 .00 dB / 0.498 m)perform substantially below the HUVR variants, with gaps of 7.3 dB and 13 .9 dB to HUVR. This indicates that the HUVR-style patch-token representation transfers more effectively to terrain than ei-ther full weight prediction or a single global modulation vector. The Functa gap is also consistent with its 512 -dimensional global 
+
+Table 1: Cross-method comparison on the swisstopo terrain benchmark, test split ( 𝑛 =432 ). PSNR in dB, RMSE 𝑧 in meters; 
+
+∇𝑓 (m/px) and ∇2 𝑓 (m/px 2) are the gradient and Laplacian RMSE against finite-difference references, computed ana-lytically by automatic differentiation for the SIREN-based decoders (HUVR+SIREN, Functa) and by central finite dif-ferences for the ReLU-based decoders (TransINR, HUVR). 
+
+#floats is the number of scalar values in the per-tile payload 
+
+𝜁 (𝑖 ) that must be stored for each input; the shared model weights are amortized across the dataset and excluded from the count. Method PSNR ↑ RMSE 𝑧 ↓ ∇𝑓 ↓ ∇2 𝑓 ↓ #floats 
+
+TransINR 41.56 0.222 0.095 0.103 197,376 Functa 35.00 0.498 0.115 0.095 512 HUVR 48.86 0.092 0.068 0.091 8,224 
+
+HUVR+SIREN 51.69 0.066 0.053 0.076 8,224 modulation vector, which trades the spatially-varying structure that HUVR’s 𝑃 =256 patch grid carries for a smaller per-tile payload. Inside the HUVR family, derivative fidelity moves in the same direction (Figure 2 and the right half of Table 1). The decoder re-placement preserves the sign of the gain at every derivative order, with the relative reduction shrinking from −28% on height to −23% 
+
+on gradient and −17% on Laplacian as the targets themselves be-come noisier. The worst-tile envelope behaves the same way. The maximum gradient error drops from 4.73 to 3.79 (−20% ) and the maximum Laplacian error from 5.77 to 4.67 (−19% ). The separa-tion from TransINR and Functa is clearest on the gradient, where their RMSE is roughly twice HUVR+SIREN ’s ( 0.095 for TransINR and 0.115 for Functa against 0.053 ). On the Laplacian the gap is 
+
+> 5Feng et al.
+
+Table 2: Per-method FLOPs (GFLOPs) under the 1 :2 forward-to-backward convention. Train cost is per optimizer step on one 256 × 256 tile; inference is per tile. Enc. and Dec. are the per-tile costs of the input encoder 𝑇 Φ and of the hypernetwork decoder; NeuDec. is the neural coordinate decoder. Method Train Infer Enc. Dec. NeuDec. 
+
+TransINR 431.5 143.8 109.2 0.10 34.6 Functa 8,698.7 4,832.6 0.0 0.02 483.3 HUVR 285.8 95.3 46.6 27.05 21.6  
+
+> HUVR+SIREN
+
+275.9 92.0 46.6 27.86 17.5 smaller: TransINR ( 0.103 ) and Functa ( 0.095 ) sit above HUVR+SIREN ’s 
+
+0.076 but close to the HUVR family’s 0.091 , because the second-order target is itself noisier. The much larger height-fidelity gaps already separate these two methods from the HUVR family, and the derivative rows do not change the cross-method ordering. On the decode-cost criterion (Table 2), we report analytical FLOPs under a standard linear-layer accounting convention with the back-ward pass counted at twice the forward cost. Training cost is per optimizer step on one tile (forward plus backward) and inference cost is per tile under a forward-only convention, with the exception of Functa, whose meta-learning inner loop runs at inference and is therefore counted as part of its inference budget. HUVR+SIREN 
+
+is the cheapest of the four methods on both training cost per step (275 .9 GFLOPs) and inference cost per tile ( 92 .0 GFLOPs). The per-pixel neural-decoder savings from removing HUVR’s Conv-plus-PixelShuffle upsampler (Section 3.3) map to a 1.04 × total inference reduction, because the ViT encoder and hypernetwork decoder dominate the per-tile pipeline. TransINR sits at 1.56 × HUVR+SIREN 
+
+on both. Functa is the exception, because its second-order meta-learning inner loop must be re-run at inference time on every tile, producing a 31 .5× training-step cost and a 52 .5× per-tile inference cost relative to HUVR+SIREN . This gap follows directly from the architecture’s inner-loop adaptation requirement at deployment. Measured per-tile inference wall-clock on the same RTX A5000 does not track the FLOPs count within the HUVR family. A single full decode pass takes 15 .96 ± 0.44 ms for HUVR, 18 .11 ± 0.17 ms for 
+
+> HUVR+SIREN
+
+, and 18 .31 ± 0.18 ms for TransINR ( 10 warm-up plus 
+
+100 timed forward passes on one test tile, batch one). HUVR+SIREN 
+
+is marginally slower than HUVR in wall-clock despite its lower FLOPs count, because evaluating the SIREN decoder independently at every one of the 256 2 pixel coordinates is less hardware-efficient than HUVR’s fused Conv-plus-PixelShuffle upsampler. Thus, the FLOPs reduction from removing that upsampler does not translate into a wall-clock reduction at this tile size. Storage (Table 3, Figure 3) gives the clearest separation. At fp32, HUVR and HUVR+SIREN both cost 4.016 BPP (the same 8,224 -float bottleneck token), so HUVR+SIREN ’s +2.83 dB height improvement is delivered at zero additional storage. TransINR’s per-tile cost is much higher ( 96 .375 BPP at fp32, 24 × HUVR’s bottleneck) because its transformer specializes a 257 ×768 weight-token state per tile rather than compressing through a 32 -dimensional bottleneck. Quantizing the bottleneck token, the only source of per-tile variation in the HUVR family, with symmetric per-dim min-max scales then exposes 
+
+Table 3: Per-tile bits-per-pixel at fp32 and the HUVR+SIREN post-training quantization frontier. #floats is the number of scalar values in the per-tile payload stored for each input; the shared model weights are amortized across the dataset and excluded from the count. BPP uncomp is fixed-width packing; BPP ent is the Shannon lower bound under per-dimension entropy coding. PSNR is in dB. Method #floats BPP uncomp BPP ent PSNR 
+
+Functa 512 0.250 — 35.00 HUVR 8,224 4.016 — 48.86 HUVR+SIREN 8,224 4.016 — 51.69 TransINR 197,376 96.375 — 41.56 
+
+HUVR+SIREN PTQ sweep: 
+
+@ int16 8,224 2.016 1.009 51.69 
+
+@ int8 8,224 1.012 0.822 51.54 
+
+@ int4 8,224 0.510 0.381 42.99 @ int2 8,224 0.259 0.128 27.93 10 1 10 0 10 1 10 2 
+
+> Per-tile BPP
+> 30
+> 35
+> 40
+> 45
+> 50
+> PSNR (dB)
+> int2
+> int4
+> int8 int16
+> int32
+> HUVR+SIREN
+> PTQ
+> PTQ entropy
+> HUVR
+> Functa
+> TransINR
+
+Figure 3: Rate–distortion frontier on the test split, plotting per-tile PSNR against per-tile bits-per-pixel under the con-vention of Table 3. The HUVR+SIREN PTQ frontier dominates the HUVR fp32 configuration down to int8. 
+
+the underlying compressibility of the learned representation. We say that configuration 𝐴 rate-distortion dominates configuration 
+
+𝐵 when 𝐴 achieves no worse BPP and no worse PSNR, with a strict improvement in at least one of the two metrics. Under this definition, the HUVR+SIREN PTQ frontier dominates the HUVR fp32 configuration for all swept bit widths down to int8. The aim of this experiment is simply to show that HUVR+SIREN ’s per-tile payload tolerates aggressive post-training quantization. Even at int8 it still achieves a higher PSNR than HUVR’s full-precision reconstruction. At int8, HUVR+SIREN reaches 51 .54 dB at 0.822 entropy-coded BPP, reducing storage by 4.9× relative to HUVR fp32 while improving PSNR by 2.68 dB . Its 0.15 dB loss relative to HUVR+SIREN fp32 is negligible, so we treat int8 as preserving fp32 fidelity. Below int8 the frontier collapses. Int4 ( 0.381 entropy-coded BPP) drops to 42 .99 dB ,
+
+> 6Rethinking Amortized Neural Representations for High-Resolution Terrain Elevation Data
+
+and int2 ( 0.128 entropy-coded BPP) drops to 27 .93 dB . Functa’s fp32 configuration ( 0.250 BPP, 35 .00 dB ) reaches a lower-BPP regime than HUVR+SIREN ’s int4, but its PSNR sits more than 7 dB below 
+
+> HUVR+SIREN
+
+’s int4 frontier point and below the fidelity regime typically required for downstream geomorphological analysis [ 9]. Functa and HUVR+SIREN therefore occupy different rate-distortion regimes rather than dominating each other across the full frontier. Across the four evaluation criteria, HUVR+SIREN provides the strongest overall result among the amortized-INR methods tested on this benchmark. Relative to HUVR, it improves height fidelity by +2.83 dB at identical per-tile storage, reduces derivative-fidelity error by 23% to 17% , and gives a modest reduction in per-tile infer-ence cost. Its post-training quantization frontier further dominates the HUVR fp32 operating point down to int8, indicating that the improvement is retained under compact storage. We therefore fo-cus the remaining analysis on HUVR+SIREN : Section 4.3 studies the design choices behind these gains, and Section 4.4 measures the residual gap to the per-tile fitting ceiling. 
+
+## 4.3 Ablation studies 
+
+The cross-method comparison identifies HUVR+SIREN as the strongest configuration on this benchmark, but does not show which design choices are responsible for the gain. We address that question by varying one design choice at a time relative to the baseline configuration ( 𝑝 =16 pixel patches, bottleneck width 𝐷 =32 , SIREN base frequency 𝜔 0=10 , amplitude-plus-shift modulation, full 𝑁 =3338 training set with augmentation enabled). All ablation runs share the same training recipe and evaluation protocol. The five varied design choices are the patch size 𝑝 
+
+(spatial granularity at which the encoder ingests the tile), the bottleneck width 𝐷 (per-tile storage capacity), the SIREN base frequency 𝜔 0 (decoder’s operating frequency band), the modulation interface (amplitude-plus-shift vs. amplitude-only, shift-only, and the INCODE alternative), and the training-set size 𝑁 with augmentation on or off. Table 4 summarizes the single-variable perturbations. 
+
+Patch size 𝑝 . This governs the spatial granularity at which the encoder ingests the tile, and trades reconstruction quality against per-tile storage. Halving 𝑝 from 16 to 8 quadruples the number of patches 𝑃 , so the per-tile representation size (1 + 𝑃 ) · 𝐷 scales as 𝑝 −2 at fixed 𝐷 . It is also the single largest gain we observe in the ablation, +4.90 dB at 𝑝 =8 (56 .59 vs. 51 .69 dB , RMSE 𝑧 0.066 →
+
+0.037 m). Doubling to 𝑝 =32 symmetrically loses 5.04 dB . The gain at smaller 𝑝 extends to gradient and Laplacian RMSE in the same direction as the height RMSE, which indicates that the effect arises from a denser spatial sampling of the input at the encoder rather than from a better match between the per-patch neural decoder and high-frequency content of the heightfield. We keep 𝑝 =16 as the default because it provides a better storage-quality trade-off. Using 
+
+𝑝 =8 would increase the per-tile representation from 8,224 to 32 ,800 
+
+floats and move the model outside the storage regime analyzed in Section 4.2. 
+
+Patch-boundary artefacts. Because each patch token decodes its own sub-tile, patch-token models can introduce small height discon-tinuities along patch boundaries. Every patch-token configuration 
+
+Table 4: One-at-a-time ablations of HUVR+SIREN relative to the recommended configuration (top row). Δ columns are signed test-split differences against the baseline. ΔTrain reports the same quantity on the training split as an optimization-progress check.                                                                                
+
+> Config. PSNR ΔPSNR RMSE Δ∇𝑓 Δ∇2𝑓 ΔTrain
+> Baseline 51.69 —0.0655 ———
+> 𝑝 =856.59 +4.90 0.0368 −0.0229 −0.0289 +4.52
+> 𝑝 =32 46.65 −5.04 0.1195 +0.0239 +0.0162 −4.94
+> 𝐷 =16 49.20 −2.49 0.0885 +0.0118 +0.0103 −2.17
+> 𝐷 =128 53.52 +1.82 0.0529 −0.0085 −0.0093 +1.89
+> 𝐷 =256 53.24 +1.55 0.0546 −0.0077 −0.0084 +1.51
+> 𝐷 =768 53.92 +2.22 0.0505 −0.0104 −0.0118 +1.89
+> 𝜔 0=550.78 −0.91 0.0729 +0.0045 +0.0043 −0.92
+> 𝜔 0=30 51.95 +0.26 0.0635 −0.0010 −0.0010 +0.26
+> Amplitude 51.24 −0.45 0.0690 +0.0024 +0.0024 −0.48
+> Shift 51.07 −0.62 0.0705 +0.0034 +0.0034 −0.71
+> INCODE [15] 50.33 −1.36 0.0771 +0.0061 +0.0053 −1.12
+
+we tested shows lower PSNR within 2 pixels of a patch seam than in the interior. The boundary-interior gap shrinks with denser patch grids ( −1.74 dB at 𝑝 =32 , −1.09 at 𝑝 =16 , −0.18 at 𝑝 =8) and with wider bottlenecks at fixed 𝑝 =16 (−1.54 at 𝐷 =16 down to −0.77 at 𝐷 =768 ). Seam artefacts are therefore a consistent feature of patch-token architectures whose magnitude is controlled by patch density and decoder capacity rather than by the overall PSNR ranking. The full per-checkpoint breakdown is in Appendix C. 
+
+Bottleneck width 𝐷 . This controls how much per-tile information the encoder is allowed to keep, and is the design choice most directly tied to per-tile storage. We sweep 𝐷 across {16 , 32 , 128 , 256 , 768 },where 𝐷 =768 corresponds to the no-compression upper bound at which the encoder’s 768 → 𝐷 projection becomes the iden-tity. Reconstruction improves with 𝐷 but with rapidly diminishing returns. Halving the bottleneck to 𝐷 =16 costs 2.49 dB . Quadru-pling to 𝐷 =128 yields only +1.82 dB . Doubling further to 𝐷 =256 
+
+changes PSNR by only −0.27 dB from 𝐷 =128 , leaving it effectively unchanged. The no-compression upper bound at 𝐷 =768 recovers 
+
++2.22 dB over 𝐷 =32 . The sublinear shape of this curve shows that the 32 -dimensional bottleneck leaves some headroom but is not the dominant constraint: even removing the compression entirely yields only about +2 dB , less than a third of the ≈ 7 dB gap to the per-tile full-model upper bound reported in Section 4.4. We keep 
+
+𝐷 =32 as the default because the per-tile bottleneck scales linearly with 𝐷 . Moving to 𝐷 =128 would multiply fp32 BPP from 4.016 to 
+
+16 .06 in exchange for +1.82 dB , whereas the PTQ frontier at 𝐷 =32 
+
+already reaches 0.822 entropy-coded BPP at 51 .54 dB in Section 4.2. 
+
+SIREN base frequency 𝜔 0. This sets the dominant frequency at which the neural decoder’s sinusoidal activations oscillate, and is the parameter a SIREN user typically tunes to match the spec-tral content of the target signal. The natural-image SIREN de-fault of 𝜔 0=30 is calibrated to full-resolution image fitting. With 
+
+> HUVR+SIREN
+
+’s 16 × 16 per-patch regime, the effective signal each    
+
+> 7Feng et al. 64 256 1024 3338
+> training-set size N (tiles)
+> 44
+> 45
+> 46
+> 47
+> 48
+> 49
+> 50
+> 51
+> 52
+> test PSNR (dB)
+> no aug
+> with augmentation
+
+Figure 4: Dataset-size sensitivity of HUVR+SIREN . Each point is a model trained from scratch on 𝑁 tiles for a fixed total of 21 ,000 optimizer steps. PSNR saturates by 𝑁 ≈ 1024 and the with-augmentation anchor at 𝑁 =3338 matches the no-augmentation point. 
+
+per-patch decoder reconstructs sits in a lower frequency band, which motivates our 𝜔 0=10 baseline. The ablation supports this calibration but shows the choice is not decisive. Setting 𝜔 0=5 loses 
+
+0.91 dB while 𝜔 0=30 gains only 0.26 dB . Raising 𝜔 0 above the base-line therefore does not help, and the natural-image default of 𝜔 0=30 
+
+is matched closely by our smaller-band 𝜔 0=10 . Only halving it to 
+
+𝜔 0=5 changes reconstruction quality appreciably, by about 0.9 dB. 
+
+Modulation interface. This determines how the hypernetwork decoder’s per-patch token influences the SIREN’s pre-activation at each layer. We compare four interfaces: amplitude-only modu-lation, shift-only modulation, the combined amplitude-plus-shift modulation we use as the baseline, and the INCODE interface [ 15 ], a richer modulation function introduced for natural-image fitting. Amplitude-only and shift-only ablations lose 0.45 and 0.62 dB re-spectively, indicating that both components of the combined in-terface carry signal. The INCODE interface loses 1.36 dB relative to the baseline. The published gain of INCODE on natural-image fitting therefore does not transfer to amortized terrain reconstruc-tion at this training-data scale. The combined amplitude-plus-shift modulation, which is also the cheapest of the four, remains the strongest interface we tested. 
+
+Training-set size 𝑁 and augmentation. This ablation (Fig-ure 4) tests two related questions: how much training data the encoder-decoder needs to amortize, and whether the HUVR augmentation policy contributes a measurable effect on ter-rain. We train HUVR+SIREN from scratch on nested subsets 
+
+𝑁 ∈ { 64 , 256 , 1024 , 3338 } of the training split for a fixed 21 ,000 
+
+optimizer steps without augmentation, and re-train at the full 
+
+𝑁 =3338 with augmentation on as the comparison anchor. PSNR climbs from 44 .16 dB at 𝑁 =64 to 50 .41 dB at 𝑁 =256 , 51 .68 dB at 
+
+𝑁 =1024 , and saturates at 51 .62 dB for the full 𝑁 =3338 split. The encoder-decoder therefore carries a real data demand at the low end of the curve but reaches its operating regime already by 
+
+𝑁 ≈ 1024 . The final 3.3× data expansion to 𝑁 =3338 contributes only −0.06 dB . Enabling augmentation at 𝑁 =3338 contributes a further +0.07 dB , both negligible. Saturation at 𝑁 ≈ 1024 is consistent with the bottleneck-width result that the 32 -dimensional bottleneck leaves only modest headroom for the amortized representation. At this dataset scale the binding constraint is not the supply of training data but the structural capacity of what the shared encoder-decoder can be fit to. 
+
+Summary. The decoder swap is therefore the dominant change in HUVR+SIREN , and the remaining four design choices together narrow down what determines amortized inference quality on ter-rain. The 𝜔 0=30 default that helps full-resolution natural-image SIREN fitting is matched by our 𝜔 0=10 baseline within the 16 × 16 
+
+per-patch regime. The richer INCODE modulation interface, de-signed for natural-image SIREN reconstruction, does not improve on the cheaper amplitude-plus-shift baseline at this training-data scale. The remaining factors (bottleneck width 𝐷 at fixed 𝑝 , dataset size 𝑁 with or without augmentation) are already in saturation. Building on these saturations, Section 4.4 introduces two analytical diagnostics to isolate the structural source of the residual gap to per-tile fitting. 
+
+## 4.4 Analytical diagnosis of the amortization gap 
+
+> HUVR+SIREN
+
+’s amortized inference sits at 51 .69 dB on the test split, which the ablation studies of Section 4.3 show is approximately the best amortized number reachable by tuning the HUVR+SIREN config-uration alone at this training-data scale. This subsection analyzes the remaining gap to the per-tile fitting ceiling. We ask whether the remaining amortization gap is mainly due to the tile-specific bottleneck token, the shared encoder-decoder parameters, or the structure of the learned token space. To answer this, we use two per-tile optimization diagnostics and one structural analysis of the bottleneck token. 
+
+Diagnostic construction. The diagnostics are designed so that each isolates one component of the pipeline as the per-tile degree of freedom while keeping everything upstream fixed at its amor-tized value. The per-instance fitting bound freezes the hypernetwork and the neural coordinate decoder. It then continues optimizing the bottleneck token 𝜁 (𝑖 ) alone for each tile, starting from its amortized value. By construction it measures the reconstruction quality the amortized encoder forgoes by producing each tile’s bottleneck to-ken in a single forward pass rather than fitting that token directly to the tile. A recovery of several dB would indicate that the encoder is not using the 32 dimensions of the bottleneck optimally. A recovery near zero would indicate that the encoder already produces, for each tile, the best token the shared decoder can use. The per-tile full-model upper bound additionally unfreezes the hypernetwork decoder and the SIREN base weights and jointly optimizes them with the bottleneck token per tile, keeping only the encoder and the upstream tokenizer frozen. By construction it measures the ceiling that this encoder-decoder architecture could reach on each individ-ual tile if the shared post-bottleneck pipeline were also allowed to specialize. This second construction is deliberately not deployable, because the whole point of an amortized representation is that the hypernetwork decoder and the neural decoder are shared across the dataset, so specializing them per tile destroys the amortization   
+
+> 8Rethinking Amortized Neural Representations for High-Resolution Terrain Elevation Data amortized per-instance
+> fitting
+> per-tile
+> upper bound
+> 30
+> 35
+> 40
+> 45
+> 50
+> 55
+> 60
+> PSNR (dB)
+> Functa 35.0
+> TransINR 41.6
+> HUVR 48.9
+> HUVR+SIREN
+> 51.69 53.05
+> 58.95
+> amortization
+> gap
+
+Figure 5: Decomposing the amortization gap of HUVR+SIREN .The three red markers trace PSNR as per-tile flexibility ex-pands: amortized encoding (left), the per-instance fitting bound (middle), and the per-tile full-model upper bound (right, computed on 32 randomly sampled tiles). The verti-cal span on the right is the amortization gap and horizontal dashed lines mark the amortized cross-method benchmark. 
+
+advantage and recovers an architecture that has no benefit over per-tile optimization. We use the upper bound as a structural ceiling, not as a proposed inference recipe. 
+
+Decomposing the gap. Figure 5 reports both diagnostics on 
+
+> HUVR+SIREN
+
+. The per-instance fitting bound reaches 53 .05 dB .Continuing to optimize the bottleneck token alone, with the shared decoder frozen, raises amortized inference by only 1.36 dB . On a per-tile basis the amortized encoder therefore already produces patch tokens close to the best 32 -dimensional token the shared decoder can read. The per-tile full-model upper bound, by contrast, reaches 58 .95 dB after 𝑇 =5000 joint-update steps on 32 randomly sampled tiles (we sub-sample because each tile requires its own optimization run), more than 7 dB above the amortized 51 .69 dB of Table 1. Of this roughly 7 dB gap, optimizing the bottleneck token alone closes less than a fifth ( 51 .69 → 53 .05 dB ). The remaining 
+
+≈ 6 dB does not reside in the bottleneck token but in the shared post-bottleneck pipeline, the hypernetwork decoder and the neural decoder whose weights are amortized across the dataset. In this sense HUVR+SIREN ’s 32 -dimensional patch-token bottleneck is approximately saturated by amortized inference: continuing to optimize the bottleneck token alone with the shared decoder frozen recovers a negligible fraction of the per-tile full-model upper bound. 
+
+Token-space structure. We further characterize the bottleneck token directly. Over all 854 ,528 patch tokens produced by the amor-tized encoder on the training split, the PCA spectrum collapses sharply. Five of the 32 components account for 95% of the variance and the participation ratio (an effective-dimensionality measure equal to the component count for a flat spectrum and tending to 
+
+1 as variance concentrates into a single direction; Appendix C) is 
+
+1.85 . The absolute Pearson correlation coefficient |𝜌 | between each token dimension and the mean elevation of the patch it represents peaks at |𝜌 | = 0.072 , ruling out the trivial confound that one or two dimensions track absolute height. The encoder therefore con-centrates per-token variance into about five effective directions of its nominal 32 , consistent with the bottleneck-width ablation where halving 𝐷 to 16 costs only −2.49 dB . Figure 7 in Appendix C expands this into a four-panel diagnostic. 
+
+Summary. Taken together, the two per-tile diagnostics and the token-space analysis localize the amortization gap to the shared components of HUVR+SIREN rather than to its per-tile payload. Re-optimizing the bottleneck token against each tile recovers only 
+
+1.36 dB , so the per-tile token is already approximately saturated. The amortized encoder also concentrates per-token variance into roughly five of its 32 effective directions, so the nominal token capacity is under-used and is not the binding constraint. The re-maining ≈ 6 dB of the gap to the per-tile full-model upper bound is recovered only when the hypernetwork decoder and the SIREN base weights are allowed to specialize, and is attributable to the limited capacity of the shared encoder-decoder that HUVR+SIREN 
+
+amortizes across the dataset. The amortization gap on terrain is thus a property of the current hypernetwork design rather than of the dataset scale or the width of the per-tile token, and narrowing it requires a more expressive shared encoder and decoder or a more effective architectural design choice rather than a wider bottleneck. 
+
+## 5 Conclusion 
+
+This paper has presented the first controlled benchmark of amor-tized neural representations on a high-resolution terrain DEM, introduced HUVR+SIREN as a bounded domain-adapted decoder for terrain heightfields, and used two analytical diagnostics to local-ize the residual gap between the amortized configuration and the per-tile fitting ceiling. HUVR+SIREN delivers a +2.83 dB pixel-PSNR improvement over the strongest reproduced baseline at identical per-tile storage, preserves the sign of the gain at every derivative order we evaluate, and yields a post-training quantization frontier that dominates the baseline’s full-precision configuration down to int8 inclusive. The analytical diagnostics localize the residual amortization gap to the shared post-bottleneck pipeline rather than to the bottleneck token, dataset scale, or modulation tuning. The findings are bounded by the scope of the benchmark. The re-sults characterize a single geographic source (swisstopo alt3d ) at a single ground sampling distance ( 1 m/pixel ), with no geographically held-out cross-continent evaluation and no head-to-head compari-son against production-grade DEM codecs. These boundaries de-fine the natural directions along which the present characterization should be broadened in subsequent work. Future work has two main directions. The first is to extend the benchmark across additional geographic sources, ground sampling distances, and production-codec baselines, so that the cross-domain characterization begun here generalizes beyond a single national DEM. The second is to mitigate the residual amortization gap lo-calized in this paper through architectural changes to the shared post-bottleneck pipeline, with the aim of recovering more of the 
+
+> 9
+
+Feng et al. 
+
+per-tile fitting ceiling while using a smaller per-tile token payload than the current 32 -dimensional patch tokens. 
+
+## References 
+
+[1] Matthias Bauer, Emilien Dupont, Andy Brock, Dan Rosenbaum, Jonathan Richard Schwarz, and Hyunjik Kim. 2023. Spatial Functa: Scaling Functa to ImageNet Classification and Generation. arXiv preprint arXiv:2302.03130 (2023). https: //arxiv.org/abs/2302.03130 [2] Yinbo Chen and Xiaolong Wang. 2022. Transformers as Meta-Learners for Implicit Neural Representations. In European Conference on Computer Vision (ECCV) . 170–187. doi:10.1007/978-3-031-19790-1_11 Project page and code: https://yinboc.github.io/trans-inr/. [3] Adam Dai, Shubh Gupta, and Grace Gao. 2024. Neural Elevation Models for Terrain Mapping and Path Planning. arXiv preprint arXiv:2405.15227 (2024). [4] Alexey Dosovitskiy, Lucas Beyer, Alexander Kolesnikov, Dirk Weissenborn, Xi-aohua Zhai, Thomas Unterthiner, Mostafa Dehghani, Matthias Minderer, Georg Heigold, Sylvain Gelly, Jakob Uszkoreit, and Neil Houlsby. 2021. An Image is Worth 16x16 Words: Transformers for Image Recognition at Scale. In International Conference on Learning Representations (ICLR) . https://arxiv.org/abs/2010.11929 [5] Emilien Dupont, Adam Goliński, Milad Alizadeh, Yee Whye Teh, and Arnaud Doucet. 2021. COIN: COmpression with Implicit Neural representations. In ICLR 2021 Neural Compression Workshop .[6] Emilien Dupont, Hyunjik Kim, S. M. Ali Eslami, Danilo Jimenez Rezende, and Dan Rosenbaum. 2022. From data to functa: Your data point is a function and you can treat it like one. In Proceedings of the 39th International Conference on Machine Learning (Proceedings of Machine Learning Research, Vol. 162) . PMLR, 5694–5725. https://arxiv.org/abs/2201.12204 [7] Emilien Dupont, Hrushikesh Loya, Milad Alizadeh, Adam Goliński, Yee Whye Teh, and Arnaud Doucet. 2022. COIN++: Neural Compression Across Modalities. 
+
+Transactions on Machine Learning Research (2022). [8] Esri. 2021. LERC: Limited Error Raster Compression. Open-source specification and reference implementation. https://github.com/Esri/lerc. [9] Haoan Feng, Xin Xu, and Leila De Floriani. 2024. ImplicitTerrain: a Continu-ous Surface Model for Terrain Data Analysis. In Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition Workshop . 899–909. [10] Chelsea Finn, Pieter Abbeel, and Sergey Levine. 2017. Model-Agnostic Meta-Learning for Fast Adaptation of Deep Networks. In Proceedings of the 34th Inter-national Conference on Machine Learning (ICML) . 1126–1135. [11] Éric Guérin, Julie Digne, Éric Galin, Adrien Peytavie, Christian Wolf, Bedrich Benes, and Benoît Martinez. 2017. Interactive Example-Based Terrain Authoring with Conditional Generative Adversarial Networks. In ACM Transactions on Graphics (Proceedings of SIGGRAPH Asia) , Vol. 36. 228:1–228:13. doi:10.1145/ 3130800.3130804 [12] Matthew Gwilliam, Xiao Wang, Xuefeng Hu, and Zhenheng Yang. 2026. Implicit Neural Representation Facilitates Unified Universal Vision Encoding. arXiv preprint arXiv:2601.14256 (2026). https://arxiv.org/abs/2601.14256 [13] David Ha, Andrew M. Dai, and Quoc V. Le. 2017. HyperNetworks. In International Conference on Learning Representations (ICLR) . https://arxiv.org/abs/1609.09106 [14] Peng He, Yongmei Cheng, Mingdong Qi, Zhi Cao, Heng Zhang, Shaoxian Ma, Shun Yao, and Qiang Wang. 2022. Super-Resolution of Digital Elevation Model with Local Implicit Function Representation. In 2022 International Conference on Machine Learning and Intelligent Systems Engineering (MLISE) . 158–163. doi:10. 1109/MLISE57402.2022.00030 [15] Amirhossein Kazerouni, Reza Azad, Alireza Hosseini, Dorit Merhof, and Ulas Bagci. 2024. INCODE: Implicit Neural Conditioning with Prior Knowledge Embeddings. In Proceedings of the IEEE/CVF Winter Conference on Applications of Computer Vision . 1298–1307. [16] Chiheon Kim, Doyup Lee, Saehoon Kim, Minsu Cho, and Wook-Shin Han. 2023. Generalizable Implicit Neural Representations via Instance Pattern Composers. In Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recog-nition (CVPR) . 11808–11817. doi:10.1109/CVPR52729.2023.01136 [17] Théo Ladune, Pierrick Philippe, Félix Henry, Erwan Le Pennec, and Clare E. Gordon. 2023. Cool-chic: Coordinate-based Low Complexity Hierarchical Image Codec. In IEEE International Conference on Computer Vision (ICCV) .[18] Peter Lindstrom. 2014. Fixed-Rate Compressed Floating-Point Arrays. IEEE Trans. Vis. Comput. Graph. 20, 12 (2014), 2674–2683. doi:10.1109/TVCG.2014.2346458 [19] Peter Lindstrom, David Koller, William Ribarsky, Larry F. Hodges, Nick Faust, and Gregory A. Turner. 1996. Real-Time, Continuous Level of Detail Rendering of Height Fields. In Proceedings of the 23rd Annual Conference on Computer Graphics and Interactive Techniques (SIGGRAPH ’96) . 109–118. doi:10.1145/237170.237217 [20] Ishit Mehta, Michaël Gharbi, Connelly Barnes, Eli Shechtman, Ravi Ramamoorthi, and Manmohan Chandraker. 2021. Modulated periodic activations for generaliz-able local functional representations. In Proceedings of the IEEE/CVF International Conference on Computer Vision . 14214–14223. [21] Lars Mescheder, Michael Oechsle, Michael Niemeyer, Sebastian Nowozin, and Andreas Geiger. 2019. Occupancy networks: Learning 3d reconstruction in function space. In Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition . 4460–4470. [22] Ben Mildenhall, Pratul P Srinivasan, Matthew Tancik, Jonathan T Barron, Ravi Ramamoorthi, and Ren Ng. 2021. Nerf: Representing scenes as neural radiance fields for view synthesis. Commun. ACM 65, 1 (2021), 99–106. [23] Open Geospatial Consortium. 2023. Cloud Optimized GeoTIFF (COG) Standard, Version 1.0. OGC Implementation Standard 21-026. https://www.ogc.org/ standard/cog/. [24] Jeong Joon Park, Peter Florence, Julian Straub, Richard Newcombe, and Steven Lovegrove. 2019. Deepsdf: Learning continuous signed distance functions for shape representation. In Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition . 165–174. [25] Ethan Perez, Florian Strub, Harm de Vries, Vincent Dumoulin, and Aaron Courville. 2018. FiLM: Visual Reasoning with a General Conditioning Layer. In 
+
+Proceedings of the AAAI Conference on Artificial Intelligence , Vol. 32. doi:10.1609/ aaai.v32i1.11671 [26] Oriane Siméoni, Huy V Vo, Maximilian Seitzer, Federico Baldassarre, Maxime Oquab, Cijo Jose, Vasil Khalidov, Marc Szafraniec, Seungeun Yi, Michaël Rama-monjisoa, et al. 2025. Dinov3. arXiv preprint arXiv:2508.10104 (2025). [27] Vincent Sitzmann, Julien N. P. Martel, Alexander W. Bergman, David B. Lindell, and Gordon Wetzstein. 2020. Implicit Neural Representations with Periodic Activation Functions. In Advances in Neural Information Processing Systems ,Vol. 33. 7462–7473. [28] Vincent Sitzmann, Michael Zollhöfer, and Gordon Wetzstein. 2019. Scene Repre-sentation Networks: Continuous 3D-Structure-Aware Neural Scene Representa-tions. In Advances in Neural Information Processing Systems (NeurIPS) , Vol. 32. [29] Yannick Strümpler, Janis Postels, Ren Yang, Luc Van Gool, and Federico Tombari. 2022. Implicit Neural Representations for Image Compression. In European Conference on Computer Vision (ECCV) . 74–91. doi:10.1007/978-3-031-19790-1_5 [30] Matthew Tancik, Ben Mildenhall, Terrance Wang, Divi Schmidt, Pratul P. Srini-vasan, Jonathan T. Barron, and Ren Ng. 2021. Learned Initializations for Opti-mizing Coordinate-Based Neural Representations. In Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR) . 2846–2855. [31] Matthew Tancik, Pratul Srinivasan, Ben Mildenhall, Sara Fridovich-Keil, Nithin Raghavan, Utkarsh Singhal, Ravi Ramamoorthi, Jonathan Barron, and Ren Ng. 2020. Fourier features let networks learn high frequency functions in low dimen-sional domains. Advances in Neural Information Processing Systems 33 (2020), 7537–7547. [32] Zhongyi Xie, W. Randolph Franklin, and Daniel M. Tracy. 2010. Slope Preserving Lossy Terrain Compression. ACM SIGSPATIAL Special 2, 1 (2010), 19–24. doi:10. 1145/1953102.1953106 [33] Shun Yao, Yongmei Cheng, Fei Yang, and Mikhail G. Mozerov. 2024. A continuous digital elevation representation model for DEM super-resolution. ISPRS Journal of Photogrammetry and Remote Sensing 208 (2024), 1–13. doi:10.1016/j.isprsjprs. 2024.01.001 10 Rethinking Amortized Neural Representations for High-Resolution Terrain Elevation Data 
+
+## A Reproduction, hyperparameters, and hardware 
+
+Each reproduction starts from the upstream public implementa-tion, with a single shared edit at the input layer that adapts a three-channel image-regression input to the single-channel terrain heightfield. Table 5 contrasts the HUVR and HUVR+SIREN neural de-coders at the same encoder, hypernetwork decoder, and 257 ×32 bot-tleneck slot. Table 6 lists per-method training schedules: TransINR follows its upstream Imagenette image-regression recipe; Functa is a meta-learned shared SIREN (depth 5, width 256 , 𝜔 0=30 ) with a 512 -dimensional global modulation vector adapted per tile by a 𝑇 inner =3-step second-order meta-learner inner loop; HUVR and 
+
+HUVR+SIREN use HUVR’s published schedule with DINOv3 distilla-tion retained at its published weight. The per-instance fitting bound and per-tile full-model upper bound (Section 4.4) optimize per-tile state with Adam ( lr =10 −1 token-only, lr =10 −4 joint). All jobs ran on one SLURM node with 4 NVIDIA RTX A5000 GPUs ( 24 GB) under PyTorch 2.4 DDP; per-instance fits ran on a single A5000. 
+
+Table 5: Neural-decoder comparison between HUVR and 
+
+HUVR+SIREN at identical upstream pipeline. Per-pixel FLOPs cover the coordinate decoder and, for HUVR, its Conv+PixelShuffle upsampler (which HUVR+SIREN does not use). 
+
+HUVR HUVR+SIREN 
+
+Activation ReLU SIREN ( 𝜔 0=10 )Depth × width 3 × 256 4 × 256 
+
+Output convention Per-patch center Per-pixel coord. Upsampler Conv + PixelShuffle None Per-pixel decoder FLOPs 329 k 268 k
+
+Table 6: Per-method training hyperparameters. 
+
+Method Optim. lr / sched. Epochs Batch TransINR Adam 10 −4, step@80 1000 8Functa Adam 5·10 −5, cosine 200 8HUVR AdamW 10 −4, cosine + wd 0.05 200 32  
+
+> HUVR+SIREN
+
+AdamW 10 −4, cosine + wd 0.05 200 32 
+
+## B Extended quantitative tables 
+
+Table 7 reports per-method gradient and Laplacian RMSE on the test split together with the worst-tile error envelopes max |∇ err |
+
+and max |∇ 2err | (maxima across test tiles of the per-tile mean gra-dient and Laplacian error). HUVR+SIREN improves on HUVR in both summary moments and the worst-tile envelope; the gain atten-uates with derivative order, consistent with the smooth-surface motivation of Section 3.3, and the envelopes contract by a compa-rable factor to the distribution-level RMSE, so the improvement is not tail-driven. Table 8 reports the HUVR+SIREN PTQ frontier across the swept bit widths {fp32, int16, int8, int4, int2 } with both uncompressed and entropy-coded BPP under the Table 3 conven-tions; the entropy column uses the Shannon lower bound of 32 
+
+independent per-dimension coders fit per tile. The int8 row is the sweet spot ( 0.82 BPP, 51 .54 dB; indistinguishable from the fp32 46  
+
+> 48
+> 50
+> 52
+> 54
+> 56
+> PSNR (dB)
+> Interior Boundary
+> HUVR-published
+> HUVR + SIREN
+> patch  p=8
+> patch  p=32
+> bottleneck  D=16
+> bottleneck  D=128
+> bottleneck  D=256
+> bottleneck  D=768
+> SIREN  0=5
+> SIREN  0=30
+> modulation: amplitude
+> modulation: shift
+> modulation: INCODE
+> 1.5
+> 1.0
+> 0.5
+> 0.0
+> boundary  interior (dB)
+
+Figure 6: Patch-boundary versus interior PSNR for every HUVR-family checkpoint with a patch-token bottleneck. Every point lies above the diagonal, so boundary PSNR is strictly below interior PSNR. 
+
+51 .69 dB), while int4 collapses by 8.5 dB and is no longer rate-distortion-dominant. Table 9 disaggregates the four-method head-line by terrain regime, with tiles binned into thirds of equal count by HUVR’s per-tile gradient-magnitude error (a ruggedness proxy uniform across methods). PSNR is approximately regime-stable for every method because the per-tile PSNR convention normalizes by the tile’s own elevation range; RMSE 𝑧 in meters scales monotoni-cally with ruggedness as expected. HUVR+SIREN preserves its 2–3 dB gain over HUVR within every regime and is the only method to keep RMSE 𝑧 below 0.1 m on the rugged third. Table 10 expands the HUVR+SIREN ablation rows of Table 4 with absolute derivative RMSE on the test split; the same ordering as Table 4 is reproduced (patch size 𝑝 is the dominant axis, with capacity 𝐷 second). Figure 6 reports the patch-boundary versus interior reconstruction quality across every patch-token configuration in the HUVR+SIREN ablation studies. Every configuration shows a strictly negative boundary-minus-interior PSNR gap, with magnitude tracking seam density (largest at 𝑝 =32 , smallest at 𝑝 =8) and decoder capacity (shrinking monotonically as 𝐷 widens from 16 to 768 ). 
+
+Table 7: HUVR vs. HUVR+SIREN derivative-fidelity on the test split. PSNR and RMSE 𝑧 repeated from Table 1; the last four columns are additional disaggregation. Gradient terms are in m/px and Laplacian terms in m/px 2.
+
+Method PSNR RMSE 𝑧 RMSE ∇ RMSE ∇2 max | ∇| max | ∇ 2|
+
+HUVR 48.86 0.092 0.068 0.091 4.73 5.77  
+
+> HUVR+SIREN
+
+51.69 0.066 0.053 0.076 3.79 4.67 
+
+## C Bottleneck-token diagnostic 
+
+Figure 7 expands the bottleneck-token diagnostic of Section 4.4 over the 854 ,528 training-split patch tokens. Panel (a) plots the eigen-value spectrum {𝜆 𝑖 }32  
+
+> 𝑖 =1
+
+of the per-token covariance matrix. Two summaries quantify its concentration: the 95% -rank, the smallest                      
+
+> 11 Feng et al. 010 20 30
+> PC index
+> 0.0
+> 0.1
+> 0.2
+> 0.3
+> 0.4
+> 0.5
+> 0.6
+> 0.7
+> Explained variance ratio
+> (a) PCA spectrum (95% rank = 5, PR = 1.85/32)
+> 0.70
+> 0.75
+> 0.80
+> 0.85
+> 0.90
+> 0.95
+> 1.00
+> Cumulative EV
+> d0
+> d22
+> d6
+> d3
+> d23
+> d29
+> d1
+> d9
+> d15
+> d20
+> d17
+> d10
+> d8
+> d11
+> d30
+> d31 0.00
+> 0.02
+> 0.04
+> 0.06
+> 0.08
+> 0.10
+> | |
+> (b) Correlation with patch mean elevation (max | | = 0.072)
+> |Pearson |
+> |Partial |
+> 0246810
+> |pixel-NN token-NN| (out of 10)
+> 0
+> 200
+> 400
+> 600
+> 800
+> sampled patches
+> (c) NN consistency (mean overlap = 0.11/10)
+> 500 750 1000 1250 1500
+> patch mean elevation (m)
+> 4
+> 3
+> 2
+> 1
+> 0
+> 1
+> 2
+> 3
+> token dim d0
+> (d) Top elev-corr dim d0 (= -0.072)
+
+Figure 7: Structural diagnostic of the HUVR+SIREN 32 -dimensional patch-token bottleneck over all 854 ,528 training-split patch tokens. Panels (a)–(d) defined in the surrounding text. Table 8: HUVR+SIREN PTQ frontier under symmetric per-dimension min–max quantization with per-tile fp16 scales (+0.008 BPP overhead). BPP uncomp is fixed-width packing; BPP ent is the Shannon lower bound. 
+
+Bit width BPP uncomp BPP ent PSNR (dB) RMSE (m) fp32 4.016 — 51.6907 0.0655 int16 2.016 1.009 51.6903 0.0655 int8 1.012 0.822 51.5427 0.0667 int4 0.510 0.381 42.9898 0.2069 int2 0.259 0.128 27.9307 1.2190 
+
+Table 9: Cross-method headline by terrain regime. Tiles binned into thirds by HUVR’s per-tile gradient-magnitude error: flat (lowest), hilly , rugged (highest). Each cell is mean PSNR (dB) / RMSE 𝑧 (m) over the 144 tiles in that bin. 
+
+Method flat hilly rugged TransINR 41.56 / 0.10 41.21 / 0.24 41.91 / 0.33 Functa 35.69 / 0.19 34.45 / 0.53 34.85 / 0.77 HUVR 47.96 / 0.04 49.01 / 0.10 49.61 / 0.14  
+
+> HUVR+SIREN
+
+50.47 / 0.03 51.95 / 0.07 52.66 / 0.10 
+
+number of leading components whose cumulative variance reaches 
+
+95% (here 5), and the participation ratio PR = (Í𝑖 𝜆 𝑖 )2/Í𝑖 𝜆 2 
+
+> 𝑖
+
+= 1.85 ,an effective-dimensionality measure equal to the component count for a flat spectrum (here 32 ) and tending to 1 as variance concen-trates into a single direction. Panel (b) reports, for each of the 32 
+
+Table 10: HUVR+SIREN ablation rows of Table 4 with absolute derivative RMSE on the test split. 
+
+Config. RMSE ∇ (m/px) RMSE ∇2 (m/px 2)Baseline 0.0527 0.0756 
+
+𝑝 =8 0.0298 0.0467 
+
+𝑝 =32 0.0767 0.0918 
+
+𝐷 =16 0.0646 0.0858 
+
+𝐷 =128 0.0442 0.0662 
+
+𝐷 =256 0.0450 0.0671 
+
+𝐷 =768 0.0423 0.0637 
+
+𝜔 0=5 0.0573 0.0799 
+
+𝜔 0=30 0.0517 0.0746 amplitude 0.0551 0.0780 shift 0.0561 0.0790 INCODE 0.0588 0.0809 
+
+token dimensions, its absolute Pearson correlation coefficient |𝜌 |
+
+with the patch mean elevation, together with the partial-Pearson correlation that conditions on patch elevation standard deviation and maximum gradient norm to remove those confounds. Both stay below 0.08 , so no single dimension encodes absolute height. Panel (c) reports nearest-neighbor (NN) consistency, defined as the average fraction of shared members between a patch’s 𝑘 =10 
+
+nearest neighbors in raw pixel space and its 𝑘 =10 nearest neighbors in token space. Across 500 random patches this overlap averages 
+
+0.11 of 10 , so token proximity does not track pixel proximity. Panel (d) scatters the most elevation-correlated token dimension against patch mean elevation.

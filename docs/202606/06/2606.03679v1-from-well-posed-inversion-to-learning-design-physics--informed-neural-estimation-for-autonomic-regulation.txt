@@ -1,0 +1,959 @@
+Title: From Well-Posed Inversion to Learning Design: Physics- Informed Neural Estimation for Autonomic Regulation
+
+URL Source: https://arxiv.org/pdf/2606.03679v1
+
+Published Time: Wed, 03 Jun 2026 01:32:33 GMT
+
+Number of Pages: 16
+
+Markdown Content:
+# From Well-Posed Inversion to Learning Design: Physics-Informed Neural Estimation for Autonomic Regulation 
+
+# Sara Nour Sadoun a, Giuseppe Alessio D’Inverno b, Francois Cottin a,Arnaud Boutin a and Taous-Meriem Laleg-Kirati a
+
+> a
+
+Universite Paris-Saclay, INRIA, CIAMS, 91190 Gif-sur-Yvette, France 
+
+> b
+
+Laboratoire de Mathematiques d’Orsay, Universite Paris-Saclay, 91400 Orsay, France 
+
+Abstract 
+
+Learning-based and physics-informed methods are increasingly used for inverse estimation in controlled nonlinear dynamical systems. However, in many such approaches, the theoretic requirements that make unknown-input reconstruction meaningful, namely well-posedness in the sense of Hadamard, are often disregarded or weakly addressed through generic regularization terms with no explicit guarantees. In this work, we adopt a complementary viewpoint in which these control-theoretic and structural conditions inform the estimator design and constrain its training. We thus develop a physics-informed input-state neural estimator for joint unknown-input and state estimation in nonlinear controlled systems with partial measurements. In the present work, this general framework is instantiated on a model of autonomic cardiac regulation, provides a concrete study case. The estimator is formulated as an inverse neural map conditioned on time and measured outputs, and is trained under data fidelity and dynamical consistency constraints. To ensure it complies with the same structural requirements imposed in robust estimation, we derive left-invertibility conditions by differential-algebraic elimination and embed the resulting constraints directly into the training objective. We further analyze a priori the stability of the inverse mapping to output perturbations and derive a conservative Lipschitz bound that guides the tuning of cost functional hyper-parameters. The framework is evaluated on simulated data, where ground truth data is available, and on two distinct datasets of real cardiovascular recordings. The results show that incorporating control-theoretic solvability constraints into physics-informed learning improves the reliability of inverse inference beyond forward consistency alone. 
+
+Key words: unknown-input reconstruction, state estimation, physics-informed machine learning, nonlinear systems, autonomic cardiac regulation, brain-heart interaction 
+
+1 Introduction 
+
+Recent advances in data-driven and learning-based methods have expanded the design space and research perspective of model-based control and estimation, enabling flexible approximations of uncertain dynam-ics, scalable inference from high-dimensional measure-ments, and improved performance in regimes where first-principles models can be restrictive, incomplete, or difficult to calibrate. In particular, neural network representations have extended classical observers and filters through learned embeddings and hybrid archi-tectures, supporting state estimation, system identifica-tion, and control while retaining physical interpretabil-
+
+Email addresses: maria-sara-nour.sadoun@inria.fr 
+
+(Sara Nour Sadoun), taous-meriem.laleg@inria.fr 
+
+(Taous-Meriem Laleg-Kirati). 
+
+ity [10, 18, 23]. A prominent family within Scientific Machine Learning (SciML) is physics-informed neural networks (PINNs), which embed differential-equation residuals into train-ing objectives to enforce physical consistency. Yet op-erational reliability requires consistency with control-theoretic notions such as well-posedness, stability, and identifiability, placing physics-based learning in direct contact with estimation theory and motivating the broader viewpoint of physics-informed neural estima-tors — learning architectures designed explicitly for inference in dynamical systems. A central motivation for such approaches arises in inverse inference problems, where the goal is not merely to simulate trajectories forward, but to infer hidden states, parameters, or un-known inputs from partial output measurements — for which standard PINN structures are often not adapted. Control input reconstruction, also referred to as unknown-input estimation, is particularly important 
+
+Preprint submitted to Automatica 3 June 2026 
+
+> arXiv:2606.03679v1 [eess.SY] 2 Jun 2026
+
+in biomedical engineering and related domains where inputs may be unmeasured or available only through indirect sensors, and where their recovery is essential for interpretability, retrospective analysis, and model-based monitoring. In autonomic regulation specifically, reconstructing latent regulatory signals is critical when the measurable output is a coarse proxy of underlying physiology. Yet, input reconstruction is inherently constrained by the requirement of Hadamard well-posedness, as dis-tinct inputs may generate indistinguishable outputs under the same model and measurement configura-tion, while small observation errors may amplify into larger differences in the reconstructed input. Without conditions ensuring that the input is uniquely and ro-bustly determined by the observations, a learned inverse model may reproduce the observations while producing physically plausible but non-unique explanations — a difficulty further exacerbated by the flexibility of neural networks. As a result, a physics-based learning approach may appear accurate in forward prediction while prov-ing unreliable in inverse inference unless well-posedness is explicitly accounted for in the considered modeling and sensing setup. From a methodological standpoint, the literature spans a broad spectrum, from classical observer-based recon-struction to modern learning-based inverse formula-tions. Unmeasured inputs have been addressed through sliding-mode designs [40, 42], adaptive and robust H∞
+
+observers for Lipschitz or differentiable nonlinear sys-tems [30, 45], and finite-time or LMI-based estimators under constrained disturbances [8,32]. In parallel, offline inverse strategies have recovered unknown nonlinear effects via subspace deconvolution, with performance contingent on orthogonality conditions [5]. Across these approaches, reconstructability and robustness typically rely on structural assumptions, such as matched uncer-tainties or partially specified input models, which can become restrictive in realistic applications. More recent work has sought to relax these restrictions by combining model structure with data-driven flexibil-ity. Gray-box Extended Kalman Filter schemes jointly estimate states and local dynamics [29], while Gaussian-process latent-force models represent unknown inputs as Gaussian processes in linear augmented state-space models [7, 34, 43]. PINN-based inverse-source formula-tions follow a similar idea, recovering unknown forcing terms under physics constraints [4, 9, 26]. Although several recent studies discuss identifiability issues in PINN-based workflows and emphasize their practical impact [20,25,33,46], explicit guarantees remain largely absent. This motivates the need for estimator architec-tures and training procedures that do not merely enforce physics approximately, but incorporate structural solv-ability constraints directly into the learning problem. At the same time, framing unknown-input estimation as an inverse problem connects it to a growing litera-ture on neural inverse solvers that address robustness and ambiguity. Deep networks have been shown to ap-proximate inverse operators robustly under suitable restrictions on the forward operator, with broader per-formance characterizations developed for deep inverse models [1,6,37]. This ambiguity has motivated invertible neural architectures and flow-based models that learn the forward map jointly with a latent-augmented inverse pass [2, 14, 15, 27]. While these approaches strengthen learning-based inversion, their guarantees are typically formulated at the level of the learned mapping itself and, when model-based considerations are embedded, remain restricted to linear models; the use of physics penalties improves plausibility [28] but does not guar-antee unique solvability or structural consistency of the inverse problem. In controlled nonlinear dynamical systems, reliabil-ity fundamentally depends on whether the underlying model and sensing configuration admit a unique and stable reconstruction. Our objective is therefore to explore such a struc-turally constrained learning strategy for joint state and unknown-input estimation in a nonlinear controlled dynamical model of autonomic cardiac regulation pro-posed in [3], in which the input enters through the model’s primary stiff nonlinearity. The present case study provides a concrete and necessary setting in which the framework’s assumptions, implementation, and per-formance can be explicitly examined, while remaining generalizable to related inverse problems. With these considerations in mind, we present a new framework, a Physics-Informed Input–State Neural Es-timator (PIISNE) designed on a nonlinear controlled dynamical system of autonomic cardiac regulation, with the main contributions: (i) We propose an augmented estimator formulation for the inverse input reconstruction problem associated with the autonomic cardiac regulation model pro-posed in [3], in which the neural representation is ex-plicitly conditioned on the measured output and time 
+
+t, casting the learned map as an inverse estimator of the unknown regulatory input. (ii) We establish left-invertibility guarantees based on differential-algebraic elimination, deriving input– output relations and constraints ensuring unique reconstructibility. Preliminary results concerning this step were developed in a first contribution [39]. (iii) We investigate the stability of the inverse I/O map-ping with respect to output perturbations and derive a conservative bound of a Lipschitz-like constant that provides insight on the choice of a set of hyperparam-eters in the cost function. (iv) We constrain the training of our neural network with a loss enforcing data fidelity, model residual consistency, and left-invertibility conditions, within a subspace en-suring Output-Input stability, to mitigate spurious non-unique inversions. (v) We validate the resulting estimator on simulated data where ground truth is available for both input and states, evaluate on two distinct datasets of real car-2diovascular recordings with substantial inter-subject diversity and intra-subject variability, and benchmark against classical estimators. 
+
+Paper organization. Section II introduces the pre-liminary theoretical notions necessary for the rest of the paper. Section III formulates the problem addressed around the case study of the autonomic cardiac regula-tion model. Section IV details the model-specific struc-tural left-invertibility analysis and how it is incorporated into learning. Section V presents the stability analysis of the inverse mapping, whose numerical study is con-ducted in Section VII. Section VI reports the architec-ture framework and training process, followed by exper-iments and comparisons on the datasets. Discussion and conclusion are provided in Sections VIII to XI. 
+
+2 Preliminaries: Well-posedness of inverse re-construction 
+
+Inverse reconstruction problems aim to recover an un-known signal (or parameter) u from observed data y us-ing a forward model 
+
+y = F(u), (1) where F denotes the input-output operator. 
+
+Definition (Hadamard well-posedness): Let X and Y
+
+be normed spaces, Xad ⊆ X an admissible set, and F :
+
+Xad → Y a forward operator. The inverse reconstruction problem associated with F is said to be well-posed in the sense of Hadamard [24] on Xad if: (i) Existence: ∀y ∈ F (Xad ) there exists at least one 
+
+u ∈ X ad s.t. y = F(u).(ii) Uniqueness: ∀y ∈ F (Xad ) there exists at most one 
+
+u ∈ X ad such that y = F(u) (i.e. , F is injective on 
+
+Xad ). (iii) Stability: The inverse mapping R = F−1 :
+
+F(Xad ) → X ad is continuous with respect to the chosen norms. In practical terms, the stability requirement in Defini-tion 2 is often strengthened to a Lipschitz-type depen-dence on the data, which provides an explicit condition-ing constant. 
+
+Definition (left-invertibility and input/output map-ping) [21]: Consider the dynamical system 
+
+˙x(t) = f(x(t), u (t)), y(t) = h(x(t), u (t)), (2) where x(t) ∈ Rn is the state, u(t) ∈ R is an input (here-after regarded as unknown), and y(t) ∈ R is the mea-sured output. Assume f, h ∈ C k for some k ∈ N.Fix x(0) = x0. For any admissible input u(·), denote the corresponding output trajectory by y(·; x0, u ) and define the input–output map 
+
+Fx0 : u(·) 7 −→ y(·; x0, u ).
+
+The system is left-invertible (around x0) if there exists a finite T > 0 such that 
+
+Fx0 (u1) = Fx0 (u2) =⇒ u1(t) = u2(t), ∀t ∈ [0 , T ].
+
+Equivalently, for the same initial condition, two distinct inputs cannot generate the same output trajectory over 
+
+[0 , T ].The left-invertibility of finite-dimensional systems described by ODE models has been extensively dis-cussed [8, 16, 19, 21, 41]. However, most contributions tend to linear systems or input-affine nonlinear sys-tems, whereas in other settings—such as the present model—the input enters the dynamics only through nonlinear terms. A closely related line of work concerns structural identifiability [13, 44]. Algebro-differential elimination methods [11], including the Rosenfeld–Gröbner algo-rithm [22], make it possible to eliminate the latent state 
+
+x and derive an input-output relation expressed solely in terms of u, y, and their time derivatives. The exis-tence and uniqueness properties of solutions to such relations can then be used to examine injectivity of the input-output mapping, provide us with a practical tool to assess left-invertibility. 
+
+Definition (Lipschitz stability and conditioning con-stant): The inverse reconstruction is said to be Lips-chitz stable on Xad if there exists L > 0 s.t. ∀u1, u 2 ∈Xad ,
+
+∥u1 − u2∥X ≤ L ∥F (u1) − F (u2)∥Y . (3) For dynamical inverse problems, reconstruction is per-formed over a finite time window W = [0 , T ] (or a dis-crete grid W = {tk}Nk=1 ), and stability may depend on norms that include derivatives of the measured output. Accordingly, a stability requirement may take the form 
+
+∥u1 − u2∥∞,W ≤ L ∥y1 − y2∥YW , (4) where YW can be chosen to encode the regular-ity required by the reconstruction procedure (e.g., 
+
+YW = W k, ∞(W ) for some k ≥ 0). Stability typically fails in inverse problems, motivat-ing regularization theory on stability modulus that is strongly model—and measurement-dependent [17]. Re-cent work explicit stability requirements when inverse maps are approximated with learning-based solvers. [37] 3analyzes the Lipschitz stability of a restricted finite-dimensional inverse problem and analyzes the noise ro-bustness of neural reconstructions under this Lipschitz inverse setting. In PINN setting, [12] assumes condi-tional stability of the inverse PDE problem. 
+
+3 Problem Formulation 
+
+3.1 Physiology-based mathematical model of autonomic cardiac regulation 
+
+We model the interaction between mean arterial blood pressure (BP) and heart rate (HR) through a low-dimensional baroreflex-driven dynamical system. The formulation used throughout this paper follows [35], which proposes a coupled nonlinear ODE model. The present work considers the model without explicit de-lays, as [35] discusses delayed mechanisms in connection with the appearance of physiological oscillations as Mayer waves. Let H(t) denote HR and P (t) denote mean arterial BP. We introduce the state vector x(t) = [ H(t), P (t)] ⊤ and take the pressure set-point Psp (t) as input, i.e., u(t) = 
+
+Psp (t). The dynamics can be written as follows 
+
+{ ˙H(t) = fH (x(t), u (t)) ˙P (t) = fP (x(t), u (t)) , (5) where x denotes the state vector x = [ H, P ] and u the system’s input u = Psp , and: 
+
+
+
+fH (x, u ) = βH Ts
+
+1 + γT p
+
+− VH Tp + δH (H0 − H) ,fP (x, u ) = − PRa (1 + αT s) Ca
+
++ H∆VCa
+
+.
+
+(6a) (6b) 
+
+The coupling between P (t) and H(t) is closed through two complementary autonomic drives. Baroreflex acti-vation is represented by the sigmoid 
+
+σ(P (t)) = 11 + e−αsp (P (t)−Psp (t)) ,
+
+from which the parasympathetic activity is defined as 
+
+Tp = σ(P (t)) and the sympathetic activity as Ts =1 − σ(P (t)) . In this representation, Psp (t) acts as a ref-erence around which the baroreflex term modulates the autonomic balance. The use of sigmoid σ(P ) functionals is a standard choice within the physiological modeling community to rep-resent a smooth, saturating nonlinearity: the response increases progressively with P (t), transitions around a characteristic threshold, and approaches an asymptote. All parameters in (6) are physiologically interpretable and are reported in Table 1. A schematic representation of the baroreflex arc and the associated interactions cap-tured by the model is shown in Figure 1.                         
+
+> Parameter Definition Nominal Value
+> Raminimum arterial resistance 0.6 mmHg ·g·ml −1
+> Caarterial compliance 1.55 mmHg ·g−1
+> ∆Vstroke volume 50 ml
+> βHsympathetic control of HR 0.84 s −2
+> γparasympathetic damping of βH0.2
+> VHparasympathetic control of HR 1.17 s −1
+> δHrelaxation time 1.7 s −1
+> H0intrinsic HR 100 min −1
+> αsympathetic effect on Ra1.3
+> αsp Slope of sigmoid determining baroreflex response 0.07 mmHg −1
+
+Table 1 Parameter definitions and nominal values. 
+
+Fig. 1. Neural control of cardiovascular function via the baroreflex arc 
+
+3.2 Problem formulation 
+
+The problem considered in this work is broadly cast as a joint unknown input-state estimation problem for non-linear controlled dynamical systems, in which an un-known driving signal must be jointly reconstructed with unmeasured state components from partial and noisy output observations. Accordingly, we consider a con-trolled nonlinear dynamical system of the form 
+
+˙x(t) = f (x(t), u (t)) , y(t) = C x (t), (7) where x(t) ∈ Rn denotes the state, u(t) an unknown in-put to be reconstructed, and y(t) the measured output. 
+
+ˆx(t), ˆy(t), ˆu(t) denote their estimation. Given noisy mea-surements ym(t) on a finite time horizon [0 , T ], the as-sociated joint state–input recovery problem can be for-mulated as 
+
+min 
+
+> x(·), u (·)
+
+∫ T
+
+> 0
+
+∥ym(t) − C ˆx(t)∥2 dt 
+
+︸ ︷︷ ︸
+
+> Jdata
+
++ λdyn 
+
+∫ T
+
+> 0
+
+∥ ˙x(t) − f (ˆ x(t), ˆu(t)) ∥2 dt 
+
+︸ ︷︷ ︸
+
+> Jdyn
+
++ λLI JLI 
+
+(ˆy(t), ˆu(t))
+
+s.t. (x(·), u (·)) ∈ A stab .
+
+(8) 4where Jdata accounts for data fidelity, and Jdyn for phys-ical consistency. JLI denotes a term constraining the op-timization landscape to solutions consistent with left-invertibility conditions, thereby promoting uniqueness of the recovered input, and Astab denotes an admissible set enforcing stability of the reconstruction with respect to perturbations in the measured output over [0 , T ].This formulation naturally motivates a physics-informed input–state neural estimator, obtained by parameteriz-ing x(·) and u(·) and minimizing (8) under dynamical consistency. 
+
+Study case (Autonomic cardiac regulation): The present framework is investigated for a physiological study case of practical interest: the estimation of cen-tral (neural) regulation acting on the cardiovascular system through modulation of the baroreflex reference. In the considered model, this effect is represented by the pressure set-point Psp (t), defined as an interocep-tive physiological command shaping the hemodynamic response (H(t), P (t)) .Accordingly, let the unknown input be u(t) = Psp (t); the state, x(t) = [ H(t), P (t)] ⊤, and the measured output be the heart rate: 
+
+y(t) = C x (t) = H(t), C =
+
+[
+
+1 0 
+
+]
+
+. (9) The objective is therefore to reconstruct the unknown neural command Psp (t) while simultaneously estimating the unmeasured arterial pressure state P (t) from noisy heart-rate measurements under the coupled nonlinear physiology-based dynamics in (6). 
+
+4 Left-invertibility of the autonomic cardiac regulation model 
+
+This section derives an explicit triangular differential– algebraic input–output representation for the model (6). The resulting characterization provides structural con-ditions ensuring that the unknown control input Psp (t)
+
+is structurally identifiable and that the system is left-invertible with respect to Psp (·).The goal is to obtain conditions that can be used to constrain training so that the reconstruction problem is well-posed. Unlike approaches that augment the state by postulating a parametric dynamics for the unknown in-put, we seek to reconstruct Psp (t) without imposing any evolution law on it, consistent with its interpretation as an interoceptive physiological command. 
+
+Remark. For readability, time dependence is omitted throughout this section; overdots denote differentiation with respect to time (e.g., ˙x = ddt x(t)). 
+
+Proposition. The model (6a)–(6b) admits the following triangular differential–algebraic input–output mapping: 
+
+
+
+˙Psp + a(s) Psp = − 1
+
+αsp 
+
+(
+
+˙ss(1 − s) + a(s) log 
+
+( s
+
+1 − s
+
+))
+
++ b H, Q(s, Y ) = VH γs 2 + s(βH + VH + γY ) + ( Y − βH ) = 0 ,
+
+˙s = − γs + 1 
+
+D(s, Y ) ˙Y , 
+
+(10) where s := Tp, a(s) := 1
+
+RaCa [ 1 + α(1 − s) ] , b := ∆VCa
+
+,
+
+(11) 
+
+D(s, Y ) = 2 VH γ s +βH +VH +γY , Y := ˙H−δH (H0−H).
+
+(12) An admissible control input Psp that generates the out-put H uniquely exists, provided that 
+
+(CLI ); 
+
+
+
+D(s, Y )̸ = 0 ,
+
+−VH ≤ Y ≤ βH ,s / ∈ { 0, 1}.
+
+(13) Once s is determined from H, the coupling between P
+
+and Psp allows transferring a boundary/initial condition between Psp and P , which is useful to avoid any dynam-ical hypothesis on the unmeasurable Psp .
+
+Proof. Starting from (6b), set s := Tp ∈ [0 , 1] , T s =1 − Tp = 1 − s. 
+
+Substituting into (6b) and using the definitions in (11) yields the compact form 
+
+˙P = − a(s) P + b H. (14) Next, invert the logistic relation that defines s:
+
+s = 11 + e−αsp (P −Psp ) =⇒ P = Psp + 1
+
+αsp 
+
+log 
+
+( s
+
+1 − s
+
+)
+
+,s / ∈ { 0, 1}.
+
+Substituting this expression for P into (14) gives 
+
+˙Psp +a(s) Psp = − 1
+
+αsp 
+
+( ˙ss(1 − s) +a(s) log 
+
+( s
+
+1 − s
+
+)) 
+
++b H, 
+
+(15) which provides a differential relation for Psp once s and 
+
+˙s are determined from H.To determine s algebraically, rewrite (6a) with Tp = s
+
+and Ts = 1 − s, and introduce 
+
+Y := ˙H − δH (H0 − H).
+
+5Then (6a) is equivalent to the quadratic constraint 
+
+Q(s, Y ) = VH γs 2 + s(βH + VH + γY ) + ( Y − βH ) = 0 .
+
+(16) Differentiating (16) along trajectories yields 
+
+dQ (s, Y )
+
+dt = ∂Q ∂s ˙s + ∂Q ∂Y ˙Y = 0 ,
+
+with ∂Q ∂Y = γs + 1 , and 
+
+D(s, Y ) = ∂Q ∂s = 2 VH γs + βH + VH + γY. 
+
+Hence: ˙s = − γs + 1 
+
+D(s, Y ) ( ¨H + δH ˙H), (17) which is well-defined under D(s, Y )̸ = 0 . Collecting (15), (16), and (17) yields (10). 
+
+Admissibility of the algebraic solution s
+
+We now study the existence of an admissible solution 
+
+s ∈ (0 , 1) to (16). Recall (16): 
+
+Q(s, Y ) = VH γ s 2 + s(βH + VH + γY ) + ( Y − βH ) = 0 .
+
+(18) Set A := VH γ, B := βH + VH + γY, C := Y − βH ,
+
+so that Q(s, Y ) = As 2 + Bs + C.The discriminant is 
+
+∆ = B2 − 4AC = ( βH + VH + γY )2 − 4( VH γ)( Y − βH ).
+
+(19) 
+
+1− Sign structure. Let r1, r 2 be the roots of Q(s, Y ) = 0. By Viète’s formulas, 
+
+r1 + r2 = − BA , r1r2 = CA .
+
+Since A > 0:
+
+• If C ≤ 0 (equivalently Y ≤ βH ), then r1r2 ≤ 0 and the roots have opposite signs; thus, there exists exactly one nonnegative root whenever ∆ ≥ 0.
+
+• If C > 0 (equivalently Y > β H ), then B = βH + VH +
+
+γY > 0, implying r1 + r2 < 0 and r1r2 > 0; therefore, both roots are negative. 
+
+2− Root in the interval (0 , 1) . A sufficient condition for the existence of a root in (0 , 1) is 
+
+Q(0) Q(1) ≤ 0. (20) Here, Q(0) = Y − βH , Q(1) = VH γ + ( βH +
+
+VH + γY ) + ( Y − βH ) = (1 + γ)( VH + Y ).
+
+Therefore, (20) is equivalent to (Y −βH ) ( VH +Y ) ≤
+
+0 ⇐⇒ −VH ≤ Y ≤ βH , which yields the ad-missibility condition stated in (13). 
+
+5 Stability and conditioning of the inverse I/O reconstruction 
+
+A central viewpoint in this work is that learning the inverse map is viewed as an estimator design problem rather than a generic function fitting. The designed estimator aims to drive Hθ (t) → Hdata (t). Yet, even when Hθ closely matches Hdata , uniqueness alone does not guarantee accurate reconstruction: the inverse map may be ill-conditioned, so that small perturbations in 
+
+H (and its derivative estimates) are amplified into large errors on u.This motivates an explicit stability analysis of the in-verse reconstruction on [0 , T ], in which we derive a Lipschitz-type bound with a constant depending on the model parameters and the admissibility margins. In particular, we make precise how the admissible region enforced by our constraints—specifically, sigmoid non-saturation and a non-vanishing denominator—controls conditioning and guides the choice of constraint margins and regularization strengths for robust input estimation. 
+
+5.1 Objective definition (Output-Input Stability) 
+
+Fix a time window I = [0 , T ] (or I = {t1, . . . , t N }). We study the stability of the inverse operator that maps a heart-rate output trajectory y(·) = H(·) to an input trajectory u(·) = Psp (·).We consider two admissible trajectories (H1, u 1) and 
+
+(H2, u 2) and aim to prove a Lipschitz-type stability bound: 
+
+∥u1 − u2∥∞,I ≤ CH (δ) ∥y1 − y2∥W 2,∞(I),
+
+where CH (δ) depends on margin parameters δ and on admissibility margins δ, and: 
+
+∥y1 − y2∥W 2,∞(I) = ∥y1 − y2∥∞,I + ∥ ˙y1 − ˙y2∥∞,I + ∥¨y1 −
+
+¨y2∥∞,I . and ∥f ∥∞,W := sup t∈I |f (t)|.
+
+5.2 Stability constant 
+
+Theorem (Hadamard-type stability of the inverse I/O map). Let T > 0 and let I = [0 , T ]. Let H1, H 2 ∈
+
+W 2,∞(I) and define, for i ∈ { 1, 2},
+
+Yi(t) := ˙Hi(t) + δH
+
+(Hi(t) − H0
+
+), t ∈ I. (21) 
+
+Admissibility. We denote δ = {εsat , ε deg } > 0 and assume that for all t ∈ I and i ∈ { 1, 2},
+
+si(t) ∈ [εsat , 1 − εsat ], |D(si(t), Y i(t)) | ≥ εdeg , (22) 6where D is the non-degeneracy term arising from the left-invertibility relation. 
+
+Boundedness. Assume β = {U, M ˙Y , M ˙s} is finite on I,with 
+
+U ≥ ∥ u2∥∞,I , M ˙Y ≥ ∥ ˙Y2∥∞,I , M ˙s ≥ ∥ ˙s2∥∞,I .
+
+Then there exists an explicit constant CH (δ, β, T ) > 0,depending only on the admissibility margins, the bound-edness quantities, the model parameters, and the win-dow length T , such that 
+
+∥u1 − u2∥∞,I ≤ CH (δ, β, T )∥H1 − H2∥W 2,∞(I). (23) An admissible conservative expression for CH is of the form: 
+
+CH := T
+
+[
+
+LaU K s,H + |b| + 1
+
+|αsp |
+
+(
+
+Llog K ˙s + KsKs,H 
+
+)]
+
+,
+
+where the variables are explicit functions of (δ, β W , T )
+
+given in the proof. 
+
+Proof. We outline the derivation of (23) and make ex-plicit how each constant enters the final bound. 
+
+Step 0 ( H → Y is Lipschitz). 
+
+Let ∆f := f1 − f2 for any functional or variable f .With (21), we have: Therefore, ∥∆Y ∥∞,I ≤ ∥ ∆ ˙H∥∞,I + δH ∥∆H∥∞,I .
+
+(24) Since δH > 1, we obtain the conservative bound 
+
+∥∆Y ∥∞,I ≤ δH ∥∆H∥W 2,∞(I). (25) And similarly: 
+
+∥∆ ˙Y ∥∞,I ≤ ∥ ∆ ¨H∥∞,I +δH ∥∆ ˙H∥∞,I ≤ δH ∥∆H∥W 2,∞(I).
+
+(26) 
+
+Step 1 (Bounding ∆s and ∆ ˙ s). 
+
+Let the algebraic left-invertibility relation be written as 
+
+Q(s, Y ) = 0 .
+
+Denote D := ∂Q ∂s , QY := ∂Q ∂Y . By the admissibility condition (22), |D| ≥ εdeg on the admissible set. The implicit function theorem yields the pointwise sen-sitivity 
+
+∂s ∂Y (s, Y ) = − QY (s, Y )
+
+D(s, Y ) . (27) Let Γ( δ) := sup  
+
+> (s,Y )∈A stab
+
+|QY (s, Y )|, LsY (δ) := Γ( δ)
+
+εdeg 
+
+,
+
+(28) where 
+
+Astab := {(s, Y ) : s ∈ [εsat , 1 − εsat ], |D(s, Y )| ≥ εdeg } .
+
+Then (27) and (25) imply 
+
+∥∆s∥∞,I ≤ LsY (δ)∥∆Y ∥∞,I ≤ LsY (δ)δH ∥∆H∥W 2,∞(I).
+
+(29) Hence, one may take Ks,H (δ) := LsY (δ)δH , (30) so that: ∥∆s∥∞,I ≤ Ks,H (δ)∥∆H∥W 2,∞(I).
+
+To control ∆ ˙ s, differentiate Q(s(t), Y (t)) = 0 in time: 
+
+D(s, Y ) ˙ s(t) + QY (s, Y ) ˙Y (t) = 0 .
+
+Thus, ˙s(t) = −A(s, Y ) ˙Y (t), A(s, Y ) := QY (s, Y )
+
+D(s, Y ) .
+
+(31) On the admissible set, |A(s, Y )| ≤ LsY . Moreover, as-sume that A is Lipschitz on the admissible set: 
+
+|A(s1, Y 1)−A(s2, Y 2)| ≤ LA
+
+(
+
+|s1 −s2|+|Y1 −Y2|
+
+)
+
+, (32) where an admissible choice is LA := sup 
+
+> Astab
+
+(|∂sA| + |∂Y A|) .
+
+(33) We now write 
+
+˙s1 − ˙s2 = −A1 ˙Y1 + A2 ˙Y2 = −A1( ˙Y1 − ˙Y2) − (A1 − A2) ˙Y2.
+
+Taking ∥ · ∥ ∞,I and using (28), (29), and (32), yields 
+
+∥∆ ˙ s∥∞,I ≤ LsY ∥∆ ˙Y ∥∞,I +LAM ˙Y
+
+(
+
+∥∆s∥∞,I +∥∆Y ∥∞,I 
+
+)
+
+.
+
+(34) Together with (25), (26), and (29), we obtain 
+
+∥∆ ˙ s∥∞,I ≤ K ˙s(δ, β )∥∆H∥W 2,∞(I), (35) where an admissible conservative choice is 
+
+K ˙s := LsY δH + LAM ˙Y
+
+(
+
+Ks,H + δH
+
+)
+
+. (36) 
+
+Step 2 (Bounding the forcing difference). 
+
+We use the forcing term from (15): 
+
+F (H, s, ˙s) := bH − 1
+
+αsp 
+
+( ˙ss(1 − s) + a(s) log s
+
+1 − s
+
+)
+
+.
+
+Since the following estimates are taken in absolute value, the sign of the second term does not affect the bound. Define Llog (δ) := 1
+
+εsat (1 − εsat ) , Mlog (δ) := log 1 − εsat 
+
+εsat 
+
+,
+
+7and Lfrac2 (δ) := max 
+
+> s∈[εsat ,1−εsat ]
+
+∣∣∣∣
+
+dds 
+
+1
+
+s(1 − s)
+
+∣∣∣∣ ≤ 1
+
+ε2sat (1 − εsat )2 .
+
+Also set amax := max  
+
+> s∈[εsat ,1−εsat ]
+
+a(s), L a := max  
+
+> s∈[εsat ,1−εsat ]
+
+|a′(s)|.
+
+For the term ˙s/ [s(1 − s)] , we have 
+
+∣∣∣∣
+
+˙s1
+
+s1(1 − s1) − ˙s2
+
+s2(1 − s2)
+
+∣∣∣∣ ≤ Llog | ˙s1− ˙s2|+M ˙sLfrac2 |s1−s2|.
+
+For the term a(s) log s 
+
+> 1−s
+
+, we have 
+
+∣∣∣∣a(s1) log s1
+
+1 − s1
+
+− a(s2) log s2
+
+1 − s2
+
+∣∣∣∣ ≤≤ (LaMlog + amax Llog ) |s1 − s2|.
+
+Define Ks := M ˙sLfrac2 + LaMlog + amax Llog . (37) Combining the latter inequalities yields 
+
+∥F1 − F2∥∞,I ≤ | b|∥ H1 − H2∥∞,I 
+
++ 1
+
+|αsp |
+
+(
+
+Llog ∥∆ ˙ s∥∞,I + Ks∥∆s∥∞,I 
+
+)
+
+.
+
+(38) 
+
+Step 3 (Stability of the inverse ODE for u). 
+
+Let e := u1 − u2. Using (10) gives 
+
+˙e + a(s1)e = (a(s2) − a(s1))u2 + ( F1 − F2).
+
+Define g(t) := (a(s2) − a(s1))u2 + ( F1 − F2).
+
+Hence, ∥g∥∞,I ≤ LaU ∥∆s∥∞,I + ∥F1 − F2∥∞,I . (39) Applying the standard variation-of-constants bound for 
+
+˙e + a(s1)e = g
+
+on I, and using a(s) ≥ 0, and no IC perturbation, and therefore 
+
+∥∆u∥∞,I ≤ T ∥g∥∞,I . (40) 
+
+Step 4 (Final constant). 
+
+Finally, combining (40), (39), and (38), together with (29) and (35), yields 
+
+∥u1 − u2∥∞,I ≤ CH ∥H1 − H2∥W 2,∞(I).
+
+An explicit, conservative bound is 
+
+CH := T
+
+[
+
+LaU K s,H + |b| + 1
+
+|αsp |
+
+(
+
+Llog K ˙s + KsKs,H 
+
+)]
+
+,
+
+as stated in Theorem 5.2. In the theoretical expression of CH , the dependence on 
+
+εsat arises through factors of the form [εsat (1 − εsat )]−1,which explode as εsat → 0. Hence, CH increases as εsat 
+
+decreases, while values closer to 0.5 are less penalizing since εsat (1 − εsat ) is maximal at εsat = 0 .5.By contrast, εdeg enters through inverse scalings such as 1/ε deg and 1/ε 2 
+
+> deg
+
+, so increasing εdeg monotonically decreases CH . Overall, the most favorable regime corre-sponds to sufficiently large εdeg together with moderate-to-large εsat .
+
+6 Joint unknown input and state estimation Physics-based Neural architecture 
+
+We propose a physics-based neural architecture that jointly estimates the unknown control input and the cardiovascular states under a coupled, nonlinear and controlled physiological model. In order to ensure well-posedness of the present inverse problem, uniqueness of the input reconstruction defined within a stability subspace; and enforce dynamical consistency, we inject physics-based residuals and left-invertibility constraints. The estimator receives as inputs the normalized time variable tnorm and a normalized, filtered signal hnorm (t),derived from the measured heart rate H. We normalize both inputs to avoid time acting as a diverging/scaling term when appearing in the estimates in the compos-ite loss, and improve optimization conditioning and gra-dient flow. This architecture and estimation framework are illustrated in Figure 2. 
+
+6.1 Loss formulation 
+
+Let θ denote the network parameters and ˆH(t, θ ), ˆP (t, θ )
+
+are the estimated states and ˆPsp (t, θ ) is the estimated control input. Let a batch be B = {(tnorm ,i , h norm ,i , H i)}Ni=1 (normal-ized inputs; unnormalized measured data). The inverse problem is solved by minimizing the batch-averaged ob-jective 
+
+min 
+
+> θ
+
+1
+
+K
+
+> K
+
+∑
+
+> b=1
+
+Ltotal (θ | B b). (41) where K is the number of training batches and: 
+
+Ltotal = Ldata + wphys 
+
+[
+
+Ldyn + LID 
+
+]
+
+.
+
+(i) Data loss: Ldata accounts for data fidelity loss, Ldyn 
+
+for the model residuals and LID for the identifiability constraints. Data and physics terms are balanced through an adap-tive factor: wphys = Ldata  
+
+> Ldyn +LID
+
+,
+
+For the experimental data learning, we compare the es-timate to the unnormalized measurement to preserve 8Fig. 2. Architecture of the proposed Physics-Informed Neural Estimator for joint unknown control input Psp (t) and state P (t)
+
+> neural estimation (PIISNE)
+
+physical units: 
+
+Ldata (θ | B ) = ∑
+
+> i∈B
+
+∥∥ ˆH(ti, θ ) − Hi
+
+∥∥22. (42) 
+
+(ii ) Model’s residuals’ loss: Ldyn enforces the agree-ment between the temporal evolution predicted by the neural estimator and the physiological yielded by the dynamical system: 
+
+Ldyn (θ | B ) = ∑
+
+> i∈B
+
+∥∥∥ ˙ˆP (ti, θ ) − fP
+
+(ˆxθ (ti), ˆuθ (ti))∥∥∥22
+
++ ∑
+
+> i∈B
+
+∥∥∥ ˙ˆH(ti, θ ) − fH
+
+(ˆxθ (ti), ˆuθ (ti))∥∥∥22
+
+.
+
+(43) 
+
+Remark: A crucial difference of the present work with respect to frameworks aimed at solving inverse prob-lems [26, 38] resides in the reconstruction of the control input, which depends not only on time but, more impor-tantly, on the time-varying dynamics it induces in the measured output. This naturally leads to the necessity of computing the total derivatives rather than relying only on the partial derivative w.r.t. time auto-differentiation outputs, which is the standard approach in PINNs. We capture both explicit temporal dependence and implicit dependence through the evolving hnorm :
+
+
+
+d ˆHdt = ∂ ˆH∂t + ∂ ˆH∂h norm 
+
+dh norm 
+
+dt ,d ˆPdt = ∂ ˆP∂t + ∂ ˆP∂h norm 
+
+dh norm 
+
+dt .
+
+(44) Relying only on automatic differentiation with respect to t would omit the ∂(·)/∂h norm pathways and thus fail to represent the temporal evolution of the dynamics cap-tured by the physiological model. No explicit dependence of the measurement data with respect to time is available. Therefore, the derivative of 
+
+hnorm w.r.t time is computed using simple numerical differentiation (finite differences) applied to the filtered signal to avoid noise amplification. 
+
+Remark: Although time derivatives of the measured output are not directly accessible in practice, they can be approximated from sampled trajectories using nu-merical or algebraic differentiation schemes [31]. While the left-invertibility conditions are stated for continuous-time signals over a time window and assume access to the required derivatives, the estimator adopted in this work operates on discrete measurements: the necessary derivatives are obtained numerically, and we show that with appropriate smoothing and hyper-parameter se-lection, the associated noise amplification can be con-trolled. 
+
+(iii ) Left-invertibility loss: We inject the structural identifiability constraints derived above through 
+
+LID = LINQ + Lsat + Ldegen . (45) Violations of the admissible interval are penalized with 
+
+LINQ = 1
+
+N
+
+> N
+
+∑
+
+> k=1
+
+softplus( −VH − ˆYk)+ 1
+
+N
+
+> N
+
+∑
+
+> k=1
+
+softplus( ˆYk−βH ),
+
+9prevent saturation of the sigmoid by keeping ˆsk through 
+
+Lsat = λsat 
+
+1
+
+N
+
+> N
+
+∑
+
+> k=1
+
+[
+
+softplus (ˆsk − logit (εsat ))]2
+
+,
+
+and non-degeneracy of (15) with a margin from zero 
+
+Ldegen = 1
+
+N
+
+> N
+
+∑
+
+> k=1
+
+[
+
+softplus (εdeg − | D|)]2
+
+.
+
+Here, εsat > 0 and εdegen > 0 are the margin hyper-parameters tuned through estimation stability analysis. We recall the need for a boundary condition on P to ensure input identifiability. In the present work, we set an inequality boundary condition as P ≥ 60 to ensure physiologically-coherent estimation. 
+
+7 Stability constant: numerical simulations 
+
+We perform numerical simulations of CH (εsat , ε deg ) to quantify how sensitive this stability constant is to the margin hyperparameters εsat and εdeg , and hence to assess the tightness and conditioning of the associated bound. In our setting, a smaller CH implies that output-to-input error amplification is controlled, guaranteeing that convergence of the estimated output toward the target entails a comparably bounded convergence of the reconstructed input. The goal is therefore to delineate safe regions where CH remains small-to-moderate, guar-anteeing stability of the inverse Input-Output mapping. 
+
+Simulation setup. We evaluate CH on a grid with 
+
+εsat ∈ [10 −3, 0.49] and εdeg ∈ [10 −3, 10] , using a dura-tion parameter equivalent to 40 samples, consistent with that used later for smoothing excessive noise in numer-ical derivatives. We fix the rest of the parameters, in-cluding the upper bounds of the states and intermediate variables, to physiologically coherent values to limit the degrees of freedom to the hyperparameters of interest, and proceed with an uncertainty analysis on the remain-ing fixed parameters. Figure 3a reports the 3D response surface of 
+
+log 10 
+
+(CH (εsat , ε deg )) over the (εsat , ε deg ) plane. In ad-dition, a correlation-based sensitivity analysis was car-ried out with respect to the remaining fixed bounds to identify the parameters exerting the strongest influence on CH . The Monte Carlo uncertainty analysis shown in Figure 3b was then performed only on these selected sensitive quantities. Taken together, Figure 3 provides a compact view of how sensitivity and uncertainty shape the stability bound across the parameter domain. The numerical sweep in Figure 3a is consistent with the foregoing analysis, with increasing εdeg producing a monotone decrease in CH . While the dominant source of variability in CH is εdeg , the influence of εsat remains visible: moving away from the lower-bound region, i.e. as εsat increases toward 0.5, decreases CH , although it progressively saturates as εsat reaches moderate values. This transition from a poorly conditioned to a more stable regime is rapid near the smallest admissible values and progressively slower as both hyperparam-eters increase. In this interpretation, εdeg primarily controls the regularization strength induced by the left-invertibility constraints, whereas εsat determines the admissible tracking margin between the blood pressure state P and the estimated input trajectory Psp . Hence, the smallest values of CH are obtained for sufficiently large εdeg combined with moderate-to-large εsat . These simulations are therefore used to guide the selection of admissible hyperparameter values according to the tol-erance level the practitioner is willing to impose, rather than through ad hoc fixing or blind tuning. In partic-ular, an operational regime can be identified in which 
+
+log 10 (CH )min ≈ − 0.08 , suggesting approximate equiva-lence between the estimation errors of H and Psp , with the possibility of mild denoising. The Monte Carlo uncertainty analysis results displayed in Figure 3b confirm that the deterministic dependence of CH on εsat and εdeg remains valid under uncertainty propagation in the rest of the parameters entering the bound, as the median curves preserve the same ordering as in the nominal study, with a markedly stronger effect for εdeg . The percentile envelopes further show that, for εsat , the envelope width decreases mainly near its lower-bound region and then rapidly saturates, consis-tent with its role in preventing saturation of the gating variable S. This effect is more pronounced for the M ˙S -related term, while the M ˙Y -related contribution remains a more persistent source of dispersion due to its sensi-tivity to output derivatives and noise amplification. By contrast, increasing εdeg yields a stronger and more sus-tained reduction of both the median and the envelope width, indicating that it acts as the main global con-ditioning parameter of the inverse mapping. Notably, the envelopes tend to extend further below than above the median, an asymmetry that is favorable given that smaller values of CH imply better conditioning. 
+
+8 Data 
+
+8.1 The PASS dataset 
+
+The PASS dataset [36] proposes a bank of multiple sig-nals collected from 48 participants asked to perform tasks of varying levels of emotional and physical stress and wearable sensors were used to record cardiac, respi-ratory activity, and cerebral activities. This study relies on Heart-Rate time-series extracted from mobile ECG recordings. We first downsample all signals to 5 Hz to reduce computational load and de-liberately operate in a temporally sparse regime. This down-sampling preserves characteristic slow autonomic modulations (< 0.5Hz ). Yet, the short-term autonomic 10 (a) Sensitivity surface log 10 (CH ) = f (εsat , ε deg ). (b) Uncertainty with respect to the uncertain parameters {M ˙Y , M ˙S }.Fig. 3. Sensitivity analysis of the Lipschitz constant of the estimator with respect to the margin and uncertain parameters. 
+
+response targeted presents faster dynamics. From the time-series of each subject-specific (key), we train a dedicated model using 7500 samples extracted as contiguous segments, so as to preserve temporal co-herence and dependencies. The remaining samples from the same participant constitute the held-out test set for the within-subject evaluation. For cross-subject evalu-ation, the model trained on the time-series of a given participant is evaluated on the full time series of each unseen target key, i.e. on participants entirely excluded from that model’s training. 
+
+8.2 the 3CI dataset 
+
+The present dataset is multimodal physiological database acquired in 30 participants for the study of brain–heart interaction during acute stress. It includes simultaneous 32 -electrodes EEG, ECG, and contin-uous beat-to-beat non-invasive arterial blood pres-sure recorded with Finometer. Three validated stress paradigms were included for social-evaluative stress, nociceptive and sympathetic activation, and a graded physical effort, each accompanied by resting baseline and recovery periods. Cross-modal synchronization was ensured to support precise temporal alignment of recordings. The present dataset is used exclusively for testing and validating upon both variables H and P .
+
+8.3 Simulated data 
+
+The simulated dataset comprises 500 synthetic envelope signals representing Psp . Each envelope is generated over 
+
+1000 s at an initial sampling step of 0.005 s, starting from a randomly selected baseline and including three successive bump-shaped modulations with variable rise times, plateau durations, decay phases, and amplitudes. This construction introduces variability while preserving a common temporal structure coherent with autonomic task-specific responses. After generation, the envelopes are downsampled by a factor of 20 . These 500 Psp pro-files are then used as inputs to the dynamical system to simulate the corresponding trajectories of H and P ,thereby producing a complete synthetic dataset. Table 2 recalls available data for each dataset.                   
+
+> HPPsp
+> DATASET
+> PASS ✓✗✗
+> Simulated ✓✓✓
+> 3CI ✓✓✗
+> Table 2 Summary of available recordings and variables for each dataset.
+
+9 Simulations and Results 
+
+9.1 Neural Network architecture and training scheme 
+
+The neural component is a feed-forward multilayer perceptron (MLP) with seven fully-connected lay-ers [2 , 10 , 25 , 40 , 20 , 10 , 3] and GELU activations; such activation functions were chosen for its smooth, twice-differentiable nonlinearity, which supports stable physics-based derivative constraints. We do not include an activation function in the last layer for freedom of output values. Given [t, h norm (t)] , the model produces the estimated system states ˆxθ (t) and reconstructed input ˆuθ (t).Although H is directly observable, the network re-estimates ˆH(t, θ ) from [t, h norm (t)] in order to preserve temporal coupling with the other estimated states, en-able residual-based physics enforcement, and ensure gradients propagate consistently through all dynamical dependencies. 
+
+Training and stopping criteria: Training proceeds end-to-end in PyTorch using Adam (learning rate 0.1,11 batch size 1500 . Training is ran for a maximum of 95 
+
+epochs with early stopping based on validation per-formance. The checkpoint is updated only when the improvement exceeds 10 −2 relative to the current best score. If no such improvement is observed for 20 con-secutive epochs, training is terminated and the best-performing checkpoint within the preceding window is retained as the final set of weights. We use Python 3.14 .2 software for the simulations on a PC with 32 GB RAM, Intel Core i7 − 13800 H CPU on Windows 10 operating system, and a NVIDIA RTX Ada GPU. 
+
+Remark: The omission of the state time-delay in the present dynamical system constrains the variability of the states. In this scope, a regularization term is added to encourage it for the estimates: 
+
+L′ 
+
+> total
+
+= Ltotal − λ std [logit (s)] (46) 
+
+9.2 Simulation results and discussion 
+
+Figures 4 and 5 summarize the cross-participant behav-ior of the estimator when the neural-network weights trained on one participant (source key) are deployed, without recalibration or adaptation, to reconstruct the measured hemodynamic output of the rest of subjects (target keys). Figure 4 shows that several source keys yield narrow distributions centered at low NRMSE, demonstrating that the PIISNE can generalize to pre-viously unseen participant data while jointly inferring the cardiovascular variables ( ˆP and ˆH) and the corre-sponding unknown control input (interoceptive ˆPsp ). This is particularly visible for sources in the 2115 –2139 
+
+range, whose narrow, low-centered violin plots con-firm robustness to inter-subject variability rather than source-specific fitting. By contrast, a smaller number of sources exhibit larger errors together with broader distributions, indicating parameterizations that are less transferable. Figure 5a refines this observation by exposing the struc-ture of the cross-participant error map. The observed degradation patterns are consistent with deployments in which the observable does not fully constrain the la-tent dynamics, or with spectral bias in the network. The best and worst off-diagonal cases identified in Fig-ure 5a are illustrated in Figures 5b and 5c. In the best off-diagonal configuration (target 2127 evaluated with weights 2130 ; Figure 5b), the reconstructed ˆH closely follows Hdata over both slow trends and faster autonomic fluctuations, with limited bias over the full concate-nated horizon, while the LF and HF band-energy KDEs closely overlap those of the measured signal, indicating that the transferred weights preserve not only time-domain reconstruction but also the oscillatory content in the canonical autonomic bands. While both P (t) and the neural setpoint Psp (t) are inferred without direct targets, the strong proximity observed between ˆP (t) and 
+
+ˆPsp (t) is physiologically expected and coherent: Psp (t)
+
+represents the neural setpoint that blood pressure P (t)
+
+must dynamically track, consistent with the compara-tor role of the Nucleus Tractus Solitarius in integrating hemodynamic signals with descending neural control. By contrast, the worst off-diagonal case (target 2142 
+
+evaluated with weights 2141 ; Figure 5c) shows a quali-tatively different regime. The reconstructed ˆH collapses toward a lower-amplitude trajectory, indicating that the deployed parameterization is not compatible with the target dynamics under the same constrained infer-ence. This mismatch propagates to the inferred latent pressures: both ˆP and ˆPsp drift toward implausibly low values and exhibit intermittent burst-like excursions rather than smooth coupled modulation. The LF/HF distributions are likewise degraded, confirming a fail-ure of cross-subject transfer in which the constrained learned mapping cannot reconcile the target’s baseline and responsiveness with the source parameterization. To assess generalization more rigorously, the previously trained PIISNE was also evaluated on both the simu-lated and 3CI datasets. This offers a clearer assessment of its generalization capability and allows validation on variables ( P , Psp ) that were not available in the PASS dataset. The performance of the best-identified source key across all three datasets is reported in Table 3. As expected, the lowest errors are obtained on the simulated dataset, with larger errors on the two real datasets reflecting their greater variability and hetero-geneous recording conditions. Yet, these errors display substantially small standard deviations, indicating sta-bility in the estimation. This crucially validates that the estimator is capable of jointly reconstructing unknown control input and state from a single observable. Closer inspection reveals that the main discrepancy is an off-set, while the estimator still captures the underlying dynamics reasonably well, likely attributable to the use of fixed physiological parameters — in particular the stroke volume parameter, which is highly sensitive. Across variables, errors increase from simulated to real data for both H and P , the latter plausibly reflecting baroreflex regime shifts induced by task diversity in the 3CI protocol. The estimation of Psp , available only in the simulated dataset, remains highly accurate, providing a direct validation of the proposed scheme for joint state and control-input inference from a single observable. 
+
+10 Robustness and comparison 
+
+10.1 Ablation study 
+
+This section presents an ablation study designed to as-sess the contribution of the main components of the pro-posed framework. By selectively removing exclusively the well-posedness components from the loss, we evalu-ate their impact on the overall performance and robust-ness of the model. This analysis provides a clearer as-sessment of its contribution to the performance of the 12 Fig. 4. NRMSE distribution per model. 
+
+(a) Heatmap of estimation performance (NRMSE) for each model trained on one key (columns) and evaluated on all keys (rows). 
+
+(b) Best off-diagonal configuration. 
+
+(c) Worst off-diagonal configuration. Fig. 5. Overall comparison of estimation performance: heatmap of cross-key results (left), and representative best and worst off-diagonal configurations (right). src key H P Psp 
+
+> DATASET
+
+PASS 2130 0.099 ± 0.07 
+
+Simulated 2130 0.04 ± 0.02 0.046 ± 0.03 0.1 ± 0.05 
+
+3CI 2126 0.16 ± 0.07 0.21 ± 0.08 
+
+Table 3 Summary of the performance of the best-performing neural network, trained on the PASS source key, and its generalization across participants from the simulated, PASS, and 3CI datasets, reported as symmetric mean absolute percentage error (SMAPE). 
+
+neural estimator. We focus the testing of the models on never-seen samples from the same subject (key) it was trained on -no generalization requirement. Figure 6 provides three illustrations of failure cases for this self-prediction after ablation. All three cases are striking illustrations as all performed highly on self-prediction as seen in Figure 5a, and tan-gibly showcase the need and contribution to incorporate well-posedness in the learning design. Indeed, the esti-mation of heart rate collapses and the other estimates are non-physiological and collapse similarly, coherent with the functioning of controlled autonomic activity. 13 (a) 2115 (b) 2117 (c) 2121 Fig. 6. Illustrative failure cases after ablation of the left-invertibility loss terms. 
+
+10.2 Model-based estimator: Sliding-mode observer 
+
+As a model-based baseline for comparison with the neural estimator, we consider a sliding-mode observer (SMO) as a model-based estimator of the latent set-point Psp . The formulation assumes that Psp behaves as a slowly varying augmented state over the estimation window, a dynamical assumption that may, however, introduce model mismatch. The SMO is nonetheless well suited for nonlinear estimation from limited mea-surements and exhibits inherent robustness to such mismatch, which motivates its selection as a compari-son point. The observer gains are calibrated jointly over all recordings through bounded global optimization, by minimizing the average normalized reconstruction er-ror on the measured heart-rate. The resulting estimate therefore corresponds to one common observer param-eterization, selected for cross-recording performance rather than per-trajectory fitting. Figure 7 provides three illustrative cases of fidelity to H coexisting with failure in Psp estimation. These illustrative failures showcase poor, non-physiological recovery of Psp coexisting with output fidelity on H: aberrant chattering-like transients in the estimation of Psp , a behavior well-documented in SMO-based estimation. These excursions also reflect a limitation of the augmented-state formulation itself, as 
+
+Psp is reconstructed under a slow-variation assumption that may further degrade the estimate and promote non-physiological dynamics. These results illustrate the core limitation of purely model-based estimators in the present problem formulation: their inherent dependency on assumptions regarding the dynamics of the unknown input to be estimated. 
+
+11 Conclusion 
+
+As estimation problems are increasingly recast as op-timization problems to leverage neural networks as universal function approximators, the classical control-theoretic requirements attached to estimation can no longer remain implicit. In Scientific Machine Learning (SciML), this translation is often implemented through residual terms associated with the governing dynamics; in inverse inference, however, the central issue is not merely trajectory fitting but whether unknown-input reconstruction is well posed in the Hadamard sense [24]. In this perspective, rather than relying only on generic regularization to bias learning toward plausible solu-tions, we adopted a complementary paradigm in which control-theoretic solvability requirements directly in-form both estimator design and training. Within this framework, we proposed a physics-informed neural estimator for the joint reconstruction of blood pressure, heart rate, and the latent neural control in-put. For the considered controlled dynamical system, left-invertibility provides the relevant structural no-tion of uniqueness, and we showed how the associated conditions can be transferred into the learning formu-lation through dedicated loss terms. Beyond unique-ness, Output-Input stability was addressed through the derivation of an explicit Lipschitz-like constant, whose numerical analysis clarified how the left-invertibility margins shape the conditioning and robustness of the inverse problem. The associated deterministic and un-certainty analyses consistently identified the most favor-able hyperparameter regime for stable reconstruction. The numerical results demonstrate accurate recon-struction of cardiovascular dynamics while enabling recovery of the latent regulatory input, interpreted here as an interoceptive control signal mediating brain-to-cardiovascular communication. Performance on simu-lated ground-truth data provides a primary validation of the proposed scheme. Beyond single-subject perfor-mance, the estimator generalizes across unseen subjects and datasets, confirming that the neural component does not act as a standalone function approximator. In practice, this supports the use of the most stable source models — those associated with low mean and low dis-persion in Figure 4 — as reusable initializations for un-seen subjects, while the structured failures highlighted in Figure 5c point to the importance of augmenting the model to account for a missed degree of freedom: stroke volume. These conclusions are reinforced by the robustness and comparison analyses. The ablation study showed that removing the left-invertibility terms from the training objective can induce clear estimation failures even in self-prediction, confirming that these constraints are not merely auxiliary regularizers but essential ingredients of the inverse-learning design. Con-versely, the comparison with a sliding-mode observer confirmed that satisfactory output fidelity on H may coexist with non-physiological recovery of Psp , high-lighting the limitations of purely model-based inference 14 (a) 2112 (b) 2115 (c) 2134_1 Fig. 7. Illustrative cases of Psp reconstruction failure despite measurement fidelity. 
+
+under restrictive dynamical assumptions. Taken to-gether, these results support the proposed framework as a relevant compromise between purely data-driven flex-ibility and purely model-based inference under restric-tive assumptions. Future work will focus on improving robustness to noise and on extending the formulation to delayed systems, which is an essential next step both for physiological modeling and for left-invertibility analyses in such settings. 
+
+Availability of data 
+
+Our dataset is available at: https://musaelab.ca/ pass-raw-dataset/ .
+
+References 
+
+[1] J. Amjad. Deep Learning for Inverse Problems: Performance Characterizations, Learning Algorithms, and Applications .Ph.d. thesis, University College London (UCL), 2022. [2] L. Ardizzone, J. Kruse, S. Wirkert, D. Rahner, E. W. Pellegrini, R. S. Klessen, L. Maier-Hein, C. Rother, and U. Köthe. Analyzing inverse problems with invertible neural networks. arXiv preprint , 2018. [3] P. Ataee, G. A. Dumont, and W. T. Boyce. Baroreflex modeling in the genesis of stress reactivity using sigmoidal characteristic. In Proceedings of the 2010 American Control Conference , pages 3566–3571. IEEE, 2010. [4] M. Barreau, M. Aguiar, J. Liu, and K. H. Johansson. Physics-informed learning for identification and state reconstruction of traffic density. In 2021 60th IEEE Conference on Decision and Control (CDC) , pages 2653–2658. IEEE, 2021. [5] D. Bernal. Input reconstruction in systems with unknown nonlinearities. Mechanical Systems and Signal Processing ,190:110140, 2023. [6] N. Buskulic. Neural Network Based Methods for Inverse Problems: Algorithms and Guarantees . Ph.d. thesis, Université de Caen Normandie, 2024. [7] L. Caglio, A. Sadeqi, H. Stang, and E. Katsanos. Joint input-state estimation of structures subjected to complex loads via augmented kalman filter with physics informed latent force models. Mechanical Systems and Signal Processing ,223:111852, 2025. [8] A. Chakrabarty, M. J. Corless, G. T. Buzzard, S. H. Żak, and A. E. Rundell. State and unknown input observers for nonlinear systems with bounded exogenous inputs. IEEE Transactions on Automatic Control , 62(10):4936–4951, 2017. [9] C.-T. Chen and G. X. Gu. Physics-informed deep-learning for elasticity: forward, inverse, and mixed problems. Advanced Science , 10(18):2300439, 2023. [10] H. Chen, H. Luo, B. Huang, B. Jiang, and O. Kaynak. Data-driven designs of observers and controllers via solving model matching problems. Automatica , 156:111196, 2023. [11] O.-T. Chis, J. R. Banga, and E. Balsa-Canto. Structural identifiability of systems biology models: a critical comparison of methods. PloS one , 6(11):e27755, 2011. [12] T. De Ryck and S. Mishra. Numerical analysis of physics-informed neural networks and related models in physics-informed machine learning. Acta Numerica , 2024. [13] L. Denis-Vidal and G. Joly-Blanchard. Equivalence and identifiability analysis of uncontrolled nonlinear dynamical systems. Automatica , 40(2):287–292, 2004. [14] L. Dinh, D. Krueger, and Y. Bengio. Nice: Non-linear independent components estimation. arXiv preprint , 2014. [15] L. Dinh, J. Sohl-Dickstein, and S. Bengio. Density estimation using real NVP. In International Conference on Learning Representations (ICLR) , 2017. arXiv:1605.08803. [16] B. Engelhardt, H. Fröhlich, and M. Kschischo. Learning (from) the errors of a systems biology model. Scientific Reports , 6:20772, 2016. [17] H. W. Engl. Inverse problems and their regularization. In 
+
+Computational Mathematics Driven by Industrial Problems: Lectures given at the 1st Session of the Centro Internazionale Matematico Estivo (CIME) held in Martina Franca, Italy, June 21–27, 1999 , pages 127–150. Springer, 2007. [18] J. Fiedler, D. Gerbet, and K. Röbenack. Data-driven observer design for nonlinear systems using automatic differentiation. 
+
+PAMM , 25(1):e202400115, 2025. [19] R. Fonod, D. Henry, C. Charbonnel, and E. Bomschlegl. A class of nonlinear unknown input observer for fault diagnosis: Application to fault tolerant control of an autonomous spacecraft. In 2014 UKACC International Conference on Control (CONTROL) . IEEE, 2014. [20] M. Haywood-Alexander, G. Arcieri, A. Kamariotis, and E. Chatzi. Response estimation and system identification of dynamical systems via physics-informed neural networks. 
+
+Advanced Modeling and Simulation in Engineering Sciences ,12(1):8, 2025. [21] R. M. Hirschorn. Invertibility of nonlinear control systems. 
+
+SIAM Journal on Control and Optimization , 1979. [22] É. Hubert. Factorization-free decomposition algorithms in differential algebra. Journal of symbolic computation , 29(4-5):641–662, 2000. [23] X.-B. Jin, R. J. Robert Jeremiah, T.-L. Su, Y.-T. Bai, and J.-L. Kong. The new trend of state estimation: From model-driven to hybrid-driven methods. Sensors , 21(6):2085, 2021. 
+
+15 [24] S. I. Kabanikhin et al. Definitions and examples of inverse and ill-posed problems. J. Inverse Ill-Posed Probl , 2008. [25] E. Kharazmi, M. Cai, X. Zheng, Z. Zhang, G. Lin, and G. E. Karniadakis. Identifiability and predictability of integer-and fractional-order epidemiological models using physics-informed neural networks. Nature Computational Science ,1(11):744–753, 2021. [26] D. Kim and J. Lee. A review of physics informed neural networks for multiscale analysis and inverse problems. 
+
+Multiscale Science and Engineering , 6(1):1–11, 2024. [27] D. P. Kingma and P. Dhariwal. Glow: Generative flow with invertible 1x1 convolutions. In Advances in Neural Information Processing Systems (NeurIPS) , 2018. [28] A. Krishnapriyan, A. Gholami, S. Zhe, R. Kirby, and M. W. Mahoney. Characterizing possible failure modes in physics-informed neural networks. Advances in neural information processing systems , 34:26548–26560, 2021. [29] A. Kullberg, I. Skog, and G. Hendeby. Online joint state inference and learning of partially unknown state–space models. IEEE Transactions on Signal Processing , 2021. [30] X. Li, T. Zhu, and L. Zhang. State estimation and simultaneous unknown input and measurement noise reconstruction for lipschitz nonlinear systems via an adaptive h∞ observer. International Journal of Control, Automation and Systems , 2016. [31] D.-Y. Liu, O. Gibaru, and W. Perruquetti. Error analysis of jacobi derivative estimators for noisy signals. Numerical Algorithms , 58(1):53–83, 2011. [32] A. I. Malikov. Synthesis of state unknown inputs observers for nonlinear lipschitz systems with uncertain disturbances. 
+
+Automation and Remote Control , 79(3):406–424, 2018. [33] V. Minadakis. Application of physics informed neural networks in the development of physiologically based knetic models. Application of physics informed neural networks in the development of physiologically based knetic models , 2024. [34] R. Nayek, S. Chakraborty, and S. Narasimhan. A gaussian process latent force model for joint input-state estimation in linear structural systems. Mechanical Systems and Signal Processing , 128:497–530, 2019. [35] J. T. Ottesen. Modelling of the baroreflex-feedback mechanism with time-delay. Journal of mathematical biology ,36(1):41–63, 1997. [36] M. Parent, I. Albuquerque, A. Tiwari, R. Cassani, J.-F. Gagnon, D. Lafond, S. Tremblay, and T. H. Falk. Pass: a multimodal database of physical activity and stress for mobile passive body/brain-computer interface research. Frontiers in Neuroscience , 14:542934, 2020. [37] A. F. L. Pineda and P. C. Petersen. Deep neural networks can stably solve high-dimensional, noisy, non-linear inverse problems. arXiv preprint , 2022. [38] M. Raissi, P. Perdikaris, and G. E. Karniadakis. Physics-informed neural networks: A deep learning framework for solving forward and inverse problems involving nonlinear partial differential equations. Journal of Computational physics , 378:686–707, 2019. [39] S. N. Sadoun, G. A. d’Inverno, A. Boutin, F. Cottin, and T.-M. Laleg-Kirati. Physics-informed neural estimation of state and unknown input in autonomic cardiac dynamics with left-invertibility constraints. IEEE Reviews in Biomedical Engineering , 2026. [40] R. Sharma and M. Aldeen. Fault and disturbance reconstruction in non-linear systems using a network of interconnected sliding mode observers. IET Control Theory & Applications , 5(6):751–763, 2011. [41] N. Tsiantis, E. Balsa-Canto, and J. R. Banga. Optimality and identification of dynamic models in systems biology: an inverse optimal control framework. Bioinformatics ,34(14):2433–2440, 2018. [42] K. C. Veluvolu and Y. C. Soh. Discrete-time sliding-mode state and unknown input estimations for nonlinear systems. 
+
+IEEE Transactions on Industrial Electronics , 2009. [43] S. Vettori, E. Di Lorenzo, B. Peeters, and E. Chatzi. Assessment of alternative covariance functions for joint input-state estimation via gaussian process latent force models in structural dynamics. Mechanical Systems and Signal Processing , 213:111303, 2024. [44] L. Wanika, J. Egan, N. Swaminathan, C. Duran-Villalobos, J. Branke, S. Goldrick, and M. Chappell. Structural and practical identifiability analysis in bioengineering: abeginner’s guide. Journal of Biological Engineering , 2024. [45] J. Yang, F. Zhu, and X. Sun. State estimation and simultaneous unknown input and measurement noise reconstruction based on associated observers. International Journal of Adaptive Control and Signal Processing , 2013. [46] E. Zhang, M. Dao, G. E. Karniadakis, and S. Suresh. Analyses of internal structures and defects in materials using physics-informed neural networks. Science advances ,8(7):eabk0644, 2022. 
+
+16

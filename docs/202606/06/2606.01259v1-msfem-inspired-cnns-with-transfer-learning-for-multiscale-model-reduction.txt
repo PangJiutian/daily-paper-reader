@@ -1,0 +1,1024 @@
+Title: MsFEM-Inspired CNNs with Transfer Learning for Multiscale Model Reduction
+
+URL Source: https://arxiv.org/pdf/2606.01259v1
+
+Published Time: Tue, 02 Jun 2026 01:32:13 GMT
+
+Number of Pages: 36
+
+Markdown Content:
+# MsFEM-Inspired CNNs with Transfer Learning for Multiscale Model Reduction 
+
+# Xuehan Zhang ∗ Lijian Jiang † Eric T. Chung ‡
+
+Abstract 
+
+Deep learning-based surrogate models have been extensively developed for efficiently ap-proximating multiscale systems with random input fields. However, most existing approaches require retraining neural networks from scratch when source terms, boundary conditions, or differential operators change, resulting in significant computational costs and limited adaptability. To address this challenge, we integrate our previous CNN-based reduced-order model (ROM) framework with the multiscale finite element method (MsFEM) and propose an MsFEM-inspired transfer learning strategy, termed MITL. The CNN-based ROM con-sists of two components: Basis CNNs, which learn reduced basis functions, and Coef CNNs, which predict the corresponding linear combination coefficients. To enhance the transfer-ability of learned multiscale representations, global MsFEM basis problems are employed as source tasks during pretraining. For new target problems, MITL requires training only lightweight adaptation networks to construct task-specific reduced bases and coefficients, thereby substantially reducing the computational burden. Numerical experiments demon-strate that MITL achieves accurate and efficient predictions across a range of target tasks, with particularly significant advantages in data-scarce scenarios. 
+
+keywords: transfer learning; convolutional neural network; multiscale finite element method; 
+
+# 1 Introduction 
+
+Multiscale problems are widely studied across many science and engineering fields, such as materials science, environmental science, biomechanics, and so on. These problems are typically modeled by partial differential equations (PDEs) with multiscale random input fields. The randomness usually arises from the heterogeneity of physical properties. For instance, the hydraulic conductivity field in groundwater flow is often highly heterogeneous and exhibits random multiscale variations due to the spatial distribution of pores, fractures,            
+
+> ∗School of Mathematical Sciences, Tongji University, Shanghai 200092, China. (xhzhang@tongji.edu.cn ).
+> †School of Mathematical Sciences, Key Laboratory of Intelligent Computing and Applications (Ministry of Education), Tongji University, Shanghai 200092, China. ( ljjiang@tongji.edu.cn ).
+> ‡Department of Mathematics, The Chinese University of Hong Kong, Hong Kong 999077, China. (tschung@math.cuhk.edu.hk ).
+
+1
+
+> arXiv:2606.01259v1 [cs.CE] 31 May 2026
+
+and soil layers with different permeabilities. Such heterogeneity typically leads to multiscale coefficients in the governing flow equations [1]. To capture the fine-scale features of such systems, numerical simulation methods must solve large-scale algebraic equations, which is often computationally prohibitive. Therefore, it is necessary to design efficient multiscale simulation methods, especially for real-time applications (e.g., inverse problems and stochas-tic control [2, 3]) and many-query contexts (e.g., design or optimization [4]). During last decades, a few reduced-order modeling methods (ROMs) have been proposed for multiscale problems. ROMs can be classified as intrusive or non-intrusive, depending on whether they require the underlying equations. They can all be summarized into two stages: offline stage and online stage. In the offline stage, a set of reduced basis is constructed using using either data-driven or physics-driven methods from snapshots of high-fidelity re-sponses. Data-driven approaches extract global and general features from snapshots through techniques such as proper orthogonal decomposition (POD) [5] and greedy algorithms [6]), while physics-driven methods (e.g., multiscale finite element methods [7–9] and its variants [10–12]) capture multiscale features directly from local multiscale operators for each input sample. Then, in the online stage, the linear combination of the reduced basis can be ef-ficiently determined by either Galerkin projection (intrusive)[13–15] or regression methods (non-intrusive) [16–21]. By taking the advantages of intrusive reduced-basis methods and multiscale model re-duction methods, we proposed a deep model reduction methods, called CNN-based ROM in [15], for multiscale problems. It consists of two CNNs: Basis CNNs and Coef CNNs. They corresponds to the two phases of ROMs. The first one is used to learn reduced basis from data constrained by equations, and the second one is designed to learn the coefficients of linear conbinations. Various numerical experiments demonstrate that CNN-based ROM can serve as an efficient surrogate for multiscale problems with random input fields. However, the CNN-based ROM suffers from three limitations that hinder its applicability to real-world problems. First, it is an intrusive ROM, as the training of the Basis CNNs relies on the underlying governing equations. Second, a large amount of high-fidelity data is required to avoid overfitting. Third, any changes in the source term, boundary conditions, or differen-tial operators necessitate retraining the model, which is a common drawback of AI-for-PDE methods [22–24]. In this paper, we consider the situation where the underlying equations are only par-tially known. Moreover, the size of dataset is limited, and the data can be obtained through numerical simulations or physical experiments. This work aims to develop an efficient trans-fer learning strategy grounded in CNN-based ROM. The strategy is designed to transfer multiscale features from source tasks to target tasks. Thus, we can achieve rapid adaptation by training lightweight neural networks. Inspired by the fact that the multiscale basis of MsFEM is transferable to problems with different source terms and boundary conditions, we propose the transfer learning strategy, called MsFEM-inspired CNNs with transfer learn-ing (MITL). The global MsFEM problems are chosen as source tasks to obtain transferable multiscale features, which is trained by CNN-based ROM. Corresponding to two CNNs in CNN-based ROM, the target model also consists of two CNNs: TL-Basis CNNs and TL-Coef CNNs. TL-Basis CNNs keep the parameters of Basis CNNs fixed and add a residual structure with a two-layer convolutional neural operator (CNO) to obtain the new reduced basis for target tasks. In TL-CoefCNNs, only the top-layer parameters of Coef CNNs are 2trainable. Additionally, dimension-modification layers are designed for adjusting the output dimension. Furthermore, time encoding layers are proposed for solving unsteady problems. This article is structured as follows. In Section 2, we give the definitions and examples of multiscale problems, which is followed by a brief introduction to CNN-based ROM and MsFEM in Section 3. Section 4 focuses on the proposed method, MITL. In this section, we also explore the connections between the proposed method with numerical homogenization. In Section 5, a few numerical results are presented to illustrate the efficacy of the proposed method. We also demonstrate that MITL can provide a significant surrogate model for efficient inversion. Finally, some conclusions are given. 
+
+# 2 Problem setup 
+
+In this paper, we consider the following multiscale boundary value problems defined in a bounded domain Ω ⊂ R2 with boundary ∂Ω: 
+
+
+
+L
+
+
+
+u(x); κ(x, ξ )
+
+
+
+= f (u, x ), x ∈ Ω,
+
+Du(x) = b(x), x ∈ ∂Ω,
+
+(2.1) where L denotes a nonlinear differential operator. The randomness of above system is described by the parametric random field κ(x, ξ ), which depends explicitly on the spatial variable x ∈ Ω and the d−dimensional random vector ξ ∈ (Ξ , F, P). This random field characterizes the multiscale features of the medium. In numerical experiments, samples of 
+
+κ(x, ξ ) are obtained either through direct sampling or from real observational data. The term f (u, x ) is the nonlinear source term with sufficient regularity. The boundary condi-tion operator D can represent Dirichlet, Neumann, or mixed boundary conditions, and b(x)denotes the given boundary condition (e.g., the Dirichlet trace or Neumann flux). Although many existing approaches can provide efficient surrogate models for above problems, they require constructing separate models and retraining from scratch when the source terms, boundary conditions, or differential operators vary. Therefore, our goal is to develop effective transfer learning strategies that enable rapid transfer across similar multiscale problems. In detail, to learn transferable multiscale features, we first select a specific instance of the above problem as the source task, namely, 
+
+
+
+Ls
+
+
+
+us(x); κ(x, ξ )
+
+
+
+= fs(u, x ), x ∈ Ω,
+
+Dsus(x) = bs(x), x ∈ ∂Ω.
+
+(2.2) The formulation of the source task (2.2) is assumed to be known and captures all the mul-tiscale features. Let Ω be partitioned by a uniform grid with mesh sizes h (denoting the spatial grid by H). And K ∈ RNh×Nh is the sample of κ(x, ξ ), which takes values on H.Then, we can obtain finite-dimensional approximations uhs ∈ V hs ⊂ RNh×Nh of us(x) through a finite element method (FEM). The stiffness matrix and load vectors of FEM are denoted by Ah(uhs ; K) and Fh(uhs ; K). Therefore, we can construct a surrogate for the source task 
+
+uhs = gs(K),
+
+3using source dataset D =
+
+n
+
+Ki, u hs (Ki), A h(uhs ; Ki), F h(uhs ; Ki)
+
+oNs
+
+> i=1
+
+. Here the source neural network gs : K −→ V hs .Similarly, we consider a target task that differs from the source task in one or more components (e.g., the differential operator Lt, the source term ft, or the boundary data bt), while sharing the same parametric random field κ(x, ξ ) and the same spatial domain Ω: 
+
+
+
+Lt
+
+
+
+ut(x); κ(x, ξ )
+
+
+
+= ft(u, x ), x ∈ Ω,
+
+Dtut(x) = bt(x), x ∈ ∂Ω.
+
+(2.3) The explicit form of target task (2.3) is unkown and only limited data are available. For any input sample K, ut(x) is observed on the grid H, leading to the matrix uht (K). And then we can obtain the following target model by using target dataset Dt =
+
+n
+
+Ki, u ht (Ki)
+
+oNt
+
+> i=1
+
+, N t ≪
+
+Ns,
+
+uht = gt(K),
+
+where gt retains the multiscale features acquired by gs and only lightweight neural networks in target model are trained to adapt to target tasks. 
+
+# 3 Preliminaries 
+
+In this section, we introduce the necessary preliminaries for the proposed method. We first provide a brief review of our previous work on CNN-based ROM [15]. Subsequently, Subsection 3.2 revisits MsFEM from a transfer learning perspective, which serves as the primary inspiration for our approach. We also discuss the limitations of these two methods, which motivate the development of the proposed method. 
+
+# 3.1 CNN-based ROM 
+
+As illustrated in Figure 3.1, CNN-based ROM consists of two separate CNNs: Basis CNNs and Coefficient CNNs (Coef CNNs), which correspond to two main parts of ROMs. The first one learns input-specific basis functions from the snapshots of fine-scale solutions. An activation function, inspired by Galerkin projection, is utilized at the output layer to reconstruct fine-scale solutions from the basis functions. Given the dataset 
+
+n
+
+Ki, u h(Ki), A h(uh; Ki), F h(uh; Ki)
+
+oMi=1 
+
+,
+
+a low-dimensional approximation of fine-scale solution uh can be written as, ˆuh(K) = 
+
+
+
+Φθ(K)T Ah(uh; K)Φ θ(K)
+
+−1
+
+Φθ(K)T Fh(uh; K)
+
+
+
+,
+
+where Φ θ(K) ∈ RN 2  
+
+> h×N
+
+is the learned reduced basis, each column of which represents a reduced base. Then the parameters θ of Basis CNN can be optimized by, arg min 
+
+> θ
+
+1
+
+M
+
+> M
+
+X
+
+> i=1
+
+∥uh(Ki) − ˆuh(Ki)∥22 + cond F
+
+
+
+Φθ(K)T Ah(uh; K)Φ θ(K)
+
+
+
+,
+
+4where cond F denotes the matrix condition number under the Frobenius norm. It should be noted that the tests of Basis CNNs still require the fine-scale stiffness matrix and load vector, which limits online computational efficiency. More importantly, they cannot be directly applied to nonlinear problems. The second CNN, called Coef CNN, is then designed to determine the coefficients for learning the linear combination of reduced basis, namely, ˜uh(K) = Φ θ(K)cϕ(K),
+
+where Coef CNN cϕ(K) defines a mapping from input sample K to cofficients. The param-eters ϕ of Coef CNN can be optimized by the Mean Squared Error (MSE) loss function, arg min 
+
+> ϕ
+
+1
+
+M ∥uh(Ki) − ˜uh(Ki)∥22
+
+Various numerical experiments demonstrate that the proposed method achieves good perfor-
+
+Figure 3.1: The schema of CNN-based ROM. mance in both approximation accuracy and generalization. Therefore, it is a suitable choice as the source model for transfer learning tasks. However, there are also some limitations in real-world applications. 5• The training of Basis CNN relies on data, and the solution data inherently encodes information such as the source terms and boundary conditions. As a result, the learned reduced basis cannot achieve effective transfer across different source terms, boundary conditions, unlike those in the multiscale finite element method. 
+
+• The training of Basis CNN relies on access to the underlying governing equations, which are used to constrain the learning of reduced basis functions. For practical multiscale problems, the exact form of the equation is often unavailable, thereby limiting the applicability of the method. 
+
+• The training of CNN-based ROM typically requires a large number of high-fidelity snapshot datasets. However, high-accuracy numerical simulations for multiscale prob-lems demand very fine mesh discretizations, making the offline data generation pro-cess computationally expensive and limiting its applicability to large-scale engineering problems. 
+
+# 3.2 Insights into MsFEM from a Transfer Learning Perspective 
+
+The main idea of transfer learning is to leverage knowledge learned from source tasks to improve learning efficiency on a target task. This is typically achieved by extracting and reusing transferable representations that capture shared features across tasks, enabling faster adaptation and reducing the need for training from scratch. For example, in the field of image classification, a deep neural network pre-trained on a source domain task often learns general features unrelated to the specific task (such as low-level patterns like edges and textures) in its shallow layers, while its deeper layers capture task-relevant semantic information. By freezing the shallow-layer parameters of the pre-trained model and fine-tuning the deep-layer parameters, the general knowledge acquired from the source domain can be transferred to the target task. In this subsection, we review MsFEM from the perspective of transfer learning, sum-marizing its methodology as the following transfer learning framework. 
+
+• Source task: First, a source model is selected, which defines a finite-dimensional projection of the full-order solution, 
+
+gs : V Nh → V N , ˆuh = Φ ms cms ,
+
+where Φ ms = [ ϕ1ms , · · · , ϕ N
+
+> ms
+
+] denotes the multiscale basis functions and cms represents the reduced-order coefficients. Subsequently, suitable local boundary conditions Dms [7] are imposed. The basis functions Φ ms , which capture the multiscale features, are then obtained by solving the following local problems, 
+
+(Lms 
+
+ ϕi
+
+> ms
+
+(x); κ(x, ξ ) = 0 , x ∈ Ωk,
+
+Di
+
+> ms
+
+ϕi
+
+> ms
+
+(x) = b(x), x ∈ ∂Ωk, i = 1 , · · · , N ms , (3.1) where Ω k is a local subdomain of Ω such that Ω = S Ωk.6• Target task: For a new source term f (x) or boundary conditions D,
+
+(Lms 
+
+ u(x); κ(x, ξ ) = f (x), x ∈ Ω,
+
+Du(x) = b(x), x ∈ ∂Ω, (3.2) the multiscale basis Φ ms obtained from the cell problems (3.1) are treated as the trans-ferable component and remain fixed. The reduced-order coefficients ct 
+
+> ms
+
+are then de-termined via Galerkin projection, 
+
+ct 
+
+> ms
+
+= (Φ T
+
+> ms
+
+AhΦms )−1ΦT
+
+> ms
+
+Fh,
+
+where Ah and Fh are stiffness matrix and load vector of the target task (3.2). In contrast to purely data-driven transfer learning, feature transfer in MsFEM is grounded in physical principles rather than relying on the empirical extraction of data distributions. This fundamental difference constitutes the two sides of the same coin in this method. On the one hand, its strengths lie in generalization and interpretability. Since the transferred knowledge is derived from underlying physical mechanisms, the basis functions Φ ms possess strong theoretical guarantees and stable extrapolation capabilities when applied to different source terms or boundary conditions under the same medium coefficient κ(x, ξ ). On the other hand, its transferability exhibits two main limitations: 
+
+• The transfer of multiscale basis functions Φ ms heavily depends on input sample itself. In practice, they can only be applied to problems with the same random input sample or to samples with slight variations, making it difficult to share features across different inputs as in data-driven models. 
+
+• When the operator Lms changes, especially when it becomes nonlinear, the transfer-ability of the multiscale basis functions lacks theoretical justification and may even break down. Inspired by the physics-driven transfer paradigm of MsFEM, this work further explores its extension and implementation within a data-driven framework. On the one hand, the core ideas of MsFEM are adopted as a theoretical foundation to guide the design of transfer learn-ing strategies. On the other hand, the nonlinear approximation capability of neural networks and large-scale data pretraining mechanisms are introduced to overcome the limitations of MsFEM basis functions in cross-sample and cross-operator transfer tasks. 
+
+# 4 MsFEM-Inspired CNNs with Transfer Learning 
+
+In Section 3.1, we analyze the limitations of CNN-based ROM. Inspired by MsFEM, we know that the basis learned from cell problems (3.1) does not depend on source terms and can be reused for solving new equations with different source terms and boundary conditions. As illustrated in Section 3.2, such property resembles transfer learning techniques. In terms of the ideas of MsFEM and transfer learning techniques, we propose a novel multiscale model reduction approach, called MsFEM-inspired CNNs with transfer learning 7Figure 4.1: The schema of MITL. (MITL). The proposed method consists of two stages: pretraining on a source task and adaptation to a target task (see Figure 4.1). It aims to extract transferable multiscale feature representations from the source tasks and achieve efficient adaptation using only a small amount of target task data. 
+
+# 4.1 Source task 
+
+Multiscale problems (2.1) involve a wide variety of source terms and boundary condi-tions. It is crucial to select a representative subset of problems (2.1) as the source tasks for constructing MITL. As noted in Section 3.2, the multiscale basis constructed by MsFEM have been demonstrated, both theoretically and numerically, to be transferable to problems with different source terms and boundary conditions. Therefore, it is natural to choose the cell problem (3.2) as source task of the proposed method. In MsFEM, the multiscale basis functions are solved locally on subdomains Ω k. This localization strategy is a trade-off between accuracy and computational efficiency. In other words, solving the cell problems over the whole domain Ω would lead to computational cost similar to that of the original problems, thereby failing to achieve the purpose of model reduction. However, the multiscale features inherently embedded in the heterogeneous input 
+
+κ(x, ξ ) have a global influence on the output response uh [26]. Local truncation inevitably results in the loss of interaction information between different regions. This loss of informa-tion leads to the use of a relatively large number of basis functions in MsFEM to achieve the desired approximation accuracy. To capture more complete multiscale features, the restriction to local formulations is removed, and the source task is defined directly on the global domain. Although global computation are computationally more expensive, this cost remains acceptable as the source task is performed in the offline stage. More importantly, the global formulation enables the multiscale basis to capture the global coupling across scales, thereby allowing the source 8model to learn more intrinsic and transferable representations. Specifically, the source tasks are posed as the following Nms global boundary value problems, 
+
+
+
+Ls
+
+
+
+uis(x); κ(x, ξ k)
+
+
+
+= 0 , x ∈ Ω, k = 1 , · · · , N s,
+
+Disuis(x)( x) = b(x), x ∈ ∂Ω, i = 1 , · · · , N ms .
+
+(4.1) In this work, we take the following linear problems defined on the square domain Ω = [x1, x 2] × [y1, y 2] as an example, 
+
+( − ∇ ·  κ(x, ξ k)∇uis(x) = 0 , x ∈ Ω, k = 1 , . . . , N s,uis(x) is linear on ∂Ω and uis(xj ) = δij ,
+
+where x1 = [ x1, y 1]T , x 2 = [ x1, y 2]T , x 3 = [ x2, y 1]T , x 4 = [ x2, y 2]T and δij is defined as follows, 
+
+δij =
+
+(1, j = i, 
+
+0, j̸ = i. 
+
+Since the boundary condition is rotationally symmetric, the four boundary value problems can be transformed into a single equivalent boundary value problem by rotating the random input sample κ(x, ξ k), 
+
+
+
+− ∇ · 
+
+
+
+κ(x, ξ k)∇us(x)
+
+
+
+= 0 , x ∈ Ω, k = 1 , · · · , 4Ns,us(x) is linear on ∂Ω and us(xj ) = δ1j .
+
+(4.2) Define the two-dimensional rotation matrix by 
+
+Rθ =
+
+cos θ − sin θ
+
+sin θ cos θ
+
+
+
+,
+
+then the rotation operator can be written as Tθf (x) = f (Rθx). This operator represents a clockwise rotation of the function f by an angle θ in the two-dimensional space. Denote the random input sample functions in the source tasks (4.1) by 
+
+n
+
+κ(x, ξ k)
+
+oNs
+
+> k=1
+
+. Then, the other 3Ns random input sample functions in the source tasks (4.2) can be defined as follows, 
+
+κ(x, ξ k+Ns ) = Tπ/ 2
+
+
+
+κ(x, ξ k)
+
+
+
+, κ (x, ξ k+2 Ns ) = Tπ
+
+
+
+κ(x, ξ k)
+
+
+
+, κ (x, ξ k+3 Ns ) = T3π/ 2
+
+
+
+κ(x, ξ k)
+
+
+
+.
+
+The spatial domain Ω is discretized using a uniform mesh H with mesh size h. The source problem (4.2) is then solved by the finite element method to obtain the source dataset 
+
+Ds =
+
+n
+
+Ki, u is(Ki), A h(Ki), F h(Ki)
+
+o4Ns
+
+> i=1
+
+. Then, the source model can be obtained by training a CNN-based ROM, namely, ˆuhs = gs(K) = Φ θ(K)cϕ(K), (4.3) where Φ θ(K) and cϕ(K) contain the transferable multiscale features. 94.2 Target task 
+
+In this section, we use a feature-based transfer learning strategy to efficiently transfer the multiscale features learned from the source model to the target task. This leads to a sample-efficient adaptation to the target task. The effectiveness of such a strategy, however, relies on the similarity between the source and target tasks. To this end, we consider the following four classes of equations, i.e., (4.4)–(4.6). 
+
+• Second-order linear partial differential equation .
+
+
+
+− ∇ · 
+
+
+
+κ(x, ξ )∇u(x)
+
+
+
++ cu (x) = f (x), x ∈ Ω,
+
+Du(x) = b(x), x ∈ ∂Ω.
+
+(4.4) 
+
+• Second-order linear partial differential equation with a nonlinear source term . 
+
+− ∇ · 
+
+
+
+κ(x, ξ )∇u(x)
+
+
+
+= f (x, u (x)) , x ∈ Ω,
+
+Du(x) = b(x), x ∈ ∂Ω.
+
+(4.5) 
+
+• P-Laplacian equation .
+
+
+
+− ∇ · 
+
+
+
+κ(x, ξ )|u(x)|p−2∇u(x)
+
+
+
+= f (x), x ∈ Ω,
+
+Du(x) = b(x), x ∈ ∂Ω.
+
+(4.6) Based on the CNN-based ROM architecture, lightweight modifications are introduced to the network in this section to improve its adaptability to the target task. The new architecture also consists of two CNNs: TL-Basis CNNs and TL-Coef CNNs (see Figure 4.2). During the transfer learning process, the two CNNs are trained jointly. TL-Basis CNNs are responsible for transferring and refining the reduced basis learned by the Basis CNNs from both data and governing equation. At the same time, TL-Coef CNNs retain the multiscale features learned by the Coef CNNs from the input data, while modifying only the high-level network architecture, thereby improving the adaptability of the overall network to the target task. The transfer strategy described above will be described in detail in the following subsections. 
+
+4.2.1 Basis CNNs of MITL (TL-BasisCNNs) 
+
+In Section 3.2, we note that the multiscale basis functions constructed by MsFEM are transferable to problems with different source terms and boundary conditions. Owing to this transferability, the reduced basis functions learned by the Basis CNNs from these global MsFEM basis functions are also capable of capturing transferable multiscale features. However, the four boundary conditions in source task (4.2) originate from the four vertices of the computational domain and propagate outward, with their values decreasing linearly from 1 to 0. Consequently, each global basis function only captures a portion of the multiscale features. Therefore, for each input, it is necessary to fuse the features learned from the four 10 Figure 4.2: The two CNNs of MITL global basis functions in order to obtain a complete feature representation of the output response. Sepecifically, The mapping that rotates a matrix by π/ 2 radians clockwise is defined as follows 
+
+Rπ/ 2 : RNh×Nh → RNh×Nh ,A′
+
+= Rπ/ 2(A), A′
+
+= [ aj,N h−i+1 ], A = [ aij ], i = 1 , .., N h, j = 1 , · · · , N h.
+
+Similarly, we can define the mapping that rotates a matrix by π/ 2 radians anticlockwise by 
+
+R−π/ 2 : RNh×Nh → RNh×Nh ,A′
+
+= R−π/ 2(A), A′
+
+= [ aNh−j+1 ,i ], A = [ aij ], i = 1 , .., N h, j = 1 , · · · , N h.
+
+Then, For a random input sample K, rotating it three times and passing all four versions through the trained Basis CNNs produces four sets of reduced-order basis functions, namely, Φ1
+
+> θ
+
+(K) := Φ θ(K),
+
+Φ2
+
+> θ
+
+(K) := R−π/ 2(Φ θ(Rπ/ 2(K))) ,
+
+Φ3
+
+> θ
+
+(K) := R−π/ 2 ◦ R −π/ 2(Φ θ(Rπ/ 2 ◦ R π/ 2(K))) ,
+
+Φ4
+
+> θ
+
+(K) := Rπ/ 2 ◦ R π/ 2 ◦ R π/ 2(Φ θ(Rπ/ 2 ◦ R π/ 2 ◦ R π/ 2(K))) By finally concatenating the above reduced basis, we can obtain a set of reduced-order basis Φ cθ(K) from source task. The learning of these basis is constrained by the operator 
+
+−∇· 
+
+
+
+κ(x, ξ )∇· 
+
+
+
+, where the operator itself depends only on the random input κ(x, ξ ). Thus, we can obtain the total multiscale reduced basis Φ cθ(K), i.e., Φcθ(K) = [Φ 1
+
+> θ
+
+(K), Φ2
+
+> θ
+
+(K), Φ3
+
+> θ
+
+(K), Φ4
+
+> θ
+
+(K)] .
+
+11 Compared with MsFEM, for a new sample K, the proposed method does not need to solve the cell problem (4.1) for constructing local multiscale basis functions. Instead, reduced basis that encode multiscale features can be directly obtained by simply utilizing the trained Basis CNNs. Since we also consider problems with different differential operator, the basis obtained by source task are not directly transferable to the target task. To this end, a residual structure is introduced to correct the reduced basis functions, namely, ˆΦcγ (K) = Φ cθ(K) + Φ CNO 
+
+> γ
+
+
+
+Φcθ(K)
+
+
+
+,
+
+where the residual is learned by convolutional neural operator (CNO) [27], γ are trainable neural network parameters. There are two reasons for choosing CNO. Firstly, the core architecture of the CNO is also based on convolutional layers, which aligns with that of CNN-based ROM. This can ensure better compatibility. Second, it has been widely shown in the literature that the CNO can effectively capture multiscale features [27]. In addition, the skip connections in the residual structure allow the original input in-formation to be directly propagated to subsequent layers. This helps preserve the multiscale features learned from the source task, while improving adaptability to the target task. 
+
+Remark 4.1 . In this paper, we take MsFEM basis as an example. The rotation radian can take some random values to capture the patterns of the input field κ(x, ξ ). 
+
+4.2.2 Coefficient CNNs of MITL (TL-Coef CNNs) 
+
+In TL-CoefCNNs, we employ paramter transfer strategy. Specifically, the CNN compo-nents and the first feedforward neural network (FNN) layer are frozen, while only the last two FNN layers are fine-tuned to adapt to the target task. Moreover, the number of reduced basis increases from N to 4 N , additional linear layer is required to adjust output dimension, called dimension modification layer, i.e., ˆcφ,W,b (K) = W (cφ ◦ cρ(K)) + b, 
+
+where cφ denotes the last two forward feedback neural networks of Coef CNN and cρ repre-sents convolutional parts. In many image processing tasks, shallow layers are considered to capture general features of images (e.g., edges, corners, and textures), while deeper layers are responsible for extracting high-level semantic information [28]. Since the input samples and system responses can also be regarded as images, the parameters of cρ are frozen in target tasks while φ is set to be trainable trainable. W ∈ R4N ×N and b ∈ R4N are train-able parameters in the dimension modification layer, which used to change the dimension of coefficients from N to 4 N .
+
+4.2.3 Loss function 
+
+Based on the previous two subsections, we can construct a surrogates for target task, i.e., ˆuht (Ki) = ˆΦγ (Ki)ˆ cφ,W,b (Ki),
+
+12 where γ, φ, W, b are trainable paramters of neural networks. Given the dataset 
+
+Dt =
+
+n
+
+Ki, u ht (Ki)
+
+oNt
+
+> i=1
+
+,
+
+the following optimization problem is solved arg min 
+
+> γ,φ,W,b
+
+1
+
+NtNtX
+
+> i=1
+
+∥uht − ˆuht ∥22,
+
+where ∥ · ∥ 2 is matrix 2 −norm. 
+
+Remark 4.2 . MITL can also be used to unsteady problems. We assume that the multiscale random input field κ(x, ξ ) is only depends on the spatial variable x. Take the following parabolic problems as an example, 
+
+
+
+∂u (x, t )
+
+∂t = ∇ · 
+
+
+
+κ(x, ξ )∇u(x, t )
+
+
+
++ f (x), x ∈ Ω,
+
+Du(x, t ) = b(x), x ∈ ∂Ω,u(x, 0) = u0(x), x ∈ Ω,
+
+Therefore, only TL-Coef CNN is required to be modified to learn a time-dependent cofficients for the target tasks. Specifically, a shallow feedforward network cα is introduced to encode time. The resulting temporal encoding is then added to the spatial features and is passed to the subsequent network (see Figure 4.3). Such process can be written as ˆcφ,W,b,α (K, t ) = W
+
+
+
+cφ ◦  cρ(K) + cα(t)
+
++ b. 
+
+Thus, TL-Coef CNN is capable of predicting the solution at any time t ∈ (0 , T ], ˆuht (K, t ) = ˆΦγ (K)ˆ cφ,W,b,α (K, t ). (4.7) 
+
+4.2.4 Nonlinear nature of the mapping from multiscale basis to fine-scale solu-tions 
+
+The MsFEM origins from homogenization theory, which illustrate that the mapping from multiscale basis to fine-scale solutions is naturally nonlinear. Speciffically, consider the following highly oscillating periodic operator with macro-micro ratio ϵ ≪ 1, 
+
+−∇ · 
+
+
+
+κ(xϵ
+
+
+
+∇uϵ(x)
+
+
+
+= f (x), x ∈ Ω,
+
+where κ(xϵ ) is y−periodic with y = x/ϵ . By solving cell problems [29], we can obtain homogenized coeffcients κ∗ and periodic basis Φ ms = ( ϕ1, · · · , ϕ d) where d is the dimension of spatial domain. Then, we can obtain the coarse solution u∗, which satisfy the corresponding coarse model, 
+
+−∇ · 
+
+
+
+κ∗(x)∇u∗(x)
+
+
+
+= f (x), x ∈ Ω.
+
+13 Figure 4.3: TL-Coef CNNs for unsteady problems According to asymptotic expansion, multiscale solutions uϵ(x) can be written as [29] 
+
+uϵ(x) = u∗(x) + ϵ∇u∗(x) · Φms (x/ϵ ) + O(ϵ2) = u∗
+
+
+
+x + ϵΦms (x/ϵ )
+
+
+
++ O(ϵ2).
+
+Therefore, uϵ is a nonlinear function of basis Φ ms . The design of MITL is guided by this idea, that is, ˆuht = ˆΦγ ˆcφ,W,b = ( I + Φ CNO  
+
+> γ
+
+)(Φ cθ)ˆ cφ,W,b =
+
+
+
+c ◦ (I + Φ CNO  
+
+> γ
+
+)
+
+
+
+(Φ cθ), (4.8) where c : RN 2  
+
+> h×4N
+
+→ R4N ×1 and is defined by c(Φ) := Φˆ cφ,W,b . Thus, the prediction soluton ˆuht is nonlinear with respect to MsFEM reduced basis Φ cθ through the nonlinear mapping 
+
+c ◦ (I + Φ CNO  
+
+> γ
+
+). 
+
+# 5 Numerical experiment 
+
+In this section, the numerical results for various multiscale problems with random inputs are presented to show the accuracy and efficiency of MITL. To illustrate numerical results quantitatively, we define the relative L2 error ϵtest as follows, 
+
+ϵtest = 1
+
+D
+
+> D
+
+X
+
+> i=1
+
+∥ui − ˆui∥2
+
+∥ui∥2
+
+,
+
+where ui denotes the results of numerical simulations and ˆ ui is the approximation solution ob-tained by MITL. And D represents the size of test dataset. The meaning of them varies across different tasks. For source tasks, ui = Φ ms (Ki), ˆui = ˆΦms (Ki), D = N test s . For target tasks, two cases are distinguished: for steady problems, ui = uh(Ki), ˆui = ˆ uh(Ki), D =
+
+N test t ; for unsteady problems, ui = uht (Kk, t ), ˆui = ˆ uht (Kk, t ), D = N test t ∗ Tt.14 5.1 The construction of datasets 
+
+In this section, we first introduce two types of random input fields: hydraulic con-ductivity field of an aquifer with channels and permeability of fractured rock. They are both binary-valued, representing the foreground and background media, respectively. The geometry and position of foreground media are stochastic. 
+
+5.1.1 Hydraulic conductivity field of channelized aquifers 
+
+We first consider a relatively idealized random field, representing the hydraulic con-ductivity of a channelized aquifer. The foreground corresponds to the channels and the background to the matrix material, with their hydraulic conductivities set to 1000 and 1, respectively. The primary complexity of this random field lies in the varying branching pat-terns of the channels across different samples, while the overall orientation and width of the channels remain relatively fixed. By using a trained generative model [30], 6024 samples of this random field are obtained, of which 5024 are used for training the source and target tasks, and the remaining 1000 are reserved for evaluating the generalization capability of the model. 
+
+Figure 5.1: Eight samples of the hydraulic conductivity of channelized aquifers 
+
+5.1.2 Permeability of fractured rock 
+
+The random fields considered in this subsection are sourced from the GeoCrack dataset [31], which represent the permeability of fractured rocks. The rock samples in this dataset were collected from Europe (Greece and Italy) and the Middle East (Oman and the United Arab Emirates), with the fracture traces manually annotated. The real fracture geometries (including width, branching patterns, orientation, curvature, density and so on) exhibit con-siderably greater complexity (see Figure 5.2). To control sample variability, rock images are selected based on both fracture morphology similarity and sampling location. The selected images are binarized and localized, yielding subimages of resolution 65 × 65 in which the 15 Figure 5.2: The real-world photos of fractured rocks [31] fracture area constitutes 3% − 10% of the total area. Finally, 6024 samples were obtained, of which 5024 were assigned to the training set and the remainder to the test set. For simplic-ity, the fracture permeability is taken as 1000 and the rock matrix permeability as 1. Eight processed samples are shown in Figure 5.3. 
+
+Figure 5.3: Eight samples of the permeability of fractured rocks In order to construct training and test datasets, bilinear finite element methods in rectangular elements are be used to solve source task (4.2) and target rask (4.4)-(4.2). In the finite element formulation, the random input field κ is sampled at the single-point Gaussian quadrature points, while the training process requires its values at the nodal points of spatial mesh H. To address this issue, the values of the random field on H are interpolated onto the quadrature points using the nearest-neighbor interpolation scheme. Specifically, for any matrix K = [ kij ] ∈ RNh×Nh , the interpolated matrix ˆK = [ ˆkij ] ∈ R(Nh−1) ×(Nh−1) is obtained through the mapping ˆkij = k[iN h/(Nh−1)] ,[jN h/(Nh−1)] .
+
+16 This interpolation method is more suitable for binary-valued matrices. 
+
+# 5.2 Source tasks 
+
+In MITL, source tasks (4.2) are first approximated by CNN-based ROM to obtain transferable features. Rotating each random field sample defined in Section 5.1 by 90 ◦ , 180 ◦
+
+and 270 ◦ yields a total of 24,000 samples, among which 20000 samples are splitted to training dataset and the rest ones for test dataset. The corresponding source tasks are solved using the finite element method on the mesh H of a 65 × 65 grid. Then, we obtain the source-task dataset Ds. The architecture of CNN-based ROM used for the source tasks is listed in Table 1. Table 1: The architecture of CNN-based ROM used for the source tasks (4.2)                                                                                                   
+
+> Basis CNNs Coef CNNs
+> Layer Resolution H×WParameter numbers Layer Resolution H×WParameter numbers Input 63 ×63 -Input 63 ×63 -Conv p(25 ×25,32,1) 63 ×63 20064 Conv (23 ×23,32,1) 63 ×63 16992 Conv p(25 ×25,32,1) 63 ×63 640064 Conv (23 ×23,32,2) 32 ×32 541760 Conv p(25 ×25,64,1) 63 ×63 1280128 Conv (23 ×23,64,1) 32 ×32 1083520 Conv p(25 ×25,64,1) 63 ×63 2560128 Conv (23 ×23,64,2) 16 ×16 2166912 Conv p(25 ×25,128,1) 63 ×63 5120256 Conv (23 ×23,128,1) 16 ×16 4333824 Conv p(25 ×25,128,1) 63 ×63 10240256 Conv (23 ×23,128,2) 8×88667392 Conv (25 ×25,1,1) 63 ×63 1280 FC (300) 300 2457900 Reshape 3969 ×10 -FC (300) 300 90300 FC (10) 10 3010
+> Total number of parameters 39223786
+
+The Basis CNNs and Coef CNNs are trained sequencely by using the methods in our previous work [15]. Then, we can obtain the source models (4.3). As shown in Table 2, CNN-based ROM can provide accurate surrogates for source tasks. Since the source tasks with permeability of fractured rocks are more complex, the relative L2 test error is larger than that of channelized aquifers using the same neural network architecture. Table 2: The relative L2 test error of CNN-based ROM used for source tasks channelized aquifers fractured rocks 
+
+ϵtest 1.52% 2.72% Figure 5.4 provides a more intuitive illustration of the prediction performance of the source model on three test samples. Since MITL needs to transfer the reduced basis learned by the Basis CNNs, we plot 40 reduced basis learned by the CNN-based ROM for one input sample K of channelized aquifers (see Figure 5.5). The figure shows that the Basis CNNs capture the channel mor-phology in the learned basis functions. The basis functions with larger magnitudes focus on the multiscale features emanating from the four corners, consistent with the MsFEM basis functions. 17 (a) Channelized aquifers 
+
+> (b) Fractured rocks
+
+Figure 5.4: The prediction performance of the source model 18 Figure 5.5: Channelized aquifers: reduced basis learned by source model 19 5.3 Target tasks 
+
+In this section, the multiscale features learned by the source model are transferred to a series of target tasks, which involves different source terms, boundary conditions, and even different differential operators. To realize efficient transfer, we propose MITL. The core strategy is to freeze the main architecture of the source model and fine-tune only a small number of specific layers to adapt to new tasks. In details, TL-Basis CNNs freeze all trainable parameters of Basis CNNs to inherit its capability of extracting multiscale features. Only the two-layer CNO, originally designed for learning the residual term, is set as trainable to capture the new features of target tasks. This trainable portion comprises 183,344 parameters, accounting for merely 0 .92% of the total parameters of Basis CNNs in the source model. In TL-Coef CNNs, the backbone network responsible for feature extraction is frozen, and only the last two feedforward layers together with the temporal encoding network and the dimension modification layer are trained. For steady and unsteady problems, the numbers of trainable parameters are 93,310 and 90,900 (plus 440 parameters from the dimension adaptation layer), accounting for only 0 .48% and 0.95% of the total parameters of Coef CNNs in the source model, respectively. Overall, the trainable parameters of MITL framework amount to only 0 .94% of those of CNN-based ROM defined in Talbe 1. Compared with the source model, the target model is considerably more lightweight. 
+
+5.3.1 Transfer to problems with different source terms 
+
+We first consider problems with different source terms, i.e., keeping the differential operator and the boundary conditions in the source tasks (4.2) unchanged, and varying only the source term f (x), x = [ x1, x 2] ∈ Ω. The following three source terms are considered: 
+
+• [TL1]Exponential function : f (x) = exp( x1 + x2).
+
+• [TL2]Indicator function having a circle support :
+
+f (x) = 
+
+(100 , x ∈ { x|(x1 − 0.2) 2 + ( x2 − 0.2) 2 ≤ 0.15 2},
+
+0, ortherwise .
+
+• [TL3]Indicator function having a rectangular support :
+
+f (x) = 
+
+(100 , x ∈ [0 , 0.6] × [0 , 0.25] ,
+
+0, ortherwise ,
+
+where TL1 is continuous with respect to x, while the latter two are discontinuous. In this section, the random field defined in Section 5.1.1 is considered. For the same random input sample K, the solutions corresponding to these three source terms are shown in Figure 5.6. From the perspective of data distribution, TL1 exhibits the closest distribution to that of the source task. The target model is trained with training sets of sizes 5024, 1024, 512, 256, 128, and 64, respectively. The relative L2 error is evaluated on the same test set of size 1000, and the results are presented in Table 3. An instrusive result is also shown in Figure 5.7. 20 Figure 5.6: Channelized aquifers: solution samples of problems with three different source terms Table 3: Channelized aquifers: MITL performance for problems with different source terms 5024 1024 512 256 128 64 TL1 2.12% 2.76% 2.93% 3.25% 3.50% 4.07% TL2 2.49% 2.84% 3.17% 3.96% 5.44% 5.81% TL3 2.45% 2.65% 3.83% 3.86% 4.89% 5.87% The above results demonstrate that even when the target dataset Dt contains only 64 samples (accounting for merely 0 .32% of the source dataset), The relative L2 error of different problems remain within an acceptable range. This result highlights the significant advantage of transfer learning in dealing with small-sample scenarios. 
+
+5.3.2 Transfer to problems with different boundary conditions 
+
+In this section, we consider more complex random field defined in Section 5.1.2 and problems with differenet boundary conditions, including inhomogeneous Dirichlet boundary condition and mixed Dirichlet–Neumann boundary conditions. Speciffically, the boundary operators D are defined as follows, 
+
+• [TL4] Inhomogeneous Dirichlet boundary condition 
+
+u(x) = 
+
+(1, x ∈ x ∈ ∂Ω1
+
+> D
+
+,
+
+0, x ∈ ∂Ω0
+
+> D
+
+,
+
+21 Figure 5.7: Channelized aquifers: MITL performance for problems with different source terms (From top to bottom row: TL1, TL2, TL3, the size of training dataset is 32.) 22 where ∂Ω1 
+
+> D
+
+= {x := ( x1, x 2) ∈ ∂Ω : x ∈  {0} × [0 .25 , 0.75]  S   [0 .6, 1] 
+
+× [0 .25 , 1] }, ∂ Ω0 
+
+> D
+
+= Ω \Ω1
+
+> D
+
+.
+
+• [TL5] Mixed Dirichlet–Neumann boundary conditions 
+
+
+
+u(x) = 1 , x ∈ ∂Ω1
+
+> D
+
+,u(x) = 0 , x ∈ ∂Ω0
+
+> D
+
+,∂u ∂⃗ n = 0 , x ∈ ∂ΩN ,
+
+where ∂ΩN = {x := ( x1, x 2) ∈ ∂Ω : x2 = 1 }, ∂ Ω1 
+
+> D
+
+= {x ∈ ∂Ω : x2 = 0 }, ∂ Ω0 
+
+> D
+
+=
+
+∂Ω\∂ΩN \∂Ω1
+
+> D
+
+.
+
+Figure 5.8: Fractured rocks: solution samples of problems with two different boundary conditions In addition, the source term is taken as f (x) = 1. For the same input sample K, the solutions corresponding to these two boundary conditions are shown in Figure 5.8. The MITL is trained for above target tasks, and the results are presented in the top two rows of Table 4. It can be observed that the overall performance in this case is not good as that of channelized acquifers due to the complexity of random input field. However, with 128–256 training samples MITL succeeds in learning the overall solution structure. This level of accuracy meets the needs of design and optimization tasks that do not demand high fidelity (see Figure 5.9 and Figure 5.10). Furthermore, comparing the results in the first row with those in the third and fourth rows of Table 4, it can be seen that MITL has a significant advantage over CNN-based ROM retrained from scratch when the data size is small. In the 23 third row, the parameter scale is consistent with that of the source model, while the fourth row shows the results after adjusting the network parameter to 264,772 (the parameter scale of MITL is 276,654). Table 4: Fractured rocks:MITL performance for problems with different boundary conditions 5024 1024 512 256 128 64 32 MITL(TL4) 6.14% 7.92% 8.67% 9.54% 10.96% 12.55% 14.88% MITL(TL5) 5.71% 7.03% 8.31% 10.81% 12.50% 14.30% 16.98% CNN-based ROM 1(TL4) 4.02% 8.05% 12.73% 14.66% 17.75% 22.50% 24.13% CNN-based ROM 2(TL4) 7.63% 12.06% 14.41% 16.71% 20.45% 22.52% 26.32% 
+
+Figure 5.9: Fractured rocks: MITL performance on different sizes of training dataset (TL4) 
+
+5.3.3 Transfer to problems with different operators 
+
+In this section, we turn to a more difficult transfer task, that is, transferring the mul-tiscale features extracted by the source model to target tasks with different differential op-erators. Accordding to the complexity of differential operators, we first consider reaction-diffusion process, 24 Figure 5.10: Fractured rocks:MITL performance on different sizes of training dataset (TL5) 25 • [TL6] Reaction-diffusion equation 
+
+
+
+− ∇ · 
+
+
+
+κ(x, ξ )∇u(x)
+
+
+
++ 200 u(x) = exp( x), x ∈ Ω
+
+u(x) = 0 , x ∈ ∂Ω.
+
+We further consider two nonlinear operators. The first one involves a nonlinear source term, and the second is the p-Laplacian equation with p = 3. Both operators exhibit mild nonlinearity and therefore share similarity with the source tasks. 
+
+• [TL7] Nonlinear source term 
+
+
+
+− ∇ · 
+
+
+
+κ(x, ξ )∇u(x)
+
+
+
+= sin(10 πu (x)) + cos (10 πu (x)) , x ∈ Ω
+
+u(x) = 0 , x ∈ ∂Ω.
+
+• [TL8] P-Laplacian Equation 
+
+
+
+− ∇ · 
+
+
+
+κ(x, ξ )|u(x)|∇ u(x)
+
+
+
+= exp( x), x ∈ Ω,u(x) = 0 , x ∈ ∂Ω.
+
+In the following experiments, we consider the random input field defined in Section 5.1.1. For the same input sample K, the solutions corresponding to these three differential operators are shown in Figure 5.11. The target model is trained with training sets of sizes 
+
+Figure 5.11: Channelized acquifer: solution samples of problems with three different differ-ential operators 26 5024, 1024, 512, 256, 128, and 64, respectively. The relative L2 error is evaluated on the same test set of size 1000, and the results are presented in Table 5. Table 5: Channelized acquifer: MITL performance of problems with different differential operators 1024 512 256 128 64 32 TL6 2.44% 2.93% 4.79% 5.16% 6.50% 12.27% TL7 2.13% 2.50% 4.00% 4.56% 7.00% 12.98% TL8 2.31% 2.56% 3.47% 4.32% 7.58% 10.99% Above differential operators are steady, we now consider a temporal-spatial problem, namely, 
+
+• [TL9] Parabolic equation 
+
+
+
+∂u (x, t )
+
+∂t = ∇ · 
+
+
+
+κ(x, ξ )∇u(x, t )
+
+
+
+− exp( x1 + x2), x ∈ Ω, t ∈ [0 , 0.09] 
+
+u(x, t ) = sin( πx 1) + cos( πx 2), x ∈ ∂Ω,u(x, 0) = sin( πx 1) + cos( πx 2), x ∈ Ω.
+
+Using a uniform time interval 0 .0015, the temporal domain is discretized into 60 steps for each random input sample K. Twelve of these time steps are allocated to training, while the rest are used to assess the method’s interpolation accuracy. As illustrated in Table 6, MITL have a good performance in the temporal-spatial problems. Table 6: Channelized acquifer:MITL performace of the parabolic problem (“Training points” represents the prediction performance at the training points, and “Interpolation” denotes the prediction performance at all time steps). 1024 512 256 128 TL9 (Training points) 2.63% 3.01% 4.56% 5.96% TL9 (Interpolation) 2.75% 3.15% 4.65 6.01% To more intuitively illustrate the predictive performance across different time steps, we further plot the predicted results at some time steps, as shown in Figure 5.12. It can be observed that the error decreases progressively as the time increases. This arises because the solution converges toward the steady-state limit as the time increases, making its data distribution closer to that of the source problem. 
+
+# 5.4 Application to inverse problems 
+
+The above experimental results demonstrate that the proposed method can provide an efficient and accurate surrogate model for multiscale problems with random inputs (2) under 27 Figure 5.12: Channelized acquifer: MITL performance of parabolic equations (the size of training dataset is 512). 28 limited data availability. In this section, we apply MITL to inverse problems. Here, we consider the multiscale systems modeled by the equations, 
+
+
+
+− ∇ · 
+
+
+
+κ(x, ξ )∇u(x)
+
+
+
+= f (x), x ∈ Ω = [0 , 1] × [0 , 1] ,u(x) = 1 , x ∈ ∂Ω,
+
+(5.1) where κ(x, ξ ) is the random input field defined in Section 5.1.1. And the source term f (x)is defined as follows, 
+
+f (x) = 100 2πσ 2 exp( ∥x − [0 .5, 0.5] ∥22
+
+2σ2 ).
+
+Take σ = 0 .45 and assume that the observation noise σobs = 0 .05. Then observation data can be generated by solving equation (5.1) and adding Gaussian noise, 
+
+y(x) = uh(x) + ϵ, ϵ ∼ N (0 , σ obs ).
+
+We can thus obtain the dataset Y(i) =
+
+n
+
+y(x1), y (x2), · · · , y (xNobs )
+
+o
+
+, i = 1 · · · M ob-served by Nobs sensors on the spatial points Xobs =
+
+n
+
+x1, x 2, · · · , x Nobs 
+
+o
+
+, our goal is to estimate the corresponding random input sample Ki. The size of training dataset M is less than 5024, and the number of test samples is 1000. 
+
+Figure 5.13: The schema of Surrogate-constrained VAE. A method combines Variational Autoencoder (VAE) [32] with MITL is introduced to solve this problems. VAE is a type of generative model that belongs to the family of Autoen-coders, specifically designed for learning latent representation of the input data and generate new data samples. It is composed of the recognition model, which learn the mapping from input data to parameters of posteriors for latent variables, and the likelihood model, which reconstructs data from latent space. In standard VAE, both recognition model and likeli-hood model are represented by neural networks. As an unsupervised method, VAE learn the latent variables purely by data, which is not suitable for inverse problems. Hence, we use the trained MITL as parts of likelihood model to constrain the learning of latent variables, which is inspired by PDE-constrained Bayesian inversion methods [33]. Therefore, we call the method Surrogate-constrained VAE (see Figure 5.13) and the unknown parameters ψ
+
+are only contained in the recognition model, that is 
+
+η = PRecog  
+
+> ψ
+
+(Y) (5.2) 29 where η are the local variational parameters that define the posterior distributions q(z|Y ; η), which is used to approximate the true posterior p(z|Y ). Here, the latent variable z denotes the low-dimensional representation of the random input sample K. We learn the correspond-ing z by Convolutional Autoencoder in this experiments, which can be written as, ˆK = De ◦ En( K), (5.3) where En is the encoder that encodes K to low-dimensional representation z and De denotes the decoder that reconstruct K from z. Other efficient reduction methods, such as KLE[34], diffusion map[35] and so on, can also be used. The mapping PRecog  
+
+> ψ
+
+is defined by the standard convolutional neural networks. The problem thus becomes solving for the global variational parameters H. Using such a neural network, we can obtain the posterior estimation of latent variable z by passing observation data Y through PRecog  
+
+> ψ
+
+, which can not be achieved by PDE-constrained Bayesian inversion methods. Next, we will use variational inference to learn the parameters H. Because the likelihood of data p(y) is hard to computed, we instead minimize the lower bound of it that is known as evidence lower bound (ELBO), ELBO( ψ) = Eqψ (z|Y ;η)
+
+
+
+log p(y|z; ˆΦγ , ˆcφ,W,b , σ obs )
+
+
+
++ KL 
+
+
+
+qψ(z|Y ; η)∥p(z)
+
+
+
+,
+
+(5.4) where p(y|z; ˆΦγ , ˆcφ,W,b , σ obs ) is the likelihood model with i.i.d Gaussian observation noise σobs ,i.e., 
+
+Yi = M ˆΦγ (Ki)ˆ cφ,W,b (Ki) + ϵi, ϵ i ∼ N (0 , σ 2
+
+> obs
+
+I),
+
+where M = [ mij ] ∈ RNh×Nh is the mask matrix to control the outputs resolution, which is defined as follows, 
+
+mij =
+
+(1, xij ∈ X obs ,
+
+0, otherwise ,
+
+where xij denotes the i-th row and the j-th column element in the spatial mesh H. And 
+
+p(z) is the prior, we take it the standard Gaussian distribution. The approximation posterior distribution q(z|Y ; ψ) are also Gaussian with mean vector μ and covariance matrix σ2I, i.e., 
+
+z|Y ∼ N (μ, σ 2I).
+
+Furthermore, we can understand the equation (5.4) from the perspective of inverse problems. The first term aims at maximizing the likelihood of the reconstructed data. The second term is the Kullback-Leibler divergence of two probability density, which is defined as KL( p∥q) = 
+
+Z
+
+p(x) log p(x)
+
+q(x) dx. 
+
+It works as the regularization term such that posterior is as similar as possible to prior, which can help to alleviate the ill-posedness of the inverse problem. In terms of reparametrization tricks [32], we can use gradient descent algorithms, such as Adam, to optimize neural network 30 parameters H. Once the recognition model is trained, we can also estimate the expectations of K by Monte Carlo method, i.e., 
+
+Eqψ (z|Y ;η)(K) ≈ 1
+
+NMC 
+
+> NMC
+
+X
+
+> i=1
+
+De( z(i)), z(i) ∼ qψ(z|Y ; ψ). (5.5) Similarly, we can also obtain the variance of K based on estimations (5.5) 
+
+V ar qψ (z|Y ;η)(K) ≈ 1
+
+NMC 
+
+> NMC
+
+X
+
+> i=1
+
+
+
+De( z(i)) − Eqψ (z|Y ;η)(K)
+
+2
+
+, z(i) ∼ qψ(z|Y ; η). (5.6) The MITL is firstly trained with a training set of size 512 on observation grids of 32 ×32, 16 × 16 and 8 × 8, respectively. The predition results are shown in Figure 5.14. 
+
+Figure 5.14: MITL performance on noisy data. (The resolutions are 32 × 32, 16 × 16 and 8 × 8 from top to bottom, respectively. And the noise level σobs is 0 .05.) The proposed Surrogate-constrained VAE is trained using the surrogates from MITL. The inversion results under different resolutions are shown in Figures 5.15. To further illus-trate the uncertainty quantification ability of the proposed method, the resolution 16 × 16 is unchanged and we choose the noise level as 0 .05 , 0.10 and 0 .15 to train surrogate-constrained VAE. The prediction results are shown in Figure 5.16. 31 Figure 5.15: Inversion performance of Surrogate-constrained VAE on the test dataset.(The resolutions are 32 × 32, 16 × 16 and 8 × 8 from top to bottom, respectively. And the noise level σobs is 0 .05.) 32 Figure 5.16: The uncertainty quantification ability of Surrogate-constrained VAE on the test dataset.(The noise levels are 0 .05, 0 .10 and 0 .15 from top to bottom, respectively. And the resolution is 16 × 16.) 
+
+# 6 Conclusion 
+
+In this paper, we proposed a transfer learning strategy called MITL. It addressed three limitations of our previous CNN-based ROM: dependence on underlying PDE information, high data acquisition cost, and poor adaptability to problems with different source terms and boundary conditions. MITL is motivated by the transferability of multiscale basis functions in MsFEM. It transfers the multiscale features learned from a source task to target tasks by fine-tuning lightweight neural networks, thereby enabling efficient transfer across similar multiscale problems. Specifically, we first reviewed the core idea of MsFEM from a transfer learning per-spective. Inspired by this observation, a source task was designed in which MsFEM basis functions were solved over the global domain to preserve globally coupled multiscale informa-tion. CNN-based ROM was trained on this source task, yielding transferable representations that encodes multiscale features. For the target task, two sub-networks, TL-Basis CNNs and TL-Coef CNNs, were introduced to fine-tune the previously learned Basis CNNs and Coef CNNs, respectively. TL-Basis CNNs keep the parameters of Basis CNNs fixed and adopt a residual structure with CNOs to adjust the reduced basis learned from source tasks. The resulting mapping is a nonlinear function of the basis. Such an architecture enables MITL to handle nonlinear problems. Moreover, it makes the mapping from basis to outputs nonlinear, which is consistent with the homogenization theory of periodic multiscale problems. TL-Coef CNNs achieve rapid adaptation to both steady-state and unsteady problems by freezing the backbone, fine-tuning only the top layers, and incorporating a temporal encoding network. The trainable parameters of the entire framework account for only small portion of those of 33 the source model, substantially improving the training efficiency on target tasks. We note that the idea of MITL can be also formulated using other multiscale basis functions. 
+
+# 7 Acknowledgements 
+
+L. Jiang acknowledges the support of NSFC 12271408. EC’s research is partially sup-ported by the Hong Kong RGC General Research Fund (Project numbers: 14305624 and 14304525). 
+
+# References 
+
+[1] M. Alotaibi, H. Chen, S. Sun, Generalized multiscale finite element methods for the reduced model of Darcy flow in fractured porous media, Journal of Computational and Applied Mathematics. 413 (2022) 114305. [2] Y. Xia, N. Zabaras, Bayesian multiscale deep generative model for the solution of high-dimensional inverse problems, Journal of Computational Physics. 455 (2022) 111008. [3] L. Jiang, L. Ma, A hybrid model reduction method for stochastic parabolic optimal control problems, Computer Methods in Applied Mechanics and Engineering. 370 (2020) 113244. [4] J. Capers, L. Stanfield, J. Sambles, S. Bayes, A. Powell, A. Hibbins, S. Horsley, Mul-tiscale design of large and irregular metamaterials, Physical review applied. 21 (2024) 014005. [5] R. Zimmermann, S. G¨ ortz, Improved extrapolation of steady turbulent aerodynamics using a non-linear POD-based reduced order model, The Aeronautical Journal. 116 (2012) 1079-1100. [6] M. Yano, Discontinuous Galerkin reduced basis empirical quadrature procedure for model reduction of parametrized nonlinear conservation laws, Advances in Computa-tional Mathematics. 45 (2019) 2287-2320. [7] E. Chung, Y. Efendiev, T. Hou, Multiscale model reduction: multiscale finite element methods and their generalizations, Springer, Switzerland, 2023. [8] T. Hou, X. Wu, A multiscale finite element method for elliptic problems in composite materials and porous media. Journal of Computational Physics. 134 (1997) 169-189. [9] L. Jiang, Y. Efendiev, G. Victor, Multiscale methods for parabolic equations with con-tinuum spatial scales, Discrete and Continuous Dynamical Systems. 8 (2012) 833-859. [10] Y. Efendiev, J. Galvis, T. Hou, Generalized multiscale finite element methods (GMs-FEM), Journal of Computational Physics. 251 (2013) 116-135. 34 [11] M. Li, E. Chung, L., Jiang, A constraint energy minimizing generalized multiscale finite element method for parabolic equations, Multiscale Modeling and Simulation. 17 (2019) 996-1018. [12] L. Jiang, P. Michael, A resourceful splitting technique with applications to deterministic and stochastic multiscale finite element methods, Multiscale modeling and simulation 10 (2012) 954-985. [13] M. Raissi, P. Perdikaris, G.E. Karniadakis, Physics-informed neural networks: a deep learning framework for solving forward and inverse problems involving nonlinear partial differential equations. Journal of Computational Physics, 378 (2019) 686-707. [14] W. Chen, Q. Wang, J. Hesthaven, C. Zhang, Physics-informed machine learning for reduced-order modeling of nonlinear problems. Journal of Computational Physics. 446 (2021), 110666. [15] X. Zhang, L. Jiang, CNN-based reduced-order modeling for multiscale problems, Journal of Computational Physics. 2025, (524) 113710. [16] S. Cheung, E. Chung, Y. Efendiev, E. Gildin, Y. Wang, J. Zhang, Deep global model reduction learning in porous media flow simulation, Computational Geosciences. 24 (2020) 261-274. [17] J. Hesthaven, S. Ubbiali, Non-intrusive reduced order modeling of nonlinear problems using neural networks, Journal of Computational Physics. 363 (2018) 55-78. [18] S. Fresca, L. Dede, A. Manzoni, A comprehensive deep learning-based approach to reduced order modeling of nonlinear time-dependent parametrized PDEs, Journal of Scientific Computing. 87 (2021) 1-36. [19] M. Mignolet, A. Przekop, S. Rizzi, S. Spottswood, A review of indirect/non-intrusive reduced order modeling of nonlinear geometric structures, Journal of Sound and Vibra-tion. 332 (2013) 2437-2460. [20] Q. Wang, J. Hesthaven, D. Ray, Non-intrusive reduced order modeling of unsteady flows using artificial neural networks with application to a combustion problem, Journal of Computational Physics. 384 (2019) 289-307. [21] X. Zhang, L. Jiang, Conditional variational autoencoder with Gaussian process regres-sion recognition for parametric models, Journal of Computational and Applied Mathe-matics. 438 (2024) 115532. [22] T. Wang, J. Bai, Z. Lin, Q. Wang, C. Anitescu, J. Sun, M. Eshaghi, Y. Gu, X. Feng, X. Zhuang, T. Rabczuk, Artificial intelligence for partial differential equations in com-putational mechanics: A review, Applied Mechanics Reviews. (2024) 1-81. [23] L. Yang, S. Liu, T. Meng, S. J. Osher, In-context operator learning with data prompts for differential equation problems, Proceedings of the National Academy of Sciences. 120 (2023) e2310142120. 35 [24] Y. Gao, K. C. Cheung, M. K. Ng, Svd-pinns: Transfer learning of physics-informed neural networks via singular value decomposition, in: 2022 IEEE Symposium Series on Computational Intelligence (SSCI). (2022) 1443–1450. [25] Z. Li, N. Kovachki, K. Azizzadenesheli, B. Liu, K. Bhattacharya, A. Stuart, A. Anand-kumar, Fourier neural operator for parametric partial differential equations. ICLR, (2021). [26] Q. Du, B. Engquist, X. Tian, Multiscale modeling, homogenization and nonlocal effects: Mathematical and computational issues, Contemporary Mathematics. 754 (2020) 115-139. [27] B. Raonic, R. Molinaro, T. Rohner, S. Mishra and E. Bezenac, Convolutional neural operators, ICLR 2023 workshop on physics for machine learning. 2023. [28] M. Zeiler, R. Fergus, Visualizing and understanding convolutional networks, European conference on computer vision. (2024) 818-833. [29] G. Allaire, B. Robert, A multiscale finite element method for numerical homogenization, Multiscale Modeling sand Simulation. 4 (2005) 790-812. [30] E. Laloy, R. Herault, D. Jacques and N. Linde, Training-image based geostatistical in-version using a spatial generative adversarial neural network, Water Resources Research. 54 (2018) 381-406. [31] M Yaqoob, M Ishaq, MY Ansari, VRS Konagandla, TA Tamimi, S Tavani, A. Cor-radetti, T. Seers, GeoCrack: a high-resolution dataset of fracture edges in geological outcrops, Scientific Data. 11 (2024) 1318. [32] L. Cinelli, M. Marins, E. Silva, S. Netto, Variational methods for machine learning with applications to deep networks, Springer, 2021, pp. 151-152. [33] J. Cockayne, C. Oates, T. Sullivan, M. Girolami, Probabilistic numerical methods for PDE-constrained Bayesian inverse problems, AIP Conference Proceedings. 1853 (2017) 060001. [34] Y. Zhu, N. Zabaras, Bayesian deep convolutional encoder–decoder networks for surro-gate modeling and uncertainty quantification, Journal of Computational Physics. 366 (2018) 415-447. [35] I. Kalogeris, V. Papadopoulos, Diffusion maps-aided neural networks for the solution of parametrized PDEs, Computer Methods in Applied Mechanics and Engineering. 376 (2021) 113568. 36

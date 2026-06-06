@@ -1,0 +1,395 @@
+Title: Data-efficient flood depth prediction through domain-aware coreset selection and tabular foundation models
+
+URL Source: https://arxiv.org/pdf/2606.05265v1
+
+Published Time: Fri, 05 Jun 2026 00:16:05 GMT
+
+Number of Pages: 14
+
+Markdown Content:
+# Highlights 
+
+## Data-efficient flood depth prediction through domain-aware coreset selection and tabular founda-tion models 
+
+Lipai Huang, Adithi Srinath, Manas Singh, Junwei Ma, Ali Mostafavi 
+
+• A two-stage coreset jointly stratifies by storm return period and spatial structure. 
+
+• A vanilla foundation model matches the watershed-level baseline with a 50k coreset. 
+
+• In-context learning predicts a held-out watershed from neighbors without retraining. 
+
+• Models extrapolate on out-of-distribution storms and remain accurate in-distribution. 
+
+> arXiv:2606.05265v1 [cs.LG] 3 Jun 2026
+
+# Data-efficient flood depth prediction through domain-aware coreset selection and tabular foundation models 
+
+## Lipai Huang a,∗, Adithi Srinath b, Manas Singh b, Junwei Ma a,c and Ali Mostafavi a,d 
+
+> aUrban Resilience.AI Lab, Zachry Department of Civil and Environmental Engineering, Texas A&M University, College Station, TX, USA
+> bDepartment of Computer Science and Engineering, Texas A&M University, College Station, TX, USA
+> cResilitix Intelligence LLC, Houston, TX, USA
+> dInstitute for a Disaster Resilient Texas, Texas A&M University, College Station, TX, USA
+
+A R T I C L E I N F O 
+
+> Keywords :Domain-aware coreset construction In-context learning Tabular foundation model Flood depth prediction Cross-watershed transferability Hydrodynamic surrogate
+
+A B S T R A C T          
+
+> Near-real-time flood depth prediction demands surrogate models that are accurate, fast, and transfer-able across watersheds. Supervised surrogates can match physics-based simulators in accuracy but need millions of training rows per watershed and cannot extrapolate beyond their original mesh. We propose a domain-aware coreset construction pipeline that conditions a tabular foundation model at inference time. The pipeline stratifies storms by return period and most-affected watershed, then samples hexagons with a target-aware spatial selector. With 0.7% of the per-watershed training pool, the model attains a mean 𝑅 2of 0.663 across nine Houston-area watersheds, within 98 .5% of the supervised reference ( 𝑅 2= 0 .673 ). It transfers to held-out watersheds without task-specific retraining, staying ahead of a coreset-trained supervised baseline. On real storms it exceeds the supervised reference on a far out-of-distribution case and trails it on a mostly in-distribution one. Domain-aware coreset construction lets tabular foundation models deliver data-efficient, watershed-transferable flood predictions without per-watershed training.
+
+## 1. Introduction 
+
+Timely flood depth information supports emergency managers and infrastructure operators during extreme weather events, and also underpins downstream assessments of flood exposure (Yin and Mostafavi, 2023), mobility disruption, and community resilience (Yin, Li and Mostafavi, 2026). Yet generating it at scale remains computationally demand-ing (Li, Ma, Brody and Mostafavi, 2025). Physics-based hydrodynamic models such as the Hydrologic Engineer-ing Center’s River Analysis System (HEC-RAS) provide the engineering reference for inundation depth prediction. Their cost grows quickly with simulated extent and mesh resolution, especially when many storm events must be screened. A direct HEC-RAS sweep is therefore impractical for near-real-time forecasting or broad scenario testing (Ma, Li, Li and Mostafavi, 2026). Machine learning (ML) surro-gates trained on simulator output have become a standard alternative and offer near-instant inference once trained (Bentivoglio, Isufi, Jonkman and Taormina, 2022; Mosavi, Ozturk and Chau, 2018). Existing surrogate work falls into two patterns. The first trains one model per mesh cell, capturing local dynamics at fine resolution while producing a fragmented collec-tion that cannot be applied beyond the original mesh (Lee, Huang, Antolini, Garcia, Juan, Brody and Mostafavi, 2024). The second trains a single supervised model on the full knowledge base of one watershed, which yields strong in-watershed accuracy but binds the predictor to its training region (Zahura, Goodall, Sadler, Shen, Morsy and Behl, 2020). Both patterns share the same operational drawback:    
+
+> ∗Corresponding author
+> lipai.huang@tamu.edu (L. Huang)
+> ORCID (s): 0009-0005-3732-7319 (L. Huang)
+
+each requires millions of training rows, and adding a new watershed or recalibrating after an event-regime shift en-tails another full training pass. Tree-based gradient boosting (Chen and Guestrin, 2016) still dominates this space because deep tabular methods continue to underperform tree en-sembles on structured input (Grinsztajn, Oyallon and Varo-quaux, 2022). Deep learning has produced striking results on adjacent hydrologic tasks such as rainfall-runoff modeling (Kratzert, Klotz, Brenner, Schulz and Herrnegger, 2018), but for spatially distributed flood-depth surrogates the tree-based pattern remains the practical default. Transformer and foundation-model architectures have recently been adapted to structured disaster-management tasks, including post-disaster building-damage categoriza-tion (Xiao and Mostafavi, 2025), multimodal impact as-sessment (Xiao, Yin and Mostafavi, 2026), and graph-based damage prediction (Esparza, Battala and Mostafavi, 2026). Tabular foundation models (TFMs) such as TabPFN (Hollmann, Müller, Purucker, Krishnakumar, Körfer, Hoo, Schirrmeister and Hutter, 2025) and TabICL (Qu, Holzmüller, Varoquaux and Le Morvan, 2024) offer a different path. A TFM is a single transformer pretrained on a wide distribution of synthetic tabular tasks. It solves a new task at inference time by conditioning on a labeled context set rather than through gradient updates. This in-context learning (ICL) framing avoids per-task retraining, and a sufficiently strong pretrained backbone can rival task-specific supervised mod-els on tabular benchmarks. However, the context windows of the tabular foundation models considered in this work are bounded at roughly 10 4 to 10 5 rows (Hollmann et al., 2025; Grinsztajn, Flöge, Key, Birkel, Jund, Roof, Jäger, Hollmann and Hutter, 2025; Qu et al., 2024), while a single water-shed’s simulation knowledge base typically reaches millions. 
+
+Huang et al.: Preprint submitted to Elsevier Page 1 of 13 Data-efficient domain-aware flood depth prediction    
+
+> Figure 1: Conceptual overview of the proposed approach. (1) Physics-based flood simulation archive: a HEC-RAS knowledge base of 592 synthetic storm events across nine Houston-area watersheds, on the order of 10 8event-hexagon rows, with storm metadata, watershed boundaries, and NOAA Atlas 14 return-period labels. (2) Domain-aware coreset construction: a two-stage pipeline compresses the archive into a compact, hydrologically representative subset. Stage 1 stratifies events by return period and most-affected watershed, and Stage 2 selects H3 Level 10 hexagons with a target-aware facility-location strategy. (3) Tabular foundation model in-context conditioning: the coreset conditions a pretrained tabular foundation model at inference, with no per-watershed fine-tuning. (4) Flood-depth prediction outputs: the model returns peak inundation depth for query hexagons. The pipeline is evaluated under three protocols: within-watershed accuracy, cross-watershed leave-one-out transfer, and real-storm validation on Hurricane Harvey and Tropical Storm Imelda. (The schematic was prepared with the assistance of ChatGPT-5.5.)
+
+Choosing which rows to put into the context becomes the central operational question. Naive options such as random sampling or feature-only facility location ignore the spatial autocorrelation and event-magnitude imbalance that govern flood data. Building a high-quality coreset for a TFM in this setting therefore depends on encoding hydrologic and geographic prior knowledge into the selection step. Figure 1 summarizes the proposed approach. We pro-pose that a TFM conditioned on a carefully built coreset is a feasible flood-depth surrogate at the watershed level. We then test how far the same configuration transfers to held-out watersheds under a leak-free protocol. To support both questions we develop a domain-aware coreset construction pipeline that operates in two stages. Stage one stratifies storm events on two axes: storm return period (RP) and most-affected watershed. The dual stratification ensures that rare high-RP events and their host watersheds survive sampling noise. Stage two samples from a hierarchical hexagonal (H3) grid at Level 10 with cell edge length of approximately 75 m. The selector combines facility-location coverage in static-feature space with a z-scored target-depth signal. For cross-watershed evaluation we adopt a leave-one-out (LOO) protocol in which the held-out target watershed contributes neither training rows nor context. The contributions of this paper are: 
+
+• A two-stage domain-aware coreset construction pipeline that combines event-level stratification by return pe-riod and watershed with target-aware hexagon selec-tion, encoding hydrologic and geographic priors in the context. 
+
+• A demonstration that a vanilla TFM conditioned on the domain-aware coreset (about 0.7% of the per-watershed training pool) recovers 98 .5% of a   
+
+> Huang et al.: Preprint submitted to Elsevier Page 2 of 13 Data-efficient domain-aware flood depth prediction
+
+watershed-level supervised reference in average 𝑅 2
+
+across nine Houston-area watersheds. 
+
+• A leak-free leave-one-out protocol with two source-selection modes (neighboring versus all other water-sheds), showing that the same vanilla TFM transfers to held-out watersheds without retraining and outper-forms a coreset-trained supervised baseline at most context sizes in both modes. 
+
+## 2. Related Work 
+
+2.1. Return Period for Storm Stratification 
+
+Hydrology distinguishes pluvial return period (RP) from fluvial RP by their driver. Pluvial RP ranks events by short-duration rainfall intensity and supports urban drainage de-sign where local rainfall dominates. Fluvial RP ranks events by streamflow magnitude at a gauge and supports riverine flood mapping where upstream runoff dominates. The two can rank the same storm differently, so combined RP frame-works treat both drivers jointly and are preferred in mixed-regime basins where rainfall and runoff co-vary (Zscheis-chler, Westra, van den Hurk, Seneviratne, Ward, Pitman, AghaKouchak, Bresch, Leonard, Wahl and Zhang, 2018; Wahl, Jain, Bender, Meyers and Luther, 2015). All vari-ants share the same statistical foundation: a 𝑇 -year storm has a 1∕ 𝑇 chance of being equaled or exceeded in any single year. RP underpins floodplain mapping, hydraulic structure design, and insurance rate setting. In the United States the reference curves are published in NOAA Atlas 14 (National Oceanic and Atmospheric Administration, 2018), which maps storm duration and accumulated rainfall depth to RP at the county level. For supervised flood-prediction datasets, synthetic storm libraries tend to oversample mod-erate events, so intentional stratification by RP is needed to keep rare, high-impact storms from being under-represented in training (Bentivoglio et al., 2022). 
+
+2.2. Coreset Selection 
+
+A coreset is a small, weighted subset of a dataset chosen so that a model trained or conditioned on the subset behaves similarly to one trained on the full data (Phillips, 2017; Mirzasoleiman, Bilmes and Leskovec, 2020; Bachem, Lucic and Krause, 2017). Coreset selection methods fall into three broad families. Uniform random sampling provides an unbi-ased default but covers feature space inefficiently when data are imbalanced. Geometric methods such as facility location (Lin and Bilmes, 2011; Wei, Iyer and Bilmes, 2015) and core-set covering (Sener and Savarese, 2018) greedily pick samples that maximize coverage of a feature-space kernel, offering diversity guarantees but ignoring labels. Target-aware methods incorporate label statistics: gradient-based selectors (Killamsetty, Sivasubramanian, Ramakrishnan and Iyer, 2021b; Killamsetty, Sivasubramanian, Ramakrishnan, De and Iyer, 2021a) pick samples whose gradients best approximate the full-batch update, proxy-based selectors (Coleman, Yeh, Mussmann, Mirzasoleiman, Bailis, Liang, Leskovec and Zaharia, 2020) rank candidates with a cheaper surrogate model, and pruning metrics such as forgetting score or supervised classification margin separate redundant from informative examples (Sorscher, Geirhos, Shekhar, Ganguli and Morcos, 2022). In the foundation-model era, coreset selection has taken on a second role of choosing in-context examples that condition a pretrained predictor at inference time (Hollmann et al., 2025; Thomas, Ma, Hosseinzadeh, Golestan, Yu, Volkovs and Caterini, 2024). Most of these methods assume samples are independent, an assumption that breaks in geophysical applications where features are strongly autocorrelated, causing naive feature-space selection to cluster samples geographically and leave parts of the domain unrepresented (Roberts, Bahn, Ciuti, Boyce, Elith, Guillera-Arroita, Hauenstein, Lahoz-Monfort, Schröder, Thuiller, Warton, Wintle, Hartig and Dormann, 2017; Meyer, Reudenbach, Hengl, Katurji and Nauss, 2018). 
+
+2.3. In-Context Learning for Tabular Prediction 
+
+Tabular foundation models (TFMs) cast tabular pre-diction as in-context learning: a transformer is pretrained once on a large distribution of synthetic tasks and, at in-ference, conditions on a labeled context set (𝐗 𝑐𝑡𝑥 , 𝐲 𝑐𝑡𝑥 ) to predict labels for a query set 𝐗 𝑞 without gradient updates. The framing originates in the prior-data fitted networks of Müller, Hollmann, Pineda Arango, Grabocka and Hutter (2022) and was specialized to tabular classification and re-gression by TabPFN (Hollmann, Müller, Eggensperger and Hutter, 2023; Hollmann et al., 2025). Subsequent releases progressively expand the supported context: TabPFN-v2.5 (Grinsztajn et al., 2025) reaches roughly 5 × 10 4 rows, and TabPFN-v2.6 (Prior Labs, 2025) extends this to 10 5 rows. TabICL (Qu et al., 2024) targets even larger context sizes through a column-then-row attention mechanism. A separate strand augments these backbones with task-specific fine-tuning (Thomas et al., 2024), with full fine-tuning recently shown to be a stable baseline for TabPFN-v2 (Rubachev, Kotelnikov, Kartashev and Babenko, 2025). Transfer learn-ing has likewise been used to improve tabular prediction from limited engineering data (Pak, Leach, Yoon and Paal, 2023). 
+
+2.4. Out-of-Distribution Evaluation 
+
+Spatially distributed predictors are vulnerable to two distinct evaluation failures. Standard random 𝑘 -fold cross-validation underestimates prediction error on spatially au-tocorrelated data, because train and test folds remain close in feature and physical space (Roberts et al., 2017). Spatial cross-validation schemes such as Leave-Location-Out hold out entire spatial blocks to break that contamination (Meyer et al., 2018). A separate question is whether predictions made outside the training distribution can be trusted at all: Meyer and Pebesma (2021) formalize this as the Area of Applicability of a spatial model, and the WILDS benchmark (Koh, Sagawa, Marklund, Xie, Zhang, Balsubramani, Hu, Yasunaga, Phillips, Gao et al., 2021) catalogues represen-tative distribution shifts in machine learning.   
+
+> Huang et al.: Preprint submitted to Elsevier Page 3 of 13 Data-efficient domain-aware flood depth prediction
+
+## 3. Data 
+
+The primary data is the MaxFloodCast HEC-RAS simu-lation database (Lee et al., 2024) covering nine watersheds in Harris County, Texas (Figure 2). Harris County is the largest county in the Greater Houston Metropolitan Statistical Area, with a substantially flat topography ranging from roughly 
+
+−12 m to 91 m above mean sea level and a population exceeding 4.5 million. Two main hydrologic systems orga-nize the county: Cypress Creek in the north and the Buffalo Bayou system across the central and southern portions, both draining eastward through the San Jacinto River and the Ship Channel into the Gulf of Mexico.         
+
+> Figure 2: The nine Houston-area watersheds, dissolved from the HEC-RAS simulation mesh. Basemap rendered with contextily (https://contextily.readthedocs.io/en/latest/index. html ) using OpenStreetMap and CARTO tiles.
+
+The database contains 592 synthetic storm events gen-erated by applying a Rasterized Time-series Resampling Method to historic storms in the area, with durations from 
+
+1 to 33 hours and hourly rainfall grids at approximately 
+
+1,010 m resolution. Flood inundation depths are simulated by HEC-RAS 2D over an unstructured mesh of 26 ,301 cells (nominal size ≈ 366 m), refined along major watercourses and breaklined at high-elevation features. From this database we inherit the cell-level peak inundation depth target and the per-event rainfall metadata. All other inputs are processed independently in this study. To establish a uniform spatial unit across all variables, we discretize each mesh cell into H3 Level 10 hexagons (about 75 m edge length) via polygon polyfill ( ≈ 7.7
+
+hexagons per mesh cell on average). Static geophysical features are extracted from external geospatial datasets and resampled onto the resulting 177 ,330 hexagons. The HEC-RAS depth output and event-level rainfall metadata are likewise resampled to the same H3 Level 10 grid. Hexagons in the same mesh cell share that cell’s dynamic features (rainfall, depth) but carry their own static features, yielding 
+
+592 events × 177 ,330 hexagons ≈ 105 million rows with no missing values. Per-watershed counts range from 2.2 M(Hunting Bayou) to 14 .1 M (Cypress Creek), with a mean of about 6.9 M. Each row carries 11 predictors and a target (Table 1). Eight static predictors describe local topography and hy-drology: elevation, imperviousness, Topographic Wetness Index (TWI), road density within a 500 m radius, distance to coast, Height above Nearest Drainage (HAND), distance to the nearest stream, and distance to the nearest stream of order ≥ 4. Three dynamic predictors describe each storm: cumulative rainfall, peak rainfall intensity, and precipitation duration. Among the static predictors, TWI follows the standard ln(SCA∕ tan 𝛽 ) formulation under 𝐷 ∞ flow routing (Tarboton, 1997) computed in SAGA GIS (Conrad, Bechtel, Bock, Dietrich, Fischer, Gerlitz, Wehberg, Wichmann and Böhner, 2015), and road density is the fraction of road area within a 500 m circular kernel applied to a 15 m-buffered roadway raster. The target is the per-event peak inundation depth at each hexagon simulated by HEC-RAS. The model predicts one peak-depth value per event and hexagon from static geospatial features and aggregated rainfall descriptors, not a time-evolving nowcast that updates depth as new rainfall or gauge data arrive. Each storm is annotated with two derived fields used for stratification. The most-affected watershed is the watershed whose cells have the highest mean inundation depth during that storm. The RP bin assigns each storm to the largest exceeded NOAA Atlas 14 (National Oceanic and Atmo-spheric Administration, 2018) county-median threshold at the PFDS duration class matching the event’s storm duration, with the procedure detailed in Section 4.1. RP is used as a stratification label rather than a model input. Bin populations cover the range from below 1-year through 1,000-year, with 
+
+42 events each in the 500 -year and 1,000 -year bins. The 592 events are split into 350 for training, 121 for validation, and 121 for testing under double stratification on RP bin and most-affected watershed, with a post-processing pass that prevents any single watershed from being under-represented at test time. Within the test set, 42 stratified-subsample events serve as the query set in all experiments. For external validation we use two real storms simulated with observed rainfall: Hurricane Harvey (August 2017) and Tropical Storm Imelda (September 2019). Rainfall inputs come from Harris County Flood Control District rain-gage observations (Harris County Flood Control District, 2023) interpolated through Thiessen polygons, while depth targets are produced by HEC-RAS 2D under the same setup as the synthetic events and resampled onto the same H3 L10 grid. Harvey lies entirely outside the synthetic training en-velope on the (cumulative rainfall, duration) plane and is treated as fully out-of-distribution (OOD). Imelda mixes in-distribution and OOD cells. 
+
+## 4. Methodology 
+
+4.1. Return Period Construction 
+
+Each storm event is labeled with a single RP bin used to stratify the dataset split and the Stage 1 event selection. The                    
+
+> Huang et al.: Preprint submitted to Elsevier Page 4 of 13 Data-efficient domain-aware flood depth prediction
+> Table 1
+> Key variables used in modeling and event stratification, with data sources. Category Variable Data Source Topography Elevation National Elevation Dataset (NED) Imperviousness National Land Cover Database (NLCD) Topographic Wetness Index (TWI) NED + NLCD Road Density within 500 m radius TxDOT roadway network Distance to Coast National Hydrography Dataset Plus High Resolution (NHDPlusHR) Hydrology Height above Nearest Drainage (HAND) NOAA National Water Model Distance to Nearest Stream NHDPlusHR Distance to Stream (order ≥4)NHDPlusHR Aggregated Event-specific Cumulative Rainfall HEC-RAS 2D Peak Rainfall Intensity HEC-RAS 2D Precipitation Duration HEC-RAS 2D Event Annotation Return Period (RP) NOAA Atlas 14
+
+event is first assigned a NOAA Atlas 14 duration class 𝑑 ∗
+
+based on its storm duration 𝑑 𝑒 :
+
+𝑑 ∗ =
+
+⎧⎪⎨⎪⎩
+
+6 h , 𝑑 𝑒 ≤ 6 h 12 h , 6 h < 𝑑 𝑒 ≤ 12 h 24 h , 𝑑 𝑒 > 12 h 
+
+(1) which selects the smallest NOAA Atlas 14 (National Oceanic and Atmospheric Administration, 2018) class containing 𝑑 𝑒 .The event’s peak cumulative rainfall across hexagons, 𝑟 max ,is then compared against the Harris-County-median NOAA Atlas 14 thresholds {𝜏 𝑑 ∗,𝑇 } at the candidate return periods 
+
+𝑇 ∈ {1 , 2, 5, 10 , 25 , 50 , 100 , 200 , 500 , 1000} years, and the event is assigned the largest 𝑇 for which the threshold is exceeded: 
+
+RP event = max { 𝑇 ∶ 𝑟 max ≥ 𝜏 𝑑 ∗,𝑇 
+
+}, (2) with RP event = 0 when no threshold is exceeded. 
+
+4.2. Two-Stage Coreset Construction 
+
+The choice of in-context examples is the central de-sign decision of this paper. A naive random sample of the simulation knowledge base ignores two properties of flood data: storm-magnitude imbalance leaves rare high-RP events sparse in any such subsample, and spatial autocor-relation among static features causes the picked hexagons to cluster geographically. We address both with a two-stage construction: events are first dual-stratified by return period and watershed, then hexagons within each watershed are sampled with a target-aware spatial selector. The resulting coreset is the Cartesian product of 𝑁 𝑒 events sampled in Stage 1 and 𝑁 ℎ hexagons selected per watershed in Stage 2, giving 𝑁 = 𝑁 𝑒 × 𝑁 ℎ rows per watershed. Table 2 lists the 
+
+(𝑁 𝑒 , 𝑁 ℎ) values used for each 𝑁 .The decomposition balances event diversity against per-watershed hexagon coverage within a context that fits all TFMs evaluated. The largest size 𝑁 = 50 k matches TabPFN-v2.5’s native context limit, so every coreset-based                 
+
+> Table 2
+> Coreset decomposition: (𝑁 𝑒 , 𝑁 ℎ)for each per-watershed size
+> 𝑁 .
+> 𝑁 𝑁 𝑒 𝑁 ℎ
+> 500 20 25 1,000 25 40 2,000 40 50 5,000 50 100 10,000 50 200 50,000 50 1,000
+
+model sees the same maximum context regardless of its own capacity ceiling. Within this 𝑁 envelope, both 𝑁 𝑒 and 𝑁 ℎ
+
+rise at small 𝑁 so the coreset captures both event types and watershed geometry. 𝑁 𝑒 saturates at 50 once 𝑁 allows it, which keeps Stage 1 from depleting the rare-RP tail bins where the training pool itself is sparse. 𝑁 ℎ then grows to keep 𝑁 = 𝑁 𝑒 × 𝑁 ℎ as 𝑁 continues to climb. 
+
+4.2.1. Stage 1: Event Stratification 
+
+Given 𝑁 𝑒 events to select in Stage 1, we draw them from the training split, stratified jointly by RP bin and most-affected watershed. Each watershed first gets a floor of 
+
+𝑘 min = min(2 , ⌊𝑁 𝑒 ∕𝑛 ws ⌋) events, where 𝑛 ws is the number of watersheds. The remaining slots are allocated across water-sheds in proportion to their training-event counts (largest-remainder rounding), and within each watershed across its RP bins. By construction, every watershed contributes at least 𝑘 min events, with within-watershed RP stratification preserving the pool’s bin diversity. 
+
+4.2.2. Stage 2: Hexagon Selection 
+
+Within each watershed we evaluate five hexagon-selection methods: a Random baseline, Facility Location (FL), Spatial-Penalty FL (SP-FL), Depth-Stratified Sampling (Strat-Depth), and Depth-Augmented FL (FL-Depth). 
+
+Random. Uniform random sampling, used as a baseline.   
+
+> Huang et al.: Preprint submitted to Elsevier Page 5 of 13 Data-efficient domain-aware flood depth prediction
+
+FL. Greedy facility location on a feature-space RBF ker-nel (Lin and Bilmes, 2011; Wei et al., 2015; Sener and Savarese, 2018), evaluated over a candidate pool pool of 
+
+3,000 random hexagons subsampled from the watershed for tractability: 
+
+f l = arg max 
+
+> ||=𝑁 ℎ
+
+∑
+
+> ℎ∈pool
+
+max  
+
+> 𝑠 ∈
+
+𝐾 (𝑥 ℎ, 𝑥 𝑠 ), (3) 
+
+𝐾 (𝑥 ℎ, 𝑥 𝑠 ) = exp 
+
+(
+
+− ‖𝑥 ℎ − 𝑥 𝑠 ‖2
+
+𝜎 2
+
+> 𝑓
+
+)
+
+, (4) where 𝑥 ℎ is the z-scored static-feature vector of hexagon ℎ
+
+and 𝜎 2 
+
+> 𝑓
+
+is set by the median heuristic on pairwise squared distances within the pool. 
+
+SP-FL. Facility location on the same pool with a hard spatial-exclusion constraint: 
+
+‖𝑝 ℎ𝑖 − 𝑝 ℎ𝑗 ‖geo ≥ 𝑟 min , ∀ ℎ𝑖 , ℎ 𝑗 ∈ sp _f l , 𝑖 ≠ 𝑗, (5) where 𝑝 ℎ is the hexagon centroid and ‖ ⋅ ‖geo is haversine distance. We fix 𝑟 min = 300 m. SP-FL can fall short of 𝑁 ℎ
+
+in small watersheds when the geometric constraint exhausts available hexagons (Hunting Bayou 56% filled at 𝑁 = 50 k, Vince-Buffalo 71% ). 
+
+Strat-Depth. Stratified random sampling on a per-hexagon depth signal 𝑦 ℎ. The depth signal is the mean simulated peak depth at hexagon ℎ over the Stage 1 event set  for the current 
+
+𝑁 :
+
+𝑦 ℎ = 1
+
+||∑
+
+> 𝑒 ∈
+
+depth ℎ,𝑒 , (6) where depth ℎ,𝑒 is the HEC-RAS-simulated peak depth at hexagon ℎ in event 𝑒 . Dry hexagons ( 𝑦 ℎ ≤ 0) form a separate bin when present and wet hexagons are split into up to three quantile bins, for a total of at most four bins. Selections are allocated equally per bin with largest-remainder allocation to the largest pools for the residual. 
+
+FL-Depth. Facility location on the same pool with feature vector augmented by the z-scored depth signal from Eq. 6: ̃𝑥 ℎ = [ 𝑥 ℎ ; 𝑧 (𝑦 ℎ) ], 𝑧 (𝑦 ) = 𝑦 − 𝜇 𝑦 
+
+𝜎 𝑦 
+
+, (7) where 𝜇 𝑦 and 𝜎 𝑦 are the pool-wide mean and standard deviation of 𝑦 ℎ. The kernel bandwidth 𝜎 2 
+
+> 𝑓
+
+is recomputed by the median heuristic on the augmented ̃𝑥 pool. 
+
+4.3. Models 
+
+4.3.1. Reference Baselines 
+
+Coreset-XGB is XGBoost (Chen and Guestrin, 2016) trained on a single coreset of 𝑁 = 50 k rows per water-shed, with hyperparameters from Lee et al. (2024): 1,000 
+
+histogram-based trees of maximum depth 5, learning rate 
+
+0.01 , column subsampling rate 0.3, and 𝐿 1 regularization weight 10 . Full-KB-XGB uses the same hyperparameters but is trained on all 350 training events for that watershed, on average ≈ 6 .9 M rows. We call it the supervised reference rather than a strict ceiling, since several coreset-based mod-els exceed it on individual watersheds and on the far out-of-distribution storm. 
+
+4.3.2. Vanilla TFMs 
+
+We evaluate three vanilla TFMs. TabPFN-v2.6 (Holl-mann et al., 2025; Prior Labs, 2025) is the latest release in the TabPFN family. TabPFN-v2.5 (Grinsztajn et al., 2025) provides a backbone version contrast, and TabICL (Qu et al., 2024) extends the comparison to a second TFM family. At inference time the coreset  provides the in-context examples: ̂𝑦 𝑞 = 𝑓 𝜃 
+
+(𝑥 𝑞 ; {( 𝑥 𝑖 , 𝑦 𝑖 )} 𝑖 ∈
+
+) (8) where 𝑓 𝜃 is the pretrained transformer and 𝜃 is held fixed. No gradient updates are applied at inference. 
+
+4.3.3. Fine-Tuning Variants 
+
+To test whether fine-tuning (FT) improves over vanilla inference, we add two FT modes on both the TabPFN-v2.5 and TabPFN-v2.6 backbones. TabPFN-FT-v2.5 / v2.6 applies per-watershed fine-tuning on each watershed’s own FL-Depth coreset. TabPFN-FTLOO-v2.5 / v2.6 is fine-tuned across the other eight watersheds, with each episode drawing context and query from one of those eight sampled uniformly at random, so that on a held-out target both context and weights are target-free. Both modes share a single recipe: 
+
+500 episodes with fresh context and query batches of 4,000 
+
+and 2,048 rows, AdamW at learning rate 10 −5 and weight decay 10 −4 , gradient clipping at 1.0, bfloat16 autocast, and MSE loss on context-normalized targets. 
+
+## 5. Experiments and Results 
+
+5.1. Coreset Construction 
+
+The coresets evaluated below come from the two-stage pipeline of Section 4.2, with event selection in Stage 1 and hexagon selection in Stage 2. Stage 1 selects 𝑁 𝑒 = 50 training events. This is large enough for proportional allocation to give every watershed several events despite the uneven per-watershed training pools, and small enough for 𝑁 = 𝑁 𝑒 × 𝑁 ℎ to fit within TabPFN-v2.5’s context cap. The allocation in Figure 3 com-bines proportional sampling with a floor of 𝑘 min = 2 , routing most of the sample to the larger bayou watersheds. The floor catches Addicks and Barker, whose small training pools would otherwise round to zero and exclude these watersheds from the downstream protocols. The below-1-year stratum visible at Addicks and Barker is a direct consequence of this floor on small pools. Each pool spans only 2 and 4 RP bins respectively, including a below-1-year bin, so the floor forces both watersheds to draw bins they would otherwise miss. The 500 -year and 1,000 -year classes each surface in four watersheds, providing rare-event coverage across the bayou network.                                                                                                           
+
+> Huang et al.: Preprint submitted to Elsevier Page 6 of 13 Data-efficient domain-aware flood depth prediction
+> Figure 3: Per-watershed event allocation at 𝑁 𝑒 = 50 . Bars stacked by return period bin, with x-axis labels showing the selected / training-pool ratio per watershed.
+> Table 3
+> Mean 𝑅 2across nine watersheds for the five hexagon selectors at each coreset size 𝑁 . Bold marks each column’s best selector. FL-Depth has the highest cross-𝑁 average for both models, and XGB shows a smaller method spread than v2.5 at every 𝑁 .
+> (a) Vanilla TabPFN-v2.5
+> Method 𝑁 = 500 𝑁 = 1 k𝑁 = 2 k𝑁 = 5 k𝑁 = 10 k𝑁 = 50 kMean Random 0.348 0.370 0.381 0.429 0.463 0.609 0.433 FL 0.315 0.283 0.277 0.346 0.393 0.609 0.371 SP-FL 0.320 0.307 0.298 0.377 0.417 0.602 0.387 Strat-Depth 0.381 0.442 0.453 0.409 0.471 0.611 0.461 FL-Depth 0.455 0.475 0.469 0.402 0.418 0.621 0.473
+> (b) Coreset-XGB
+> Method 𝑁 = 500 𝑁 = 1 k𝑁 = 2 k𝑁 = 5 k𝑁 = 10 k𝑁 = 50 kMean Random 0.400 0.427 0.425 0.486 0.524 0.601 0.477 FL 0.367 0.376 0.384 0.474 0.515 0.609 0.454 SP-FL 0.373 0.387 0.396 0.479 0.523 0.605 0.461 Strat-Depth 0.414 0.433 0.455 0.487 0.528 0.605 0.487 FL-Depth 0.436 0.466 0.469 0.458 0.514 0.606 0.491
+
+Stage 2 selects 𝑁 ℎ hexagons per watershed under five candidate selectors defined in Section 4.2.2. The selectors trade off feature-space coverage against spatial spread, illus-trated for Brays Bayou at 𝑁 = 10 k ( 𝑁 ℎ = 200 ) in Figure 4. FL clusters tightest because its feature-space objective does not penalize spatial proximity, so two nearby hexagons with distinct features can both be selected. Random and Strat-Depth lack any spatial term and follow the underlying mesh density. FL-Depth is more spread than these spatially neutral baselines because its feature vector includes the z-scored depth signal, which varies smoothly in space and therefore makes nearby hexagons redundant under the FL objective. SP-FL has the widest spread under the 𝑟 min = 300 mexclusion constraint. To pick the downstream hexagon selector, we sweep Vanilla TabPFN-v2.5 as the representative TFM and Coreset-XGB as a tree-based control over all five methods at six 𝑁 
+
+values, reported in Table 3. For v2.5 in panel (a), FL-Depth wins at four of the six 𝑁 values and tops the cross-𝑁 average at 𝑅 2 = 0 .473 , with Strat-Depth second and the pure facility-location methods FL and SP-FL well behind. FL-Depth slips below Random at 𝑁 = 5 k and below Strat-Depth at 𝑁 =10 k, but these dips reflect the v2.5 backbone’s weakness in this 𝑁 range rather than any selector failure. Outside that mid-𝑁 window, depth-aware selectors dominate because       
+
+> Huang et al.: Preprint submitted to Elsevier Page 7 of 13 Data-efficient domain-aware flood depth prediction
+> Figure 4: Spatial distribution of selected hexagons for Brays Bayou at 𝑁 = 10 k ( 𝑁 ℎ= 200 ) under all five Stage 2 methods. Panel titles include the mean nearest-neighbor distance. The sparser sampling at the watershed’s southwestern arm reflects the underlying mesh, which thins out where the watershed narrows.
+
+the per-hexagon depth signal compresses each hexagon’s response across the Stage 1 event mix into a single target-relevant dimension. The Stage 1 events span below-1-year through 1,000 -year storms, so hexagons selected along this signal cover the flood-response surface directly. Pure feature-space selection picks hexagons that look feature-diverse but can still cluster on flood response, leaving the target distribution under-covered. The largest size 𝑁 = 50 kis the operating point the rest of our experiments target. It matches TabPFN-v2.5’s native context cap and is the largest context that fits every TFM under parity, even though it represents only about 0.7% of the per-watershed KB. At this size every reasonable coreset spans the flood-response surface, the five methods converge into a narrow band, and FL-Depth still leads. Coreset-XGB in panel (b) follows the same broad ordering but with a much smaller method spread. FL-Depth has a small early lead, but the methods converge quickly as 𝑁 grows because the tree ensemble absorbs row-selection noise into its fit rather than propagating it like an in-context TFM. XGB therefore acts only as a control here, and we adopt FL-Depth as the default hexagon selector for all coreset-based models in the rest of the paper. 
+
+5.2. Experiment 1: Within-Watershed 
+
+We investigate how close a coreset-based model gets to the watershed-level supervised reference and how fine-tuning shifts that gap. Using the FL-Depth coreset across six values of 𝑁 from 500 to 50 k, we evaluate three vanilla TFMs, two per-watershed fine-tuned TabPFN variants, and Coreset-XGB. Full-KB-XGB sets the supervised reference, trained on all 350 training events per watershed. We trace how mean 𝑅 2 scales with 𝑁 to see whether any coreset-based model approaches the reference, then break the 𝑁 =50 k results down by watershed and quantify how much fine-tuning helps each TFM backbone. 
+
+5.2.1. Aggregate Scaling with 𝑁 
+
+The coreset-based models differ in how steeply they improve with 𝑁 and in which size brings them closest to the Full-KB-XGB reference. Figure 5 reports the within-watershed mean 𝑅 2 at each 𝑁 for the six coreset-based models and the reference. Coreset-XGB rises monotonically with 𝑁 but plateaus well below the reference, since the tree ensemble has no pretrained prior and learns only from the coreset. TabICL also rises with 𝑁 but stays below the TabPFN-v2.6 family across the sweep. Its native context window is much larger than 50 k, so the parity cap we apply is conservative for TabICL and leaves it short of its optimum in this regime. Vanilla TabPFN-v2.5 climbs through small 𝑁 ,underperforms in the intermediate 𝑁 range, then recovers at 
+
+𝑁 = 50 k, a v2.5 backbone weakness that the v2.6 backbone eliminates. TabPFN-FT-v2.5 anchors weights to each target watershed and smooths the v2.5 mid-𝑁 dip, but at 𝑁 =50 k it still trails Vanilla TabPFN-v2.6. Vanilla TabPFN-v2.6               
+
+> Huang et al.: Preprint submitted to Elsevier Page 8 of 13 Data-efficient domain-aware flood depth prediction
+> Figure 5: Within-watershed 𝑅 2scaling with coreset size 𝑁 .Mean 𝑅 2across the nine watersheds for the six coreset-based models under FL-Depth, with the Full-KB-XGB reference shown as the dotted line.
+
+rises monotonically with 𝑁 and reaches 𝑅 2 = 0 .663 at 𝑁 =50 k, the highest among coreset-based models and a 98 .5% 
+
+recovery of the Full-KB-XGB reference at 0.673 . The same fine-tuning recipe applied to v2.6 yields TabPFN-FT-v2.6, which tracks Vanilla TabPFN-v2.6 closely but lands slightly lower. The v2.6 prior already encodes the per-watershed adjustment that fine-tuning extracts from v2.5, and addi-tional fine-tuning over-fits the limited target signal in each watershed’s coreset. Two patterns dominate the sweep. The backbone upgrade from v2.5 to v2.6 delivers a larger gain than fine-tuning v2.5 does, and fine-tuning v2.6 provides no benefit. Vanilla TabPFN-v2.6 is therefore the strongest within-watershed model in this evaluation. The stronger pretrained prior delivers more than per-watershed adaptation on the v2.5 backbone, and on the v2.6 backbone the prior is already too informative for fine-tuning to improve. 
+
+5.2.2. Per-Watershed Model Comparison 
+
+At 𝑁 = 50 k with the FL-Depth coreset, we evaluate per-watershed performance for each coreset-based model and the Full-KB-XGB reference. Table 4 reports the 𝑅 2 values. By training-pool size the nine watersheds fall into three groups. Addicks and Barker are small reservoirs with ≤ 4 events each, Hunting is a small-pool bayou with 18 events, and the other six bayous hold 33 to 84 events. Volatility across watersheds tracks the TFM backbone. Vanilla TabPFN-v2.5 has the widest cross-watershed standard deviation at 𝜎 =0.090 . It reaches above the reference on Hunting and Barker where the supervised model is data-limited by small training pools, but falls well below it on Brays and Greens where larger pools give the reference more signal than v2.5’s 50 -event coreset can extract. TabICL is similarly volatile and drops below Coreset-XGB on the harder bayou watersheds, since its column-row attention is designed for much larger contexts than 50 k. Per-watershed fine-tuning on the v2.5 backbone reduces 𝜎 to 0.073 by anchoring weights to each target watershed, and the v2.6 backbone reduces it to roughly 
+
+0.06 regardless of fine-tuning. Backbone strength rather than fine-tuning carries the stability gain. Vanilla TabPFN-v2.6 wins six of the nine watersheds among coreset-based mod-els, with TabPFN-FT-v2.5 taking Barker and Vince-Buffalo and Vanilla TabPFN-v2.5 taking Hunting. More striking, Vanilla TabPFN-v2.6 exceeds the Full-KB-XGB reference on Barker, Hunting, and Sims while recovering 93% to 100% 
+
+on the remaining six. The three reference-beating watersheds share small-to-moderate training pools where the supervised reference itself is data-limited, leaving room for in-context inference with a strong prior to compensate. The remaining six watersheds have larger pools that benefit Full-KB-XGB more than a fixed-size coreset can match. At only 0.7% of the per-watershed training pool, this makes the coreset approach data-efficient at the watershed level. 
+
+5.3. Experiment 2: Cross-Watershed LOO 
+
+We measure cross-watershed transfer by holding out one target watershed at a time. For each held-out target 𝑇 , the in-ference context of size 𝑁 is built from the other eight water-sheds’ 50 k-row random coresets, with two source-selection modes determining how those eight pools feed the context. The geo mode uses only the 𝐾 𝑇 watersheds touching 𝑇 in the mesh-derived adjacency graph of Table 5, each contributing 
+
+𝑁 ∕𝐾 𝑇 rows. The all mode uses all eight other watersheds, each contributing 𝑁 ∕8 rows. The geo pool size 𝐾 𝑇 varies by target, and the mode tests whether watersheds touching 
+
+𝑇 carry sufficiently representative hydrologic regimes that a smaller and more local pool matches the wider pool of all eight. Hexagons within each contributing watershed are sampled at random, since Experiment 1 already character-izes selector effects. We sweep eight context sizes from 1kto 50 k and compare three model groups. Vanilla TabPFN on both backbones consumes the cross-watershed context without parameter updates. TabPFN-FTLOO on both back-bones is fine-tuned across the other eight watersheds before inference, so that neither the target’s data nor its weights enter the prediction. Coreset-XGB is a tree-based baseline fitted on the same cross-watershed context. The Full-KB-XGB reference from Experiment 1 is not reused here be-cause each of its models was trained on its own watershed’s full training rows and would leak target labels into a leave-one-out evaluation, and keeping every model at the same 
+
+50 k-row cross-watershed context isolates the transfer effect from data-volume differences. The leave-one-out protocol breaks the spatial leakage that a random 𝑘 -fold split would not catch (Roberts et al., 2017; Meyer et al., 2018), providing a notion of cross-watershed transfer principled with respect to the spatial structure of the data (Meyer and Pebesma, 2021). Cross-watershed performance separates cleanly by back-bone. Vanilla TabPFN-v2.5 peaks at the smallest 𝑁 and decays steadily as the context grows, while Vanilla TabPFN-v2.6 holds 𝑅 2 between 0.50 and 0.52 across the entire sweep and takes the lead from 𝑁 = 10 k onward. Figure 6 traces the full sweep and Table 6 pins three landmark 𝑁 val-ues under both modes. The TabPFN-FTLOO variants track   
+
+> Huang et al.: Preprint submitted to Elsevier Page 9 of 13
+
+Data-efficient domain-aware flood depth prediction 
+
+Table 4 
+
+Per-watershed 𝑅 2 at 𝑁 = 50 k under FL-Depth, with the bottom two rows giving the cross-watershed mean and standard deviation 
+
+𝜎 . Bold marks each row’s coreset-based maximum, and italics mark cells where a coreset-based model exceeds the Full-KB-XGB reference. V-TabPFN denotes Vanilla TabPFN, and TabPFN-FT is the fine-tuned variant. Watershed Coreset XGB TabICL V-TabPFN v2.5 TabPFN-FT v2.5 TabPFN-FT v2.6 V-TabPFN v2.6 Full-KB XGB Addicks 0.592 0.605 0.615 0.652 0.651 0.662 0.677 Barker 0.670 0.727 0.766 0.779 0.727 0.749 0.728 Brays 0.557 0.526 0.508 0.586 0.578 0.596 0.617 Cypress 0.631 0.617 0.589 0.642 0.655 0.675 0.697 Greens 0.561 0.553 0.527 0.559 0.580 0.593 0.632 Hunting 0.667 0.757 0.765 0.762 0.745 0.748 0.737 Sims 0.601 0.645 0.607 0.668 0.673 0.680 0.661 Vince-Buffalo 0.589 0.580 0.601 0.630 0.619 0.601 0.649 Whiteoak-Buffalo 0.589 0.600 0.608 0.643 0.642 0.662 0.663 Mean 0.606 0.623 0.621 0.658 0.652 0.663 0.673 Std 0.041 0.076 0.090 0.073 0.058 0.059 0.041 
+
+Table 5 
+
+Touching-watershed neighbors used by the geo mode, derived from mesh-cell geometry. Target watershed 𝐾 𝑇 Neighbors Addicks Reservoir 3 Barker, Cypress, Whiteoak-Buffalo Barker Reservoir 4 Addicks, Brays, Cypress, Whiteoak-Buffalo Brays Bayou 4 Barker, Sims, Vince-Buffalo, Whiteoak-Buffalo Cypress Creek 4 Addicks, Barker, Greens, Whiteoak-Buffalo Greens Bayou 4 Cypress, Hunting, Vince-Buffalo, Whiteoak-Buffalo Hunting Bayou 3 Greens, Vince-Buffalo, Whiteoak-Buffalo Sims Bayou 2 Brays, Vince-Buffalo Vince Bayou-Buffalo Bayou 5 Brays, Greens, Hunting, Sims, Whiteoak-Buffalo Whiteoak Bayou-Buffalo Bayou 7 Addicks, Barker, Brays, Cypress, Greens, Hunting, Vince-Buffalo 
+
+their backbones without overtaking Vanilla TabPFN-v2.6, so leave-one-out fine-tuning offers no usable lift on the stronger backbone, mirroring the within-watershed FT finding from Experiment 1. The mode gap stays narrow across the sweep. The one exception is Coreset-XGB at 𝑁 = 50 k under all ,where the wider and more diverse training pool benefits tree fitting enough to overtake every TFM. Outside that corner, the narrow mode gap supports the spatial-locality intuition behind geo ’s design. Touching watersheds carry enough rep-resentative variation to substitute for the full eight-watershed pool in cross-watershed transfer. Vanilla TabPFN-v2.6 is therefore the strongest cross-watershed model, transferring leak-free to a held-out target at the same 50 k-row context size as within-watershed inference. As in Experiment 1, per-task fine-tuning is unnecessary on the stronger backbone. 
+
+5.4. Experiment 3: Real Events 
+
+We evaluate five coreset-based models and the Full-KB-XGB reference on Hurricane Harvey and Tropical Storm Imelda. Each TFM uses its own watershed’s coreset as in-context examples. Harvey’s storm profile lies entirely 
+
+Table 6 
+
+Cross-watershed LOO 𝑅 2 at 𝑁 ∈ {2 k, 10 k, 50 k}, averaged over nine held-out target watersheds under the geo and all source-selection modes. Bold marks each row’s maximum. Mode 𝑁 Coreset XGB V-TabPFN v2.5 TabPFN-FTLOO v2.5 TabPFN-FTLOO v2.6 V-TabPFN v2.6 
+
+geo 
+
+2k 0.4529 0.5300 0.4641 0.4627 0.5195 
+
+10 k 0.4807 0.4790 0.4875 0.5026 0.5152 
+
+50 k 0.4795 0.3984 0.4691 0.4954 0.5023 
+
+all 
+
+2k 0.4660 0.5141 0.4733 0.4690 0.5056 
+
+10 k 0.4910 0.5113 0.4533 0.4970 0.5169 
+
+50 k 0.4940 0.4097 0.4527 0.4815 0.4851 Huang et al.: Preprint submitted to Elsevier Page 10 of 13 Data-efficient domain-aware flood depth prediction          
+
+> Figure 6: Cross-watershed LOO mean 𝑅 2versus context size 𝑁 under the geo (left) and all (right) source-selection modes, averaged over nine held-out target watersheds.
+
+outside the synthetic training envelope on the cumulative-rainfall and duration axes and therefore serves as a fully out-of-distribution test. Imelda has cells both inside and outside this envelope across the nine watersheds.                 
+
+> Table 7
+> Real-event 𝑅 2on Hurricane Harvey and Tropical Storm Imelda, averaged over the nine watersheds. Two TFM variants exceed the Full-KB-XGB reference on Harvey, while the reference reclaims the lead on Imelda. Model Harvey Imelda Coreset-XGB 0.471 0.430 TabICL 0.481 0.380 Vanilla TabPFN-v2.5 0.487 0.404 Vanilla TabPFN-v2.6 0.558 0.430 TabPFN-FT-v2.5 0.570 0.457 Full-KB-XGB 0.503 0.528
+
+On Harvey the two top TFM models exceed the Full-KB-XGB reference. The TabPFN pretrained prior generalizes more reliably than tree-based fitting under sharp distribution shift, since XGB must extrapolate beyond its training enve-lope while the TFM stays inside its own prior. The backbone upgrade from v2.5 to v2.6 delivers +0 .071 𝑅 2 on Harvey and accounts for most of the 0.012 gap between Vanilla TabPFN-v2.6 and the leading TabPFN-FT-v2.5. On Imelda the Full-KB-XGB reference reclaims the lead. Breaking the event into its in-distribution and OOD slices localizes the gap. Full-KB-XGB pulls ahead on the OOD slice with +0 .13 𝑅 2
+
+over Vanilla TabPFN-v2.6, while the three top models con-verge within 0.02 𝑅 2 on the in-distribution slice. TabPFN-FT-v2.5 retains a 0.027 𝑅 2 edge over Vanilla TabPFN-v2.6 on this mixed event. This is the only point in the entire evaluation where fine-tuning shows measurable value. In-distribution prediction depends more on training volume than on the pretrained prior. Full-KB-XGB fits 6.9M rows per watershed and stays ahead of every coreset model on Imelda, while TabPFN-FT-v2.5 extracts more from its 50 kcoreset through 500 gradient-update episodes than vanilla in-context inference does in a single forward pass. The two storms partition the real-event regime by distribution shift. Coreset TFMs hold more potential than tree-based fitting for far-OOD events, while tree-based models with full training access remain hard to beat on in-distribution events. 
+
+## 6. Conclusion 
+
+We present a domain-aware coreset construction pipeline that conditions a tabular foundation model on a small frac-tion of the training rows used by a watershed-level super-vised baseline. With a 50 k-row coreset at about 0.7% of the per-watershed training pool, Vanilla TabPFN-v2.6 reaches mean 𝑅 2 = 0.663 across nine Houston-area watersheds and recovers 98 .5% of a Full-KB-XGB reference trained on roughly 6.9M rows per watershed. This makes Vanilla TabPFN-v2.6 the optimal TFM in our evaluation. Three design elements drive this result. Dual stratification of storm events by NOAA Atlas 14 return period and most-affected watershed ensures rare-event coverage. Target-aware spatial selection via FL-Depth picks hexagons that span the flood-response surface. A sufficiently strong pretrained backbone removes the need for per-task fine-tuning. The same model also transfers to a held-out watershed by drawing in-context examples from its touching neighbors, without any gradient updates. The three experiments map the operating range of the candidates. In the within-watershed evaluation, all core-set TFMs improve with context size 𝑁 , but the trajectory depends on the backbone. The TabPFN-v2.6 family rises monotonically across the sweep, while the TabPFN-v2.5 family dips through the intermediate 𝑁 range and recovers   
+
+> Huang et al.: Preprint submitted to Elsevier Page 11 of 13
+
+Data-efficient domain-aware flood depth prediction 
+
+only at 𝑁 = 50 k. Vanilla TabPFN-v2.6 reaches the highest mean 𝑅 2 = 0 .663 , within 1.5% of the supervised reference on only 0.7% of the per-watershed training data, and per-watershed fine-tuning provides no further benefit. In the cross-watershed leave-one-out evaluation, Vanilla TabPFN-v2.5 peaks at the smallest 𝑁 and decays as the context grows, while Vanilla TabPFN-v2.6 stays stable between 
+
+0.50 and 0.52 across the full sweep and leads the coreset-trained supervised baseline at most context sizes in both source-selection modes. LOO fine-tuning likewise provides no benefit. Two real storms confirm the pattern, with TFMs exceeding the supervised reference on far-OOD Hurricane Harvey and the reference reclaiming the lead on the largely in-distribution Tropical Storm Imelda. Coreset TFMs there-fore hold an advantage under far-OOD conditions, while supervised models with full training access remain hard to beat in-distribution. Several boundaries of the current scope motivate fu-ture work. Vanilla TabPFN-v2.6 has higher cross-watershed variance than the Full-KB-XGB reference ( std = 0.059 
+
+versus 0.041 ), so its higher mean comes with a wider per-watershed worst case. The 50 k-row context cap is well matched to per-watershed inference but leaves room to ex-plore the larger native windows of TabPFN-v2.6 at roughly 
+
+100 k and TabICL at higher still. The real-event component covers two storms that span the OOD and in-distribution regimes, and the cross-watershed evaluation draws on nine Houston-area watersheds. The mesh-to-H3 conversion stan-dardizes spatial units but gives hexagons inheriting the same mesh cell a shared depth label, so future evaluation should report sensitivity at both the H3 and original mesh-cell resolution. Results here are reported in 𝑅 2, and comple-mentary metrics such as RMSE, MAE, and high-depth tail accuracy would further characterize operational reliability. Future work includes evaluating on a wider set of historical storms, testing transfer across distinct hydroclimatic regions to probe the broader transfer-learning capability of coreset TFMs, and exploring hybrids that combine TFM in-context inference with tree-based fitting on in-distribution residuals. 
+
+## References 
+
+Bachem, O., Lucic, M., Krause, A., 2017. Practical coreset constructions for machine learning. arXiv preprint arXiv:1703.06476 . Bentivoglio, R., Isufi, E., Jonkman, S.N., Taormina, R., 2022. Deep learning methods for flood mapping: A review of existing applications and future research directions. Hydrology and Earth System Sciences 26, 4345– 4378. Chen, T., Guestrin, C., 2016. XGBoost: A scalable tree boosting system, in: Proceedings of the 22nd ACM SIGKDD International Conference on Knowledge Discovery and Data Mining, pp. 785–794. Coleman, C., Yeh, C., Mussmann, S., Mirzasoleiman, B., Bailis, P., Liang, P., Leskovec, J., Zaharia, M., 2020. Selection via proxy: Efficient data selection for deep learning, in: International Conference on Learning Representations. Conrad, O., Bechtel, B., Bock, M., Dietrich, H., Fischer, E., Gerlitz, L., Wehberg, J., Wichmann, V., Böhner, J., 2015. System for automated geoscientific analyses (SAGA) v. 2.1.4. Geoscientific Model Develop-ment 8, 1991–2007. Esparza, M., Battala, V., Mostafavi, A., 2026. A graph neural network and decision tree modeling approach for predicting wildfire-induced building damage. Computer-Aided Civil and Infrastructure Engineering , 100085. Grinsztajn, L., Flöge, K., Key, O., Birkel, F., Jund, P., Roof, C., Jäger, L., Hollmann, N., Hutter, F., 2025. TabPFN-2.5: Advancing the state of the art in tabular foundation models. arXiv preprint arXiv:2511.08667 . Grinsztajn, L., Oyallon, E., Varoquaux, G., 2022. Why do tree-based models still outperform deep learning on tabular data?, in: Advances in Neural Information Processing Systems. Harris County Flood Control District, 2023. Harris county flood warning system. https://www.harriscountyfws.org/ .Hollmann, N., Müller, S., Eggensperger, K., Hutter, F., 2023. TabPFN: A transformer that solves small tabular classification problems in a second, in: International Conference on Learning Representations. Hollmann, N., Müller, S., Purucker, L., Krishnakumar, A., Körfer, M., Hoo, S.B., Schirrmeister, R.T., Hutter, F., 2025. Accurate predictions on small data with a tabular foundation model. Nature 637, 319–326. Killamsetty, K., Sivasubramanian, D., Ramakrishnan, G., De, A., Iyer, R., 2021a. GRAD-MATCH: Gradient matching based data subset selection for efficient deep model training, in: International Conference on Machine Learning, pp. 5464–5474. Killamsetty, K., Sivasubramanian, D., Ramakrishnan, G., Iyer, R., 2021b. GLISTER: Generalization based data subset selection for efficient and robust learning, in: Proceedings of the AAAI Conference on Artificial Intelligence, pp. 8110–8118. Koh, P.W., Sagawa, S., Marklund, H., Xie, S.M., Zhang, M., Balsubramani, A., Hu, W., Yasunaga, M., Phillips, R.L., Gao, I., et al., 2021. WILDS: A benchmark of in-the-wild distribution shifts, in: International Confer-ence on Machine Learning, pp. 5637–5664. Kratzert, F., Klotz, D., Brenner, C., Schulz, K., Herrnegger, M., 2018. Rainfall-runoff modelling using long short-term memory (lstm) net-works. Hydrology and Earth System Sciences 22, 6005–6022. Lee, C.C., Huang, L., Antolini, F., Garcia, M., Juan, A., Brody, S.D., Mostafavi, A., 2024. Predicting peak inundation depths with a physics informed machine learning model. Scientific Reports 14, 14826. Li, X., Ma, J., Brody, S.D., Mostafavi, A., 2025. A parametric framework for anticipatory flashflood warning: Integrating landscape vulnerability with precipitation forecasts. arXiv preprint arXiv:2512.17785 . Lin, H., Bilmes, J., 2011. A class of submodular functions for document summarization, in: Proceedings of the 49th Annual Meeting of the Asso-ciation for Computational Linguistics: Human Language Technologies, pp. 510–521. Ma, J., Li, B., Li, X., Mostafavi, A., 2026. Uncovering spatiotemporal coupling of electricity outages and food access disruptions during disas-ters. Transportation Research Part D: Transport and Environment 156, 105358. Meyer, H., Pebesma, E., 2021. Predicting into unknown space? Estimating the area of applicability of spatial prediction models. Methods in Ecology and Evolution 12, 1620–1633. Meyer, H., Reudenbach, C., Hengl, T., Katurji, M., Nauss, T., 2018. Im-proving performance of spatio-temporal machine learning models using forward feature selection and target-oriented validation. Environmental Modelling & Software 101, 1–9. Mirzasoleiman, B., Bilmes, J., Leskovec, J., 2020. Coresets for data-efficient training of machine learning models, in: International Confer-ence on Machine Learning, pp. 6950–6960. Mosavi, A., Ozturk, P., Chau, K.w., 2018. Flood prediction using machine learning models: Literature review. Water 10, 1536. Müller, S., Hollmann, N., Pineda Arango, S., Grabocka, J., Hutter, F., 2022. Transformers can do Bayesian inference, in: International Conference on Learning Representations. National Oceanic and Atmospheric Administration, 2018. NOAA Atlas 14 precipitation-frequency Atlas of the United States. https://hdsc.nws. noaa.gov/pfds/ . Accessed via the Precipitation Frequency Data Server (PFDS). Pak, H., Leach, S., Yoon, S.H., Paal, S.G., 2023. A knowledge transfer enhanced ensemble approach to predict the shear capacity of reinforced concrete deep beams without stirrups. Computer-Aided Civil and Infrastructure Engineering 38, 1520–1535. 
+
+Huang et al.: Preprint submitted to Elsevier Page 12 of 13 Data-efficient domain-aware flood depth prediction 
+
+Phillips, J.M., 2017. Coresets and sketches. Handbook of Discrete and Computational Geometry , 1269–1288. Prior Labs, 2025. TabPFN-2.6. https://huggingface.co/Prior-Labs/ tabpfn_2_6 . Software release supporting up to 100,000 rows and 2,000 features. Qu, J., Holzmüller, D., Varoquaux, G., Le Morvan, M., 2024. TabICL: A tabular foundation model for in-context learning on large data. arXiv preprint arXiv:2502.05564 . Roberts, D.R., Bahn, V., Ciuti, S., Boyce, M.S., Elith, J., Guillera-Arroita, G., Hauenstein, S., Lahoz-Monfort, J.J., Schröder, B., Thuiller, W., Warton, D.I., Wintle, B.A., Hartig, F., Dormann, C.F., 2017. Cross-validation strategies for data with temporal, spatial, hierarchical, or phylogenetic structure. Ecography 40, 913–929. Rubachev, I., Kotelnikov, A., Kartashev, N., Babenko, A., 2025. On finetuning tabular foundation models. arXiv preprint arXiv:2506.08982 .Sener, O., Savarese, S., 2018. Active learning for convolutional neural networks: A core-set approach, in: International Conference on Learning Representations. Sorscher, B., Geirhos, R., Shekhar, S., Ganguli, S., Morcos, A., 2022. Beyond neural scaling laws: Beating power law scaling via data pruning. Advances in Neural Information Processing Systems 35, 19523–19536. Tarboton, D.G., 1997. A new method for the determination of flow directions and upslope areas in grid digital elevation models. Water Resources Research 33, 309–319. Thomas, V., Ma, J., Hosseinzadeh, R., Golestan, K., Yu, G., Volkovs, M., Caterini, A.L., 2024. Retrieval & fine-tuning for in-context tabular models, in: Advances in Neural Information Processing Systems. Wahl, T., Jain, S., Bender, J., Meyers, S.D., Luther, M.E., 2015. Increasing risk of compound flooding from storm surge and rainfall for major US cities. Nature Climate Change 5, 1093–1097. doi: 10.1038/nclimate2736 .Wei, K., Iyer, R., Bilmes, J., 2015. Submodularity in data subset selection and active learning, in: International Conference on Machine Learning, pp. 1954–1963. Xiao, Y., Mostafavi, A., 2025. Damagecat: A deep learning transformer framework for typology-based post-disaster building damage catego-rization. International Journal of Disaster Risk Reduction , 105704. Xiao, Y., Yin, K., Mostafavi, A., 2026. Crisisense-rag: Crisis sensing multimodal retrieval-augmented generation for rapid disaster impact assessment. Computer-Aided Civil and Infrastructure Engineering , 100096. Yin, K., Li, B., Mostafavi, A., 2026. Deep learning-driven community resilience rating based on intertwined socio-technical systems features. npj Urban Sustainability . Yin, K., Mostafavi, A., 2023. Unsupervised graph deep learning re-veals emergent flood risk profile of urban areas. arXiv preprint arXiv:2309.14610 . Zahura, F.T., Goodall, J.L., Sadler, J.M., Shen, Y., Morsy, M.M., Behl, M., 2020. Training machine learning surrogate models from a high-fidelity physics-based model: Application for real-time street-scale flood prediction in an urban coastal community. Water Resources Research 56, e2019WR027038. doi: 10.1029/2019WR027038 .Zscheischler, J., Westra, S., van den Hurk, B.J.J.M., Seneviratne, S.I., Ward, P.J., Pitman, A., AghaKouchak, A., Bresch, D.N., Leonard, M., Wahl, T., Zhang, X., 2018. Future climate risk from compound events. Nature Climate Change 8, 469–477. doi: 10.1038/s41558-018-0156-3 .
+
+Huang et al.: Preprint submitted to Elsevier Page 13 of 13
