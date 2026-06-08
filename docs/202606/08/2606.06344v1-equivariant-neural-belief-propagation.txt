@@ -1,0 +1,1326 @@
+Title: Equivariant Neural Belief Propagation
+
+URL Source: https://arxiv.org/pdf/2606.06344v1
+
+Published Time: Fri, 05 Jun 2026 01:24:13 GMT
+
+Number of Pages: 18
+
+Markdown Content:
+# Equivariant Neural Belief Propagation 
+
+Zehua Cheng 1 Wei Dai 2 Jiahao Sun 21Department of Computer Science, University of Oxford, Oxford, United Kingdom 
+
+> 2
+
+FLock.io, London, United Kingdom 
+
+# Abstract 
+
+Probabilistic inference over spatially embedded variables requires beliefs that respect SE (3) sym-metry, yet existing equivariant networks produce only scalars and vectors—not the rank-2 precision tensors needed for anisotropic uncertainty—and single-component messages collapse multi-modal energy landscapes to physically meaningless av-erages. We introduce Equivariant Neural Belief Propagation (ENBP), a factor-graph framework whose messages are equivariant Gaussian mixture models with sufficient statistics that transform ex-actly under SE (3) . Rank-2 precision matrices are synthesised via equivariant outer products, inges-ted through differentiable spectral decomposition, and kept tractable by a greedy KL-based mixture reduction that provably commutes with SE (3) . On GEOM-QM9 and GEOM-Drugs, ENBP achieves 98.9% conformational coverage at 0.090 ˚A er-ror with sub-second latency—over 100 × faster than diffusion baselines at higher accuracy. On multi-body robotic inference, vanilla loopy BP di-verges at 15+ agents while ENBP converges with near-zero collision rates and machine-precision equivariance error ( ∼10 −7 vs. 10 −1 for augmen-ted baselines). 
+
+# 1 INTRODUCTION 
+
+Probabilistic inference over spatially embedded variables— predicting atomic positions in a molecule or coordinate mar-ginals of robotic agents—is governed by SE (3) -invariant energy landscapes. Predicted beliefs must therefore trans-form equivariantly with the input [Satorras et al., 2021, Batzner et al., 2022]. Belief Propagation (BP) on factor graphs provides the natural scaffold, computing exact mar-ginals on trees [Pearl, 1988, Kschischang et al., 2001] with principled extensions to loopy topologies [Yedidia et al., 2003]. The question is not whether to use equivariant archi-tectures or factor-graph inference, but how to unite them—a unification that existing methods have failed to achieve for structural reasons. The root cause is a forced dilemma between geometric symmetry and representational expressivity. Current E(n)-equivariant networks [Satorras et al., 2021, Thomas et al., 2018] produce invariant scalars and equivariant vectors, which suffice for energies or forces but not for probabilistic inference: the covariance of a distribution in R3 is a rank-2 tensor with transformation law Λ 7 → RΛR⊤, which is neither scalar nor vectorial. Preserving equivariance forces isotropic covariances ( Λ = λI), unable to distinguish radial from angular precision [Ganea et al., 2021, Schütt et al., 2017]; breaking equivariance introduces systematic general-isation error that no finite augmentation eliminates [Elesedy and Zaidi, 2021]. A second deficiency compounds the first: single-Gaussian messages collapse multi-modal energy land-scapes to the mean of distinct modes—a location that may carry negligible physical probability. Together, the rank-2 bottleneck and uni-modal constraint leave existing equivari-ant frameworks unable to represent the geometric and stat-istical complexity of physical distributions. We propose Equivariant Neural Belief Propagation (ENBP), resolving both pathologies through a single principle: mes-sages are equivariant Gaussian mixture models (EGMMs) whose sufficient statistics transform exactly under SE (3) .Three interlocking mechanisms realise this principle: 1. Precision tensor synthesis. Each component’s pre-cision matrix is built from learned equivariant basis vectors via Λk = P 
+
+> p
+
+σ(p) 
+
+> k
+
+v(p) 
+
+> k
+
+v(p)
+
+> k
+> ⊤
+
++ ϵI, guarantee-ing positive-definiteness and Λk 7 → RΛkR⊤.2. Spectral ingestion. Incoming precision matrices are eigendecomposed into invariant eigenvalues and equivariant eigenvectors, enabling standard equivariant layers to consume full anisotropic covariance. 
+
+> arXiv:2606.06344v1 [cs.LG] 4 Jun 2026
+
+3. Equivariant mixture reduction. The exponential blowup from multiplying K-component mixtures is controlled by greedy KL-based merging that provably commutes with SE (3) .Experiments are designed to falsify the diagnosis. Iso-tropic precision causes large, systematic degradation; scal-ing K=1 → 4 triggers a phase transition in collision avoid-ance on loopy robotic graphs; and ENBP achieves equivari-ance error ∼10 −7 while augmented baselines remain at 
+
+∼10 −1. On GEOM-QM9 and GEOM-Drugs, ENBP reaches 98.9% coverage at 0.090 ˚A error with sub-second latency— over 100 × faster than diffusion baselines at higher accuracy. On multi-body robotic inference, vanilla loopy BP diverges at 15+ agents while ENBP converges with near-zero colli-sion rates. In summary, the contributions of this paper are: 1. An equivariant Gaussian mixture message representa-tion that simultaneously captures multi-modal distribu-tions and full anisotropic covariance while transform-ing exactly under SE (3) .2. A rank-2 tensor synthesis–ingestion loop—outer-product precision construction paired with differen-tiable spectral decomposition—that enables standard equivariant architectures to produce and consume cov-ariance matrices without violating symmetry. 3. Formal proofs of positive-definiteness (Lemma 1), 
+
+SO (3) -equivariance of precision tensors (Lemma 2), equivariance-preserving spectral ingestion (Proposi-tion 1) and mixture reduction (Proposition 2), loss in-variance (Theorem 2), end-to-end SE (3) -equivariance (Theorem 3), and convergence stabilisation (Lemma 3). 4. State-of-the-art results on molecular conformation and multi-body robotic inference, with ablations confirm-ing that each architectural component is individually necessary. 
+
+# 2 RELATED WORKS 
+
+Belief propagation and probabilistic inference on graphs. 
+
+Belief propagation (BP) was introduced by Pearl [1988] for exact inference on tree-structured graphical models and later extended to general factor graphs through the sum-product formalism [Kschischang et al., 2001]. When ap-plied to graphs containing cycles, loopy BP can oscillate or diverge [Murphy et al., 1999], and its fixed points cor-respond to stationary points of the Bethe free energy rather than true marginals [Yedidia et al., 2003]. Various strategies have been proposed to stabilise loopy BP, including message damping [Heskes, 2004], tree-reweighted methods [Wain-wright et al., 2003], and convergent alternatives based on convex relaxations [Globerson and Jaakkola, 2007]. In con-tinuous domains, Expectation Propagation [Minka, 2001] approximates intractable messages by moment-matching within the exponential family, while Variational Message Passing [Winn and Bishop, 2005] restricts the variational distribution to a factorised form. Our framework inherits the iterative message-passing structure of BP but replaces scalar or single-Gaussian messages with equivariant Gaussian mix-tures, operating directly on the factor graph topology rather than collapsing it. 
+
+Geometric and equivariant neural networks. Encod-ing physical symmetries directly into neural architectures has yielded substantial gains in data efficiency and general-isation [Elesedy and Zaidi, 2021]. Tensor Field Networks [Thomas et al., 2018] pioneered the use of spherical harmon-ics to construct SE (3) -equivariant layers, and subsequent architectures have simplified this construction through in-variant message passing [Schütt et al., 2017, 2021], equivari-ant coordinate updates [Satorras et al., 2021], or steerable features [Brandstetter et al., 2022, Batzner et al., 2022]. PaiNN [Schütt et al., 2021] interleaves equivariant mes-sage and update blocks to process both scalar and vectorial features, while DimeNet [Gasteiger et al., 2020] incorpor-ates directional information through Bessel basis embed-dings of interatomic angles. SEGNN [Brandstetter et al., 2022] generalises steerable convolutions to arbitrary tensor orders on graphs. These methods, however, are designed for discriminative prediction (e.g. energy or force regres-sion) and output point estimates rather than full probability distributions. ENBP addresses this gap by embedding an 
+
+E(n)-equivariant network [Satorras et al., 2021] within a belief propagation loop, enabling it to produce calibrated, multi-modal marginal distributions while retaining exact geometric equivariance. 
+
+Molecular conformation generation. Predicting three-dimensional molecular conformations from a connectivity graph has received growing attention as a testbed for geo-metric generative models. Early learning-based approaches predicted interatomic distances or torsion angles directly [Ganea et al., 2021, Xu et al., 2022a], but struggled to cap-ture multi-modal torsional distributions. Score-based dif-fusion models brought substantial improvements: GeoDiff [Xu et al., 2022b] applies a diffusion process in Cartesian co-ordinate space, while Torsional Diffusion [Jing et al., 2022] restricts the diffusion to the hypertorus of dihedral angles, significantly reducing the dimensionality of the generative problem. More recent methods explore flow matching on Riemannian manifolds [Klein et al., 2024] and latent-space diffusion with SE (3) invariance. Despite their strong em-pirical performance, diffusion-based methods require many sequential denoising steps at inference time, incurring high computational cost. In contrast, ENBP generates a full multi-modal belief in a fixed number of BP iterations, yielding competitive coverage and structural accuracy at a fraction of the latency. Figure 1: Overview of the Equivariant Neural Belief Propagation (ENBP) architecture. (1) Factor Graph & EGMM Message Passing: The probabilistic inference problem is structured as a bipartite factor graph where variable and factor nodes exchange messages. To capture multi-modal energy landscapes, messages are parameterized as Equivariant Gaussian Mixture Models (EGMMs). Each mixture component consists of an invariant mixing weight, an SE (3) -equivariant mean vector, and an SO (3) -equivariant rank-2 precision matrix. 
+
+# 3 METHODOLOGY 
+
+Formal definitions of factor graphs, belief propagation, and group equivariance are provided in Appendix A. 
+
+3.1 PROBLEM FORMULATION AND FACTOR GRAPH STRUCTURE 
+
+We consider probabilistic inference over N continuous spa-tial variables x = {x1, . . . , xN }, where each xi ∈ R3
+
+represents the position of a physical entity (e.g. an atom or robotic agent). Each variable node carries invariant scalar features si ∈ Rds (e.g. atomic number) that do not trans-form under spatial operations. The joint distribution factor-ises over M local potentials [Pearl, 1988, Kschischang et al., 2001]: 
+
+p(x) = 1
+
+Z
+
+> M
+
+Y
+
+> a=1
+
+ψa(xN (a)), (1) where N (a) ⊂ { 1, . . . , N } indexes the variables in factor 
+
+a and Z is the partition function. In physical systems, p is 
+
+SE (3) -invariant: p(Rx + t) = p(x) for all R ∈ SO (3) ,
+
+t ∈ R3. Any inference framework must therefore produce equivariant marginal beliefs. We represent Eq. (1) as a bipartite factor graph G =(V, F, E), preserving the bipartite topology to encode con-ditional independence and accommodate higher-order in-teractions within single factor nodes. On acyclic graphs, BP computes exact marginals [Pearl, 1988]; on the cyclic graphs arising in closed-ring molecules and coupled robotic formations, standard BP may diverge [Yedidia et al., 2003, Murphy et al., 1999], motivating the stabilisation mechan-isms in Section 3.5. 
+
+3.2 EQUIVARIANT GAUSSIAN MIXTURE MESSAGES 
+
+Messages should represent probability distributions rather than opaque latent vectors [Sudderth et al., 2003, Winn and Bishop, 2005]. Single-Gaussian messages collapse multi-modal landscapes to a mean that may carry negligible phys-ical probability [Ganea et al., 2021]. We therefore para-meterise each message as an Equivariant Gaussian Mixture Model (EGMM) with K components: 
+
+ma→i(xi) = 
+
+> K
+
+X
+
+> k=1
+
+wk N  xi μk, Λ−1
+
+> k
+
+ , (2) where wk > 0 with P 
+
+> k
+
+wk = 1 , μk ∈ R3 is an SE (3) -equivariant mean, and Λk ∈ R3×3 is an SO (3) -equivariant precision matrix. Under rotation R, the weights are invariant, 
+
+μk 7 → Rμk, and Λk 7 → RΛkR⊤.3.3 PRECISION TENSOR SYNTHESIS VIA EQUIVARIANT OUTER PRODUCTS 
+
+Standard E(n)-equivariant networks [Satorras et al., 2021] produce scalars and vectors but cannot output rank-2 tensors; scalar-only construction restricts Λk to the isotropic form 
+
+λkI, which cannot capture the anisotropic uncertainties of molecular bonds [Batzner et al., 2022, Schütt et al., 2017]. We synthesise Λk from P learned equivariant basis vectors 
+
+{v(p) 
+
+> k
+
+} and positive scalar coefficients {σ(p) 
+
+> k
+
+} (enforced via softplus): 
+
+Λk =
+
+> P
+
+X
+
+> p=1
+
+σ(p) 
+
+> k
+
+v(p) 
+
+> k
+
+v(p)
+
+> k
+> ⊤
+
++ ϵ I, (3) where ϵ > 0 guarantees positive-definiteness. Since each 
+
+v(p) 
+
+> k
+
+7 → Rv(p) 
+
+> k
+
+, the full construction satisfies Λk 7 →
+
+RΛkR⊤. Setting P ≥ 3 yields full rank when the basis vectors are not co-planar; in all experiments P = 3 and 
+
+ϵ = 10 −4.
+
+3.4 SPECTRAL DECOMPOSITION FOR TENSOR INGESTION 
+
+The receiving node must ingest the rank-2 precision tensor as input features. Standard equivariant layers [Satorras et al., 2021, Thomas et al., 2018] accept scalars and vectors but not 3 × 3 matrices; flattening would destroy the SO (3) 
+
+transformation law. We apply a differentiable eigendecom-position: 
+
+Λk =
+
+> 3
+
+X
+
+> j=1
+
+λ(j) 
+
+> k
+
+u(j) 
+
+> k
+
+u(j)
+
+> k
+> ⊤
+
+, (4) where λ(1)  
+
+> k
+
+≥ λ(2)  
+
+> k
+
+≥ λ(3)  
+
+> k
+
+> 0 and {u(j) 
+
+> k
+
+} form an ortho-gonal eigenbasis. Under rotation, eigenvalues are invariant and eigenvectors co-rotate ( u(j) 
+
+> k
+
+7 → Ru(j) 
+
+> k
+
+), so the eigenval-ues enter as scalar features and the eigenvectors as vector features. Two numerical subtleties require treatment. Near-degenerate eigenvalues produce singular gradients via (λ(i) 
+
+> k
+
+− λ(j) 
+
+> k
+
+)−1
+
+terms; following Wang et al. [2022], we replace each denom-inator with a stable approximant regularised by δ = 10 −6.The sign ambiguity of eigenvectors ( u ↔ − u) is resolved by enforcing that the component with the largest absolute value is positive. 
+
+3.5 MESSAGE UPDATE RULES 
+
+The inference algorithm proceeds through T iterations of alternating variable-to-factor and factor-to-variable updates (Algorithm 1). 
+
+Variable-to-factor update. Variable i multiplies all in-coming messages from N (i) \ { a} [Kschischang et al., 2001]. For K-component EGMMs, the exact product yields 
+
+K|N (i)|− 1 components. We handle this in two stages. First, pairwise products are computed via natural parameter sum-mation: 
+
+Λ12 = Λ1 + Λ2,
+
+μ12 = Λ−112 (Λ1μ1 + Λ2μ2). (5) Second, the expanded mixture is collapsed back to K com-ponents by greedily merging the pair with the smallest closed-form KL divergence upper bound [Runnalls, 2007], using moment-matching. This reduction is equivariance-preserving: the KL criterion depends only on invariant quant-ities, and moment-matching of means commutes with rota-tion. To mitigate the oscillatory behaviour of BP on loopy factor graphs [Heskes, 2004], we apply temporal damping. Let 
+
+θ(t) 
+
+> i→a
+
+denote the concatenated natural parameters of the variable-to-factor message at iteration t. The damped update is: 
+
+θ(t) 
+
+> i→a
+
+= α ˜θ(t) 
+
+> i→a
+
++ (1 − α) θ(t−1)  
+
+> i→a
+
+, (6) where ˜θ(t) 
+
+> i→a
+
+are the freshly computed parameters and α ∈
+
+(0 , 1] is a damping coefficient. This convex combination restricts the step size of the marginal updates, suppress-ing circular information flow in loopy substructures. While damping does not provide formal convergence guarantees for loopy BP in general [Heskes, 2004, Yedidia et al., 2003], it empirically stabilises the inference process in all configur-ations evaluated in Section 4. 
+
+Factor-to-variable update. The factor-to-variable mes-sage marginalises the potential over all neighbouring vari-ables except i:
+
+ma→i(xi) ∝
+
+Z
+
+ψa(xN (a)) Y 
+
+> j∈N (a)\{ i}
+
+mj→a(xj ) dxj .
+
+(7) This integral is generally intractable [Sudderth et al., 2003, Minka, 2001]. We approximate it with a learnable E(n)-equivariant network fϕ [Satorras et al., 2021] operating over factor a’s local neighbourhood. The network receives spectral-decomposed sufficient statistics (eigenvalues, ei-genvectors, means, weights) from each j ∈ N (a) \ { i}, and operates on relative positions xj − xi to enforce translation invariance (Section 3.7). It outputs basis vectors, scaling coefficients, means, and logit weights, from which EGMM parameters are assembled via Eq. (3) and softmax norm-alisation. The equivariance of fϕ ensures the approximate marginalisation commutes with SE (3) [Elesedy and Zaidi, 2021]. Algorithm 1: Equivariant Neural Belief Propagation 
+
+Input :Factor graph G = ( V, F, E); node positions 
+
+{xi}; scalar features {si}; number of iterations T ; number of mixture components 
+
+K; damping coefficient α
+
+Output : Marginal beliefs {bi(xi)}i∈V 
+
+Initialise all messages m(0) 
+
+> a→i
+
+, m(0)  
+
+> i→a
+
+as uniform EGMM; 
+
+for t = 1 to T do 
+
+// Variable-to-factor update 
+
+foreach (i, a ) ∈ E do 
+
+Compute product of incoming messages 
+
+{m(t−1)  
+
+> a′→i
+
+}a′∈N (i)\{ a} via Eq. (5); Collapse mixture to K components via greedy KL merging; Apply temporal damping via Eq. (6); 
+
+end 
+
+// Factor-to-variable update 
+
+foreach (a, i ) ∈ E do 
+
+Spectrally decompose incoming precision matrices via Eq. (4); Compute relative coordinates rji = xj − xi for 
+
+j ∈ N (a) \ { i};Predict EGMM parameters {wk, μk, Λk}Kk=1 
+
+via fϕ;Synthesise precision matrices via Eq. (3); 
+
+end end 
+
+Compute final beliefs: bi(xi) ∝ Q  
+
+> a∈N (i)
+
+m(T )
+
+> a→i
+
+(xi);
+
+3.6 OBJECTIVE FUNCTION 
+
+We optimise ϕ by maximising the log-likelihood of observed configurations x∗ 
+
+> i
+
+under the predicted EGMM beliefs: 
+
+Li = − log 
+
+> K
+
+X
+
+> k=1
+
+wk N  x∗ 
+
+> i
+
+μk, Λ−1
+
+> k
+
+ . (8) Expanding each component gives the Mahalanobis distance and log-normalisation:                   
+
+> log N(x∗
+> i|μk,Λ−1
+> k) = −12 (x∗
+> i−μk)⊤Λk(x∗
+> i−μk)+ 12 log det Λk−32 log(2 π).
+> (9)
+
+Both terms are SO (3) -invariant: the Mahalanobis form is unchanged because R⊤R = I, and log det( RΛkR⊤) = log det Λk because det R = 1. We compute the log-determinant via P 
+
+> j
+
+log λ(j) 
+
+> k
+
+for numerical stability. The log-determinant is essential: without it, the optimiser can trivially minimise the Mahalanobis term by sending 
+
+σ(p) 
+
+> k
+
+→ 0 (i.e. Λk → ϵI), predicting near-infinite vari-ance. The log-determinant penalises low-precision solu-tions, establishing a non-trivial optimum. The total loss is L = P 
+
+> i∈V
+
+Li.
+
+3.7 EXPERIMENTAL DESIGN FOR GEOMETRIC INTEGRITY 
+
+Two design decisions address common methodological pit-falls in geometric deep learning. 
+
+Elimination of global centring. Subtracting the global centroid ¯x = 1
+
+> N
+
+P 
+
+> i
+
+xi introduces an all-to-all dependency that violates the conditional independence structure BP ex-ploits; it is also redundant for translation-equivariant models. We instead compute relative displacements rji = xj − xi
+
+within each factor’s neighbourhood, preserving locality. 
+
+Capacity-matched baselines. Matching baselines by parameter count biases the comparison: equivariant architec-tures encode symmetry structurally, while non-equivariant models must spend capacity learning it from data [Elesedy and Zaidi, 2021]. We therefore match inference-time FLOPs, expanding non-equivariant hidden dimensions accordingly. All non-equivariant baselines are trained with continuous 
+
+SO (3) augmentation. 
+
+# 4 EXPERIMENTAL SETUP 
+
+We evaluate ENBP on two domains that expose distinct failure modes of existing inference methods. The first is molecular conformation prediction on GEOM-QM9 and GEOM-Drugs [Axelrod and Gomez-Bombarelli, 2022], cov-ering both rigid and highly flexible molecules. The second is multi-body robotic formation inference with 5–20 agents in 2D and 3D, whose dense cyclic factor graphs cause vanilla BP to diverge. Baselines include direct-prediction GNNs (GeoMol, ConfGNN), diffusion models (GeoDiff, Torsional Diffusion), vanilla loopy BP, and a direct-regression GNN— all FLOPs-matched and trained with continuous SO (3) aug-mentation (Section 3.7). Full dataset descriptions, baseline configurations, evaluation metrics, and implementation de-tails are provided in Appendix B. 
+
+# 5 EXPERIMENTAL RESULTS 
+
+The rigorous evaluation of generative structural algorithms intrinsically demands physical testbeds characterized by complex, non-linear energy landscapes. Molecular conform-ation prediction provided an optimal environment for this validation, as it fundamentally required the continuous infer-ence of three-dimensional atomic positions conditioned ex-clusively on topological connectivity graphs. Because phys-ical chemical structures naturally produce closed-ring cyclic dependencies and exhibit invariances under the Special Euc-lidean group, this domain strictly isolated the probabilistic Table 1: Molecular conformation prediction on GEOM-QM9 and GEOM-Drugs. Coverage (Cov.) is the fraction of ground-truth modes captured; AMR is the average minimum RMSD across generated conformers; Time is per-molecule inference latency. All baselines are FLOPs-matched and trained with continuous SO (3) augmentation. Model Variant Gen. Budget (C) QM9 Cov. (%) ↑
+
+QM9 AMR ( ˚A) ↓ QM9 RMSD ( ˚A) ↓
+
+Drugs Cov. (%) ↑
+
+Drugs AMR ( ˚A) ↓ Time (s) ↓
+
+GeoMol 10 68.4 0.354 0.382 34.2 1.624 0.12 ConfGNN 10 71.5 0.312 0.345 39.5 1.482 0.18 GeoDiff 10 82.4 0.245 0.278 58.6 1.150 12.45 Torsional Diff. 10 86.8 0.198 0.224 67.2 0.945 8.52 
+
+ENBP (Ours) 10 92.5 0.142 0.165 82.4 0.620 0.45 
+
+GeoMol 50 74.2 0.320 0.350 45.8 1.450 0.15 ConfGNN 50 78.4 0.285 0.310 51.2 1.280 0.22 GeoDiff 50 88.5 0.210 0.235 68.4 1.020 62.25 Torsional Diff. 50 91.2 0.165 0.182 78.5 0.810 42.60 
+
+ENBP (Ours) 50 96.8 0.115 0.130 90.5 0.510 0.65 
+
+GeoMol 100 78.5 0.295 0.325 52.4 1.380 0.18 ConfGNN 100 81.2 0.250 0.280 58.6 1.150 0.28 GeoDiff 100 91.4 0.185 0.210 75.2 0.910 124.50 Torsional Diff. 100 93.8 0.142 0.160 84.6 0.720 85.20 
+
+ENBP (Ours) 100 98.2 0.102 0.115 94.8 0.445 0.85 
+
+GeoMol 200 81.4 0.280 0.310 58.5 1.280 0.25 ConfGNN 200 84.5 0.235 0.265 64.2 1.050 0.35 GeoDiff 200 93.5 0.165 0.185 81.5 0.840 249.00 Torsional Diff. 200 95.4 0.125 0.145 88.4 0.650 170.40 
+
+ENBP (Ours) 200 98.9 0.090 0.105 96.5 0.380 1.25 
+
+reasoning capabilities of the inference models. Operating precisely within this parameter space ensured that represent-ational advantages mathematically derived from equivariant formulations could be empirically quantified. To systematically probe these limits, we deployed the GEOM-QM9 and GEOM-Drugs datasets. QM9 (small, rigid molecules) tests local geometric precision, while GEOM-Drugs (large, flexible compounds) features highly multi-modal torsional landscapes. Metrics included optimal-alignment Root-Mean-Square Deviation (RMSD), Cover-age, and Average Minimum RMSD (AMR) mapped across varying generative budgets. For an unbiased comparison, we used capacity-matched (FLOP-equalized) baselines, in-cluding direct prediction GNNs (GeoMol, ConfGNN) and continuous-time diffusion models (GeoDiff, Torsional Dif-fusion). All non-equivariant baselines were exhaustively trained with continuous spatial data augmentation. On the rigid QM9 dataset, direct regression models plat-eaued, failing to drop AMR below 0.235 ˚A even with maximum generative budgets of 200 conformers. While diffusion models improved spatial accuracy, Equivariant Neural Belief Propagation (ENBP) established a definitive upper bound. By natively propagating exact rank-2 preci-sion tensors, ENBP achieved 98.9% Coverage and 0.090 ˚A
+
+error. On the flexible GEOM-Drugs dataset, representational lim-its were stark. Direct prediction models suffered probability dilution, producing invalid mean configurations that failed to span the conformational modes. Diffusion models navig-ated these topographies better but incurred prohibitive com-putational costs. Conversely, ENBP maintained dominant geometric fidelity with an AMR of 0.380 ˚A and near-second inference latencies. Preserving distinct structural hypotheses via Gaussian mixtures successfully resolves the dichotomy between thermodynamic uncertainty and algorithmic effi-ciency. 
+
+5.1 MULTI-BODY ROBOTIC FORMATION INFERENCE 
+
+Table 2 reports results across agent counts N ∈{5, 10 , 15 , 20 } in 2D and 3D. Baselines include Vanilla Loopy BP with single-Gaussian messages, a FLOPs-matched direct-regression GNN, and ENBP ablations with 
+
+K ∈ { 1, 2, 4} components. Vanilla Loopy BP diverges entirely at N ≥15 , confirming the instability of undamped single-Gaussian messages on dense loops. The direct-regression GNN remains operational but predicts over-smoothed averages, with 3D collision rates reaching 45.2% at N =20 . Restricting ENBP to K=1 pre-Table 2: Multi-body robotic formation inference across increasing agent density ( N ) and topological complexity. NLL is the negative log-likelihood of target geometries; Col. is the collision rate. “Div.” denotes algorithmic divergence; “DNC” denotes did not converge. ENBP variants ablate the number of mixture components K.Arch. Scale (N) Topo. Envir. 2D NLL ↓
+
+2D Col. (%) ↓
+
+3D NLL ↓
+
+3D Col. (%) ↓
+
+Time (ms) ↓
+
+Vanilla Loopy BP 5 Sparse Ring 3.45 12.4 4.12 15.2 12 GNN Direct 5 Sparse Ring 2.15 8.2 2.55 10.4 15 ENBP ( K = 1 ) 5 Sparse Ring 1.85 6.5 2.10 8.5 24 ENBP ( K = 2 ) 5 Sparse Ring 1.42 2.1 1.65 3.2 32 
+
+ENBP ( K = 4 ) 5 Sparse Ring 0.85 0.0 0.95 0.2 45 
+
+Vanilla Loopy BP 10 Coupled Grid 6.85 24.5 7.95 31.5 28 GNN Direct 10 Coupled Grid 3.85 15.4 4.25 18.2 24 ENBP ( K = 1 ) 10 Coupled Grid 3.25 12.8 3.85 15.4 45 ENBP ( K = 2 ) 10 Coupled Grid 2.45 5.4 2.85 8.2 58 
+
+ENBP ( K = 4 ) 10 Coupled Grid 1.25 0.8 1.45 1.2 72 
+
+Vanilla Loopy BP 15 Dense Loop Div. Div. Div. Div. DNC GNN Direct 15 Dense Loop 5.24 25.8 6.15 31.4 35 ENBP ( K = 1 ) 15 Dense Loop 4.85 22.4 5.42 26.8 65 ENBP ( K = 2 ) 15 Dense Loop 3.55 12.5 4.15 16.2 84 
+
+ENBP ( K = 4 ) 15 Dense Loop 1.65 2.1 1.85 3.4 105 
+
+Vanilla Loopy BP 20 Swarm Matrix Div. Div. Div. Div. DNC GNN Direct 20 Swarm Matrix 7.45 38.4 8.65 45.2 48 ENBP ( K = 1 ) 20 Swarm Matrix 6.55 32.5 7.85 38.6 85 ENBP ( K = 2 ) 20 Swarm Matrix 5.15 18.4 6.25 24.5 115 
+
+ENBP ( K = 4 ) 20 Swarm Matrix 2.25 4.2 2.65 5.8 135 
+
+serves equivariance but suffers analogous mode-averaging collisions, confirming that single-component messages can-not partition probability mass around physical obstacles. Scaling to K=4 reverses the collision trajectory: rates drop to near zero even in the densest 20-agent swarms, while NLL reaches the lowest values across all scales. Inference latency grows sub-linearly with K, confirming that multi-modal message passing resolves dense collision-avoidance constraints at manageable computational cost. 
+
+5.2 PRECISION TENSOR AND SPECTRAL INGESTION ABLATIONS 
+
+Table 3 isolates the contributions of precision tensor syn-thesis and spectral ingestion by replacing one module at a time. To thoroughly interrogate these operational boundar-ies, a sequence of highly targeted architectural ablation stud-ies was conducted, specifically deconstructing the precision tensor synthesis and the differentiable spectral decomposi-tion modules. These empirical variations were continuously evaluated over the rigid and flexible molecular testbeds. 
+
+Precision parameterisation. Restricting Λk to isotropic form inflates AMR from 0.090 to 0.285 ˚A on QM9 and from 0.380 to 1.250 ˚A on Drugs, confirming that anisotropic cov-ariance is essential for capturing directional torsional vari-ance. Increasing the outer-product rank from P =1 to P =3 
+
+yields monotonic improvement; the full-rank construction improves NLL by nearly 2× over P =1 .
+
+Tensor ingestion. Flattening the precision matrix into nine scalars produces the worst results across all metrics (AMR of 1.850 ˚A on Drugs), as it destroys the SO (3) trans-formation law. Cholesky parameterisation also underper-forms due to lack of equivariance guarantees. Feeding only eigenvalues without eigenvectors discards directional in-formation and degrades AMR by 2.4× relative to the full spectral module. Both the co-rotating eigenvectors and their invariant eigenvalues are necessary for stable ingestion of anisotropic uncertainty. 
+
+5.3 INFERENCE DYNAMICS AND EQUIVARIANCE VERIFICATION 
+
+The functional stability and rigorous mathematical integrity of any message-passing inference engine rely heavily upon explicit control over temporal algorithmic dynamics and the absolute preservation of fundamental spatial transform-ations. Systematic sensitivity analyses were consequently designed to rigorously trace the algorithmic convergence Table 3: Ablation of precision tensor parameterisation and spectral ingestion on GEOM-QM9 and GEOM-Drugs. Each row replaces one module of the full ENBP architecture while keeping all other components fixed. Arch. Var. QM9 NLL ↓                                          
+
+> QM9 AMR ( ˚A)↓
+> Drugs NLL ↓
+> Drugs AMR ( ˚A)↓
+> Isotropic Baseline (Λk=λkI)-120.4 0.285 -85.2 1.250 Diagonal Precision Approximation -142.5 0.220 -98.4 0.950 Outer-Product Rank ( P= 1 )-165.2 0.185 -115.6 0.820 Outer-Product Rank ( P= 2 )-192.8 0.140 -145.2 0.650 Flattened Matrix (9 Scalars) -95.6 0.450 -60.5 1.850 Cholesky Parameterization -135.2 0.255 -92.8 1.150 Eigenvalues Only (No Vectors) -152.4 0.205 -105.4 0.900
+> Full ENBP
+> (P= 3 , Spectral) -235.6 0.090 -188.5 0.380
+
+boundaries dictating iterative context aggregation and tem-poral message regularization. Additionally, the evaluation framework incorporated strict numerical verifications ex-plicitly structured to audit exact spatial equivariance. By subjecting the generated topologies to unobserved global co-ordinate rotations, the protocol quantified the precise math-ematical resilience of the predictive pipelines, fundament-ally isolating architectural geometric stability from superfi-cial data-augmented approximations. The controlled modulation of the recursive message-passing depth and the temporal damping coefficients successfully and empirically mapped the operational parameters required to stabilize cyclic graphs. In the complete absence of tem-poral regularization ( α = 1 .0), the algorithms generated severe, non-convergent oscillations directly reflecting the resonant amplification of localized topological loops, driv-ing convergence rates to zero. Conversely, the application of extreme damping parameters ( α = 0 .1) induced deep mathematical stagnation, preventing the structural margin-als from reaching holistic geometric consensus. Identifying the mathematically optimal stabilization point empirically validated that carefully restricting the natural parameter update step sizes successfully forces smooth, monotonic al-gorithmic convergence without compromising the temporal dissemination of distant multi-body physical constraints. The strict numerical verification of structural symmetry un-der arbitrary spatial transformations provided the final in-dispensable proof of coordinate-free algorithmic design. Despite being exhaustively trained utilizing continuous data augmentations, the standard non-equivariant baselines suffered insurmountable generalization collapse, exhibiting wildly fluctuating equivariance errors when exposed to pre-Table 4: Sensitivity to damping coefficient α and iteration depth T , with equivariance verification on the 20-agent 3D robotic task. Equivariance error is the maximum deviation in predicted marginals under random SO (3) rotations not seen during training. “Div.” denotes algorithmic divergence. Configuration Parameter Value System NLL ↓                                                         
+
+> Conv. Rate (%) ↑
+> Equiv. Error ↓
+> Damping ( α)α= 0 .13.85 100.0 1.2×10 −7
+> Damping ( α)α= 0 .51.45 100.0 1.2×10 −7
+> Damping ( α)α= 1 .0Div. 0.0 1.2×10 −7
+> Iterations ( T)T= 1 8.54 100.0 1.2×10 −7
+> Iterations ( T)T= 8 1.35 100.0 1.2×10 −7
+> Baseline Setting Direct GNN (Aug.) 6.55 100.0 4.5×10 −1
+> Baseline Setting Vanilla Loopy BP Div. 0.0 8.2×10 −1
+> Full ENBP (Ours) Optimal Config 1.25 100.0 1.2×10 −7
+
+viously unseen spatial orientations. In sharp contrast, the proposed inference architecture effortlessly maintained per-fectly identical log-likelihood scores across all rotated data-sets. The quantified structural deviation hovered precisely at the fundamental limit of machine precision, empirically cer-tifying the methodological proofs and formally validating that local, relative-coordinate processing natively eliminates the coordinate-frame biases chronic to contemporary deep neural networks. 
+
+# 6 CONCLUSION 
+
+We identified a structural bottleneck in equivariant neural inference—the inability to produce rank-2 precision tensors or multi-modal messages—and resolved it through Equivari-ant Neural Belief Propagation, whose equivariant Gaus-sian mixture messages are synthesised via outer products, ingested via spectral decomposition, and reduced via an 
+
+SE (3) -commuting greedy procedure. Ablations confirm each diagnosis: isotropic precision inflates error by 3×;scaling from K=1 to K=4 triggers a phase transition in collision avoidance; and architectural equivariance yields six orders of magnitude lower symmetry error than data augmentation. Beyond the specific benchmarks, the tensor synthesis–ingestion loop is not specific to BP and can be embedded into any equivariant GNN requiring directional uncertainty. The framework’s boundaries are concrete: fixed iteration depth does not adapt to graph complexity; Gaus-sian mixtures cannot represent heavy-tailed or discontinuous potentials; greedy reduction optimises a KL upper bound rather than the true divergence; and architectures with native Type-2 outputs could replace the outer-product construction, potentially improving efficiency. References 
+
+Simon Axelrod and Rafael Gomez-Bombarelli. Geom, energy-annotated molecular conformations for property prediction and molecular generation. Scientific data , 9 (1):185, 2022. Simon Batzner, Albert Musaelian, Lixin Sun, Mario Geiger, Jonathan P. Mailoa, Mordechai Kornbluth, Nicola Molin-ari, Tess E. Smidt, and Boris Kozinsky. E(3)-equivariant graph neural networks for data-efficient and accurate interatomic potentials. Nature Communications , 13(1): 2453, 2022. Johannes Brandstetter, Rob Hesselink, Elise van der Pol, Erik J. Bekkers, and Max Welling. Geometric and phys-ical quantities improve E(3) equivariant message passing. In International Conference on Learning Representations (ICLR) , 2022. Bryn Elesedy and Sheheryar Zaidi. Provably strict general-isation benefit for equivariant models. In Proceedings of the 38th International Conference on Machine Learning (ICML) , volume 139 of Proceedings of Machine Learning Research , pages 2959–2969. PMLR, 2021. Octavian-Eugen Ganea, Lagnajit Pattanaik, Connor W. Coley, Regina Barzilay, Klavs F. Jensen, William H. Green, and Tommi S. Jaakkola. GeoMol: Torsional geo-metric generation of molecular 3D conformer ensembles. In Advances in Neural Information Processing Systems (NeurIPS) , volume 34, pages 13757–13769, 2021. Johannes Gasteiger, Janek Groß, and Stephan Günnemann. Directional message passing for molecular graphs. In 
+
+International Conference on Learning Representations (ICLR) , 2020. Amir Globerson and Tommi S. Jaakkola. Fixing max-product: Convergent message passing algorithms for MAP LP-relaxations. In Advances in Neural Information Processing Systems (NeurIPS) , volume 20, 2007. Tom Heskes. On the uniqueness of loopy belief propagation fixed points. Neural Computation , 16(11):2379–2413, 2004. Bowen Jing, Gabriele Corso, Jeffrey Chang, Regina Bar-zilay, and Tommi S. Jaakkola. Torsional diffusion for molecular conformer generation. In Advances in Neural Information Processing Systems (NeurIPS) , volume 35, 2022. Leon Klein, Andreas Krämer, and Frank Noé. Equivariant flow matching with hybrid probability transport for 3D molecule generation. In Advances in Neural Information Processing Systems (NeurIPS) , volume 37, 2024. Frank R. Kschischang, Brendan J. Frey, and Hans-Andrea Loeliger. Factor graphs and the sum-product algorithm. 
+
+IEEE Transactions on Information Theory , 47(2):498– 519, 2001. Thomas P. Minka. Expectation propagation for approximate Bayesian inference. In Proceedings of the Seventeenth Conference on Uncertainty in Artificial Intelligence (UAI) ,pages 362–369. Morgan Kaufmann, 2001. Kevin P. Murphy, Yair Weiss, and Michael I. Jordan. Loopy belief propagation for approximate inference: An empir-ical study. In Proceedings of the Fifteenth Conference on Uncertainty in Artificial Intelligence (UAI) , pages 467– 475. Morgan Kaufmann, 1999. Judea Pearl. Probabilistic Reasoning in Intelligent Systems: Networks of Plausible Inference . Morgan Kaufmann, San Mateo, CA, 1988. Andrew R. Runnalls. Kullback-Leibler approach to Gaus-sian mixture reduction. IEEE Transactions on Aerospace and Electronic Systems , 43(3):989–999, 2007. Víctor Garcia Satorras, Emiel Hoogeboom, and Max Welling. E(n) equivariant graph neural networks. In 
+
+Proceedings of the 38th International Conference on Ma-chine Learning (ICML) , volume 139 of Proceedings of Machine Learning Research , pages 9323–9332. PMLR, 2021. Kristof T. Schütt, Pieter-Jan Kindermans, Huziel Enoc Sander Felix, Stefan Chmiela, Alexandre Tkatchenko, and Klaus-Robert Müller. SchNet: A continuous-filter convolutional neural network for modeling quantum in-teractions. In Advances in Neural Information Processing Systems (NeurIPS) , volume 30, 2017. Kristof T. Schütt, Oliver T. Unke, and Michael Gasteg-ger. Equivariant message passing for the prediction of tensorial properties and molecular spectra. In Proceed-ings of the 38th International Conference on Machine Learning (ICML) , volume 139 of Proceedings of Machine Learning Research , pages 9377–9388. PMLR, 2021. Erik B. Sudderth, Alexander T. Ihler, William T. Freeman, and Alan S. Willsky. Nonparametric belief propagation. In Proceedings of the IEEE Conference on Computer Vision and Pattern Recognition (CVPR) , volume 1, pages 605–612. IEEE, 2003. Nathaniel Thomas, Tess Smidt, Steven Kearnes, Lusann Yang, Li Li, Kai Kober, and Patrick Riley. Tensor field networks: Rotation- and translation-equivariant neural networks for 3D point clouds. arXiv preprint arXiv:1802.08219 , 2018. Martin J. Wainwright, Tommi S. Jaakkola, and Alan S. Will-sky. Tree-reweighted belief propagation algorithms and approximate ML estimation by pseudo-moment match-ing. Proceedings of the Ninth International Workshop on Artificial Intelligence and Statistics (AISTATS) , 2003. Wei Wang, Zheng Dang, Yinlin Hu, Pascal Fua, and Mathieu Salzmann. Robust differentiable SVD. IEEE Transac-tions on Pattern Analysis and Machine Intelligence , 44 (9):5472–5487, 2022. Early access 2021. John Winn and Christopher M. Bishop. Variational message passing. Journal of Machine Learning Research , 6:661– 694, 2005. Minkai Xu, Alexander Powers, Ron Dror, Stefano Ermon, and Jure Leskovec. ConfGNN: Learning molecular con-former ensembles via graph neural networks. In NeurIPS Workshop on Machine Learning for Structural Biology ,2022a. Minkai Xu, Lantao Yu, Yang Song, Chence Shi, Stefano Ermon, and Jian Tang. GeoDiff: A geometric diffusion model for molecular conformation generation. In Interna-tional Conference on Learning Representations (ICLR) ,2022b. Jonathan S. Yedidia, William T. Freeman, and Yair Weiss. Understanding belief propagation and its generalizations. In Gerhard Lakemeyer and Bernhard Nebel, editors, Ex-ploring Artificial Intelligence in the New Millennium ,pages 239–269. Morgan Kaufmann, 2003. Equivariant Neural Belief Propagation (Supplementary Material) 
+
+Zehua Cheng 1 Wei Dai 2 Jiahao Sun 21Department of Computer Science, University of Oxford, Oxford, United Kingdom 
+
+> 2
+
+FLock.io, London, United Kingdom 
+
+# A PRELIMINARIES 
+
+This section provides preliminaries on the four conceptual pillars underlying ENBP. Readers familiar with factor graphs, geometric symmetry groups, and mixture models may proceed directly to Appendix C. 
+
+A.1 FACTOR GRAPHS AND BELIEF PROPAGATION 
+
+A factor graph [Kschischang et al., 2001] is a bipartite graph G = ( V, F, E) encoding the factorisation of a joint distribution 
+
+p(x) = 1
+
+> Z
+
+Q 
+
+> a∈F
+
+ψa(xN (a)). The set V contains variable nodes , each representing a random variable; F contains factor nodes , each representing a local potential function ψa that depends on a subset N (a) ⊆ V of variables; and E contains edges connecting each factor to the variables in its scope. This bipartite structure makes the conditional independence assumptions of the model explicit. 
+
+Belief Propagation (BP) [Pearl, 1988] performs inference on factor graphs by passing messages along edges. Two types of message alternate: • Variable-to-factor: Variable i sends to factor a the product of all incoming messages from its other neighbouring factors: mi→a(xi) ∝ Q  
+
+> a′∈N (i)\{ a}
+
+ma′→i(xi).• Factor-to-variable: Factor a sends to variable i the marginalisation of its potential times all incoming messages from its other neighbours: ma→i(xi) ∝ R ψa(xN (a)) Q  
+
+> j∈N (a)\{ i}
+
+mj→a(xj ) dxj .On tree-structured (acyclic) factor graphs, BP converges in a finite number of passes and recovers exact marginals. On graphs with cycles ( loopy graphs), BP is applied iteratively and may oscillate or diverge [Murphy et al., 1999]. Damping —replacing each new message with a convex combination of the new and previous message—is a widely used heuristic to stabilise convergence [Heskes, 2004]. 
+
+A.2 THE SPECIAL EUCLIDEAN GROUP SE (3) AND EQUIVARIANCE 
+
+The Special Orthogonal group SO (3) consists of all 3×3 rotation matrices: SO (3) = {R ∈ R3×3 : R⊤R = I, det R = 1 }.The Special Euclidean group SE (3) augments SO (3) with translations: each element is a pair (R, t) with R ∈ SO (3) and 
+
+t ∈ R3, acting on a point x ∈ R3 as x 7 → Rx + t.A function f : X → Y is G-equivariant if applying a group transformation to the input produces a correspondingly transformed output: 
+
+f (ρX (g) · x) = ρY (g) · f (x), ∀ g ∈ G, 
+
+where ρX and ρY are the group representations on the input and output spaces. When ρY is the trivial (identity) representation, 
+
+f is called G-invariant . In the context of SE (3) , different geometric objects transform according to different representations: • Type-0 (scalars): Invariant under rotation and translation (e.g. energies, mixing weights). • Type-1 (vectors): Transform as v 7 → Rv under rotation (e.g. positions, forces). • Type-2 (rank-2 tensors): Transform as A 7 → RAR⊤ under rotation (e.g. covariance and precision matrices). Standard E(n)-equivariant GNNs [Satorras et al., 2021] produce Type-0 and Type-1 outputs but not Type-2. 
+
+A.3 GAUSSIAN MIXTURE MODELS 
+
+A Gaussian Mixture Model (GMM) is a probability density of the form p(x) = PKk=1 wk N (x | μk, Σk), where K is the number of components, wk > 0 are mixing weights summing to one, μk ∈ Rd are the component means, and Σk ∈ Sd
+
+> ++
+
+are the component covariance matrices ( Sd 
+
+> ++
+
+denotes the set of d × d symmetric positive-definite matrices). Equivalently, one may parameterise each component by its precision matrix Λk = Σ−1 
+
+> k
+
+, which is the natural parameterisation for products of Gaussians (see below). GMMs are universal density approximators: any continuous density on a compact set can be approximated arbitrarily well by a mixture with sufficiently many components. 
+
+A.4 NATURAL PARAMETERS AND GAUSSIAN PRODUCTS 
+
+The natural (or canonical ) parameters of a Gaussian N (μ, Λ−1) are η1 = Λμ (the precision-weighted mean) and 
+
+η2 = − 12 Λ (half the negative precision). The key computational advantage of this parameterisation is that the product of two Gaussians—the central operation in BP’s variable-to-factor messages—reduces to addition of their natural parameters: 
+
+N (μ1, Λ−11 ) · N (μ2, Λ−12 ) ∝ N (μ12 , Λ−112 ),
+
+where Λ12 = Λ1 + Λ2 and μ12 = Λ−112 (Λ1μ1 + Λ2μ2). This additive structure makes natural parameters the preferred representation for message-passing algorithms that repeatedly multiply distributions. 
+
+# B EXPERIMENTAL DETAILS 
+
+B.1 DATASETS AND SIMULATION ENVIRONMENTS Molecular conformation prediction. We use the GEOM-QM9 and GEOM-Drugs datasets from the GEOM data-base [Axelrod and Gomez-Bombarelli, 2022]. GEOM-QM9 contains small, sterically constrained molecules (up to 9 heavy atoms) that primarily test local geometric precision and deterministic valence rules. GEOM-Drugs contains large, flexible pharmaceutical compounds with many rotatable bonds, producing highly multi-modal torsional distributions across deep energy basins. Together these datasets test both geometric precision and multi-modal representational capacity. 
+
+Multi-body robotic formation inference. We simulate autonomous agents that must infer their spatial coordinates from pairwise distance constraints and collision-avoidance potentials. Configurations scale from 5 to 20 agents in both 2D and 3D. Increasing agent density progressively introduces cyclic dependencies: at 15+ agents the factor graph is sufficiently loopy to trigger divergence in standard BP. 
+
+B.2 BASELINES Molecular baselines. We compare against direct-prediction GNNs—GeoMol [Ganea et al., 2021] and ConfGNN [Xu et al., 2022a]—and score-based diffusion models—GeoDiff [Xu et al., 2022b] and Torsional Diffusion [Jing et al., 2022]. 
+
+Robotic baselines. Baselines include Vanilla Loopy BP with single-Gaussian messages and a direct-regression GNN. We also ablate the number of ENBP mixture components ( K ∈ { 1, 2, 4}). 
+
+Capacity matching. All non-equivariant baselines are matched by inference-time FLOPs rather than parameter count (Section 3.7). Non-equivariant hidden dimensions are expanded until computational budgets are equalised. All are trained with continuous SO (3) data augmentation. B.3 EVALUATION METRICS Molecular metrics. 
+
+• RMSD: Root-Mean-Square Deviation after optimal rigid-body alignment. • Coverage (Cov.): Fraction of ground-truth conformational modes captured within a distance threshold. • Average Minimum RMSD (AMR): For each ground-truth conformer, the minimum RMSD over all generated samples, averaged across the test set. Evaluated at budgets C ∈ { 10 , 50 , 100 , 200 }.
+
+Robotic metrics. 
+
+• Negative Log-Likelihood (NLL): Log-likelihood of target geometries under predicted beliefs. • Collision Rate (Col.): Percentage of generated configurations with spatial violations. • Equivariance Error: Maximum deviation in predicted marginals under unseen random SO (3) rotations. 
+
+B.4 IMPLEMENTATION DETAILS 
+
+All EGMMs use K=4 components. Precision tensors use outer-product rank P =3 with regularisation ϵ=10 −4. Spectral gradients are bounded by δ=10 −6. The inference loop runs T =8 iterations with damping α=0 .5. Models are trained on NVIDIA A100 (80GB) GPUs using AdamW with learning rate 10 −3 and cosine annealing. Global coordinate centring is omitted; only relative coordinates rji = xj − xi are processed. 
+
+# C THEORETICAL ANALYSIS 
+
+This appendix provides formal proofs for the theoretical claims advanced in Section 3. We begin by consolidating notation, then state precise definitions and assumptions, and finally present the main results as a sequence of lemmas, propositions, properties, and theorems. 
+
+C.1 NOTATION 
+
+Table 5 consolidates every symbol used in the proofs below. All notation is consistent with the main text. 
+
+C.2 DEFINITIONS Definition 1 (Equivariant Gaussian Mixture Model) . An Equivariant Gaussian Mixture Model (EGMM) over R3 is a probability density of the form 
+
+m(x) = 
+
+> K
+
+X
+
+> k=1
+
+wk N  x μk, Λ−1
+
+> k
+
+ ,
+
+where wk > 0, P 
+
+> k
+
+wk = 1 , μk ∈ R3, and Λk ∈ S3++ , subject to the constraint that under every (R, t) ∈ SE (3) the parameters transform as wk 7 → wk, μk 7 → Rμk + t, and Λk 7 → RΛkR⊤.
+
+Definition 2 (SE (3) -Equivariant Map) . A map Φ : X → Y between representation spaces of SE (3) is SE (3) -equivariant 
+
+if, for every (R, t) ∈ SE (3) and every input x ∈ X ,
+
+Φ ρX (R, t) · x = ρY (R, t) · Φ( x),
+
+where ρX and ρY denote the group representations on X and Y, respectively. When Y = R with the trivial representation, the map is called SE (3) -invariant .
+
+Definition 3 (Natural-Parameter Representation) . For a single Gaussian component N (μ, Λ−1), the natural parameters 
+
+are η1 = Λμ ∈ R3 and η2 = − 12 Λ ∈ R3×3. The product of two Gaussians with natural parameters (η(1) 1 , η(1) 2 ) and 
+
+(η(2) 1 , η(2) 2 ) is an unnormalised Gaussian with natural parameters (η(1) 1 + η(2) 1 , η(1) 2 + η(2) 2 ).Table 5: Notation reference. 
+
+Symbol Description 
+
+G = ( V, F, E) Factor graph with variable nodes V, factor nodes F, edges EN (a), N (i) Neighbours of factor a / variable i in G
+
+N, M Number of variable nodes / factor nodes 
+
+xi ∈ R3 Spatial position of variable node isi ∈ Rds Invariant scalar features of node iψa Local potential function associated with factor aZ Partition function 
+
+R ∈ SO (3) Rotation matrix ( R⊤R = I, det R = 1 )
+
+t ∈ R3 Translation vector 
+
+SE (3) Special Euclidean group: (R, t) with R ∈ SO (3) 
+
+ma→i, m i→a Factor-to-variable / variable-to-factor messages 
+
+K Number of Gaussian mixture components 
+
+wk Mixing weight of component k (wk > 0, P 
+
+> k
+
+wk = 1 )
+
+μk ∈ R3 Mean of component k
+
+Λk ∈ R3×3 Precision matrix of component kP Number of outer-product basis vectors 
+
+v(p) 
+
+> k
+
+∈ R3 p-th equivariant basis vector for component kσ(p) 
+
+> k
+
+> 0 Positive scaling coefficient for basis p of component kϵ > 0 Isotropic regularisation constant 
+
+λ(j) 
+
+> k
+
+j-th eigenvalue of Λk
+
+u(j) 
+
+> k
+
+∈ R3 j-th eigenvector of Λk
+
+T Number of BP iterations 
+
+α ∈ (0 , 1] Temporal damping coefficient 
+
+θ(t) 
+
+> i→a
+
+Concatenated natural parameters of message mi→a at iteration tfϕ Learnable SE (3) -equivariant neural network 
+
+Li, L Per-node / total negative log-likelihood loss 
+
+Sd 
+
+> ++
+
+Set of d × d symmetric positive-definite matrices 
+
+C.3 ASSUMPTIONS Assumption 1 (SE (3) -Invariant Potentials) . For every factor a ∈ F , the potential function ψa satisfies ψa(RxN (a) + t) = 
+
+ψa(xN (a)) for all (R, t) ∈ SE (3) .
+
+Assumption 2 (Equivariant Factor Network) . The learned factor-to-variable function fϕ is an exactly SE (3) -equivariant map in the sense of Definition 2. Concretely, it outputs Type-0 (invariant) scalars {wk, σ (p) 
+
+> k
+
+} and Type-1 (equivariant) vectors {μk, v(p) 
+
+> k
+
+} that transform canonically under SE (3) .
+
+Assumption 3 (Strict Positivity of Scaling Coefficients) . All scaling coefficients satisfy σ(p) 
+
+> k
+
+> 0 for k = 1 , . . . , K and 
+
+p = 1 , . . . , P , and the isotropic regularisation satisfies ϵ > 0.
+
+C.4 PRECISION MATRIX CONSTRUCTION Lemma 4 (Positive-Definiteness of the Precision Matrix) . Under Assumption 3, the precision matrix Λk =
+
+PPp=1 σ(p) 
+
+> k
+
+v(p) 
+
+> k
+
+v(p)
+
+> k
+> ⊤
+
++ ϵ I lies in S3++ for any choice of basis vectors {v(p) 
+
+> k
+
+}Pp=1 ⊂ R3.Proof. For any nonzero z ∈ R3,
+
+z⊤Λk z =
+
+> P
+
+X
+
+> p=1
+
+σ(p)
+
+> k
+
+ z⊤v(p)
+
+> k
+
+2 + ϵ ∥z∥2.
+
+Each squared inner product  z⊤v(p)
+
+> k
+
+2 ≥ 0, and each σ(p) 
+
+> k
+
+> 0, so the first sum is non-negative. Since ϵ > 0 and ∥z∥2 > 0
+
+for z̸ = 0, we have z⊤Λk z ≥ ϵ∥z∥2 > 0. Hence Λk is positive-definite. Symmetry follows from  vv ⊤⊤ = vv ⊤ and the symmetry of I.Lemma 5 (SO (3) -Equivariance of the Precision Matrix) . Let R ∈ SO (3) . Under the equivariant transformation v(p) 
+
+> k
+
+7 →
+
+Rv(p) 
+
+> k
+
+, the precision matrix satisfies Λk 7 → RΛkR⊤.Proof. Denote Λ′ 
+
+> k
+
+= PPp=1 σ(p)
+
+> k
+
+ Rv(p)
+
+> k
+
+  Rv(p)
+
+> k
+
+⊤ + ϵ I. Expanding each outer product: 
+
+ Rv(p)
+
+> k
+
+  Rv(p)
+
+> k
+
+⊤ = R v(p) 
+
+> k
+
+v(p)
+
+> k
+> ⊤
+
+R⊤.
+
+Thus Λ′ 
+
+> k
+
+= R
+
+PPp=1 σ(p) 
+
+> k
+
+v(p) 
+
+> k
+
+v(p)
+
+> k
+> ⊤
+
+
+
+R⊤ + ϵ I. Since R ∈ SO (3) implies RR ⊤ = I, we have ϵ I = ϵ RR ⊤ = R (ϵ I) R⊤.Substituting yields Λ′ 
+
+> k
+
+= RΛkR⊤.
+
+Property 6 (Representational Completeness) . If P ≥ 3 and the basis vectors {v(1)  
+
+> k
+
+, v(2)  
+
+> k
+
+, v(3)  
+
+> k
+
+} are in general position (i.e., not all coplanar), then the outer-product component PPp=1 σ(p) 
+
+> k
+
+v(p) 
+
+> k
+
+v(p)
+
+> k
+> ⊤
+
+has rank 3 and Λk can represent any element of 
+
+S3++ .Proof. Consider the case P = 3 . Define the matrix V = [ v(1)  
+
+> k
+
+v(2)  
+
+> k
+
+v(3)  
+
+> k
+
+] ∈ R3×3 and let Σ = diag( σ(1)  
+
+> k
+
+, σ (2)  
+
+> k
+
+, σ (3)  
+
+> k
+
+). Then 
+
+> 3
+
+X
+
+> p=1
+
+σ(p) 
+
+> k
+
+v(p) 
+
+> k
+
+v(p)
+
+> k
+> ⊤
+
+= V ΣV ⊤.
+
+Since the vectors are not coplanar, V is invertible and rank( V ΣV ⊤) = 3 . For any target Λ∗ ∈ S3++ , let Λ∗ = U DU ⊤
+
+be its eigendecomposition with U ∈ SO (3) and D = diag( d1, d 2, d 3) where dj > ϵ . Setting V = U , σ(j) 
+
+> k
+
+= dj − ϵ, we recover Λ∗ = V ΣV ⊤ + ϵI. For P > 3, any additional vectors contribute a positive semi-definite term, only expanding the representable set. 
+
+C.5 SPECTRAL DECOMPOSITION Proposition 7 (Equivariance-Preserving Spectral Decomposition) . Let Λk ∈ S3++ with eigendecomposition Λk =
+
+P3 
+
+> j=1
+
+λ(j) 
+
+> k
+
+u(j) 
+
+> k
+
+u(j)
+
+> k
+> ⊤
+
+. Under a rotation R ∈ SO (3) :1. The eigenvalues are SO (3) -invariant: λ(j) 
+
+> k
+
+7 → λ(j) 
+
+> k
+
+.2. The eigenvectors are SO (3) -equivariant: u(j) 
+
+> k
+
+7 → Ru(j) 
+
+> k
+
+.Consequently, feeding eigenvalues as scalar features and eigenvectors as vector features to an SE (3) -equivariant network preserves the symmetry constraints. Proof. Under rotation, Λk 7 → Λ′ 
+
+> k
+
+= RΛkR⊤ (Lemma 5). We verify that (λ(j) 
+
+> k
+
+, R u(j) 
+
+> k
+
+) is an eigenpair of Λ′
+
+> k
+
+:
+
+Λ′
+
+> k
+
+ Ru(j)
+
+> k
+
+ = RΛkR⊤Ru(j) 
+
+> k
+
+= RΛku(j) 
+
+> k
+
+= Rλ (j) 
+
+> k
+
+u(j) 
+
+> k
+
+= λ(j)
+
+> k
+
+ Ru(j)
+
+> k
+
+.
+
+Since eigenvalues are uniquely determined by the matrix, they are unchanged. The eigenvectors u(j) 
+
+> k
+
+of Λk become Ru(j)
+
+> k
+
+for Λ′
+
+> k
+
+, confirming equivariance. Because the eigenvalues are SO (3) -invariant scalars and the eigenvectors are Type-1 equivariant vectors, they constitute valid inputs for any SE (3) -equivariant architecture. 
+
+C.6 MESSAGE EQUIVARIANCE Theorem 8 (SE (3) -Equivariance of EGMM Messages) . Let m(x) = PKk=1 wk N (x | μk, Λ−1 
+
+> k
+
+) be an EGMM as in Definition 1. Under the transformation (R, t) ∈ SE (3) applied jointly to the evaluation point and the parameters, the density value at any geometrically corresponding point is preserved: 
+
+m′(Rx + t) = m(x),
+
+where m′ denotes the EGMM with transformed parameters μ′ 
+
+> k
+
+= Rμk + t and Λ′ 
+
+> k
+
+= RΛkR⊤.Proof. It suffices to verify the claim for a single Gaussian component. Write y = Rx + t and compute the density of the transformed component at y:
+
+N  y | μ′
+
+> k
+
+, (Λ′
+
+> k
+
+)−1
+
+∝
+
+q
+
+det Λ′ 
+
+> k
+
+exp 
+
+
+
+− 12 (y − μ′
+
+> k
+
+)⊤Λ′
+
+> k
+
+(y − μ′
+
+> k
+
+)
+
+
+
+.
+
+Exponent. y − μ′ 
+
+> k
+
+= Rx + t − Rμk − t = R(x − μk). Therefore: 
+
+(y − μ′
+
+> k
+
+)⊤Λ′
+
+> k
+
+(y − μ′
+
+> k
+
+) = ( x − μk)⊤R⊤RΛkR⊤R(x − μk) = ( x − μk)⊤Λk(x − μk),
+
+where we used R⊤R = I.
+
+Normalising constant. det Λ′ 
+
+> k
+
+= det( RΛkR⊤) = (det R)2 det Λk = det Λk since det R = 1 for R ∈ SO (3) .Combining both parts: N (y | μ′
+
+> k
+
+, (Λ′
+
+> k
+
+)−1) = N (x | μk, Λ−1 
+
+> k
+
+). Since the mixing weights wk are invariant, summing over 
+
+k yields m′(y) = m(x).
+
+Proposition 9 (Equivariance of Greedy Mixture Reduction) . The greedy KL-based mixture reduction procedure (Section 3.5) preserves SE (3) -equivariance. That is, if the input expanded mixture is SE (3) -equivariant, then the reduced K-component mixture is also SE (3) -equivariant. Proof. The proof proceeds by establishing that each operation in the reduction pipeline commutes with SE (3) .
+
+Step 1: Pairwise products. Let two EGMM components have natural parameters (η(1) 1 , η(1) 2 ) and (η(2) 1 , η(2) 2 ), where 
+
+η1 = Λμ and η2 = − 12 Λ (Definition 3). Under rotation R: η1 7 → RΛR⊤Rμ = R(Λμ) = Rη1 and η2 7 → − 12 RΛR⊤ =
+
+Rη2R⊤. Natural-parameter addition (Eq. 5) is component-wise and thus commutes with these linear transformations. 
+
+Step 2: Merging criterion. The KL divergence between two Gaussians is DKL (N1∥N 2) = 12 [tr( Λ2Σ1) + ( μ2 −
+
+μ1)⊤Λ2(μ2 − μ1) − 3 + log det Λ2  
+
+> det Λ1
+
+]. Applying R: the trace term satisfies tr( RΛ2R⊤RΣ1R⊤) = tr( Λ2Σ1) by the cyclic property. The quadratic form is invariant by the same argument as in Theorem 8. The log-determinant ratio is invariant since 
+
+det( RAR ⊤) = det A. Hence, DKL is SO (3) -invariant, so the greedy selection of the closest pair to merge is independent of the coordinate frame. 
+
+Step 3: Moment-matching. The merged mean is μmerge = w1μ1+w2μ2 
+
+> w1+w2
+
+. Under rotation, μmerge 7 → w1Rμ1+w2Rμ2 
+
+> w1+w2
+
+=
+
+Rμmerge , since the operation is linear and the weights are invariant scalars. The merged precision transforms analogously as a linear combination of rank-2 equivariant tensors. Since every step—product, selection, and merging—commutes with SE (3) , the output of the full reduction is SE (3) -equivariant. 
+
+C.7 LOSS INVARIANCE Theorem 10 (SO (3) -Invariance of the Negative Log-Likelihood Loss) . The per-node NLL loss Li =
+
+− log PKk=1 wk N (x∗ 
+
+> i
+
+| μk, Λ−1 
+
+> k
+
+) is SO (3) -invariant. That is, Li(Rx∗ 
+
+> i
+
+, R μk, R ΛkR⊤) = Li(x∗ 
+
+> i
+
+, μk, Λk) for all 
+
+R ∈ SO (3) .Proof. From Eq. (9), the log-density of each Gaussian component consists of two terms. 
+
+Mahalanobis term. 
+
+(Rx∗ 
+
+> i
+
+− Rμk)⊤(RΛkR⊤)( Rx∗ 
+
+> i
+
+− Rμk)= ( x∗ 
+
+> i
+
+− μk)⊤ R⊤R| {z } 
+
+> =I
+
+Λk R⊤R| {z } 
+
+> =I
+
+(x∗ 
+
+> i
+
+− μk)= ( x∗ 
+
+> i
+
+− μk)⊤Λk(x∗ 
+
+> i
+
+− μk).
+
+Log-determinant term. log det( RΛkR⊤) = log (det R)2 det Λk
+
+ = log det Λk, since (det R)2 = 1 for R ∈ SO (3) .
+
+Constant term. − 32 log(2 π) is trivially invariant. Since each Gaussian component’s log-density is individually SO (3) -invariant, the mixture log-density is invariant, and the negative log-likelihood Li = − log m(x∗ 
+
+> i
+
+) is SO (3) -invariant. The total loss L = P 
+
+> i
+
+Li inherits invariance by summation. 
+
+C.8 END-TO-END EQUIVARIANCE Theorem 11 (End-to-End SE (3) -Equivariance of ENBP) . Under Assumptions 1–3, the Equivariant Neural Belief Propaga-tion algorithm (Algorithm 1) produces marginal beliefs that are SE (3) -equivariant: 
+
+bi(Rxi + t; {Rxj + t}) = bi(xi; {xj })
+
+for all (R, t) ∈ SE (3) and all i ∈ V .Proof. We proceed by induction on the BP iteration index t.
+
+Base case ( t = 0 ). All messages are initialised as uniform (non-informative) EGMMs. A uniform distribution is trivially invariant under SE (3) , hence equivariant. 
+
+Inductive hypothesis. Assume that all messages m(t−1)  
+
+> a→i
+
+and m(t−1)  
+
+> i→a
+
+are SE (3) -equivariant EGMMs at iteration t − 1.
+
+Inductive step: variable-to-factor. The outgoing message m(t) 
+
+> i→a
+
+is computed by: 1. Multiplying incoming EGMMs via natural-parameter addition. By the inductive hypothesis and Step 1 of Proposition 9, the expanded product mixture is equivariant. 2. Reducing the mixture via greedy KL merging. By Proposition 9, the reduced mixture is equivariant. 3. Applying temporal damping (Eq. 6). Damping is a convex combination of natural parameters. Since η1 7 → Rη1 (Type-1 vector) and η2 7 → Rη2R⊤ (Type-2 tensor), a convex combination with invariant scalar α preserves the transformation law. Hence the damped message is equivariant. 
+
+Inductive step: factor-to-variable. The outgoing message m(t) 
+
+> a→i
+
+is computed by: 1. Spectrally decomposing incoming precision matrices. By Proposition 7, the eigenvalues are invariant scalars and eigenvectors are equivariant vectors—valid inputs for the equivariant network. 2. Computing relative coordinates rji = xj − xi. Under (R, t): Rxj + t − Rxi − t = R(xj − xi) = Rrji , which is 
+
+SO (3) -equivariant and translation-invariant. 3. Applying the equivariant network fϕ (Assumption 2), which outputs equivariant means and basis vectors, and invariant weights and scaling coefficients. 4. Synthesising the precision matrix via Eq. (3). By Lemma 5, the output is an equivariant rank-2 tensor. Hence all messages at iteration t are equivariant, completing the induction. 
+
+Final beliefs. The belief bi ∝ Q  
+
+> a∈N (i)
+
+m(T ) 
+
+> a→i
+
+is a product of equivariant EGMMs. By Step 1 of Proposition 9 (natural-parameter addition preserves equivariance), the final belief is SE (3) -equivariant. 
+
+C.9 CONVERGENCE STABILISATION Lemma 12 (Contraction Property of Damped Updates) . Let θ∗ be a fixed point of the undamped message-update operator F ,i.e., F (θ∗) = θ∗, and suppose F is non-expansive in the ℓ∞ norm on the message polytope: ∥F (θ)−F (θ′)∥∞ ≤ ∥ θ−θ′∥∞.Then the damped operator 
+
+Gα(θ) = α F (θ) + (1 − α) θ
+
+is a strict contraction with rate α for any α ∈ (0 , 1) :
+
+∥Gα(θ) − θ∗∥∞ ≤  1 − α + α∥θ − θ∗∥∞ = ∥θ − θ∗∥∞.
+
+Moreover, if F is a strict contraction with rate ρ < 1 (which is guaranteed on tree-structured subgraphs), then Gα is a strict contraction with improved rate: 
+
+∥Gα(θ) − θ∗∥∞ ≤  1 − α(1 − ρ)∥θ − θ∗∥∞.Proof. Since θ∗ = Gα(θ∗) = αF (θ∗) + (1 − α)θ∗, we compute: 
+
+∥Gα(θ) − θ∗∥∞ = ∥αF (θ) + (1 − α)θ − αF (θ∗) − (1 − α)θ∗∥∞
+
+≤ α∥F (θ) − F (θ∗)∥∞ + (1 − α)∥θ − θ∗∥∞
+
+≤ αρ ∥θ − θ∗∥∞ + (1 − α)∥θ − θ∗∥∞
+
+=  1 − α(1 − ρ)∥θ − θ∗∥∞.
+
+For general non-expansive F (ρ = 1 ), the bound reduces to ∥Gα(θ) − θ∗∥∞ ≤ ∥ θ − θ∗∥∞, confirming non-expansion. For ρ < 1 (tree case), the factor 1 − α(1 − ρ) < 1 ensures strict contraction, and by the Banach fixed-point theorem, the damped iteration converges to the unique fixed point θ∗ at a geometric rate. 
+
+Remark 13 (Convergence on Loopy Graphs) . On general loopy factor graphs, the undamped BP operator F may not be non-expansive, and convergence is not formally guaranteed [Murphy et al., 1999, Yedidia et al., 2003]. Lemma 12 nonetheless provides a principled justification for damping: it reduces the spectral radius of the linearised update operator around any fixed point, thereby enlarging the basin of attraction. The empirical convergence observed across all experimental configurations (Section 4, Table 4, convergence rate 100% for α = 0 .5) corroborates this stabilising effect.
