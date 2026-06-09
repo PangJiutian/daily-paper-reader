@@ -1,0 +1,553 @@
+Title: GNSS-FM: A Self-Supervised Foundation Model for Daily GNSS Displacement Time Series
+
+URL Source: https://arxiv.org/pdf/2606.07725v1
+
+Published Time: Tue, 09 Jun 2026 00:07:49 GMT
+
+Number of Pages: 14
+
+Markdown Content:
+> 1
+
+# GNSS-FM: A Self-Supervised Foundation Model for Daily GNSS Displacement Time Series 
+
+Nick Teutschmann, Laura Crocetti, Fanny Lehmann, Leonardo Trentini, and Benedikt Soja 
+
+Abstract —Displacement time series from Global Navigation Satellite Systems (GNSS) are essential for a wide range of applications, including monitoring tectonic crustal deformations and investigating the different stages of the earthquake cycle. Machine learning methods have proven promising for GNSS applications; however, most remain fully supervised. This creates a bottleneck as labeled data are scarce, even though large amounts of unlabeled GNSS data are freely available. We present GNSS-FM, a self-supervised foundation model for daily GNSS time series. The model uses a dual-stream input combining displacement and velocity-like increments, and is pretrained using a masked latent prediction objective with vector-quantized targets adapted from wav2vec 2.0, with several modifications for geodetic data. Pretrained on data from over 17,000 globally distributed GNSS stations, an analysis of the learned codebook suggests that the representations capture the main signal types in GNSS displacement data, including seismic offsets, tectonic drift, and seasonal patterns. The foundation model is later fine-tuned on two downstream tasks, namely 90-day displacement forecasting and seismic step localization, where it outperforms strong task-specific baselines in both cases. These results show that self-supervised pretraining is a promising approach for GNSS time series analysis. 
+
+Index Terms —GNSS, foundation models, self-supervised learn-ing, time series analysis, geodesy, displacement monitoring, transformers, representation learning, geophysical signals, Earth observation. 
+
+I. I NTRODUCTION 
+
+Global Navigation Satellite System (GNSS) networks provide continuous, high-precision measurements of Earth-surface displacement, making them a key tool for monitoring crustal deformation. GNSS displacement time series capture a wide range of patterns, from long-term tectonic motion and seasonal loading to abrupt seismic offsets caused by earthquakes [1]. As GNSS networks have grown globally, datasets now contain displacements from tens of thousands of stations spanning multiple decades [2]. This scale makes data-driven approaches attractive because they can learn from a rich global dataset that covers diverse tectonic, climatic, and station-quality conditions. Despite this availability of large amounts of unlabeled data, i.e., data without explicit labels, most existing machine learning methods for GNSS time series are task-specific: they are trained from scratch for a single task, such as discontinuity detection or GNSS displacement forecasting [3], [4]. While forecasting does not require additional labels, many other geo-physically relevant tasks do. These labels are often limited or incomplete: discontinuity detection can depend on incomplete 
+
+> N. Teutschmann, L. Crocetti, L. Trentini, and B. Soja are with the Institute of Geodesy and Photogrammetry, ETH Zurich, Zurich, Switzerland. F. Lehmann is with the ETH AI Center, Zurich, Switzerland.
+
+external catalogs, and slow slip event catalogs are sparse and usually restricted to the largest events [3], [5]. Instead, the GNSS data needed to pretrain a more general model is freely available and continuously growing. This gap between data availability and label shortage is the main motivation for this work. Self-supervised learning is a natural way to exploit large amounts of unlabeled data. In speech and vision, large en-coders pretrained on unlabeled data using masked prediction objectives have been shown to learn representations that trans-fer well to many downstream tasks [6], [7]. The wav2vec 2.0 model [8] showed that this approach is especially effective when prediction targets are formed by discretizing the latent representation with a vector quantizer. This prevents the model from simply fitting noise and instead encourages it to capture recurring structure. SeisLM [9] showed that the same approach transfers to geophysical data, producing a foundation model for seismic time series that improves performance across several downstream tasks. However, directly applying these architectures to GNSS is not straightforward. Unlike seismic waveforms or speech, GNSS displacement series are non-stationary over multi-year windows, and combine slow tectonic drift, seasonal loading, abrupt step offsets, and colored measurement noise in a single signal. Data gaps are also common. At the same time, the displacement history within a window contains information that is important for downstream tasks, so it should not simply be removed by differencing or detrending. This creates a trade-off for self-supervised pretraining: the model should learn lo-cal changes, while still maintaining longer-range deformation context. Existing architectures can therefore not be applied unchanged, but need to be adapted to the structure of GNSS displacement time series. We present the GNSS Foundation Model (GNSS-FM), a self-supervised foundation model for daily GNSS displace-ment time series that adapts the wav2vec 2.0 framework to geodetic data, pretrained on data from over 17,000 globally distributed stations provided by the Nevada Geodetic Labora-tory [2]. Our main contributions are:  
+
+> •
+
+a dual-stream input representation combining displace-ment and velocity-like increments, giving the model access to both long-range deformation context and local dynamics,  
+
+> •
+
+a masked latent prediction pretraining framework with reliability-aware masking and loss weighting, condition-ing on station metadata, and a collapse-resistant grouped spherical quantizer. 
+
+> arXiv:2606.07725v1 [physics.geo-ph] 5 Jun 2026 2
+
+We also provide a qualitative analysis suggesting that the learned representations capture the main signal types present in GNSS data, including seismic offsets, tectonic drift, and seasonal signals. We evaluate the pretrained model on 90-day displacement forecasting and seismic step localization, where it outperforms strong task-specific baselines in both cases. II. R ELATED WORK 
+
+A. Self-Supervised Learning for Sequential Signals 
+
+The pretrain-finetune approach has become standard in natural language processing and computer vision, where large encoders trained on unlabeled data with masked prediction objectives learn representations that transfer well to many downstream tasks [6], [7], [10]. For continuous signals, di-rectly reconstructing masked values tends to make the model focus on small variations (i.e., noise and high-frequency details) rather than the underlying structure. This happens because small numerical differences tend to dominate the error signal. A common solution is to predict simpler discrete targets instead of the original continuous values, reducing sensitivity to noise and encouraging the model to learn more meaningful patterns, an observation that has also been made for noisy SAR imagery in remote sensing [11]. The wav2vec 2.0 model [8] is based on that principle and uses a convolutional encoder that maps the input to latent features. These latent features are then quantized to produce discrete targets. Here, the codebook 
+
+is a learned dictionary of representative latent patterns, and quantization assigns each continuous latent feature to one entry in this dictionary. Some of the latent features are masked, and a transformer builds representations from the visible context. The model is then trained to predict the correct quantized target for the masked part of the signal. A diversity loss encourages the model to use the full codebook and avoid collapse. HuBERT [12] replaces the quantizer with cluster assignments that are updated during training, which improves stability. WavLM [13] adds denoising objectives and further architectural improvements. The key idea that transfers to GNSS is that predicting discrete targets encourages the encoder to capture recurring patterns rather than fitting noise. This is especially useful for geodetic data, where much of the daily variability is measurement noise rather than a real deformation signal. 
+
+B. Self-Supervised and Foundation Models for Time Series 
+
+Self-supervised methods for time series have grown rapidly, though most research focuses on high-frequency sensor data or financial and meteorological series, which are quite different from geodetic data. Contrastive methods teach models to recognize that different augmented versions of the same time window should be represented in a similar way [14]. Masked modeling methods apply the same masked prediction idea to time series, either by reconstructing raw values [15] or predicting discrete targets [16], [17]. In Earth observation, similar masked reconstruction objectives have been applied to optical satellite image time series [18]. VQ-MTM [16] is sim-ilar in design to our approach: it applies a random-projection quantizer to electroencephalogram time series and shows that discrete targets help for noisy, non-stationary signals beyond speech. Several recent models apply pretraining specifically to time series forecasting. Chronos [19] discretizes time series values into a vocabulary and trains transformer language models with cross-entropy, achieving strong zero-shot forecasting across many datasets. TimesFM [20] and TimeGPT [21] follow a similar idea with decoder-only architectures. These models share the general goal of learning from large amounts of diverse data, but they are designed mainly for forecasting and do not address the specific properties of geodetic time series. Recent foundation models for Earth-system and geospatial data are closer to geodetic applications than general time series foundation models. Aurora introduces a foundation model pretrained on heterogeneous Earth-system data and finetuned for several forecasting tasks, including weather, air quality, ocean waves, and tropical cyclone tracks [22]. Building on this, Trentini et al. [23] explore integrating GNSS zenith wet delays into the same framework to improve moisture-related forecasting. The Earth System Foundation Model builds on this by improving the flexibility of the input representation and training protocols. In particular, it uses variable-wise tokenization and structured masking strategies to handle par-tially observed variables, sparse satellite observations, and station data within one backbone, while preserving dependen-cies between physical variables [24]. AlphaEarth Foundations follows a related direction in Earth observation by learning geospatial embeddings from multi-source spatial, temporal, and measurement context for mapping from sparse labels [25]. 
+
+C. Foundation Models for Seismic Waveforms 
+
+SeisLM [9] is, to our knowledge, the most directly related prior work. It adapts wav2vec 2.0 to seismic waveforms, is pretrained on multiple seismic datasets and shows strong transfer capability for phase picking and event classification. Our work follows the same general approach but applies it to a single dataset of daily GNSS displacement time series, which differ from seismic waveforms in sampling rate, signal structure, and downstream task requirements. Parts of our im-plementation are adapted from SeisLM. The main adjustments needed for GNSS, namely the dual-stream representation, reliability-aware conditioning, and a quantizer designed for lower-frequency non-stationary data, are the central contribu-tion of this work. Machine learning and deep learning methods have been ap-plied to GNSS for discontinuity detection [3], denoising [26], [27], environmental-loading-related residual or displacement correction [28], [29], and displacement forecasting [30], [31]. All of these are trained for a single specific task. Our approach is different because the same backbone, pretrained without task-specific labels, is finetuned to multiple downstream tasks. 
+
+D. GNSS Displacement Time Series Modeling 
+
+GNSS displacement series are typically modeled as a com-bination of a trend, annual and semi-annual periodic terms, and a colored noise process [32], [33]. In geodetic reference-frame realizations such as ITRF2020, station motion is mod-eled more explicitly through piecewise linear trajectories with 3150 100 50 0 50 100 150    
+
+> Longitude
+> 80
+> 60
+> 40
+> 20
+> 0
+> 20
+> 40
+> 60
+> 80
+> Latitude
+> Train (12355)
+> Val (2648)
+> Test (2648)
+> 0
+> 20
+> 40
+> East [mm]
+> 0
+> 20
+> 40
+> North [mm]
+> 2023 2024 2025
+> Time
+> 20
+> 0
+> 20
+> Up [mm]
+> Fig. 1. Dataset overview. Left: Global distribution of GNSS stations in the geographically stratified training, validation, and test splits. Right: Example of a daily GNSS displacement time series (east, north, and up component) for station OOSE.
+
+discontinuities, seasonal terms, and post-seismic deformation for sites affected by major earthquakes [34]. Standard preprocessing steps include outlier removal, step correction, and spatial and temporal filtering to reduce shared noise [35], [36]. For forecasting, hybrid models that combine variational mode decomposition with recurrent or transformer networks have shown improvements over simpler baselines [4], [37]. For step detection, Crocetti et al. [3] showed that random forest classifiers work well on short 21-day windows. III. D ATA AND PREPROCESSING 
+
+A. Dataset 
+
+We use daily GNSS displacement time series from the Nevada Geodetic Laboratory [2], which provides east, north, and up displacement components. Starting from 23,042 sta-tions, we apply quality filters that remove stations with fewer than one year of data, an observed fraction below 70%, or an internal gap longer than three years. This leaves 17,652 stations with a median span of 4,048 days and a median cov-erage fraction of 0.949, totaling 73.4 million observed station-days. The stations are divided into training (70%), validation (15%), and test (15%) sets using a geographically stratified split, so that each subset has a broad global coverage. Figure 1 illustrates the resulting spatial distribution of stations across the three splits and shows an example GNSS displacement time series for one station. 
+
+B. Preprocessing 
+
+We summarize the main preprocessing steps here and present more details in Appendix A. Outliers are detected separately for each component with an iterative procedure that combines a Hampel filter, large nearest-neighbor differences, and checks of the displacement before and after the suspected outlier, so that isolated spikes are removed without removing persistent step changes [38], [39]. Detected outlier samples are masked and treated as gaps. The cleaned displacement series is then converted to daily increments by first differ-encing. Equipment-related offsets from the Nevada Geodetic Laboratory event catalog [2] are handled in this increment space rather than by shifting the full displacement time series. Since a displacement offset appears as a single spike after first differencing, the affected daily increment is masked and then filled during gap filling. The same catalog is also used to derive the targets for seismic step localization, restricted to seismic events with a local detectability score Z > 3,where Z is the norm of the largest three-component daily increment within a ±3-day window around the catalog date, normalized by the robust variability of a preceding 30-day reference window. Equipment-related offsets are excluded and not used as positive targets. Gaps in the daily-increment series are filled using two methods. Short gaps of up to three days are filled by linear interpolation, while longer gaps use a bootstrap-based method that samples chunks from nearby context to maintain realistic noise characteristics [40], [41]. For a gap of length L, this context is taken from valid samples within at least 200 days on either side of the gap and expanded to three times the gap length for longer gaps. This provides enough local samples for stable resampling while keeping the synthesized values tied to the surrounding time series behavior. The displacement stream is then reconstructed from the filled increments. Each day is assigned a reliability label according to how the value was obtained: original observation, short-gap linear interpolation, bootstrap synthesis, or padding. These labels are mapped to weights of 1.0, 0.6, 0.2, and 0.0, respectively. They reflect decreasing confidence in the values and are used in two ways: to weight the loss during training, and as a conditioning signal fed into the model to introduce a measure of data quality. 4
+
+C. Dual-Stream Representation 
+
+The model receives two different views of the same dis-placement series: (1) the displacement stream, and (2) the velocity stream. The velocity stream is formed by first-order differences of the displacement series. These values are therefore derived daily displacement increments, not directly observed velocity measurements, but are referred to as the velocity stream in the following for the sake of clarity. This stream reduces non-stationarity and highlights local changes. The displacement stream maintains the absolute displacement level and long-range context, including tectonic drift and seasonal patterns. Both streams are normalized independently using the median and the scaled median absolute deviation. For each component series yt in each stream, we compute 
+
+m = median( y), s = 1 .4826 median( |yt − m|), and zt =(yt − m)/s . The factor 1.4826 makes the median absolute de-viation consistent with the standard deviation under normally distributed noise. An inverse hyperbolic sine transformation, 
+
+˜zt = asinh( zt), is then applied to compress large values without clipping them. 
+
+D. Windowing 
+
+All models use fixed-length windows of W = 512 days as input. For daily GNSS displacement time series, this window length covers more than one annual cycle, allowing the model to observe seasonal loading signals together with longer-term trends and abrupt offsets within the same sample. Each window must contain at least 80% originally observed days to limit training on interpolated data. For pretraining and forecasting, windows are non-overlapping to prevent data leakage. For detection, windows may overlap by up to 20% so that events near the boundaries of the window are still captured with sufficient context on both sides. For seismic step localization, training windows that contain events, i.e., windows with positive labels, are augmented by random time shifts of up to 12 days. Detection training also uses balanced batches with one positive-label window per batch so that events are seen regularly despite the strong class imbalance. IV. M ETHOD 
+
+A. GNSS-FM Structure 
+
+GNSS-FM adapts the masked latent prediction of wav2vec 2.0 [8] and the structural framework of SeisLM [9] and redesigns them for the specific characteristics of daily geodetic time series. Given windowed GNSS time series, the model extracts convolutional features, masks a subset of feature-time positions, encodes the visible context with a transformer, and predicts vector-quantized targets at the masked positions using a contrastive loss. After pretraining, the convolutional encoders and the transformer encoder are reused for downstream tasks, while the quantizer and contrastive projection heads are dis-carded. Forecasting is performed with a cross-attention de-coder, and seismic step localization with a temporal Detection Transformer (DETR) head [42]. Figure 2 gives an overview of the full model and its adaptation to the two downstream tasks. The full dual-stream pretraining model contains 359 million parameters in total. 
+
+B. Convolutional Feature Encoder 
+
+Each input stream is processed by a separate strided 1D con-volutional encoder with five layers, kernel sizes (5 , 3, 3, 3, 3) ,and strides (2 , 2, 1, 1, 1) . All layers use 256 channels, layer normalization [43], and Gaussian Error Linear Unit activations [44]. For a 512-day input window, this produces a feature sequence of length T ′ = 120 , corresponding to roughly 4 days per feature step and a receptive field of 33 days. The receptive field is computed recursively as 
+
+Rl = Rl−1 + ( kl − 1) Jl−1, Jl = Jl−1sl, (1) where Rl is the receptive field after layer l, Jl is the stride relative to the input, and kl and sl are the kernel size and stride of layer l, with R0 = J0 = 1 . The downsampling suppresses high-frequency noise while maintaining enough temporal res-olution for the downstream tasks. The two encoders have separate parameters so they can specialize for their respective input streams. 
+
+C. Dual-Stream Transformer Encoder 
+
+After convolution, each stream is layer-normalized and pro-jected to the hidden dimension H = 768 of the transformer. Positional information is added using wav2vec 2.0-style con-volutional positional embeddings [8], applied separately to each stream. Both streams are then processed by parallel self-attention stacks with the same depth ( L = 12 layers, 
+
+nh = 12 heads, feed-forward dimension 4H). Bidirectional cross-attention blocks are inserted after every second self-attention layer so that the two streams can exchange infor-mation. Residual updates are scaled by 0.8 and per-channel LayerScale parameters [45] are initialized close to zero. Both choices helped stabilize training in the early epochs. 
+
+D. Conditioning on Metadata and Data Quality 
+
+We condition the transformer on station metadata and re-liability information. Station metadata, consisting of latitude, longitude, and ellipsoidal height encoded as sine-cosine pairs, are projected into a conditioning vector and used to modulate every transformer layer through FiLM [46]. The reliability label of each feature-time step is processed in the same way, so the encoder knows whether each value is an original ob-servation, interpolated, bootstrap-synthesized, or padded (see Section III-B), with corresponding reliability weights of 1.0, 0.6, 0.2, and 0.0. A learnable global gate controls the overall conditioning strength and is gradually increased during the first quarter of training to keep early optimization stable. 
+
+E. Vector Quantization 
+
+Prediction targets are produced by discretizing the con-volutional features before masking and conditioning. Using discretized targets derived from raw unconditioned features prevents the model from taking shortcuts. The quantizer has 
+
+G = 4 independent codebook groups with V = 320 learnable 5Displacement  
+
+> east / north / up
+> Velocity
+> east / north / up
+> Station metadata Convolutional Feature Encoder Conditioning + FiLM Quantizer Masked Transformer Encoder Target Projection Prediction Projection Self-Supervised Loss Cross-Attention Forecast Decoder Temporal DETR Head 1
+
+Self-supervised pretraining 2a Forecasting 2b Detection 90-day displacement forecast  
+
+> context forecast horizon
+> Event probability + step date
+> binary decision + localization
+
+Fig. 2. Overview of GNSS-FM. The model takes displacement and velocity time series as inputs, together with station metadata. During self-supervised pretraining 1⃝, a shared convolutional feature encoder and masked transformer encoder are trained to predict quantized representations of masked targets using a contrastive objective. After pretraining, the same encoder is reused for two downstream tasks: 2a ⃝ 90-day displacement forecasting with a cross-attention decoder, and 2b ⃝ seismic step localization with a temporal DETR head. Station metadata modulates the transformer through FiLM, while remaining separate from the quantizer targets. 
+
+codevectors each. The first two groups receive velocity fea-tures, and the last two receive displacement features. Before quantization, each group has its own learnable linear projec-tion from the convolutional feature space into its codebook subspace. Each projected feature is then compared with the 320 learnable codevectors in its group, and one codevector is selected as the target representation. All vectors are ℓ2-normalized before computing cosine-similarity logits, which makes assignments independent of magnitude and prevents large seismic steps from dominating the surrounding signal. During training, group assignments use Gumbel-Softmax [47] with a temperature that decreases from 1.5 to 0.7, while the logit scale increases from 1.5 to 3.0. This encourages the model to explore many codes early in training and select sharper assignments later. Codevectors that are rarely chosen are periodically replaced with normalized features from the current batch to prevent collapse. The codebook is initialized using spherical k-means on a small subset of the training data. 
+
+F. Pretraining Objective 
+
+Short continuous sub-windows of the feature sequence are masked before being passed to the transformer. A masking curriculum increases the masking probability from 12% to 50% and the span length from 8 to 12 over the first 30 epochs. An additional tail-masking component masks the last few posi-tions of a window, which trains the model to extrapolate rather than only fill in gaps. Both streams are always masked at the same positions, so the model cannot recover masked velocity from the visible displacements or masked displacement from the visible velocities. The main training loss is an Information Noise-Contrastive Estimation (InfoNCE) contrastive objective [48] at masked positions: 
+
+Lctr = − 1
+
+|M| 
+
+X
+
+> t∈M
+
+log e sim( ct,q t) / τ 
+
+e sim( ct,q t) / τ +
+
+> K
+
+X
+
+> j=1
+
+e sim( ct,q −  
+
+> t,j )/ τ
+
+,
+
+(2) where M is the set of masked positions, ct is the projected transformer output, qt is the quantized target, {q− 
+
+> t,j
+
+} are K =50 negatives sampled from other positions and other batches, 
+
+sim is the cosine similarity, and τ = 0 .1 is a fixed temperature. Here, negatives are quantized targets taken from other feature steps, so the model must distinguish the correct target at step 
+
+t from incorrect targets selected from elsewhere. To increase the diversity of negatives without increasing batch size, we use a memory queue of past targets. This gives a large pool of negatives while keeping the implementation fixed across all experiments. Each loss term is weighted by the reliability label of the corresponding position, so synthesized or interpolated values contribute less than original observations. The full pretraining objective is 
+
+L = Lctr + λdiv Ldiv + λaux (s) Laux + λorth Lorth + λtv Ltv 
+
++ λvh (s) Lvh + λvkl (s) Lvkl + λlat (s) Llat + λsep Lsep 
+
+− λusage Husage − λtok Htok 
+
+(3) where Lctr is the main contrastive loss, Ldiv encourages broad codebook usage [8], Laux is a small auxiliary reconstruction term, and the remaining terms regularize code usage and latent structure to reduce collapse. The coefficients that depend on 
+
+s are scheduled during training, where s refers to the training step. Key hyperparameters are listed in Table I, and full definitions of the individual terms are given in Appendix B. 6                                     
+
+> TABLE I KEY HYPERPARAMETERS OF THE GNSS-FM BASE MODEL .Component Setting Window T= 512 days, T′= 120 features Transformer L= 12 ,H= 768 ,nh= 12 heads Masking p= 0 .50 , span 12; tail p= 0 .08 , span 8 Quantizer G= 4 groups, V= 320 codes/group Negatives K= 50 ,memory queue 16,384 Optimizer AdamW, learning rate 10 −4
+> Training 40 epochs, 7 GPUs, batch 448
+
+G. Downstream Task Adaptation 
+
+For displacement forecasting, each 512-day window is split into a 422-day context and a 90-day forecast horizon. The pretrained model encodes the context window and reconstructs the masked forecast horizon, and a task-specific cross-attention decoder combines these representations to predict the future displacement trajectory. The cross-attention decoder has 4 layers, 8 attention heads, model dimension 256, feed-forward expansion factor 4, and dropout 0.1. The decoder uses one query per forecast day and per displacement component, so each future time step receives its own representation. Each decoder layer performs cross-attention over three inputs: the encoded context, the reconstructed horizon of the pretrained transformer, and the preprocessed displacement values. Fine-tuning is achieved with Low-Rank Adaptation [49] applied to the main transformer linear layers, and the last four trans-former layers are additionally unfrozen. With this adaptation strategy, the forecasting model contains 382 million parame-ters, of which 70.4 million are trainable during finetuning. The forecasting model is trained in two stages. In the first stage, the pretrained encoder and cross-attention decoder produce an initial mean forecast. In the second stage, this stage-1 model is frozen and two Patch-TST-style residual branches [50] are trained with the same architecture: one predicts a residual correction to the mean forecast, and the other predicts the uncertainty interval. These residual branches use patches of length 16 with stride 8 and are implemented as 6-layer, 8-head transformers with hidden size 512, feed-forward dimension 1,024, attention pooling, and dropout 0.1. They take the displacement context, the initial forecast, and metadata, imputation, and calendar features as additional inputs. For seismic step localization, the pretrained model is com-bined with a temporal DETR head. The encoded hidden states of width 768 are first projected to a decoder width of 256 and combined with a one-dimensional sinusoidal positional encoding. A transformer decoder with 4 layers, 8 attention heads, feed-forward dimension 1,024, and dropout 0.1 then processes Q = 48 learned queries. Each query carries both a learned content embedding and an initial reference point distributed across the 512-day window. Query locations are refined iteratively across decoder layers following Dynamic Anchor Box DETR (DAB-DETR [51]). In addition to the query-based branch, the model also predicts dense frame-level event scores along the encoded sequence and a window-level event probability. The dense frame branch gives local evidence for the query predictions and helps the model localize events more precisely within the window, while the binary branch suppresses query predictions in windows with no events. For detection, the pretrained model remains trainable and is optimized together with the detection head. This gives a detection model with 367 million parameters, of which 187 million are trainable. We use full finetuning for this task because seismic step localization requires stronger task-specific adaptation than forecasting. While forecasting is close to the pretraining objective of reconstructing masked parts, localization requires the encoder to associate preserved step-like patterns with sparse seismic-event labels and to localize their dates. 
+
+H. Evaluation Procedure and Metrics 
+
+We evaluate the model at three stages: self-supervised pretraining, displacement forecasting, and seismic step local-ization. For pretraining, we report validation performance under fixed masking conditions so that checkpoints are directly comparable even though the training curriculum changes over time. We use a validation probe at the final masking difficulty and a tail-mask probe in which the masked region is restricted to the end of the window. On these probes, we report the validation loss and cosine similarity between the predicted and target representations at masked positions. We also monitor codebook usage through hard-assignment perplexity and the fraction of used codevectors. In addition to these quantitative metrics, we perform an exploratory analysis of the learned codebook on 1,000 valida-tion windows. For each window, we extract the discrete code assignments at every latent position and aggregate occurrences of each code across all windows. Each latent position corre-sponds to a local receptive-field patch in the input window rather than to a single exact day. We then characterize code occurrences by three interpretable properties: step sensitivity, trend sensitivity, and seasonal sensitivity. Step sensitivity is characterized by association with catalogued seismic events within the receptive field, together with the strength of the local step-like change. Trend sensitivity is characterized by the magnitude of the local displacement slope within the receptive field. Seasonal sensitivity is characterized by recurring code occurrences at annual or semi-annual periods. For forecasting, we evaluate 90-day displacement prediction using mean absolute error (MAE) and root mean squared error (RMSE). For the probabilistic second-stage model, we addi-tionally report empirical coverage of the predictive intervals after calibration on the validation set. For seismic step localization, we evaluate both event detec-tion and date localization. Because the labels in daily GNSS step catalogs can be misaligned by a few days relative to the visually apparent step, a predicted event is counted as correct if it falls within ±2 days of a ground-truth event. This is consistent with the error analysis of Crocetti et al. [3], who report that correctly classified earthquake dates often deviate by one to two days. We report three F1 metrics. The window F1 evaluates only whether a window contains at least one seismic event. The end-to-end localization F1 evaluates the full pipeline, so a prediction is counted as correct only if the 75 10 15 20 25 30 35 40        
+
+> Epoch
+> 0.5
+> 0.6
+> 0.7
+> 0.8
+> 0.9
+> 1.0
+> 1.1
+> Loss
+> 510 15 20 25 30 35 40
+> Epoch
+> 0.55
+> 0.60
+> 0.65
+> 0.70
+> 0.75
+> 0.80
+> 0.85
+> 0.90
+> Loss
+
+Fig. 3. Validation under fixed masking conditions. Left: Fixed hard-mask probe loss over training. Right: Tail-mask probe loss over training. Both probes are evaluated with fixed masking difficulty at every epoch, so they are directly comparable across training. 
+
+model both predicts an event in the correct window and places the event date within the tolerance window. The localization F1 on target windows removes the window-level decision step and evaluates date localization only on windows that truly contain a ground-truth event. In addition, we report a conditional localization success rate on windows that contain both a ground-truth event and receive a positive event prediction. V. R ESULTS 
+
+A. Pretraining Analysis 
+
+To assess what the model learns during pretraining, we analyze the reconstruction quality, codebook usage, and the structure of the learned representations. The validation probes and metrics are defined in Section IV-H. Figure 3 shows that both validation probes improve steadily over training, indicating that the model learns to reconstruct masked regions increasingly well. The mean cosine similarity at masked positions increases from 0.849 to 0.902. On the more difficult tail-mask probe, cosine similarity rises from 0.713 to 0.803 for the last three masked positions. Figure 4 summarizes how codebook usage evolves over training. Hard-assignment perplexity increases steadily in all four groups (i.e., two velocity-related groups, and two displacement-related groups), showing that code usage be-comes broader as training progresses. At the same time, the fraction of used codevectors also rises, which indicates that the model activates a larger part of the codebook over time. The velocity-related groups remain more selective than the displacement-related groups, while the displacement-related groups use a broader set of codevectors overall. This suggests that the two streams encode different kinds of information, with the displacement-related groups covering a more diverse range of target patterns. Within each stream, however, the two codebook groups do not show a clear separation by signal type. The codebook analysis suggests that individual codevectors specialize in distinct signal types. To connect a codevector to the original time series, we map its assignments back to the corresponding receptive fields in the GNSS window. A code is considered event-sensitive if it is often assigned to positions where the receptive field overlaps with a catalog event. Figure 5 shows one representative example, code 221 from group 5 10 15 20 25 30 35 40        
+
+> Epoch
+> 0
+> 20
+> 40
+> 60
+> 80
+> 100
+> 120
+> Perplexity
+> Displacement
+> Group 2
+> Group 3
+> Velocity
+> Group 0
+> Group 1
+> 510 15 20 25 30 35 40
+> Epoch
+> 30%
+> 40%
+> 50%
+> 60%
+> Fraction
+
+Fig. 4. Quantizer usage over training. Left: Per-group hard-assignment perplexity across epochs. Right: Fraction of codevectors used on masked validation positions. The solid line shows the median across the validation interval, and the shaded band shows the interquartile range. Groups 0 and 1 correspond to the velocity stream, while groups 2 and 3 correspond to the displacement stream. 
+
+3. This code was selected because it appears near catalog-matched events more often than most other codes in the same group. The figure shows one such occurrence, where the code is assigned close to a seismic step. Similar analyses indicate that other codes are associated with trend-like or seasonal behavior. This suggests that the pretraining objective organizes the latent space around the main signal types present in GNSS data. We also train two ablation models using only the velocity or only the displacement stream. Figure 6 compares these models with the full dual-stream model. The velocity-only model is dominated by codebook collapse and fails to optimize the objective successfully, so its cosine similarity values are much less informative. The displacement-only model remains much stronger, but it performs worse than the dual-stream model on all cosine-based probe metrics, with the largest gap on the tail-mask probes. The slightly lower overall validation objective of the displacement-only model should be interpreted cautiously, because this objective combines the main contrastive term with additional regularization terms and does not correspond directly to probe cosine similarity quality. In particular, the displacement-only objective excludes the velocity-stream tar-gets and their associated code-usage regularization, which can make the total objective slightly lower without implying better representations. Overall, this confirms that both streams contribute and that the velocity stream appears to be especially important for extrapolation. 
+
+B. Displacement Forecasting 
+
+We compare two supervised baselines and two finetuned variants of our pretrained model. The baselines are the Cal-ibrated Base Forecast, which combines ridge regression and Fourier extrapolation, and the Patch-TST Residual Baseline [50], which adds a supervised residual corrector on top of that calibrated base forecast. The two variants of our model are GNSS-FM Stage 1, which combines the pretrained encoder with a cross-attention decoder, and GNSS-FM Stage 2, which adds a Patch-TST residual branch. Table II shows the main forecasting results. The two super-vised baselines achieve lower MAE than GNSS-FM, whereas GNSS-FM Stage 1 achieves the lowest RMSE on both valida-80
+
+10 
+
+20 
+
+> North
+
+Velocities (mm/day) 
+
+360 
+
+370 
+
+380 
+
+390 
+
+Displacement (mm) 
+
+0
+
+20 
+
+40 
+
+60 
+
+> East
+
+25 
+
+0
+
+25 
+
+50 
+
+75 
+
+> SNR = 64.2
+> Event metric = 11.70
+> 2011-01-01
+> 2011-03-01
+> 2011-05-01
+
+Date 
+
+10 
+
+0
+
+10 
+
+20 
+
+> Up
+> 2011-01-01
+> 2011-03-01
+> 2011-05-01
+
+Date 
+
+140 
+
+150 
+
+160 
+
+170 
+
+180 
+
+Receptive field (RF) Chosen catalog event 
+
+Fig. 5. Example occurrence of the event-sensitive code g3-c221 at station J300. The shaded region shows the receptive field of the latent position assigned to this code, and the vertical line marks the matched catalog event. Although the code belongs to displacement group 3, the aligned velocities are also shown to illustrate the local change associated with the same time interval. The East component is highlighted because it has the strongest local step evidence, meaning the largest pre/post-event displacement offset relative to the local short-term variability. SNR denotes the local step signal-to-noise ratio, and Event metric the detectability z-score of the matched catalog event. Masked cosine Tail-mask cosine Last-3-tail cosine   
+
+> 0.0
+> 0.2
+> 0.4
+> 0.6
+> 0.8
+> 1.0
+> Cosine similarity
+> Dual-stream
+> Displacement-only
+> Dual-stream Displacement-only Velocity-only
+> 0
+> 1
+> 2
+> 3
+> 4
+> Validation objective
+
+Fig. 6. Comparison of the dual-stream model with the single-stream ablations. Left: Cosine-based probe metrics, where 1 indicates perfect alignment between the predicted and target representations. Right: Overall validation objective, where lower values indicate better optimization. 
+
+tion and test set. The baselines are designed to extrapolate re-cent trend and seasonal harmonics directly, which makes them very strong on the many ordinary windows where the future is a smooth continuation of the context. GNSS-FM, in contrast, predicts through a downsampled pretrained representation and is selected with an RMSE-oriented validation criterion, which favors reducing rare large forecast failures over minimizing the typical absolute error measured by MAE. The Up component produces the largest MAE across all models, while North and East contribute more to RMSE through rare large errors from seismic events. Stage 2 changes the validation metrics only slightly: the RMSE decreases by 0.13%, while the MAE increases by 1.60%. Since this does not represent a meaningful improvement of the deterministic mean forecast, we retain Stage 1 as the final point-forecasting model and interpret Stage 2 as the probabilistic extension for uncertainty estimation. Af-ter recalibration on the validation set, the empirical coverages of the 68%, 90%, and 95% predictive intervals on the test set are 67.2%, 89.6%, and 94.8%, respectively. The difference between validation and test is much larger for the two supervised baselines than for GNSS-FM. In particular, RMSE increases strongly from validation to test for both baselines, while the pretrained model remains much more stable across the two splits. Figure 7 shows a representative probabilistic forecast from GNSS-FM Stage 2 on the test set. The predicted mean captures the low-frequency evolution 9
+
+TABLE II DISPLACEMENT FORECASTING RESULTS IN MILLIMETRES FOR THE DIFFERENT MODELS ON THE VALIDATION AND TEST SET . GNSS-FM STAGE 1 IS RETAINED AS THE FINAL POINT -FORECASTING MODEL , WHILE 
+
+STAGE 2 IS EVALUATED AS THE PROBABILISTIC EXTENSION .Split Model MAE RMSE Val Base forecast 3.67 22.84 Val Patch-TST baseline 3.88 19.71 Val GNSS-FM Stage 1 5.61 7.91 Val GNSS-FM Stage 2 5.70 7.90 
+
+Test Base forecast 4.04 77.05 Test Patch-TST baseline 4.17 58.77 Test GNSS-FM Stage 1 4.87 6.78 
+
+Test GNSS-FM Stage 2 5.10 6.98 735           
+
+> 740
+> 745
+> North [mm]
+> 470
+> 460
+> 450
+> East [mm]
+> 75 50 25 025 50 75
+> Time relative to forecast start [days]
+> 990
+> 1000
+> 1010
+> Up [mm]
+> Input Context 95% CI 68% CI Target Pred (Mean)
+
+Fig. 7. Representative probabilistic forecast from GNSS-FM Stage 2 on the test set for station NOSE. The figure shows, for the North, East, and Up displacement components, part of the input context used by the model (black), the ground-truth future displacement over the 90-day forecast horizon (green), the predicted mean trajectory (orange), and the predictive confidence intervals (shaded areas). 
+
+of the displacement time series, while remaining smoother than the daily observations. This behavior is expected for daily GNSS forecasting, where small day-to-day fluctuations are often dominated by measurement noise and are difficult to predict from the context alone. The predictive intervals therefore represent the remaining short-term variability around the smoother mean trajectory. 
+
+C. Seismic Step Localization 
+
+We evaluate seismic step localization on 512-day windows. The task combines a window-level event decision with event date localization, and the evaluation metrics are defined in Section IV-H. We compare GNSS-FM with a hybrid baseline that uses multi-scale Haar step scores [52] and derivative-energy features for candidate proposals, XGBoost [53] for ranking, and a small temporal convolutional network for refinement. Table III summarizes the results on the test set. The two models are similar at the window-level event decision, but differ much more strongly at the localization level. The main improvement of GNSS-FM therefore does not come from deciding whether a window contains an event at all, but from turning that decision into an accurate event date. For GNSS-FM, the conditional localization success rate is 0.769 on windows that both contain a ground-truth event 
+
+TABLE III SEISMIC STEP LOCALIZATION RESULTS ON THE TEST SET . T HE THREE F1  
+
+> METRICS ARE DEFINED IN
+
+SECTION IV-H. Model Window F1 End-to-end F1 Localization F1 Baseline 0.574 0.035 0.175 GNSS-FM 0.590 0.429 0.515 <-3 -3 -2 -1 0 +1 +2 +3 >+3 
+
+> Localization error [days]
+> 0
+> 10
+> 20
+> 30
+> 40
+> Count
+> within tolerance
+> outside tolerance
+
+Fig. 8. Histogram of localization errors on windows that both contain a ground-truth event and receive a positive event prediction. Green bars mark errors within the ±2-day tolerance used for the localization metrics, while orange bars are outside this tolerance. The concentration near zero shows that, once the model predicts an event in a true event window, the predicted date is often close to the ground-truth date. 22 Mar 29 Mar 05 Apr 12 Apr 19 Apr 26 Apr    
+
+> Date (2010)
+> 300
+> 302
+> 304
+> 306
+> 308
+> 310
+> 312
+> 314
+> Displacement [mm]
+> 0.0
+> 0.2
+> 0.4
+> 0.6
+> 0.8
+> 1.0
+> Event probability
+> East Prediction Ground truth Predicted event date
+
+Fig. 9. Representative seismic step localization for one example in the test set. The figure shows the displacement component with the highest signal-to-noise ratio and the predicted event probability over time. For this window of station P482, the binary detection branch predicts an 82.4% probability of a seismic event. The vertical lines mark the predicted event date and the ground-truth seismic step date. The predicted event probability peaks two days before the catalog event date, but aligns with the onset of the visible displacement change, illustrating the ±2-day matching tolerance used for evaluation. 
+
+and receive a positive event prediction. This shows that once the model predicts an event in a true event window, it often places the event date close to the ground-truth date. Figure 8 complements this by showing the distribution of localization errors around the ground-truth date. For reference, when the model is optimized specifically for either window classification or target-only localization, it reaches an F1 score of 0.85 and 0.69, respectively. A representative example window is shown in Figure 9, which illustrates the predicted event probability and the predicted event date relative to the ground-truth seismic step. VI. D ISCUSSION 
+
+A. Representation Learning in the Pretrained Encoder 
+
+The pretraining results suggest that the model learns more than a simple interpolation of missing values. The appear-10 
+
+ance of separate codevectors for seismic offsets, trends, and seasonal cycles reflects the classical decomposition used in geodetic time series analysis, where the signal is explicitly separated into trend, periodic, offset, and noise components [32], [33]. The pretrained encoder produces a similar structure implicitly, which suggests that the main signal types in GNSS data repeat often enough to be captured by a discrete latent vocabulary. The ablation results also clarify what each input stream contributes. Displacement carries most of the stable structure needed for masked reconstruction, while the velocity stream is especially important for the more difficult segments. This is physically plausible: drift, seasonal loading, and step offsets are more directly visible in the displacements, whereas the ve-locity stream provides short-term dynamics that are otherwise suppressed by the convolutional downsampling. The main limitation of the current pretraining approach is that, although the model conditions on station metadata, it processes each station window independently. The metadata provides static spatial information, but it does not provide the model with simultaneous observations from neighboring stations or with time-varying external geophysical drivers. This matters because shared signals such as atmospheric loading affect neighboring stations simultaneously and are a well-known challenge in GNSS network analysis [35], [36]. Including spatial context, for example through a graph-based encoder or cross-station attention, would likely help, especially for the vertical component where loading effects and common-mode errors are often strongest. 
+
+B. Displacement Forecasting 
+
+The MAE-RMSE trade-off in Table II shows that the pretrained model changes the pattern of errors rather than improving all windows. This is because convolutional down-sampling in the pretrained encoder suppresses high-frequency variability, producing smoother forecasts that avoid large er-rors, but also miss some short-term signals in easy windows. This trade-off is beneficial overall because a small number of very difficult windows, caused by seismic steps or aggressive local drifts, dominate the squared error far more than they affect the absolute error. The much larger gap between validation and test RMSE for the supervised baselines suggests that the test split contains a higher fraction of such difficult forecast windows. This interpretation is supported by the fact that baseline MAE changes only slightly between validation and test, whereas baseline RMSE increases strongly. This indicates that the main difference comes from rare, high-error cases rather than from general overfitting across typical windows. In particular, the baselines appear to be more sensitive when abrupt changes distort the recent trend near the context boundary or when a short local drift is extrapolated too aggressively. By contrast, the pretrained model remains much more stable across the two splits. Figure 10 illustrates this behavior for a difficult test ex-ample with a seismic step in the context window. The forecast remains stable instead of extrapolating the abrupt offset into the prediction horizon, while still tracking the broad North and 400           
+
+> 420
+> 440
+> 460
+> North [mm]
+> 1000
+> 1100
+> 1200
+> East [mm]
+> 75 50 25 025 50 75
+> Time relative to forecast start [days]
+> 300
+> 320
+> 340
+> 360
+> Up [mm]
+> Input Context 95% CI 68% CI Target Pred (Mean)
+> Fig. 10. Forecast example for station J263 illustrating the behavior of GNSS-FM Stage 2 after a seismic step in the input context.
+
+East trajectories. The Up component is noisier, and the model represents much of this short-term variability through wider predictive confidence intervals rather than the mean trajectory. Since Stage 2 mainly adds probabilistic information without substantially changing the mean forecast, a natural extension would be to decouple the low-frequency point forecast from the high-frequency residual variability more explicitly, for example by preserving the Stage 1 mean prediction and training a separately calibrated uncertainty branch. All forecasting approaches share the same hardest failure mode: seismic steps that occur within the forecast horizon. These are impossible to predict from the previous displacement time series alone. As a result, forecast errors around such events reflect a limitation of the available input information rather than only a weakness of the forecasting architecture. 
+
+C. Seismic Step Localization 
+
+The large improvement in end-to-end localization F1 over the baseline reflects a key difference in how the two systems work. The baseline depends on a proposal stage that must identify the correct candidate event date before any learning-based ranking can take place. When this stage fails, as it does for many events, the downstream ranker has nothing to work with. The pretrained model avoids this bottleneck by operating directly on the learned sequence representation, where event-sensitive codevectors already encode step information. The final joint model reaches a test window-level F1 score of 0.590 and a test localization F1 on target windows of 0.515. The corresponding task-specific reference results are higher, with a test window-level F1 score of 0.85 for the window-event-only model and a test localization F1 on target windows of 0.69 for the localization-focused model. This gap suggests that the two objectives create partially conflicting demands during training. Better loss balancing, staged training, or architectural separation of the two heads are the most promising directions for closing this gap. A further limitation specific to the detection task is label quality. The ground-truth event catalog is based on a simple distance and magnitude equation that produces many candidate events that are not actually detectable in the displacement 11 0 5 5 10 10 20 20 50 50+            
+
+> Displacement jump (mm)
+> 0.0
+> 0.2
+> 0.4
+> 0.6
+> 0.8
+> 1.0
+> Localization F1 score
+> Fig. 11. Localization performance on true-event windows in the test set, stratified by event size. Event size is measured as the displacement jump at the event date. The points show localization F1 score in each size bin, and the error bars show 95% percentile bootstrap confidence intervals obtained by resampling true-event windows within each bin. The size bins are defined as
+> [0 ,5) ,[5 ,10) ,[10 ,20) ,[20 ,50) , and ≥50 mm, with 12, 114, 301, 91, and 20 true-event windows in each bin, respectively. Localization performance increases clearly with event size, showing that weak observed offsets near the detectability threshold are much harder to recover than larger seismic steps.
+
+data. While we filter these using a signal-to-noise threshold, the remaining labels are still imperfect: some retained events may still not produce a visible step, some are shifted by a few days, and some real steps may be absent from the catalog entirely. This likely causes the evaluation metrics to underestimate true model performance. At the same time, an analysis using the observed displacement jump on the event date shows a clear dependence on event strength: localization F1 rises steadily with displacement jump size, from 0.34 for 5-10 mm offsets to 0.56 for 20-50 mm, and reaches 0.95 above 50 mm (Figure 11). Consistent with this trend, the miss rate is higher for the smallest displacement jumps and declines strongly for larger events, whereas conditional localization precision remains comparatively high once the model emits a detection. The main limitation of the current detector is recall for weak seismic offsets near the detectability threshold, rather than date placement once an event has been detected. 
+
+D. Limitations and Future Directions 
+
+The most important limitation of GNSS-FM is that pretrain-ing uses a single data source. Adding more GNSS networks, which rely on different processing pipelines, or additional geodetic data could improve generalization, especially in re-gions with fewer stations. The daily temporal resolution also limits the model to applications that do not require high-frequency data. Beyond the two downstream tasks presented here, the pretrained encoder is a natural candidate for GNSS data gap imputation, denoising, anomaly detection, and station quality evaluation, thus, illustrating the broad potential of GNSS-FM. In principle, it is suitable for all applications where labeled data are rare and a pretrained representation could reduce the supervision needed. VII. C ONCLUSION 
+
+We present GNSS-FM, a self-supervised foundation model for daily GNSS displacement time series. We pretrain a dual-stream transformer encoder using masked latent prediction with vector-quantized targets, adapted from wav2vec 2.0 with several modifications for GNSS data. Pretrained on data from over 17,000 globally distributed GNSS stations, the model learns meaningful representations of GNSS signals, as sug-gested by codebook entries that specialize in seismic offsets, trends, and seasonal patterns. On two downstream tasks with very different task formula-tions, the pretrained encoder outperforms supervised baselines in both cases. In displacement forecasting, the finetuned model achieves a test RMSE of 6.78 mm compared to 58.77 mm for the supervised Patch-TST baseline. In seismic step local-ization, the end-to-end localization F1 improves from 0.035 (baseline) to 0.429, with a median absolute localization error of two days on correctly identified event windows. Together, these results demonstrate that a single pretrained GNSS backbone can support multiple downstream tasks, re-duces the dependence on labeled data, and generalizes well across stations it has not seen during pretraining or finetuning, thus showing great potential for future applications. ACKNOWLEDGEMENTS 
+
+The contributions of Fanny Lehmann to this work were primarily supported by the ETH AI Center fellowship. The contributions of Leonardo Trentini were supported by the Swiss National Science Foundation (SNSF) under grant num-ber 225851. APPENDIX APREPROCESSING DETAILS 
+
+This appendix summarizes the detailed preprocessing steps that are outlined in Section III. The goal is to transform daily GNSS displacement time series into fixed-length training windows while preserving the main deformation structure and keeping track of the data quality. Unless stated otherwise, all preprocessing steps are applied separately to the north, east, and up components. 
+
+A. Station filtering 
+
+Before the final station selection, poorly observed edges are trimmed to remove fragmented boundary regions. The final retained time span is the intersection across north, east, and up component. Stations are then filtered using simple criteria based on observation span, overall coverage, and long internal gaps. One station with unusually large seasonal amplitudes (LTHW) is removed separately. 
+
+B. Outlier detection and event handling 
+
+Outliers are treated as isolated spikes that are inconsistent with the local behavior of the displacement series and that do not persist as step-like offsets. Detected outliers are masked so that later gap filling treats them in the same way as missing samples. 12 
+
+The outlier detector is an iterative procedure based on a Hampel filter, combined with additional tests on local jumps and large deviations from a detrended series [38], [39]. Candidate outliers that occur close together are grouped, and the displacement before and after each group is compared. A group is kept only if it is consistent with a real offset rather than an isolated spike. This helps to preserve seismic or other step-like changes while still removing outliers. The comparison between the two surrounding windows is based on a two-sided Mann-Whitney test [54]. For each cataloged event, a local detectability score is computed from the east/north/up time series in a short window around the catalog date. Equipment changes with a detectabil-ity score above a threshold are masked before gap filling, because otherwise, after differencing they would appear as isolated spikes. After preprocessing, the event refinement pass is repeated on the cleaned time series to update detectability scores. Only seismic events are used as positive targets in the downstream detection task. 
+
+C. Velocity stream, normalization, and gap filling 
+
+After outlier removal, the cleaned displacement series is converted into first differences. This representation reduces non-stationarity and makes local changes more explicit. The velocity stream is normalized before gap filling. The series is then transformed by an inverse hyperbolic sine transformation to compress large values without clipping. Missing samples in the velocity stream, including removed outliers and masked equipment changes, are filled in two ways. Short gaps are filled by linear interpolation. Longer gaps are filled by a resampling-based synthesis step that uses nearby valid data to maintain local variability [40], [41]. Each day also receives a reliability label indicating whether it is original, interpolated, synthesized, or padded. 
+
+D. Displacement reconstruction and dual-stream output 
+
+After filling gaps in the velocity stream, the displacement stream is rebuilt by summing the daily increments. In long gaps, the reconstructed values are adjusted so that they still match the observed displacement on both sides of the gap. The final model input contains two aligned streams. The velocity stream emphasizes local and fast-changing behavior, while the displacement stream preserves the absolute displace-ment level and longer-range dependencies. The two streams are normalized separately because they differ in scale and distribution. 
+
+E. Window construction and reliability masks 
+
+All experiments use fixed-length windows of 512 days. For pretraining and forecasting, windows are non-overlapping. For seismic step localization, a limited overlap is used so that events near window boundaries are less likely to be missed. To avoid windows dominated by imputed values, only windows with sufficient original data are kept. Short series may still produce one padded window, with the padded region excluded later through masking. For forecasting, each window is split into a context period and a 90-day prediction horizon, and the horizon must also satisfy a minimum original-data requirement. Reliability labels are converted into the masks and weights used during training. These separate original from padded samples and reduce the influence of imputed values in the loss. 
+
+F. Detection-specific augmentation and batch balancing 
+
+Detection training includes two additional steps because seismic events are rare relative to the total number of windows. First, windows that contain seismic events are augmented by small random time shifts. Second, the detection uses balanced batches so that positive windows are seen regularly during training despite the strong class imbalance. APPENDIX BPRETRAINING OBJECTIVE DETAILS 
+
+This appendix gives the definitions of the terms in Equation 3. The pretraining objective combines the masked contrastive term with a diversity term, a small auxiliary reconstruction term, and several regularization terms that reduce codebook collapse. The main term is the contrastive loss. For each masked feature step t ∈ M, the model compares the projected transformer output ct with the corresponding quantized target 
+
+qt and with K = 50 negative targets q− 
+
+> t,j
+
+sampled from other feature steps. The negatives are taken both from the current batch and from the memory queue. The contrastive term is weighted by the reliability of the masked step, so masked targets based on original observations contribute more than targets based on imputed values. The diversity term Ldiv encourages broad use of the code-book instead of collapse to a small number of codevectors [8]. The usage-entropy term Husage acts in a similar way and further encourages the average assignment distribution in each group to remain spread across many codevectors. In contrast, the token-entropy term Htok acts at the level of individual feature steps and discourages assignments from becoming too sharp too early. The auxiliary reconstruction term Laux is a small reliability-weighted loss applied only at masked positions. It consists of three L1 terms: one compares the predicted velocity with the target velocity, one compares the predicted displacement with the target displacement, and one compares the cumulative sum of the predicted velocity with the predicted displacement. This term helps stabilize training and keeps the latent representation tied to the underlying signal structure. The orthogonality term Lorth acts on the raw codevectors and encourages them to point in different directions within each group. The separation term Lsep acts on the projected codevectors after the trainable projection layer and keeps them separated in the contrastive space. This helps prevent collapse at both stages. The total-variation term Ltv reduces large changes in the assignment probabilities from one feature step to the next. This makes the assignments smoother over time. 13 
+
+Two additional regularizers are used for the velocity groups. The term Lvh encourages the model to keep several code options active, and Lvkl keeps the soft assignment distribution close to uniform so that the model does not rely too much on a small subset of codes. In addition, the term Llat penalizes low cosine similarity between the predictions and the corre-sponding targets. Not all coefficients are constant during training. The coef-ficients λaux (s), λvh (s), λvkl (s), and λlat (s) depend on the training step s and are introduced gradually. This keeps the main contrastive objective dominant early in training and adds the auxiliary regularization terms later. In the final pretraining setup, the active coefficients are 
+
+λdiv = 1 .0, λaux (s) ≤ 0.01 , λorth = 0 .05 , λtv = 0 .01 ,
+
+λvh (s) ≤ 0.04 , λvkl (s) ≤ 0.05 , λlat (s) ≤ 0.02 , λsep = 0 .05 ,
+
+λusage = 0 .06 , and λtok = 0 .02 .REFERENCES [1] J. Freymueller, “Geodynamics,” in Springer Handbook of Global Nav-igation Satellite Systems , P. J. Teunissen and O. Montenbruck, Eds. Cham: Springer International Publishing, 2017. [2] G. Blewitt, W. C. Hammond, and C. Kreemer, “Harnessing the GPS data explosion for interdisciplinary science,” Eos , vol. 99, 2018. [3] L. Crocetti, M. Schartner, and B. Soja, “Discontinuity detection in GNSS station coordinate time series using machine learning,” Remote Sensing ,vol. 13, p. 3906, 2021. [4] H. Chen, T. Lu, J. Huang, X. He, K. Yu, X. Sun, X. Ma, and Z. Huang, “An improved VMD-LSTM model for time-varying GNSS time series prediction with temporally correlated noise,” Remote Sensing , vol. 15, no. 14, p. 3694, 2023. [5] G. Costantino, S. Giffard-Roisin, M. Radiguet, M. Dalla Mura, D. Marsan, and A. Socquet, “Multi-station deep learning on geodetic time series detects slow slip events in cascadia,” Communications Earth & Environment , vol. 4, p. 435, 2023. [6] J. Devlin, M.-W. Chang, K. Lee, and K. Toutanova, “BERT: Pre-training of deep bidirectional transformers for language understanding,” in Proceedings of NAACL-HLT , 2019. [7] K. He, X. Chen, S. Xie, Y. Li, P. Doll´ ar, and R. Girshick, “Masked autoencoders are scalable vision learners,” in Proceedings of CVPR ,2022. [Online]. Available: https://arxiv.org/abs/2111.06377 [8] A. Baevski, Y. Zhou, A. Mohamed, and M. Auli, “wav2vec 2.0: A framework for self-supervised learning of speech representations,” in Advances in Neural Information Processing Systems , vol. 33. Curran Associates, Inc., 2020, pp. 12 449– 12 460. [Online]. Available: https://proceedings.neurips.cc/paper/2020/ hash/92d1e1eb1cd6f9fba3227870bb6d7f07-Abstract.html [9] T. Liu, J. M¨ unchmeyer, L. Laurenti, C. Marone, M. V. d. Hoop, and I. Dokmani´ c, “SeisLM: a foundation model for seismic waveforms,” arXiv preprint arXiv:2410.15765, 2024. [10] H. Bao, L. Dong, S. Piao, and F. Wei, “Beit: Bert pre-training of image transformers,” in International Conference on Learning Representations (ICLR) , 2022. [11] Y. Wang, H. Hern´ andez Hern´ andez, C. Albrecht, and X. Zhu, “Feature guided masked autoencoder for self-supervised learning in remote sens-ing,” IEEE Journal of Selected Topics in Applied Earth Observations and Remote Sensing , pp. 1–17, 2024. [12] W.-N. Hsu, B. Bolte, Y.-H. H. Tsai, K. Lakhotia, R. Salakhutdinov, and A. Mohamed, “HuBERT: Self-supervised speech representation learning by masked prediction of hidden units,” IEEE/ACM Transactions on Audio, Speech, and Language Processing , vol. 29, pp. 3451–3460, 2021. [13] S. Chen, C. Wang, Z. Chen, Y. Wu, S. Liu, Z. Chen, J. Li, Y. Qian, and F. Wei, “WavLM: Large-scale self-supervised pre-training for full stack speech processing,” IEEE Journal of Selected Topics in Signal Processing , vol. 16, no. 6, pp. 1505–1518, 2022. [14] Z. Yue, Y. Wang, J. Duan, T. Yang, C. Huang, Y. Tong, and B. Xu, “TS2Vec: Towards universal representation of time series,” in Proceed-ings of the AAAI Conference on Artificial Intelligence , vol. 36, no. 8, 2022, pp. 8980–8987. [15] G. Zerveas, S. Jayaraman, D. Patel, A. Bhamidipaty, and C. Eickhoff, “A transformer-based framework for multivariate time series representation learning,” in Proceedings of the 27th ACM SIGKDD Conference on Knowledge Discovery and Data Mining , 2021, pp. 2114–2124. [16] H. Gui, X. Li, and X. Chen, “Vector quantization pretraining for EEG time series with random projection and phase alignment,” in 
+
+Proceedings of the 41st International Conference on Machine Learning ,ser. Proceedings of Machine Learning Research, R. Salakhutdinov, Z. Kolter, K. Heller, A. Weller, N. Oliver, J. Scarlett, and F. Berkenkamp, Eds., vol. 235. PMLR, 2024, pp. 16 731–16 750. [Online]. Available: https://proceedings.mlr.press/v235/gui24a.html [17] A. Labach, A. Pokhrel, S. E. Yi, S. Zuberi, M. Volkovs, and R. G. Krishnan, “Effective self-supervised transformers for sparse time series data,” OpenReview , 2022. [Online]. Available: https://openreview.net/forum?id=HUCgU5EQluN [18] I. Dumeur, S. Valero, and J. Inglada, “Self-supervised spatio-temporal representation learning of satellite image time series,” IEEE Journal of Selected Topics in Applied Earth Observations and Remote Sensing ,vol. 17, pp. 4350–4367, 2024. [19] A. F. Ansari et al. , “Chronos: Learning the language of time series,” arXiv preprint arXiv:2403.07815 , 2024. [Online]. Available: https://arxiv.org/abs/2403.07815 [20] A. Das, W. Kong, R. Sen, and Y. Zhou, “A decoder-only foundation model for time-series forecasting,” arXiv preprint arXiv:2310.10688 ,2023. [21] A. Garza, C. Challu, and M. Mergenthaler-Canseco, “TimeGPT-1,” arXiv preprint arXiv:2310.03589 , 2023. [22] C. Bodnar, W. P. Bruinsma, A. Lucic, M. Stanley, A. Allen, J. Brand-stetter, P. Garvan, M. Riechert, J. A. Weyn, H. Dong, J. K. Gupta, K. Thambiratnam, A. T. Archibald, C.-C. Wu, E. Heider, M. Welling, R. E. Turner, and P. Perdikaris, “A foundation model for the earth system,” Nature , vol. 641, pp. 1180–1187, 2025. [23] L. Trentini, F. Lehmann, L. Crocetti, and B. Soja, “Integrating GNSS-derived atmospheric delays into large weather foundation models,” in 
+
+EGU General Assembly 2026 . Vienna, Austria: Copernicus Meetings, 2026, eGU26-6706. [24] F. Ozdemir, Y. Cheng, S. Mohebi, F. Lehmann, S. Adamov, Z. Zhang, L. Trentini, D. Grund, O. Fuhrer, T. Hoefler, S. Mishra, S. Schemm, B. Soja, and M. Salzmann, “Earth system foundation model (esfm): A unified framework for heterogeneous data integration and forecasting,” 2026. [25] C. F. Brown, M. R. Kazmierski, V. J. Pasquarella, W. J. Ruck-lidge, M. Samsikova, C. Zhang, E. Shelhamer, E. Lahera, O. Wiles, S. Ilyushchenko, N. Gorelick, L. L. Zhang, S. Alj, E. Schechter, S. Askay, O. Guinan, R. Moore, A. Boukouvalas, and P. Kohli, “Alphaearth foundations: An embedding field model for accurate and efficient global mapping from sparse label data,” 2025. [26] G. Mastella, J. Bedford, F. Corbi, and F. Funiciello, “Denoising daily displacement GNSS time series using deep neural networks in a near real-time framing: a single-station method,” Geophysical Journal Inter-national , vol. 242, no. 3, p. ggaf207, 2025. [27] L. Bachelot, A. M. Thomas, D. Melgar, J. Searcy, and Y.-S. Sun, “Cascadia daily GNSS time series denoising: Graph neural network and stack filtering,” Seismica , vol. 2, no. 4, 2023. [28] P. Ruttner, R. Hohensinn, S. D’Aronco, J. D. Wegner, and B. Soja, “Modeling of residual GNSS station motions through meteorological data in a machine learning approach,” Remote Sensing , vol. 14, no. 1, p. 17, 2022. [29] L. Crocetti, M. Schartner, R. Schneider, K. Schindler, and B. Soja, “Correction models for GNSS displacements in europe based on en-vironmental variables and XGBoost,” Earth and Space Science Open Archive , 2025, preprint. [30] M. S ¸ ims ¸ek, M. Tas ¸kıran, and U. Do˘ gan, “Modelling of GNSS station position time series using deep learning approaches,” Earth Science Informatics , vol. 18, no. 1, p. 96, 2024. [31] M. Kiani Shahvandi and B. Soja, “Inclusion of data uncertainty in machine learning and its application in geodetic data science, with case studies for the prediction of earth orientation parameters and GNSS station coordinate time series,” Advances in Space Research , vol. 70, no. 3, pp. 563–575, 2022. [32] S. D. P. Williams, “The effect of coloured noise on the uncertainties of rates estimated from geodetic time series,” Journal of Geodesy , vol. 76, no. 9, pp. 483–494, 2003. [33] D. Dong, P. Fang, Y. Bock, M. K. Cheng, and S. Miyazaki, “Anatomy of apparent seasonal variations from GPS-derived site position time series,” 
+
+Journal of Geophysical Research , vol. 107, no. B4, 2002. 14 
+
+[34] Z. Altamimi, P. Rebischung, X. Collilieux, L. M´ etivier, and K. Chanard, “Itrf2020: an augmented reference frame refining the modeling of nonlinear station motions,” Journal of Geodesy , vol. 97, no. 47, 2023. [35] S. Wdowinski, Y. Bock, J. Zhang, P. Fang, and J. Genrich, “Southern California permanent GPS geodetic array: Spatial filtering of daily posi-tions for estimating coseismic and postseismic displacements induced by the 1992 Landers earthquake,” Journal of Geophysical Research: Solid Earth , vol. 102, no. B8, pp. 18 057–18 070, 1997. [36] D. Dong, P. Fang, Y. Bock, M. K. Cheng, and S. Miyazaki, “Spa-tiotemporal filtering using principal component analysis and karhunen– lo` eve expansion approaches to GPS coordinate time series,” Journal of Geophysical Research: Solid Earth , vol. 111, no. B3, 2006. [37] J. Jiao, H. Wang, Y. Dang, Y. Ren, C. Yue, X. Wu, H. Cui, and X. Wang, “Noise-resilient GNSS coordinate time series prediction using AVMD-sLSTM-transformer hybrid model,” Advances in Space Research , vol. 76, no. 11, pp. 6863–6881, 2025. [38] R. K. Pearson, Y. Neuvo, J. Astola, and M. Gabbouj, “Generalized hampel filters,” EURASIP Journal on Advances in Signal Processing ,vol. 2016, p. 87, 2016. [39] L. Davies and U. Gather, “The identification of multiple outliers,” 
+
+Journal of the American Statistical Association , vol. 88, no. 423, pp. 782–792, 1993. [40] H. R. K¨ unsch, “The jackknife and the bootstrap for general stationary observations,” The Annals of Statistics , vol. 17, no. 3, pp. 1217–1241, 1989. [41] U. Lall and A. Sharma, “A nearest neighbor bootstrap for resampling hydrologic time series,” Water Resources Research , vol. 32, no. 3, pp. 679–693, 1996. [42] N. Carion, F. Massa, G. Synnaeve, N. Usunier, A. Kirillov, and S. Zagoruyko, “End-to-end object detection with transformers,” in 
+
+European Conference on Computer Vision (ECCV) , 2020. [43] J. L. Ba, J. R. Kiros, and G. E. Hinton, “Layer normalization,” arXiv preprint arXiv:1607.06450 , 2016. [44] D. Hendrycks and K. Gimpel, “Gaussian error linear units (GELUs),” 
+
+arXiv preprint arXiv:1606.08415 , 2016. [45] H. Touvron, M. Cord, A. Sablayrolles, G. Synnaeve, and H. J´ egou, “Go-ing deeper with image transformers,” in Proceedings of the IEEE/CVF International Conference on Computer Vision (ICCV) , 2021, pp. 32–42. [46] E. Perez, F. Strub, H. de Vries, V. Dumoulin, and A. Courville, “FiLM: Visual reasoning with a general conditioning layer,” in Proceedings of the AAAI Conference on Artificial Intelligence , 2018. [47] E. Jang, S. Gu, and B. Poole, “Categorical reparameterization with Gumbel-Softmax,” in International Conference on Learning Represen-tations (ICLR) , 2017. [48] A. van den Oord, Y. Li, and O. Vinyals, “Representation learning with contrastive predictive coding,” arXiv preprint , 2018. [49] E. J. Hu, Y. Shen, P. Wallis, Z. Allen-Zhu, Y. Li, S. Wang, L. Wang, and W. Chen, “LoRA: Low-rank adaptation of large language models,” arXiv preprint arXiv:2106.09685, 2021. [50] Y. Nie, N. H. Nguyen, P. Sinthong, and J. Kalagnanam, “A time series is worth 64 words: Long-term forecasting with transformers,” 
+
+arXiv preprint arXiv:2211.14730 , 2023. [Online]. Available: https: //arxiv.org/abs/2211.14730 [51] S. Liu, F. Li, H. Zhang, X. Yang, X. Qi, H. Su, J. Zhu, and L. Zhang, “DAB-DETR: Dynamic anchor boxes are better queries for DETR,” in 
+
+International Conference on Learning Representations (ICLR) , 2022. [52] S. Mallat, A Wavelet Tour of Signal Processing: The Sparse Way , 3rd ed. Elsevier, 2008. [53] T. Chen and C. Guestrin, “XGBoost: A scalable tree boosting system,” in Proceedings of the 22nd ACM SIGKDD International Conference on Knowledge Discovery and Data Mining , 2016, pp. 785–794. [54] H. B. Mann and D. R. Whitney, “On a test of whether one of two random variables is stochastically larger than the other,” The Annals of Mathematical Statistics , vol. 18, no. 1, pp. 50–60, 1947.

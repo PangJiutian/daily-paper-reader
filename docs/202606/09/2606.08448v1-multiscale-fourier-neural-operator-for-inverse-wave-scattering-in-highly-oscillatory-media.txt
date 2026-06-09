@@ -1,0 +1,1996 @@
+Title: Multiscale Fourier Neural Operator for Inverse Wave Scattering in Highly Oscillatory Media
+
+URL Source: https://arxiv.org/pdf/2606.08448v1
+
+Published Time: Tue, 09 Jun 2026 01:01:04 GMT
+
+Number of Pages: 33
+
+Markdown Content:
+# Multiscale Fourier Neural Operator for Inverse Wave Scattering in Highly Oscillatory Media 
+
+Zilin You 1, Zhenli Xu 1, and Wei Cai ∗21School of Mathematical Sciences, Shanghai Jiao Tong University, Shanghai, China 
+
+> 2
+
+Department of Mathematics, Southern Methodist University, Dallas, TX, USA 
+
+Abstract 
+
+In this paper, we propose an operator learning method based on the multiscale Fourier neural operator (MscaleFNO) for inverse medium problems of Helmholtz equations. The MscaleFNO provides a neural surrogate model with reduced spectral bias for the Helmholtz equations, mapping highly oscillatory medium profiles to scattered wavefields. A plug-and-play inversion using elucidated diffusion model is intro-duced to regularize the inverse solver based on least squares of data misfits. Numerical results for partial aperture inversion of oscillatory two-dimensional media demonstrate the advantage and effectiveness of MscaleFNO for accurate reconstruction of highly oscillatory medium properties. 
+
+Keywords: Full-waveform inversion, multiscale Fourier neural opera-tor, elucidated diffusion model, Helmholtz equation 
+
+## 1 Introduction 
+
+Inverse medium problems arise in a wide range of applications, including radar imaging, geophysical exploration, and medical diagnostics, where the objective is to reconstruct unknown material parameters from observed wave-field measurements. Among existing approaches, the full waveform inversion (FWI) has emerged as a powerful framework that exploits full information content of wavefields to recover subsurface or interior structures [ 45 , 48 ]. Unlike classical travel-time tomography, which relies only on the kinematics of wave propagation, FWI is formulated as a PDE-constrained optimiza-tion problem that minimizes the mismatch between observed and simulated 
+
+> ∗Corresponding author, email: cai@smu.edu.
+
+1
+
+> arXiv:2606.08448v1 [math.NA] 7 Jun 2026
+
+data, enabling higher-resolution reconstructions of fine-scale features [ 48 ]. Despite its success, FWI faces fundamental challenges at high frequencies, stemming from the non-convexity of the misfit functional and the prohibitive computational cost of repeated PDE solves. The rapid development of deep learning has introduced data-driven alternatives to classical iterative approaches for inverse problems. In the context of FWI, early works focused on end-to-end supervised mappings from wavefield data to medium parameters using convolutional architectures, including InversionNet [ 49 ] and VelocityGAN [ 54 ], as well as hybrid ap-proaches such as UPFWI [ 19 ] that incorporate differentiable forward models. While these methods offer significant acceleration at inference, they often lack physical consistency, generalize poorly to out-of-distribution media, and fail to recover high-frequency structures due to spectral bias [ 51 ]. Benchmark studies such as OpenFWI [ 10 ] and large-scale models [ 18 ] further highlight the persistent trade-off between computational efficiency and reconstruction fidelity. Operator learning provides a principled alternative by approximating solution operators of parametric PDEs. Representative architectures include Fourier Neural Operators (FNO) [ 25 ], DeepONet [ 6, 31 ], and physics-informed variants such as PINO [ 27 ], along with extensions for complex geometries and multiscale representations [ 26 , 46 , 4], and particle-system-inspired for-mulations that offer improved generalizability for PDE approximation [ 17 ]. These approaches have demonstrated strong performance in learning forward solution operators for PDEs [ 24 ], and have been increasingly employed in inverse problems either as differentiable surrogate forward models within optimization frameworks [ 5, 28 ], or as direct inverse mappings from obser-vations to parameters [ 22 , 32 , 29 , 39 ]. However, the latter often suffers from poor generalization, heavy reliance on paired training data, and loss of fine-scale details due to the ill-posedness of the inverse problem. A fun-damental limitation shared by many neural operators is their bias toward low-frequency components, which hampers their ability to represent highly oscillatory wavefields [ 50 , 38 ]. Recent efforts to address this include hierar-chical and diffusion-enhanced operator architectures [ 14 , 35 ]. More recently, the multiscale Fourier neural operator (MscaleFNO) [ 52 ] has been proposed to overcome this limitation through scale-adaptive representations, achieving significantly improved approximation of high-frequency solutions. Never-theless, deploying such operators within a statistically principled inversion framework that accounts for the ill-posedness of the problem remains an open challenge. Diffusion models have emerged as powerful generative frameworks for learning complex high-dimensional data distributions. Building on DDPM [ 15 ], subsequent developments including score-based models [ 43 ], DDIM [ 44 ], EDM [ 20 ], and latent diffusion [ 41 ] have established diffusion models as state-of-the-art tools for image generation and flexible prior modeling. These 2capabilities have been increasingly leveraged in inverse problems, where diffu-sion models serve as learned priors for regularizing ill-posed reconstructions. Representative approaches include posterior sampling methods such as DPS [7 ], DDRM [ 21 ], and DiffPIR [ 55 ]. A complementary line of work integrates diffusion-based denoisers into iterative optimization schemes, including Plug-and-Play (PnP) [ 47 ] and Regularization by Denoising (RED) [ 40 ] frameworks. Recent extensions such as RED-DiffEq [ 42 ] have demonstrated strong per-formance in PDE-constrained inverse problems including FWI. However, all such approaches still require repeated evaluations of the forward PDE solver to enforce data consistency. In high-frequency regimes governed by the Helmholtz equation, where extremely fine discretization is necessary, such repeated solves become computationally prohibitive, making the forward solver the dominant bottleneck and fundamentally limiting the scalability of diffusion-regularized inversion for high-resolution FWI. The core challenge in high-frequency inverse scattering is fundamentally computational. Resolving fine-scale structures demands large wavenumbers, which render traditional numerical solvers prohibitively expensive for the repeated PDE evaluations required in iterative optimization. Neural operator surrogates offer a potential escape from this expense, but standard architec-tures such as FNO suffer from spectral bias, failing to accurately represent highly oscillatory wavefields. Together, these limitations leave high-frequency FWI without an efficient and physically consistent solution, while the ill-posedness of the inverse problem remains inadequately addressed. To address this challenge, we propose a full waveform inversion framework built upon the MscaleFNO [52]. By leveraging scale-adaptive representations, MscaleFNO overcomes the spectral bias of standard FNOs and enables accurate wavefield prediction in high-wavenumber regimes, serving as an efficient differentiable surrogate that eliminates the need for repeated expensive PDE solves. To further regularize the ill-posed inversion, we incorporate a pre-trained elu-cidated diffusion model (EDM) as a plug-and-play prior, injecting learned structural priors into the iterative reconstruction without additional forward solver evaluations. The resulting framework achieves high-frequency FWI that is simultaneously efficient, accurate, and well-regularized. The main contributions of this work are as follows: 
+
+• We demonstrate that MscaleFNO serves as a superior surrogate solver for high-wavenumber Helmholtz equations, achieving faster inference, improved numerical stability, and higher solution accuracy compared to standard FNO architectures, owing to its scale-adaptive spectral representations. 
+
+• We embed MscaleFNO as a differentiable surrogate forward model within a FWI framework for high-frequency Helmholtz inverse medium problems, replacing repeated expensive PDE solves and enabling effi-cient gradient-based optimization. 3• We validate the proposed framework under noisy and limited-aperture measurement settings, demonstrating that the integration of an EDM-based plug-and-play diffusion prior further improves reconstruction accuracy, robustness to noise, and recovery of fine-scale structural details compared to baseline methods. The remainder of this paper is organized as follows. Section 2 briefly reviews the formulation of full waveform inversion. Section 3 presents the pro-posed framework, detailing the MscaleFNO-based surrogate forward model and the integration of the EDM-based plug-and-play diffusion prior. Section 4 presents numerical experiments validating the surrogate forward model, evaluating reconstruction performance under noisy and limited-aperture settings, and conducting ablation studies. Finally, Section 5 concludes the paper. 
+
+## 2 Full waveform inversion 
+
+The FWI is typically implemented using gradient-based methods such as the adjoint-state approach [ 36 ], which require repeated solutions of the forward wave equation. In high-frequency regimes, the wavefield becomes highly os-cillatory, necessitating mesh resolutions proportional to the wavelength. This leads to large, indefinite, and poorly conditioned linear systems [ 1 , 11 ], signif-icantly increasing computational cost. Moreover, the achievable resolution is fundamentally limited by diffraction, with features below approximately half a wavelength being difficult to resolve [ 34 , 9 ]. Achieving higher resolution thus requires information of higher frequencies, which further exacerbates both computational burden and ill-posedness [ 13 ]. In addition, numerical discretizations suffer from the pollution effect in the high-frequency regime, requiring prohibitively fine meshes [16]. The propagation of acoustic waves in inhomogeneous media is governed by the Helmholtz equation ∆u(x) + k2 1 + α(x)u(x) = f (x), x ∈ Ω, (1) where k denotes the wavenumber in a homogeneous background medium, 
+
+α(x) represents the relative perturbation of the medium, and f (x) is the source term. The inverse medium problem aims to reconstruct α(x)from observations of the wavefield u(x) [ 8 , 33 ]. In the FWI setting, the total wavefield is matched directly to observed data. The total field can be decomposed as 
+
+u(x) = uinc (x) + us(x), (2) where uinc (x) is the incident field and us(x) is the scattered field. We consider point sources of the form f (x) = δ(x − xs) located at position xs. In a homogeneous medium, the incident field satisfies ∆uinc (x) + k2uinc (x) = δ(x − xs), (3) 4which corresponds to a spherical (or cylindrical) wave. The scattered field 
+
+us(x) satisfies ∆us(x) + k2(1 + α(x)) us(x) = −k2α(x)uinc (x), (4) together with the Sommerfeld radiation condition lim  
+
+> |x|→∞
+
+|x| d−12
+
+ ∂u s
+
+∂|x| − iku s
+
+
+
+= 0 , (5) which ensures that the scattered field is outgoing. To probe the medium, we consider multiple sources and receivers. Let 
+
+{xms }Mm=1 and {xnr }Nn=1 in Ω denote the source and receiver locations. For each source xms , we define fm = δ(x − xms ) and denote the corresponding wavefield by u(x; xms ). We define the forward Helmholtz operator K : ( α, f ) 7 → u, which maps the medium perturbation and source to the corresponding wavefield. The noisy measurements are collected in a complex-valued observation matrix 
+
+Yδ = {yδm,n }M,N m=1 ,n =1 , with entries 
+
+yδm,n = K(α, f m)( xnr ) + ϵm,n , (6) where ϵm,n denotes complex-valued additive noise. The inverse problem is to reconstruct α(x) from the noisy multi-source observations yδ. Due to the ill-posedness of the problem, regularization is required to ensure stability. A standard formulation is the PDE-constrained optimization problem min  
+
+> α(x)
+
+J (α) = 1
+
+M N 
+
+> M
+
+X
+
+> m=1
+> N
+
+X
+
+> n=1
+
+K(α, f m)( xnr ) − yδm,n  
+
+> 22
+
++ R(α), (7) where R(α) is a regularization term encoding prior knowledge on the medium structure. In this work, this term is realized through a learned plug-and-play diffusion prior, as detailed in the next section. 
+
+## 3 Operator learning for full waveform inversion 
+
+3.1 The algorithm framework 
+
+We consider the inverse medium problem of recovering the perturbation field 
+
+α(x) from noisy wavefield observations Y δ = {yδm,n }, where m = 1 , . . . , M 
+
+indexes the source and n = 1 , . . . , N indexes the receiver. A conventional regularized formulation can be written as min  
+
+> α
+
+L(α) + R(α),
+
+where L(α) measures the discrepancy between the predicted and observed wavefields, and R(α) denotes a regularization term. In this work, rather 5than explicitly specifying and differentiating such a regularization functional, we employ a learned plug-and-play diffusion prior to periodically guide the inversion iterates. Let K denote the forward Helmholtz operator that maps the medium perturbation α(x) and a source term fm to the corresponding wavefield. In conventional PDE-constrained inversion, repeated evaluations of the forward Helmholtz solver and its adjoint are required during the optimization pro-cess, which becomes computationally expensive, especially in high-frequency regimes. To alleviate this cost, we replace the expensive forward opera-tor K with a pretrained neural operator surrogate Kθ. During inversion, the parameters θ of the neural operator are fixed, and only the medium perturbation α is optimized. Since Kθ is implemented as a differentiable neural network, gradients with respect to α can be efficiently computed by automatic differentiation. The inversion is initialized from a Gaussian random field, 
+
+α(0) ∼ N (0 , σ 2max I), (8) which is treated as an optimizable tensor with gradient tracking enabled. At the ith inversion iteration, the current estimate α(i) is fed into the neural operator together with all source terms in a batched manner. Specifically, we write the batched neural-operator prediction as 
+
+bY (i) = Kbatch 
+
+> θ
+
+
+
+{(α(i), f m)}Mm=1 
+
+
+
+:= {K θ(α(i), f m)}Mm=1 , (9) where the predicted observation corresponding to the mth source and the 
+
+nth receiver is given by 
+
+bY (i) 
+
+> m,n
+
+= Kθ
+
+
+
+α(i), f m
+
+
+
+(xnr ). (10) In practice, the current medium estimate α(i) is broadcast to match the batch dimension of the source terms, so that the medium-source pairs 
+
+{(α(i), f m)}Mm=1 can be processed simultaneously by the neural operator. This batched evaluation avoids source-by-source forward simulations and enables efficient parallel computation on modern accelerators. The data fidelity term is then defined over the entire source-receiver observation set as 
+
+L(α(i)) = 1
+
+M N 
+
+> M
+
+X
+
+> m=1
+> N
+
+X
+
+> n=1
+
+bY (i) 
+
+> m,n
+
+− yδm,n  
+
+> 22
+
+. (11) Instead of explicitly deriving the adjoint-state gradient, we compute the gradient of the data fidelity term with respect to the medium variable by backpropagating through the differentiable surrogate model: 
+
+g(i) = ∇αL(α(i)). (12) 6This gradient is obtained through the computational graph 
+
+α(i) −→ K batch  
+
+> θ
+
+−→ bY (i) −→ L (α(i)), (13) Therefore, the proposed formulation avoids the need for explicit Jacobian construction or adjoint Helmholtz solvers. The medium perturbation α(i)
+
+is then updated by an Adam optimizer using the automatically computed gradient. We denote this data-consistency update by ˜α(i) = AdamStep 
+
+
+
+α(i), g (i); η
+
+
+
+, (14) where η is the learning rate. This update reduces the mismatch between the predicted observations and the measured data, thereby enforcing consistency with the physical measurements. Due to the ill-posedness of the inverse problem, data consistency alone may lead to unstable reconstructions or nonphysical artifacts. Instead of prescribing an explicit handcrafted regularization functional R(α), we introduce a learned prior based on diffusion models to implicitly characterize the distribution of plausible medium perturbations. In particular, we employ an Elucidated Diffusion Model as a learned plug-and-play diffusion prior. The diffusion model is not applied after every gradient update. Rather, it is invoked periodically to correct the current reconstruction and guide it toward the learned medium prior. The update rule is written as 
+
+α(i+1) =
+
+
+
+EDM sampler  ˜α(i), {σs}Ss=0 
+
+ , if ( i + 1) mod T = 0 ,
+
+˜α(i), otherwise , (15) where T denotes the diffusion update period, S is the number of denoising steps used by the EDM sampler, and {σs}Ss=1 denotes the noise schedule. This periodic prior update allows several data-consistency steps to sufficiently reduce the observation mismatch before applying the diffusion-based correc-tion. Compared with applying the diffusion model at every iteration, the periodic strategy reduces computational overhead and mitigates excessive regularization from the learned prior. The overall framework therefore alternates between efficient data-consistency optimization and periodic diffusion-prior correction. The data consistency step enforces agreement with the measured wavefields through the differ-entiable neural operator, while the diffusion step suppresses artifacts and constrains the reconstruction to the learned distribution of physically plausi-ble media. The proposed framework avoids repeated numerical PDE solves during inversion by combining a pretrained neural operator surrogate with automatic-differentiation-based gradient computation. Batched multi-source evaluation and periodic EDM correction further improve computational effi-ciency and reconstruction quality. The overall procedure is summarized in Algorithm 1. 7Algorithm 1 Diffusion-Prior-Guided Inversion with Neural Operator  
+
+> 1:
+
+Input: Observed data Y δ = {yδm,n }, sources {fm}Mm=1 , receiver locations 
+
+{xnr }Nn=1 , 
+
+> 2:
+
+pretrained neural operator Kθ, EDM sampler, learning rate η, total iterations I, diffusion update period T , EDM noise schedule {σs}Ss=0  
+
+> 3:
+
+Initialize: Sample α(0) ∼ N (0 , σ 2max I) and set α(0) as an optimizable tensor  
+
+> 4:
+
+Freeze the neural operator parameters θ and initialize the Adam optimizer for α 
+
+> 5:
+
+for i = 0 , 1, . . . , I − 1 do  
+
+> 6:
+
+Batched forward prediction: 
+
+bY (i) = Kbatch 
+
+> θ
+
+
+
+α(i), {fm}Mm=1 
+
+ 
+
+> 7:
+
+Compute data fidelity loss: 
+
+L(α(i)) = 1
+
+M N bY (i) − Y δ 2 
+
+> F
+> 8:
+
+Automatic differentiation: 
+
+g(i) = ∇αL(α(i)) 
+
+> 9:
+
+Data-consistency update using Adam: 
+
+˜α(i) = AdamStep 
+
+
+
+α(i), g (i); η
+
+ 
+
+> 10:
+
+if (i + 1) mod T = 0 then  
+
+> 11:
+
+Periodic prior update using EDM: 
+
+α(i+1) = EDM sampler 
+
+
+
+˜α(i), {σs}Ss=0 
+
+ 
+
+> 12:
+
+else  
+
+> 13:
+
+No diffusion update: 
+
+α(i+1) = ˜ α(i) 
+
+> 14:
+
+end if  
+
+> 15:
+
+end for  
+
+> 16:
+
+Output: Reconstructed medium perturbation α(I)
+
+3.2 Neural operator forward surrogate 
+
+We learn a surrogate forward operator Kθ that predicts the total wave-field u(x) from the medium perturbation α(x) and the source term f (x), 8with spatial coordinates concatenated as positional inputs in the neural representation: 
+
+Kθ : ( α, f ) 7 → u. 
+
+According to the diffraction limit, accurate reconstruction of high-frequency structures requires sufficiently large wavenumbers k, so that the wave can adequately probe fine-scale features of the medium. However, increasing k
+
+leads to highly oscillatory solutions, which poses a fundamental challenge for neural operator learning due to spectral bias. Specifically, conventional operator networks (e.g., FNO and DeepONet) tend to favor low-frequency components and struggle to accurately represent high-frequency oscillations. 
+
+Fourier Neural Operator. The FNO learns mappings between function spaces by parameterizing integral operators in the spectral domain. Given a generic input function a(x) defined on domain D ⊂ Rd, the FNO constructs an operator Gθ such that 
+
+u(x) = Gθ(a(x), x), (16) where the coordinate x is concatenated with a(x) as an additional input channel, equivalently serving as an identity coordinate map on D.The architecture consists of three components: a lifting operator P , a sequence of Fourier layers, and a projection operator Q. The input is first lifted to a higher-dimensional feature space: 
+
+v0(x) = P  a(x), x. (17) Each Fourier layer updates the feature representation via 
+
+vt+1 (x) = σ
+
+
+
+Wtvt(x) + F−1 Rt · F (vt)(x)
+
+
+
+, (18) where Wt is a learnable linear transformation acting pointwise in the spatial domain, and Rt is a complex-valued weight tensor acting on Fourier modes. The second term corresponds to a global convolution operator implemented efficiently in the spectral domain. This formulation combines local interac-tions (via Wt) and global dependencies (via Fourier convolution). After T
+
+layers, the output is obtained through a projection operator: 
+
+u(x) = Q vT (x). (19) To improve computational efficiency, the Fourier representation is truncated by retaining only the lowest kmax modes, i.e., Rt acts only on a subset of Fourier coefficients while higher-frequency modes are discarded. Although this truncation reduces complexity, it introduces a bias toward smooth, low-frequency functions, limiting the ability of standard FNOs to represent highly oscillatory solutions. The total architecture of FNO is illustrated in Figure 1. As a result, standard FNOs may struggle to accurately represent 9Figure 1: Architecture of the FNO network. The model consists of a lifting layer, multiple Fourier layers, and a projection layer, where each Fourier layer combines local transformations in the spatial domain with global convolutions in the spectral domain. highly oscillatory solutions, particularly in high-frequency regimes where important information is carried by high-wavenumber components. This motivates the use of multiscale operator learning. 
+
+Multiscale Fourier Neural Operator. To overcome this limitation, we employ an MscaleFNO [ 52 ] to approximate Kθ. The model consists of multiple Fourier operator branches at different scales, which helps represent both low-frequency trends and high-frequency oscillatory components. The output of the operator Kθ is defined as 
+
+u(x) = 
+
+> N
+
+X
+
+> i=1
+
+γi FNO i
+
+ [ ciα(x), c if (x), c ix ], (20) where FNO i denotes the Fourier neural operator at scale i, ci is the scaling factor, and γi represents learnable weights. Each branch FNO i adopts the FNO architecture described above. In practice, the wave field u(x) is complex-valued. We represent its real and imaginary parts as two separate channels. The network therefore outputs two channels corresponding to ℜ(u) and ℑ(u), which are combined as 
+
+u(x) = ureal (x) + i u imag (x).
+
+The architecture of MscaleFNO is illustrated in Figure 2. Figure 3 shows the error convergence curves of FNO and MscaleFNO when learning the Helmholtz forward operator at different wavenumbers, where the experimental configuration follows that of Section 4.1. For small 
+
+k, FNO achieves reasonable accuracy with fast convergence. However, as k
+
+increases, FNO exhibits noticeably slower convergence and larger residual errors, indicating difficulty in capturing high-frequency components. In contrast to FNO, MscaleFNO maintains stable convergence and consistently achieves lower training errors across all tested frequencies, demonstrating its robustness in the high-frequency regime. 10 Figure 2: MscaleFNO architecture for approximating the operator Kθ.0 100 200 300 400 500   
+
+> Epoch
+> 10 2
+> 10 1
+> 10 0
+> Relative L2 Error
+> FNO
+> k = 10
+> k = 20
+> k = 30
+> k = 40
+> k = 50
+> k = 60
+
+(a) FNO 0 100 200 300 400 500    
+
+> Epoch
+> 10 2
+> 10 1
+> 10 0
+> Relative L2 Error
+> MscaleFNO
+> k = 10
+> k = 20
+> k = 30
+> k = 40
+> k = 50
+> k = 60
+
+(b) MscaleFNO Figure 3: Training error of FNO and MscaleFNO under different wavenumbers 
+
+k.
+
+Training Data. To train the model, we generate a dataset of physically consistent samples 
+
+{ αr(x), f m(x), u rm(x) }M,R m,r =1 , (21) where urm(x) denotes the total wave field corresponding to medium αr and source fm. The wavefields urm(x) are computed by numerically solving the Helmholtz equation (1) with a finite element solver for each medium-source pair. 
+
+Loss Function and Training. The network is trained using a complex-valued relative L2 loss: 
+
+L = 1
+
+M R 
+
+X
+
+m,r 
+
+∥K θ(αr, f m)( x) − urm(x)∥22,C
+
+∥urm(x)∥22,C
+
+, (22) where ∥ · ∥ 2,C denotes the complex L2 norm. All model parameters, including the scale weights γi and scale factors 
+
+ci are trainable. After training, Kθ serves as an efficient surrogate for the 11 forward wave propagation operator, enabling fast and accurate predictions across different media configurations and source conditions. 
+
+3.3 Plug-and-play diffusion prior 
+
+To model the prior distribution of the medium parameter, we adopt the EDM [ 20 ], which consists of a noise-conditional denoiser and a multi-step sampling procedure. 
+
+EDM Denoiser. The core component of EDM is a noise-conditional denoiser Dθ(z, σ ), which takes a noisy input z at noise level σ and predicts the corresponding clean signal: ˆz0 = Dθ(z, σ ). (23) Following the EDM parameterization, the denoiser is defined as 
+
+Dθ(z, σ ) = cskip (σ) z + cout (σ) Fθ
+
+ cin (σ) z, σ , (24) where Fθ is a neural network and cin , c skip , c out are scaling functions depending on σ.
+
+Training of the Denoiser. The denoiser is trained using noise perturbation. Given clean data z0, noisy samples are generated as 
+
+z = z0 + σϵ, ϵ ∼ N (0 , I ), (25) where the noise level σ is sampled from a prescribed distribution. The training objective is 
+
+LEDM = Ez0,ϵ,σ 
+
+w(σ) ∥Dθ(z, σ ) − z0∥22
+
+ , (26) where w(σ) balances contributions across different noise levels. 
+
+EDM Sampler. While the denoiser performs single-step reconstruction, EDM defines a sampler that progressively refines a sample across multiple noise levels. The update direction is given by 
+
+d(z, σ ) = z − Dθ(z, σ )
+
+σ , (27) which approximates the score function. A decreasing noise schedule is defined as 
+
+σmax = σS > σ S−1 > · · · > σ 0 = σmin . (28) Starting from a noisy input z, one iteratively updates the sample using an Euler step: 
+
+zs = zs+1 + ( σs − σs+1 ) d(zs+1 , σ s+1 ), (29) optionally followed by a second-order (Heun) correction. Compared to a single denoising step, the multi-step sampling process helps large noise levels 12 capture global structures, while small noise levels recover fine details. This coarse-to-fine refinement improves reconstruction quality. 
+
+EDM Prior Operator. At inference, EDM performs multi-step denoising along a decreasing noise schedule {σs}, which defines a prior operator 
+
+z0 = EDM sampler( z, {σs}), (30) which maps a noisy input z to a refined sample through iterative denoising. This operator corresponds to the periodic correction step in Algorithm 1, where it is applied every T iterations to guide the medium estimate toward the learned prior distribution. 
+
+## 4 Numerical results 
+
+In this section, we consider the solution of two-dimensional Helmholtz equa-tions to evaluate the performance of the proposed method under various configurations. Specifically, we solve ∆u(x, y ) + k2 1 + α(x, y )u(x, y ) = f (x, y ), (x, y ) ∈ [0 , 1] 2, (31) where the medium perturbation is supported within a disk centered at (0 .5, 0.5) with radius 0 .25, and vanishes outside: 
+
+α(x, y ) = 0 , ∥(x, y ) − (0 .5, 0.5) ∥ > 0.25 .
+
+Inside the disk, α(x, y ) is defined via a truncated Fourier expansion: 
+
+α(x, y ) = ξ
+
+> 10
+
+X
+
+> m,n =0
+
+amn sin(2 πmx ) sin(2 πny ) + bmn sin(2 πmx ) cos(2 πny )+ cmn cos(2 πmx ) sin(2 πny ) + dmn cos(2 πmx ) cos(2 πny ),
+
+(32) where amn , b mn , c mn , d mn ∼ Uniform (−1, 1) and ξ = 0 .02. The source lo-cations are uniformly distributed along a circle centered at (0 .5, 0.5) with radius 0 .3, i.e., ∥(x, y ) − (0 .5, 0.5) ∥ = 0 .3. The receivers are placed at grid points closest to the same circle used for the source distribution. Figure 4 shows a representative example of the medium along with the corresponding source and receiver configurations. 
+
+Data generation. The source term is modeled as an ideal point source, 
+
+f (x) = δ(x − xs). Synthetic datasets are generated by solving the Helmholtz equation (31) using a high-order finite element method, with relative numeri-cal errors of approximately 10 −3. Figure 5 illustrates representative wavefields corresponding to different wavenumbers. The wavenumber k is varied in the range k ∈ [10 , 60] to assess performance across different frequency regimes. As the wavenumber k increases, the wavefields exhibit increasingly complex 13 0.0 0.2 0.4 0.6 0.8 1.0 
+
+x
+
+0.0 
+
+0.2 
+
+0.4 
+
+0.6 
+
+0.8 
+
+1.0 
+
+> y
+
+medium 
+
+sources & receivers 
+
+0.0 
+
+0.2 
+
+0.4 
+
+0.6 
+
+0.8 
+
+1.0 Figure 4: Representative medium sample α(x, y ) with source and receiver locations. 0.0 0.2 0.4 0.6 0.8 1.0 
+
+> x
+
+0.0 
+
+0.2 
+
+0.4 
+
+0.6 
+
+0.8 
+
+1.0 
+
+> y
+
+total wave (k=10) 
+
+> 0.4
+> 0.2
+> 0.0
+> 0.2
+> 0.4
+> 0.6
+> 0.8
+
+(a) k = 10 0.0 0.2 0.4 0.6 0.8 1.0 
+
+> x
+
+0.0 
+
+0.2 
+
+0.4 
+
+0.6 
+
+0.8 
+
+1.0 
+
+> y
+
+total wave (k=20)  
+
+> 0.4
+> 0.2
+> 0.0
+> 0.2
+> 0.4
+> 0.6
+> 0.8
+
+(b) k = 20 0.0 0.2 0.4 0.6 0.8 1.0 
+
+> x
+
+0.0 
+
+0.2 
+
+0.4 
+
+0.6 
+
+0.8 
+
+1.0 
+
+> y
+
+total wave (k=30)  
+
+> 0.4
+> 0.2
+> 0.0
+> 0.2
+> 0.4
+> 0.6
+> 0.8
+
+(c) k = 30 0.0 0.2 0.4 0.6 0.8 1.0 
+
+> x
+
+0.0 
+
+0.2 
+
+0.4 
+
+0.6 
+
+0.8 
+
+1.0 
+
+> y
+
+total wave (k=40) 
+
+> 0.4
+> 0.2
+> 0.0
+> 0.2
+> 0.4
+> 0.6
+> 0.8
+> 1.0
+
+(d) k = 40 0.0 0.2 0.4 0.6 0.8 1.0 
+
+> x
+
+0.0 
+
+0.2 
+
+0.4 
+
+0.6 
+
+0.8 
+
+1.0 
+
+> y
+
+total wave (k=50)  
+
+> 0.4
+> 0.2
+> 0.0
+> 0.2
+> 0.4
+> 0.6
+> 0.8
+
+(e) k = 50 0.0 0.2 0.4 0.6 0.8 1.0 
+
+> x
+
+0.0 
+
+0.2 
+
+0.4 
+
+0.6 
+
+0.8 
+
+1.0 
+
+> y
+
+total wave (k=60)  
+
+> 0.4
+> 0.2
+> 0.0
+> 0.2
+> 0.4
+> 0.6
+> 0.8
+
+(f) k = 60 Figure 5: Representative wavefields in the dataset for different wavenumbers. oscillatory patterns and finer spatial structures, reflecting the increasing dominance of high-frequency oscillations. 
+
+Source approximation. For neural operator learning, the delta source is approximated by a Gaussian function: 
+
+f (x) ≈ exp 
+
+
+
+− ∥x − xs∥2
+
+2σ2
+
+ϵ
+
+
+
+. (33) 14 0.0 0.2 0.4 0.6 0.8 1.0  
+
+> 0.0
+> 0.2
+> 0.4
+> 0.6
+> 0.8
+> 1.0 Delta source
+> 0.0
+> 0.2
+> 0.4
+> 0.6
+> 0.8
+> 1.0
+
+(a) Point source 0.0 0.2 0.4 0.6 0.8 1.0   
+
+> 0.0
+> 0.2
+> 0.4
+> 0.6
+> 0.8
+> 1.0 Gaussian source
+> 0.0
+> 0.2
+> 0.4
+> 0.6
+> 0.8
+> 1.0
+
+(b) Gaussian approximation Figure 6: Comparison between point source and its Gaussian approximation in 2D. This smoothing is applied only for the neural operator input, while the ground-truth data are generated using exact point sources. A visual comparison between the ideal point source and its Gaussian approximation is shown in Figure 6. The Gaussian representation preserves the localized nature of the source while providing a smooth and numerically stable input for the neural operator. We evaluate both forward and inverse performance to assess the accuracy, stability, and high-frequency resolution capability of the proposed approach. In the forward setting, we measure the accuracy of predicted wavefields over a range of wavenumbers using FNO and MscaleFNO. In the inverse setting, we reconstruct the medium perturbation α(x) from observed data using the proposed plug-and-play diffusion-prior-guided inversion framework. 
+
+4.1 Validation of the learned forward operator 
+
+In this section, we learn a family of forward operators Kk parameterized by the wavenumber k using FNO/MscaleFNO, which map the medium and source to the corresponding wavefield: 
+
+Kk(α(x, y ), f (x, y ), x, y ) → u(x, y ). (34) For each wavenumber k, an independent dataset of M × R = 3000 samples is constructed, consisting of triplets 
+
+{ αkr (x), f km(x), u r,k m (x) }M,R m,r =1 , (35) where αkr denotes a medium realization, f km a source term, and ur,k m the corresponding wavefield solution. Each dataset is split independently into training, validation, and test sets with a ratio of 8 : 1 : 1. 15 To ensure fair comparison, both models have approximately the same number of parameters. The models utilize 20 Fourier modes along each spatial dimension and are trained using Adam optimizer [ 23 ] with initial learning rate ηmax = 0 .001, and cosine annealing learning rate schedule [ 30 ]. The normal FNO architecture equipped with 32 channels and 4 Fourier layers, comprising 3,294,114 parameters. The parallel MscaleFNO framework with 4 sub-networks, each branch operating with 16 channels and 4 Fourier layers, comprising 3,295,056 parameters. More implementation details can be found in [52]. A direct comparison is provided in Figure 7, which reports the relative prediction error as a function of the wavenumber k. Let c = {ci}4 
+
+> i=1
+
+and γ =
+
+{γi}4 
+
+> i=1
+
+denote the scaling factors and weights of MscaleFNO, respectively. To better capture oscillatory solutions at different frequencies, MscaleFNO employs adaptive scale settings c for varying wavenumbers k: for k = 10 , 20, 
+
+c = {10 , 50 , 100 , 200 }; for k = 30 , 40, c = {10 , 50 , 200 , 1000 }; and for k =50 , 60, c = {10 , 100 , 500 , 2000 }, with initial weights γi = 1 , i = 1 , . . . , 4. The error of FNO increases significantly with k, while MscaleFNO remains stable and accurate, demonstrating strong robustness in the high-frequency regime. 10 20 30 40 50 60   
+
+> Wavenumber k
+> 10 2
+> 10 1
+> 10 0
+> Error (log scale)
+> FNO vs MscaleFNO
+> FNO
+> MscaleFNO
+
+Figure 7: Forward operator relative error versus wavenumber k for FNO and MscaleFNO. These observations are consistent with the known spectral bias of neural operators, where low-frequency components are learned more efficiently than high-frequency ones. As a result, standard FNO struggles to approximate highly oscillatory solutions. The multiscale design of MscaleFNO mitigates this limitation by enabling effective representation across multiple frequency bands, leading to improved accuracy for large k. The improved forward accuracy is particularly important for inverse problems, where reconstruction 16 quality critically depends on the fidelity of the forward operator. The results indicate that MscaleFNO provides a reliable surrogate model for high-frequency wave propagation, thereby serving as an accurate and efficient emulator for the subsequent inversion experiments. 
+
+4.2 Inverse reconstruction 
+
+We present inversion results for recovering the medium perturbation from noisy wavefield observations. The inversion follows the diffusion-regularized framework in Algorithm 1, where the trained MscaleFNO surrogate is used as the differentiable forward operator and combined with an EDM-based dif-fusion prior to improve reconstruction stability. The surrogate approximates the parameter-to-observation map from the medium perturbation and source configuration to the wavefield measurements. This avoids repeatedly solving the Helmholtz equation during iterative inversion and therefore substantially reduces the computational cost. For each inversion experiment, we use M = 50 source terms, with source locations distributed on a circle as described in Section 4 and illustrated in Figure 4. The clean observation data are generated by solving the Helmholtz equation with a high-order finite element method, rather than by the learned surrogate model, to reduce the risk of inverse crime. The data are collected at N = 240 receiver locations placed at grid points closest to the same observation circle used for the source distribution. The clean observations are contaminated by additive Gaussian noise applied independently to the real and imaginary parts: uδ = u + ηδ, where Re ηδ, Im ηδ ∼ N (0 , σ 2) with 
+
+σ = √2δ · max (|u|). We set δ = 10% throughout and write Y δ for the resulting noisy data. The main inversion parameters used in Algorithm 1 are specified as follows. The total number of optimization iterations is set to I = 1000, and the Adam learning rate is chosen as η = 0 .001. The EDM prior is applied periodically every T = 30 iterations, but starting after the first 200 iterations. This delay gives the optimizer room to explore the data-fidelity landscape and establish a coarse approximation before the denoiser begins pulling the estimates toward the learned manifold. Each EDM sampling uses S = 4 denoising steps. The noise schedule used in the EDM sampler is updated during the inversion process. Since the EDM noise sequence {σs}Ss=0 
+
+is arranged in descending order from a maximum value to a minimum value, we denote the largest and smallest noise levels at a given EDM update by 
+
+σnow max = σS and σmin = σ0, respectively. In all experiments, the minimum noise level is fixed as σmin = 0 .002. The maximum noise level is gradually decreased as the inversion iteration proceeds. Let i denote the current inversion iteration and I be the total number of iterations. We define the normalized iteration variable by τi = ( i + 1) /I . Then the current maximum noise level is linearly interpolated between the initial value σinit max = 0 .3 and 17 10 20 30 40 50 60  
+
+> Wavenumber k
+> 10 1
+> 10 0
+> Error (log scale)
+
+FNO vs MscaleFNO 
+
+> FNO
+> MscaleFNO
+
+Figure 8: Inversion error across different wavenumbers k under 10% noise. the final value σfinal max = 0 .01: σnow max = (1 − τi)σinit max + τiσfinal max . Therefore, as the inversion progresses, the EDM sampler gradually shifts from stronger prior correction to weaker fine-scale refinement. For each EDM application, the sigma sequence is generated using the Karras schedule. Given the EDM sampling step number S, the sth sigma value, where s = 0 , 1, . . . , S , is computed as ts = sS , and 
+
+σs =
+
+
+
+(σnow max )1/ρ + ts
+
+
+
+σ1/ρ  
+
+> min
+
+− (σnow max )1/ρ  ρ
+
+.
+
+Here we set ρ = 7. This schedule performs a linear interpolation in the transformed σ1/ρ space and then maps the values back to the original sigma space. As a result, the sequence decreases from σnow max to σmin , while allocating more sampling resolution to the low-noise region, which is important for fine-scale reconstruction. Figure 8 compares the reconstruction errors of FNO and MscaleFNO across different wavenumbers. As the wavenumber k increases, the per-formance of FNO deteriorates significantly, with consistently high errors in the high-frequency regime. In contrast, MscaleFNO effectively utilizes high-frequency information and achieves substantially lower reconstruction errors across all tested cases. This is consistent with the forward operator validation in Section 4.1, where FNO also struggled at high frequencies. Figure 9 provides cross-sectional comparisons of the reconstructed media for different values of k. As the wavenumber increases, the reconstruc-tion quality improves markedly, with finer-scale structures becoming pro-gressively better resolved. This behavior is consistent with the fact that higher-frequency waves carry richer spatial information, which enhances the identifiability of fine features in the inverse problem. Notably, the recon-struction error decreases from 0.956 at k = 10 to 0.129 at k = 60, confirming 18 0.0 0.2 0.4 0.6 0.8 1.0 
+
+y
+
+0.10 
+
+0.05 
+
+0.00 
+
+0.05 
+
+0.10 
+
+0.15 
+
+> a
+
+H-slice x=0.500 
+
+True 
+
+Inversion 0.0 0.2 0.4 0.6 0.8 1.0 
+
+x
+
+0.05 
+
+0.00 
+
+0.05 
+
+0.10 
+
+0.15 
+
+> a
+
+V-slice y=0.500 
+
+True 
+
+Inversion (a) k = 10 , err = 0 .956 0.0 0.2 0.4 0.6 0.8 1.0 
+
+y
+
+0.15 
+
+0.10 
+
+0.05 
+
+0.00 
+
+0.05 
+
+0.10 
+
+0.15 
+
+> a
+
+H-slice x=0.500 
+
+True 
+
+Inversion 0.0 0.2 0.4 0.6 0.8 1.0 
+
+x
+
+0.10 
+
+0.05 
+
+0.00 
+
+0.05 
+
+0.10 
+
+0.15 
+
+> a
+
+V-slice y=0.500 
+
+True 
+
+Inversion 
+
+(b) k = 20 , err = 0 .784 0.0 0.2 0.4 0.6 0.8 1.0 
+
+y
+
+0.2 
+
+0.1 
+
+0.0 
+
+0.1 
+
+> a
+
+H-slice x=0.500 
+
+True 
+
+Inversion 0.0 0.2 0.4 0.6 0.8 1.0 
+
+x
+
+0.00 
+
+0.05 
+
+0.10 
+
+0.15 
+
+> a
+
+V-slice y=0.500 
+
+True 
+
+Inversion 
+
+(c) k = 30 , err = 0 .465 0.0 0.2 0.4 0.6 0.8 1.0 
+
+y
+
+0.10 
+
+0.05 
+
+0.00 
+
+0.05 
+
+0.10 
+
+0.15 
+
+> a
+
+H-slice x=0.500 
+
+True 
+
+Inversion 0.0 0.2 0.4 0.6 0.8 1.0 
+
+x
+
+0.00 
+
+0.05 
+
+0.10 
+
+0.15 
+
+> a
+
+V-slice y=0.500 
+
+True 
+
+Inversion 
+
+(d) k = 40 , err = 0 .245 0.0 0.2 0.4 0.6 0.8 1.0 
+
+y
+
+0.10 
+
+0.05 
+
+0.00 
+
+0.05 
+
+0.10 
+
+0.15 
+
+> a
+
+H-slice x=0.500 
+
+True 
+
+Inversion 0.0 0.2 0.4 0.6 0.8 1.0 
+
+x
+
+0.00 
+
+0.05 
+
+0.10 
+
+0.15 
+
+> a
+
+V-slice y=0.500 
+
+True 
+
+Inversion 
+
+(e) k = 50 , err = 0 .134 0.0 0.2 0.4 0.6 0.8 1.0 
+
+y
+
+0.10 
+
+0.05 
+
+0.00 
+
+0.05 
+
+0.10 
+
+0.15 
+
+> a
+
+H-slice x=0.500 
+
+True 
+
+Inversion 0.0 0.2 0.4 0.6 0.8 1.0 
+
+x
+
+0.00 
+
+0.05 
+
+0.10 
+
+0.15 
+
+> a
+
+V-slice y=0.500 
+
+True 
+
+Inversion 
+
+(f) k = 60 , err = 0 .129 
+
+Figure 9: Cross-sectional comparisons of reconstruction results by MscaleFNO for different wavenumbers k under 10% noise. 19 the benefit of high-frequency measurements. 
+
+Inversion robustness under noisy observations Figure 10 shows the re-construction error under different noise levels. While the errors increase as the noise level grows, MscaleFNO remains stable across all tested wavenumbers and maintains consistent performance even in the presence of significant noise. This demonstrates the robustness of the proposed approach for practical inverse problems with noisy measurements. 10 20 30 40 50 60     
+
+> Wavenumber k
+> 10 0
+> 2 × 10 1
+> 3 × 10 1
+> 4 × 10 1
+> 6 × 10 1
+> Error (log scale)
+> clean
+> 10% Noise
+> 20% Noise
+
+Figure 10: Inversion error versus wavenumber k under different noise levels. 
+
+Limited-aperture configuration In practical settings, data acquisition is often confined to a limited angular range by physical and experimental constraints. This incomplete coverage, where sources and receivers span only a subset of directions, introduces additional ill-posedness. We consider a two-dimensional setting where sources and receivers are distributed along a circular observation curve surrounding the medium, but confined to a finite angular interval. The objective is to systematically investigate how limited-aperture configurations affect the recovery of the medium α(x). All reconstructions are performed using MscaleFNO with wavenumber k = 60, and 10% observational noise is added. We consider source apertures of 45 ◦,90 ◦, 180 ◦, and 360 ◦, and independently vary the receiver apertures over the same range. We also test a “diagonal” receiver layout, where receivers are split into two equal sectors placed on opposite sides of the domain (e.g., diagonal r = 45 ◦ means two 45 ◦ sectors, totaling 90 ◦). Figure 11 illustrates the corresponding source and receiver configurations. Columns represent different source apertures and rows represent different receiver apertures. Each configuration corresponds to a specific combination of illumination and observation coverage. Table 1 reports the relative reconstruction errors across all source– receiver aperture combinations. The error decreases monotonically as either the source or receiver aperture increases, indicating improved reconstruction accuracy with enhanced angular coverage. The lowest errors are achieved in 20 r = 45 ◦, s = 45 ◦0.0 0.2 0.4 0.6 0.8 1.0 
+
+0.0 
+
+0.2 
+
+0.4 
+
+0.6 
+
+0.8 
+
+1.0 
+
+Source 
+
+Receiver r = 45 ◦, s = 90 ◦0.0 0.2 0.4 0.6 0.8 1.0 
+
+0.0 
+
+0.2 
+
+0.4 
+
+0.6 
+
+0.8 
+
+1.0 
+
+Source 
+
+Receiver r = 45 ◦, s = 180 ◦0.0 0.2 0.4 0.6 0.8 1.0 
+
+0.0 
+
+0.2 
+
+0.4 
+
+0.6 
+
+0.8 
+
+1.0 
+
+Source 
+
+Receiver r = 45 ◦, s = 360 ◦0.0 0.2 0.4 0.6 0.8 1.0 
+
+0.0 
+
+0.2 
+
+0.4 
+
+0.6 
+
+0.8 
+
+1.0 
+
+Source 
+
+Receiver 
+
+r = 90 ◦, s = 45 ◦0.0 0.2 0.4 0.6 0.8 1.0 
+
+0.0 
+
+0.2 
+
+0.4 
+
+0.6 
+
+0.8 
+
+1.0 
+
+Source 
+
+Receiver r = 90 ◦, s = 90 ◦0.0 0.2 0.4 0.6 0.8 1.0 
+
+0.0 
+
+0.2 
+
+0.4 
+
+0.6 
+
+0.8 
+
+1.0 
+
+Source 
+
+Receiver r = 90 ◦, s = 180 ◦0.0 0.2 0.4 0.6 0.8 1.0 
+
+0.0 
+
+0.2 
+
+0.4 
+
+0.6 
+
+0.8 
+
+1.0 
+
+Source 
+
+Receiver r = 90 ◦, s = 360 ◦0.0 0.2 0.4 0.6 0.8 1.0 
+
+0.0 
+
+0.2 
+
+0.4 
+
+0.6 
+
+0.8 
+
+1.0 
+
+Source 
+
+Receiver 
+
+r = 180 ◦, s = 45 ◦0.0 0.2 0.4 0.6 0.8 1.0 
+
+0.0 
+
+0.2 
+
+0.4 
+
+0.6 
+
+0.8 
+
+1.0 
+
+Source 
+
+Receiver r = 180 ◦, s = 90 ◦0.0 0.2 0.4 0.6 0.8 1.0 
+
+0.0 
+
+0.2 
+
+0.4 
+
+0.6 
+
+0.8 
+
+1.0 
+
+Source 
+
+Receiver r = 180 ◦, s = 180 ◦0.0 0.2 0.4 0.6 0.8 1.0 
+
+0.0 
+
+0.2 
+
+0.4 
+
+0.6 
+
+0.8 
+
+1.0 
+
+Source 
+
+Receiver r = 180 ◦, s = 360 ◦0.0 0.2 0.4 0.6 0.8 1.0 
+
+0.0 
+
+0.2 
+
+0.4 
+
+0.6 
+
+0.8 
+
+1.0 
+
+Source 
+
+Receiver 
+
+r = 360 ◦, s = 45 ◦0.0 0.2 0.4 0.6 0.8 1.0 
+
+0.0 
+
+0.2 
+
+0.4 
+
+0.6 
+
+0.8 
+
+1.0 
+
+Source 
+
+Receiver r = 360 ◦, s = 90 ◦0.0 0.2 0.4 0.6 0.8 1.0 
+
+0.0 
+
+0.2 
+
+0.4 
+
+0.6 
+
+0.8 
+
+1.0 
+
+Source 
+
+Receiver r = 360 ◦, s = 180 ◦0.0 0.2 0.4 0.6 0.8 1.0 
+
+0.0 
+
+0.2 
+
+0.4 
+
+0.6 
+
+0.8 
+
+1.0 
+
+Source 
+
+Receiver r = 360 ◦, s = 360 ◦0.0 0.2 0.4 0.6 0.8 1.0 
+
+0.0 
+
+0.2 
+
+0.4 
+
+0.6 
+
+0.8 
+
+1.0 
+
+Source 
+
+Receiver 
+
+Diagonal r = 45 ◦, s = 360 ◦0.0 0.2 0.4 0.6 0.8 1.0 
+
+0.0 
+
+0.2 
+
+0.4 
+
+0.6 
+
+0.8 
+
+1.0 
+
+Source 
+
+Receiver Diagonal r = 90 ◦, s = 360 ◦0.0 0.2 0.4 0.6 0.8 1.0 
+
+0.0 
+
+0.2 
+
+0.4 
+
+0.6 
+
+0.8 
+
+1.0 
+
+Source 
+
+Receiver 
+
+Figure 11: Illustration of source (s) and receiver (r) configurations under different limited-aperture settings. Columns correspond to source apertures and rows correspond to receiver apertures, both ranging over 45 ◦, 90 ◦, 180 ◦,and 360 ◦.near full-aperture configurations (e.g., 360 ◦), while severely limited apertures 21 Table 1: Relative reconstruction errors under different source ( s) and receiver (r) aperture configurations. 
+
+r\s 45 ◦ 90 ◦ 180 ◦ 360 ◦
+
+45 ◦ 1.000 0.947 0.744 0.476 90 ◦ 0.919 0.833 0.671 0.336 180 ◦ 0.833 0.684 0.435 0.143 360 ◦ 0.569 0.421 0.149 0.129 
+
+Diagonal receiver configurations 
+
+r = 45 ◦, s = 360 ◦ r = 90 ◦, s = 360 ◦
+
+0.319 0.157 (e.g., 45 ◦) result in significantly higher errors. Furthermore, the diagonal configurations highlight the benefit of spatial diversity. For instance, under full illumination ( s = 360 ◦), the diagonal r = 45 ◦ configuration (which has a total receiver aperture of 90 ◦) yields an error of 0.319, outperforming the contiguous 90 ◦ receiver configuration (error = 0.336). This suggests that distributing the same angular coverage across opposite sides can further mitigate the ill-posedness compared to a single localized observation window. Figure 12 further shows cross-sectional comparisons along x = 0 .5. When both apertures are severely limited, the reconstructed profiles deviate significantly from the reference across the entire cross-section and exhibit strong directional bias. This behavior reflects the intrinsic ill-posedness induced by incomplete angular coverage, where parts of the domain are insufficiently illuminated or observed. As expected, widening the angular coverage of either sources or receivers consistently brings the reconstructed profile closer to the reference. In near full-aperture configurations, the reconstructed profiles closely match the reference solution, with only minor local discrepancies. These results underscore that sufficient spatial diversity in both illumination and observation is crucial for mitigating the intrinsic ill-posedness of limited-aperture inverse problems. 
+
+Comparison of regularization strategies To isolate the effect of each regularization strategy, all reconstructions in this subsection use clean (noise-free) observations at wavenumber k = 60 with the forward model taken as the MscaleFNO surrogate trained in Section 4.1. We compare three strategies: (1) the proposed Plug-and-Play (PnP) approach, where the EDM denoiser replaces the proximal operator within the iterative reconstruction, (2) standard Tikhonov regularization, which imposes an explicit ℓ2-smoothness penalty, and (3) unregularized inversion. In the PnP framework, no explicit regularization functional is required; instead, the learned denoiser implicitly constrains the solution to remain near the data manifold on which the forward surrogate was trained. 22 r = 45 ◦, s = 45 ◦0.0 0.2 0.4 0.6 0.8 1.0 
+
+y
+
+0.2 
+
+0.1 
+
+0.0 
+
+0.1 
+
+> a
+
+H-slice x=0.500 
+
+True 
+
+Inversion 
+
+error=1.000 
+
+r = 45 ◦, s = 90 ◦0.0 0.2 0.4 0.6 0.8 1.0 
+
+y
+
+0.10 
+
+0.05 
+
+0.00 
+
+0.05 
+
+0.10 
+
+0.15 
+
+> a
+
+H-slice x=0.500 
+
+True 
+
+Inversion 
+
+error=0.947 
+
+r = 45 ◦, s = 180 ◦0.0 0.2 0.4 0.6 0.8 1.0 
+
+y
+
+0.10 
+
+0.05 
+
+0.00 
+
+0.05 
+
+0.10 
+
+0.15 
+
+> a
+
+H-slice x=0.500 
+
+True 
+
+Inversion 
+
+error=0.744 
+
+r = 45 ◦, s = 360 ◦0.0 0.2 0.4 0.6 0.8 1.0 
+
+y
+
+0.1 
+
+0.0 
+
+0.1 
+
+> a
+
+H-slice x=0.500 
+
+True 
+
+Inversion 
+
+error=0.476 
+
+r = 90 ◦, s = 45 ◦0.0 0.2 0.4 0.6 0.8 1.0 
+
+y
+
+0.1 
+
+0.0 
+
+0.1 
+
+> a
+
+H-slice x=0.500 
+
+True 
+
+Inversion 
+
+error=0.919 
+
+r = 90 ◦, s = 90 ◦0.0 0.2 0.4 0.6 0.8 1.0 
+
+y
+
+0.15 
+
+0.10 
+
+0.05 
+
+0.00 
+
+0.05 
+
+0.10 
+
+0.15 
+
+> a
+
+H-slice x=0.500 
+
+True 
+
+Inversion 
+
+error=0.833 
+
+r = 90 ◦, s = 180 ◦0.0 0.2 0.4 0.6 0.8 1.0 
+
+y
+
+0.1 
+
+0.0 
+
+0.1 
+
+> a
+
+H-slice x=0.500 
+
+True 
+
+Inversion 
+
+error=0.671 
+
+r = 90 ◦, s = 360 ◦0.0 0.2 0.4 0.6 0.8 1.0 
+
+y
+
+0.15 
+
+0.10 
+
+0.05 
+
+0.00 
+
+0.05 
+
+0.10 
+
+0.15 
+
+> a
+
+H-slice x=0.500 
+
+True 
+
+Inversion 
+
+error=0.336 
+
+r = 180 ◦, s = 45 ◦0.0 0.2 0.4 0.6 0.8 1.0 
+
+y
+
+0.2 
+
+0.1 
+
+0.0 
+
+0.1 
+
+> a
+
+H-slice x=0.500 
+
+True 
+
+Inversion 
+
+error=0.833 
+
+r = 180 ◦, s = 90 ◦0.0 0.2 0.4 0.6 0.8 1.0 
+
+y
+
+0.2 
+
+0.1 
+
+0.0 
+
+0.1 
+
+> a
+
+H-slice x=0.500 
+
+True 
+
+Inversion 
+
+error=0.684 
+
+r = 180 ◦, s = 180 ◦0.0 0.2 0.4 0.6 0.8 1.0 
+
+y
+
+0.10 
+
+0.05 
+
+0.00 
+
+0.05 
+
+0.10 
+
+0.15 
+
+> a
+
+H-slice x=0.500 
+
+True 
+
+Inversion 
+
+error=0.435 
+
+r = 180 ◦, s = 360 ◦0.0 0.2 0.4 0.6 0.8 1.0 
+
+y
+
+0.10 
+
+0.05 
+
+0.00 
+
+0.05 
+
+0.10 
+
+0.15 
+
+> a
+
+H-slice x=0.500 
+
+True 
+
+Inversion 
+
+error=0.143 
+
+r = 360 ◦, s = 45 ◦0.0 0.2 0.4 0.6 0.8 1.0 
+
+y
+
+0.15 
+
+0.10 
+
+0.05 
+
+0.00 
+
+0.05 
+
+0.10 
+
+0.15 
+
+> a
+
+H-slice x=0.500 
+
+True 
+
+Inversion 
+
+error=0.569 
+
+r = 360 ◦, s = 90 ◦0.0 0.2 0.4 0.6 0.8 1.0 
+
+y
+
+0.10 
+
+0.05 
+
+0.00 
+
+0.05 
+
+0.10 
+
+0.15 
+
+> a
+
+H-slice x=0.500 
+
+True 
+
+Inversion 
+
+error=0.421 
+
+r = 360 ◦, s = 180 ◦0.0 0.2 0.4 0.6 0.8 1.0 
+
+y
+
+0.10 
+
+0.05 
+
+0.00 
+
+0.05 
+
+0.10 
+
+0.15 
+
+> a
+
+H-slice x=0.500 
+
+True 
+
+Inversion 
+
+error=0.149 
+
+r = 360 ◦, s = 360 ◦0.0 0.2 0.4 0.6 0.8 1.0 
+
+y
+
+0.10 
+
+0.05 
+
+0.00 
+
+0.05 
+
+0.10 
+
+0.15 
+
+> a
+
+H-slice x=0.500 
+
+True 
+
+Inversion 
+
+error=0.129 
+
+Diagonal r = 45 ◦, s = 360 ◦0.0 0.2 0.4 0.6 0.8 1.0 
+
+y
+
+0.10 
+
+0.05 
+
+0.00 
+
+0.05 
+
+0.10 
+
+0.15 
+
+> a
+
+H-slice x=0.500 
+
+True 
+
+Inversion 
+
+error=0.319 
+
+Diagonal r = 90 ◦, s = 360 ◦0.0 0.2 0.4 0.6 0.8 1.0 
+
+y
+
+0.10 
+
+0.05 
+
+0.00 
+
+0.05 
+
+0.10 
+
+0.15 
+
+> a
+
+H-slice x=0.500 
+
+True 
+
+Inversion 
+
+error=0.157 
+
+Figure 12: Reconstruction comparisons on the cross-section x = 0 .5 for different source and receiver apertures with error reported below each recon-struction. As shown in Figure 13, the unregularized inversion amplifies high-frequency errors inherent in the forward surrogate, producing spurious os-23 0.0 0.2 0.4 0.6 0.8 1.0      
+
+> y
+> 0.10
+> 0.05
+> 0.00
+> 0.05
+> 0.10
+> 0.15
+> a
+> H-slice x=0.500
+> True
+> Inversion 0.0 0.2 0.4 0.6 0.8 1.0
+> x
+> 0.05
+> 0.00
+> 0.05
+> 0.10
+> 0.15
+> a
+> V-slice y=0.500
+> True
+> Inversion
+
+(a) PnP with EDM denoiser: relative error = 0.122 0.0 0.2 0.4 0.6 0.8 1.0      
+
+> y
+> 0.10
+> 0.05
+> 0.00
+> 0.05
+> 0.10
+> 0.15
+> a
+> H-slice x=0.500
+> True
+> Inversion 0.0 0.2 0.4 0.6 0.8 1.0
+> x
+> 0.05
+> 0.00
+> 0.05
+> 0.10
+> 0.15
+> a
+> V-slice y=0.500
+> True
+> Inversion
+
+(b) Tikhonov regularization: relative error = 0.282 0.0 0.2 0.4 0.6 0.8 1.0 
+
+> y
+> 0.2
+> 0.1
+> 0.0
+> 0.1
+> 0.2
+> a
+
+H-slice x=0.500      
+
+> True
+> Inversion 0.0 0.2 0.4 0.6 0.8 1.0
+> x
+> 0.1
+> 0.0
+> 0.1
+> 0.2
+> a
+
+V-slice y=0.500 
+
+> True
+> Inversion
+
+(c) No regularization: relative error = 0.549 
+
+Figure 13: Reconstruction results under different strategies at k = 60 using clean observations. For each method, the left panel shows the horizontal slice at y = 0 .5 and the right panel shows the vertical slice at x = 0 .5. The PnP reconstruction preserves oscillatory features with minimal artifacts, Tikhonov regularization oversmoothes sharp transitions, and the unregularized solution is dominated by spurious high-frequency oscillations. 24 cillations that mask the true medium structure. Tikhonov regularization suppresses these artifacts through explicit smoothness constraints, but damps genuine oscillatory features in the process, with peaks and troughs visibly attenuated. In contrast, the PnP approach with the EDM denoiser effectively removes spurious oscillations while faithfully preserving the high-frequency components that define the medium. This follows directly from how the PnP framework operates. Instead of imposing a generic smoothness penalty, the denoiser projects each iterate onto a learned manifold of physically admissible fields, which allows it to separate genuine structure from artifact. 0 200 400 600 800 1000   
+
+> Iteration
+> 10 1
+> 10 0
+> Relative  L2 Error
+> Convergence of Inverse Reconstruction ( k= 60)
+> Diffusion (EDM)
+> Tikhonov
+> No regularization
+
+Figure 14: Convergence behavior of different strategies at k = 60 under clean observations. The relative L2 error is computed with respect to the ground truth. The convergence profiles in Figure 14 reinforce these observations. The unregularized method descends briefly before stagnating at a high error, a consequence of the problem’s intrinsic ill-posedness. Tikhonov regulariza-tion converges stably but saturates at a moderate error, constrained by its preference for smooth solutions. The PnP method converges in a sawtooth pattern: each sharp drop coincides with a denoising step that pulls the estimate back onto the learned manifold of admissible fields, while the intervening data-fidelity updates may temporarily nudge the error upward. This oscillatory dynamics helps the solver escape poor local minima that trap the unregularized and Tikhonov schemes, and eventually drives the error well below the other two. These results point to a fundamental mismatch between explicit smooth-ness priors and high-wavenumber inverse problems. The signal of interest lives in the very oscillatory components that such regularizers penalize. The PnP framework sidesteps this conflict by replacing the hand-crafted proximal operator with a data-driven denoiser, yielding reconstructions that are both stable and faithful to the fine-scale structure of the medium. 25 40 20 0 20 40 
+
+> modes
+> 40
+> 20
+> 0
+> 20
+> 40
+> modes
+> 15
+> 10
+> 5
+> 0
+> 5
+
+(a) scale = 2 .99 40 20 0 20 40  
+
+> modes
+> 40
+> 20
+> 0
+> 20
+> 40
+> modes
+> 6
+> 4
+> 2
+> 0
+> 2
+> 4
+> 6
+
+(b) scale = 91 .80 40 20 0 20 40 
+
+> modes
+> 40
+> 20
+> 0
+> 20
+> 40
+> modes
+> 10
+> 8
+> 6
+> 4
+> 2
+> 0
+> 2
+> 4
+> 6
+
+(c) scale = 491 .73 40 20 0 20 40  
+
+> modes
+> 40
+> 20
+> 0
+> 20
+> 40
+> modes
+> 4
+> 2
+> 0
+> 2
+> 4
+> 6
+
+(d) scale = 1991 .79 
+
+Figure 15: Fourier spectra of the outputs from different branches in MscaleFNO (trained with k = 60). Each subfigure corresponds to one branch with its learned scale. Distinct spectral patterns are observed across branches. 
+
+4.3 Ablation study 
+
+4.3.1 Spectral analysis of multiscale branches 
+
+To better understand the mechanism of the proposed MscaleFNO, we analyze the spectral characteristics of different branches in the network. Specifically, we consider the operator learned by MscaleFNO with k = 60. The model consists of four scale branches, with initial scales c = {1, 100 , 500 , 2000 }.Both the weights and the scales are trainable. After training, the learned scales become c = {2.99 , 91 .80 , 491 .73 , 1991 .79 }, showing that the scales remain largely stable during optimization. We then examine the Fourier spectrum of the outputs from each scale branch. Although each branch operates at a different spatial scale, we directly visualize their frequency spectra to investigate how their outputs differ in the frequency domain. Figure 15 shows the magnitude of the Fourier coefficients 26 for different branches. A clear trend can be observed across scales: the branch with the smallest scale ( c = 2 .99) exhibits relatively weak spectral responses, while branches with larger scales display increasingly rich and structured frequency patterns. As the scale increases, the spectral energy becomes more pronounced and spreads over a wider range of modes. Such behavior aligns with the design motivation of MscaleFNO and suggests that the model is not merely increasing capacity, but learning a structured representation across frequencies. Moreover, this frequency-wise differentiation helps alleviate the optimization difficulties observed in standard FNO, where different frequency components are entangled within a single representation. Overall, these results indicate that the proposed multiscale design pro-motes a degree of frequency separation, which is beneficial for modeling high-frequency phenomena. 
+
+4.3.2 Effect of Fourier modes and network width in FNO 
+
+To ensure a fair comparison and rule out the possibility that the poor performance of FNO at high frequencies is caused by insufficient spectral resolution, we conduct an ablation study by increasing the number of Fourier modes to the maximum allowable value. Specifically, given the training resolution of 101 × 101, we set the number of Fourier modes to 50, which corresponds to (or closely approaches) the Nyquist frequency limit of the discretization. This ensures that the model has access to the highest resolvable frequency components, eliminating spectral truncation as a limiting factor. In addition, we vary the network width, another key hyperparameter in FNO, and evaluate performance across different configurations. The tested widths are 16, 32, 48, and 64. For each configuration, we evaluate the learned forward operator across a range of wavenumbers k = 10 , 20 , 30 , 40 , 50 , 60. Table 2: Relative error of FNO with maximum Fourier modes (50) under different network widths and wavenumbers k.
+
+Width & k 10 20 30 40 50 60 
+
+16 0.0242 0.0377 0.0554 0.9999 0.9999 0.9999 32 0.0185 0.0210 0.0384 0.9999 0.9999 0.9999 48 0.0136 0.0291 0.0415 0.1355 0.9999 0.9999 64 0.0159 0.0314 0.0381 0.9999 0.9999 0.9999 From Table 2, we observe a clear transition in the behavior of FNO as the wavenumber k increases. For relatively small values of k (e.g., k ≤ 30), FNO achieves low relative errors across all tested widths, indicating that the model is capable of learning operators with moderate frequency content and nonlinearity. However, as k increases beyond this regime, the performance deteriorates significantly. In particular, for k ≥ 40, FNO starts to fail to 27 learn the operator, with the relative error saturating at a high level (close to 1 .0 in most cases), suggesting that the training process stagnates. To investigate whether this failure is due to insufficient model capacity, we increase the network width up to 64 while keeping the number of Fourier modes at the Nyquist limit. We observe that increasing the width from 16 to 48 leads to partial improvement (e.g., error 0 .1355 at width 48 for k = 40), indicating that optimization can be temporarily facilitated with a larger model. However, further increasing the width does not lead to additional gains; instead, the training again fails to converge, and the error returns to a saturated regime. These results indicate that the failure of FNO in high-frequency regimes is not solely due to insufficient spectral resolution or limited model capacity. Even with maximal Fourier modes and large network width, FNO remains difficult to optimize when the target operator exhibits strong nonlinearity and high-frequency oscillations. This suggests that the limitation is not primarily in approximation capability, but is likely related to the difficulty of optimizing representations involving strongly coupled multi-frequency components. In contrast, under the same training settings (e.g., learning rate, batch size, optimizer, and scheduler), MscaleFNO achieves this without ever re-taining the full spectrum on a single, high-resolution grid. This indicates that the limitation of FNO is intrinsically related to its single-scale rep-resentation, which entangles different frequency components and leads to optimization instability. The multiscale design of MscaleFNO, on the other hand, provides a more structured representation that better aligns with the underlying frequency characteristics. By distributing the learning across multiple scales, the model mitigates the coupling between different frequency components and improves optimization behavior. As a result, it not only improves accuracy but also significantly enhances training robustness and efficiency under limited model capacity. 
+
+## 5 Conclusion 
+
+In this work, we have proposed a full-waveform inversion framework for oscillatory inverse medium problems governed by the Helmholtz equation, centered on MscaleFNO as the core differentiable surrogate. Its multiscale spectral architecture directly addresses the spectral bias of standard FNO, enabling accurate resolution of rapidly oscillatory wavefields across high-wavenumber regimes and providing a faithful differentiable surrogate for the Helmholtz forward map. This high-frequency fidelity is the key enabler of reliable gradient-based inversion for fine-scale medium recovery, which standard FNO fails to achieve at large wavenumbers. Numerical experiments confirm that MscaleFNO achieves substantially more accurate forward predictions than standard FNO in high-wavenumber 28 regimes, and that this advantage directly translates to improved inversion quality for high-frequency media. An EDM-based plug-and-play prior is fur-ther incorporated as an auxiliary regularization to improve robustness under noisy and limited-aperture conditions, where severely restricted apertures limit fine-scale recovery but main oscillatory structures are reconstructed more reliably as the observation aperture increases. 
+
+## References 
+
+[1] L. Amundsen, A. Reitan, H. Helgesen, et al., Data-driven inver-sion/depth imaging derived from approximation to one-dimensional in-verse acoustic scattering , Inverse Problems, 21 :1823-1850, 2005. https: //iopscience.iop.org/article/10.1088/0266-5611/21/6/002 .[2] G. Bao, H. Zhang, Sensitive analysis of an inverse problem for the wave equation with caustics , J. Am. Math. Soc., 27 :953-981, 2014. https: //doi.org/10.1090/S0894-0347-2014-00787-6 .[3] N. Boull´ e, A. Townsend, A mathematical guide to operator learning ,Handbook Numer. Anal., 25 :83-125, 2024. https://doi.org/10.1016/ bs.hna.2024.05.003 .[4] S. K. Boya, D. N. Subramani, PINTO: Physics-informed transformer neural operator for learning generalized solutions of partial differential equations , Comput. Phys. Commun., 315 :109702, 2025. https://doi. org/10.1016/j.cpc.2025.109702 .[5] X. Cao, Q. Ding, X. Zhang, et al., Diff-ANO: Towards Fast High-Resolution Ultrasound Computed Tomography via Conditional Consistency Models and Adjoint Neural Operators , arXiv preprint, arXiv:2507.16344, 2025. https://doi.org/10.48550/arXiv.2507. 16344 .[6] T. Chen, H. Chen, Universal approximation to nonlinear operators ,IEEE Trans. Neural Netw., 6(4):911-917, 1995. https://doi.org/10. 1109/72.392253 .[7] H. Chung, J. Kim, M. T. McCann, et al., Diffusion posterior sampling for general noisy inverse problems , in ICLR, 2023. https://doi.org/ 10.48550/arXiv.2209.14687 .[8] D. Colton, J. Coyle, P. Monk, Recent developments in inverse acoustic scattering theory , SIAM Rev., 42 :369-414, 2000. https://doi.org/10. 1137/S0036144500367337 .29 [9] D. Courjon, C. Bainier, Near field microscopy and near field optics , Rep. Prog. Phys., 57 :989, 1994. https://doi.org/10.1088/0034-4885/57/ 10/002 .[10] C. Deng, S. Feng, H. Wang, et al., OpenFWI: Large-scale multi-structural benchmark datasets for full waveform inversion , in NeurIPS, 2022. https://proceedings.neurips.cc/paper_files/paper/2022/ file/27d3ef263c7cb8d542c4f9815a49b69b-Paper-Datasets_and_ Benchmarks.pdf .[11] O. Dorn, E. Miller, C. Rappaport, A shape reconstruction method for electromagnetic tomography using adjoint fields and level sets , In-verse Problems, 16 (5):1119-1156, 2000. https://iopscience.iop.org/ article/10.1088/0266-5611/16/5/303 .[12] H. W. Engl, M. Hanke, A. Neubauer, Regularization of inverse problems ,Springer, Dordrecht, 2000. [13] P. H¨ ahner, T. Hohage, New stability estimates for the inverse acoustic inhomogeneous medium problem and applications , SIAM J. Math. Anal., 
+
+33 (3):670-685, 2001. https://doi.org/10.1137/S0036141001383564 .[14] X. Liu, B. Xu, S. Cao, et al., Mitigating spectral bias for the multiscale operator learning , J. Comput. Phys., 506 :112944, 2024. https://doi. org/10.1016/j.jcp.2024.112944 .[15] J. Ho, A. Jain, P. Abbeel, Denoising diffusion probabilistic mod-els , in NeurIPS, 2020. https://dl.acm.org/doi/10.5555/3495724. 3496298 .[16] F. Ihlenburg, I. Babuˇ ska, Finite element solution of the Helmholtz equation with high wave number , SIAM J. Numer. Anal., 34 (1):315-358, 1997. https://doi.org/10.1137/S0036142994272337 .[17] Y. Ji, J. Liang, and Z. Xu, Machine-Learning Interatomic Potentials for Long-Range Systems , Phys. Rev. Lett. 135 , 178001, 2025. https: //doi.org/10.1103/ssp9-7s81 .[18] P. Jin, Y. Feng, S. Feng, et al., An empirical study of large-scale data-driven full waveform inversion , Sci. Rep., 14 :20034, 2024. https://doi. org/10.1038/s41598-024-68573-7 .[19] P. Jin, X. Zhang, Y. Chen, et al., Unsupervised learning of full-waveform inversion , in ICLR, 2022. https://doi.org/10.48550/arXiv.2110. 07584 .[20] T. Karras, M. Aittala, T. Aila, S. Laine, Elucidating the design space of diffusion-based generative models , in NeurIPS, 2022. https://doi.org/ 10.48550/arXiv.2206.00364 .30 [21] B. Kawar, M. Elad, S. Ermon, J. Song, Denoising diffusion restoration models , in NeurIPS, 2022. https://doi.org/10.48550/arXiv.2201. 11793 .[22] Y. Khoo, L. Ying, SwitchNet: a neural network model for forward and inverse scattering problems , SIAM J. Sci. Comput., 41 :A3182-A3201, 2018. https://doi.org/10.1137/18M1222399 .[23] D. P. Kingma, J. Ba, Adam: A Method for Stochastic Optimization , in ICLR, 2015. https://doi.org/10.48550/arXiv.1412.6980 .[24] N. Kovachki, Z. Li, B. Liu, et al., Neural operator: Learning maps between function spaces , J. Mach. Learn. Res., 24 (89):1-97, 2023. http: //jmlr.org/papers/v24/21-1524.html .[25] Z. Li, N. Kovachki, K. Azizzadenesheli, et al., Fourier neural operator for parametric PDEs , in ICLR, 2021. https://doi.org/10.48550/arXiv. 2010.08895 .[26] Z. Li, N. Kovachki, K. Azizzadenesheli, et al., Neural operator: Graph kernel network for PDEs , arXiv preprint, arXiv: 2003.03485, 2020. 
+
+https://arxiv.org/abs/2003.03485 .[27] Z. Li, H. Zheng, N. Kovachki, et al., Physics-Informed neural operator for learning partial differential equations , ACM/IMS J. Data Sci., 1(3):9, 2024. https://doi.org/10.1145/3648506 .[28] Z. Liu, F. Chen, J. Chen, et al., Neumann series-based neural operator for solving 2D inverse medium problem , J. Comput. Phys., 534 :114025, 2025. https://doi.org/10.1016/j.jcp.2025.114025 .[29] D. Long, Z. Xu, Q. Yuan, et al., Invertible Fourier neural operators ,arXiv preprint, arXiv:2402.11722, 2024. https://arxiv.org/abs/2402. 11722 .[30] I. Loshchilov, F. Hutter, SGDR: Stochastic Gradient Descent with Warm Restarts , in ICLR, 2017. https://doi.org/10.48550/arXiv. 1608.03983 .[31] L. Lu, P. Jin, G. Pang, et al., Learning nonlinear operators via DeepONet ,Nat. Mach. Intell., 3(3):218-229, 2021. https://doi.org/10.1038/ s42256-021-00302-5 .[32] R. Molinaro, Y. Yang, B. Engquist, et al., Neural inverse operators for solving PDE inverse problems , arXiv preprint, arXiv:2301.11167, 2023. 
+
+https://arxiv.org/abs/2301.11167 .31 [33] J.-C. N´ ed´ elec, Acoustic and Electromagnetic Equations: Integral Repre-sentations for Harmonic Problems , Springer, New York, 2001. https: //doi.org/10.1007/978-1-4757-4393-7 .[34] The Nobel Prize in Chemistry 2014, Nobel Foundation. [35] V. Oommen, A. Bora, Z. Zhang, et al., Integrating neural operators with diffusion models improves spectral representation in turbulence modeling 
+
+arXiv preprint, arXiv:2409.08477, 2024. https://doi.org/10.48550/ arXiv.2409.08477 .[36] R.-E. Plessix, A review of the adjoint-state method for computing the gradient of a functional with geophysical applications , Geophys. J. Int., 
+
+167 (2):495-503, 2006. https://doi.org/10.1111/j.1365-246X.2006. 02978.x .[37] R. G. Pratt, Frequency-domain elastic wave modeling by finite differ-ences , Geophysics, 55 (5):626-632, 1990. https://doi.org/10.1190/1. 1442874 .[38] N. Rahaman, A. Baratin, D. Arpit, et al., On the spectral bias of neural networks , in ICML, 2019. https://proceedings.mlr.press/ v97/rahaman19a.html .[39] M. A. Rahman, M. A. Fl´ orez, A. Anandkumar, et al., Generative adversarial neural operators , Trans. Mach. Learn. Res., 2022. https: //openreview.net/forum?id=X1VzbBU6xZ .[40] Y. Romano, M. Elad, P. Milanfar, The little engine that could: Regu-larization by denoising , SIAM J. Imaging Sci., 10 (4):1804-1844, 2017. 
+
+https://doi.org/10.1137/16M1102884 .[41] R. Rombach, A. Blattmann, D. Lorenz, et al., High-resolution image synthesis with latent diffusion models , in CVPR, 2022. https://doi. org/10.1109/CVPR52688.2022.01042 .[42] S. Shan, M. Zhu, Y. Lin, et al., Regularization by denoising diffusion models for inverse PDEs , Commun. Phys., 2026. https://doi.org/10. 1038/s42005-026-02677-6 .[43] Y. Song et al., Score-based generative modeling through stochastic dif-ferential equations , in ICLR, 2021. https://doi.org/10.48550/arXiv. 2011.13456 .[44] J. Song, C. Meng, S. Ermon, Denoising diffusion implicit models , in ICLR, 2021. https://openreview.net/forum?id=St1giarCHLP .32 [45] A. Tarantola, Inversion of seismic reflection data in the acoustic ap-proximation , Geophysics, 49 (8):1259-1266, 1984. https://doi.org/10. 1190/1.1441754 .[46] T. Tripura, S. Chakraborty, Wavelet neural operator , Comput. Methods Appl. Mech. Eng., 404 :115783, 2023. https://doi.org/10.1016/j. cma.2022.115783 .[47] S. V. Venkatakrishnan, C. A. Bouman, B. Wohlberg, Plug-and-play priors for model based reconstruction , in IEEE GlobalSIP, 2013:945-948. 
+
+https://doi.org/10.1109/GlobalSIP.2013.6737048 .[48] J. Virieux, S. Operto, An overview of full-waveform inversion , Geo-physics, 76 (4):WCC1-WCC26, 2009. https://doi.org/10.1190/1. 3238367 .[49] Y. Wu, Y. Lin, InversionNet: An efficient data-driven full waveform inversion , IEEE Trans. Comput. Imaging, 6:419-433, 2020. https:// doi.org/10.1109/TCI.2019.2956866 .[50] Z. Q. J. Xu, L. Zhang, W. Cai, On understanding spectral biases of deep neural networks , J. Comput. Phys., 530 :113905, 2025. https: //doi.org/10.1016/j.jcp.2025.113905 .[51] Z.-Q. J. Xu, Y. Zhang, and T. Luo, Overview frequency principle/spectral bias in deep learning , Commun. Appl. Math. Comput., 7:827–864, 2025. 
+
+https://doi.org/10.1007/s42967-024-00398-7 .[52] Z. You, Z. Xu, W. Cai, MscaleFNO: Multi-scale Fourier neural opera-tor learning for oscillatory functions and wave scattering problems , J. Comput. Phys., 547 :114530, 2026. https://doi.org/10.1016/j.jcp. 2025.114530 .[53] Y. Zang, P.-S. Koutsourelakis, DGenNO: A physics-aware neural op-erator for solving forward and inverse PDE problems based on deep generative probabilistic modeling , J. Comput. Phys., 538 :114137, 2025. 
+
+https://doi.org/10.1016/j.jcp.2025.114137 .[54] Z. Zhang, Y. Wu, Z. Zhou, et al., VelocityGAN: Subsurface velocity image estimation using conditional adversarial networks , in WACV, 2019:705-714. https://doi.org/10.1109/WACV.2019.00080 .[55] Y. Zhu, K. Zhang, J. Liang, et al., Denoising diffusion models for plug-and-play image restoration , in CVPRW, 2023:1219-1229. https: //doi.org/10.1109/CVPRW59228.2023.00129 .33

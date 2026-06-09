@@ -1,0 +1,585 @@
+Title: Bridged SBI: Correcting Biased Low-Fidelity Posteriors for Cost-Efficient High-Fidelity Inference
+
+URL Source: https://arxiv.org/pdf/2606.09155v1
+
+Published Time: Tue, 09 Jun 2026 02:23:45 GMT
+
+Number of Pages: 9
+
+Markdown Content:
+> 1
+
+# Bridged SBI: Correcting Biased Low-Fidelity Posteriors for Cost-Efficient High-Fidelity Inference 
+
+Gahee Kim 1, Yuki Kadokawa 1, Sandro M. Alcantara Tacora 1, Taro Abe 2,Daisuke Endo 2, Genki Yamauchi 2, Takeshi Hashimoto 2, and Takamitsu Matsubara 1
+
+Abstract —Accurate calibration of particle-based simulators is crucial for robotic earthwork simulation, but analytical calibra-tion is challenging due to this task’s highly nonlinear particle dynamics and the black-box nature of conventional simulators. Although simulation-based inference (SBI) can estimate posterior distributions over simulation parameters solely from forward simulations, applying SBI directly to high-fidelity (HF) particle simulators is often computationally prohibitive. Low-fidelity (LF) simulators with coarser particles can reduce this cost, but changes in particle size and particle count shift the parameter values needed to reproduce the same observation, producing biased LF posteriors. We propose Bridged SBI, which leverages a biased but informative LF posterior to guide HF inference. This method first uses inexpensive LF simulations to identify a coarse high-density parameter region, and then it learns a local residual bridge to transport LF posterior samples toward HF-consistent regions by correcting the LF–HF discrepancy. We analyze how sequential multi-fidelity SBI (Naive-MF) can suffer from LF-induced posterior miscoverage when it directly relies on the LF posterior without discrepancy correction. We then show that Bridged SBI is designed to alleviate this issue by explicitly modeling the LF–HF discrepancy through residual correction. Experiments on both sim-to-sim particle-parameter calibration and real-to-sim calibration with real soil observation show that Bridged SBI produces more accurate and reliable HF posteriors than HF-only SBI or the Naive-MF baseline, especially under limited HF simulation costs. 
+
+Index Terms —Calibration and Identification, Probability and Statistical Methods 
+
+I. I NTRODUCTION 
+
+# CALIBRATING particle-based simulators is essential for ensuring accurate digital twins of robotic earthwork tasks, but this is challenging due to the highly nonlinear and black-box nature of particle dynamics. In particle models, including the discrete element method (DEM), macroscopic soil behavior emerges from particle-level interactions governed by particle parameters such as friction and restitution coef-ficients [1]. Therefore, these parameters must be estimated to reproduce soil behavior in simulation. However, analytical identification is typically intractable, and manual tuning is labor-intensive [2]. To address this challenge, simulation-based inference (SBI) [3], which estimates posterior distributions 
+
+This work was supported in part by the Japan Science and Technol-ogy Agency (JST) (Moonshot Research and Development) under Grant JPMJMS2032, and in part by JST (Core Research for Evolution Science and Technology (CREST)) under Grant JPMJCR2555. Corresponding author: Gahee Kim (email: gahee.kim@naist.ac.jp). 
+
+> 1
+
+G. Kim, Y. Kadokawa, S. M. Alcantara Tacora, and T. Matsubara are with the N ARA INSTITUTE OF SCIENCE AND TECHNOLOGY , Nara, Japan. 
+
+> 2
+
+T. Abe, D. Endo, G. Yamauchi, and T. Hashimoto are with the P UBLIC 
+
+WORKS RESEARCH INSTITUTE , Ibaraki, Japan. Probabilistic Bridging   
+
+> Low fidelity (LF) High fidelity (HF)
+> Observation
+> Role separation with progressive fidelity
+> LF posterior
+> HF -consistent
+> posterior
+
+Fig. 1: Overview of Bridged SBI for low-fidelity-guided posterior correction. Bridged SBI decomposes simulation calibration into low-fidelity-guided ex-ploration and posterior correction. Low-fidelity simulator provides a low-cost coarse posterior over plausible but potentially biased parameter regions due to cross-fidelity model discrepancy. Bridged SBI then uses a small number of high-fidelity simulations to learn a local residual bridge. This bridge applies learned residual corrections to coarse posterior samples and transports them toward an HF-consistent posterior. 
+
+over simulation parameters using only forward simulations, has recently emerged as a promising approach. Despite its flexibility, applying SBI to high-fidelity (HF) particle simulators is computationally prohibitive, since reduc-ing particle size to increase fidelity dramatically increases sim-ulation costs. Low-fidelity (LF) simulators with larger particles can mitigate this cost burden. However, the resulting posteriors generally deviate from the HF target posterior because changes in particle size and count alter fundamental dynamics such as collision frequency and energy dissipation patterns [4], [5]. Consequently, the parameter regions needed to reproduce a given observation can shift across fidelities [6], posing a trade-off between cost and estimation accuracy. To address this trade-off, we exploit the observation that the LF simulator often provides a systematically biased but computationally cheaper representation of the HF simulator. Although changing the simulation fidelity shifts the corre-sponding parameter regions, the LF and HF simulators still describe the same underlying physical system, and their simulated outputs thus remain structurally correlated across fidelities. This suggests that LF simulations may still provide useful structural information about the HF posterior, even when the LF posterior itself is biased or misaligned. Con-sequently, rather than treating the LF posterior as a reliable approximation of the HF posterior, we instead use it as an imperfect but informative guide that can be corrected with a small number of HF simulations. In this paper, we propose Bridged SBI , which decomposes 
+
+> arXiv:2606.09155v1 [cs.RO] 8 Jun 2026 2
+
+HF inference into LF inference and LF–HF discrepancy cor-rection (Fig. 1). The proposed method first uses inexpensive LF simulations to obtain a coarse estimate and then applies a limited number of HF simulations near the resulting coarse parameter region to learn a local residual bridge. This bridge transports LF posterior samples toward HF-consistent regions, permitting HF inference with substantially fewer HF simu-lations. We also provide a theoretical analysis showing that sequential multi-fidelity SBI (Naive-MF), which ignores the LF–HF discrepancy, can suffer from LF-induced posterior miscoverage, whereas Bridged SBI can mitigate this issue by explicitly modeling the LF–HF discrepancy through resid-ual correction, allowing recovery of HF-consistent posterior regions that may be underrepresented by the LF posterior. We validate Bridged SBI through sim-to-sim and real-to-sim particle-parameter calibration tasks, demonstrating its effec-tiveness in a robotic earthwork scenario using real-world soil observation. The main contributions of this paper are as follows:  
+
+> •
+
+We formulate particle-parameter calibration as decom-posed posterior inference, combining LF inference with explicit LF–HF discrepancy correction. We analyze how LF-induced posterior miscoverage can arise in multi-fidelity SBI when the LF–HF discrepancy is not explicitly addressed.  
+
+> •
+
+We propose Bridged SBI , which uses LF simulations to explore low-cost parameter-space and limited HF simu-lations to learn a local residual bridge for correcting LF posterior samples.  
+
+> •
+
+We demonstrate through sim-to-sim and real-to-sim cali-bration tasks that Bridged SBI improves the accuracy and stability of HF inference, particularly under severely con-strained HF simulation budgets, reducing KL divergence by up to 75% compared with Naive-MF and up to 67% compared with HF-only SBI in real-to-sim calibration. II. R ELATED WORK 
+
+A. Parameter Estimation in Particle Simulators 
+
+Particle-based simulators, such as those adopting the discrete element method (DEM), are widely used to model granular materials [1] and robotic earthwork tasks [7]. Their behavior is governed by particle-level parameters including friction and restitution coefficients, which must be calibrated to repro-duce target macroscopic behaviors [2]. Existing calibration approaches often rely on matching handcrafted macroscopic statistics, such as the angle of repose or pile shape, between simulation and experiments [2], [6]. More recently, simulation-based inference (SBI) has been explored in robotics for simula-tor calibration [8], [9] and domain randomization [10]. In par-ticular, neural SBI methods enable posterior inference directly from high-dimensional observations such as images [3], [11]– [13], making them suitable for robotics earthwork scenarios involving complex spatial deformation caused by robot–soil interaction. However, applying SBI to high-fidelity particle simulators remains computationally challenging because in-creasing simulation fidelity typically requires the reduction of particle size, which substantially increases the number of particles as well as simulation cost [14]. To mitigate this challenge, this paper considers parameter estimation from a multi-fidelity perspective. Instead of relying solely on expensive high-fidelity (HF) simulations, we exploit low-fidelity (LF) simulations, which use larger particles and fewer total particles, as a cost-efficient source of information for inference. By combining LF simulations with a limited number of HF simulations, we reduce the simulation burden of HF-only SBI. Since this process relies only on forward simulations and does not require an explicit likelihood function or analytical model, it remains within the SBI framework and can be applied broadly to black-box simulators. 
+
+B. Multi-Fidelity Simulation-Based Inference 
+
+In the context of multi-fidelity SBI, Approximate Bayesian Computation (ABC) methods have used LF simulations to narrow the sampling space for HF simulations [15], [16]. Recent neural SBI approaches have incorporated LF infor-mation into the training of HF neural posterior estimators, for example by using LF posteriors to guide the allocation of HF simulations [17], [18] or by initializing HF posterior estimators from LF-pretrained models [19]. While these meth-ods reduce the required number of expensive HF simulations, they implicitly rely on the ability of LF-guided parameter regions to sufficiently cover HF-plausible regions. However, this assumption can fail in particle-based simulators, where changes in particle size and count can affect particle dynamics and the corresponding parameter regions across fidelities [4], [6]. Consequently, the LF posterior can be biased and assign little probability mass to regions that remain plausible under the HF simulator. Unlike existing multi-fidelity neural SBI methods, our ap-proach explicitly addresses the LF–HF discrepancy by learn-ing a correction from LF-guided to HF-consistent parameter regions, thus allowing recovery of HF-plausible regions that may be underrepresented by the LF posterior. III. P ROPOSED METHOD 
+
+In this section, we first show that sequential multi-fidelity SBI (Naive-MF) can fail when LF–HF discrepancy is ignored. We then introduce Bridged SBI, which decomposes HF inference into two stages: LF inference and the subsequent discrepancy correction. This correction is achieved as a local residual bridge learned from a small number of HF simulations. 
+
+A. Problem Setting 
+
+Let θ ∈ Θ denote simulator parameters (e.g., friction, restitu-tion) and x ∈ X denote simulator outputs (e.g., height maps, trajectories). We consider two stochastic black-box simulators defined on the same parameter space Θ and output space 
+
+X : (1) High-fidelity (HF): xh ∼ ph(x | θ), which more accurately represents the target behavior but is computationally expensive; and (2) Low-fidelity (LF): xl ∼ pl(x | θ), which is computationally cheaper but less accurate. Both are black-box simulators, so ph(x | θ) and pl(x | θ) are not available in closed form and can only be accessed through forward simulations. Given a real-world observation xobs , our goal is to infer the HF posterior, which we refer to as the target posterior, 
+
+p⋆h(θ | xobs ) ∝ p(θ)Lh(xobs | θ), (1) 3
+
+where p(θ) is the prior and Lh(xobs | θ) denotes the HF-induced likelihood, which is intractable due to the simulator’s black-box nature. This posterior is estimated by SBI from a large amount of simulation data, which is often impractical for costly HF simulators, motivating a multi-fidelity strategy that combines LF and HF simulations. 
+
+B. Structural Limitation of Sequential Multi-Fidelity Inference 
+
+A common heuristic in multi-fidelity SBI is to first estimate an LF posterior using inexpensive LF simulations and then use it as an informed prior for the HF stage. We denote the LF posterior by 
+
+p⋆l (θ | xobs ) ∝ p(θ) Ll(xobs | θ), (2) where Ll(xobs | θ) denotes the likelihood induced by the LF simulator. A sequential multi-fidelity SBI, which we denote as Naive-MF, can be written conceptually as 
+
+qnaive (θ | xobs ) ∝ p⋆l (θ | xobs ) Lh(xobs | θ). (3) While Naive-MF can improve the overall time and cost ef-ficiency of simulation by using inexpensive LF simulations to guide expensive HF inference, it can fail due to LF–HF discrepancies, as formalized by the following result. Here, we let Z be the normalization constant in (3). 
+
+Proposition 1 (Irreducible Bias under LF Miscoverage) . Let 
+
+qnaive be defined by (3), and define the KL divergence as 
+
+Enaive = DKL (p⋆h(· | xobs ) ∥ qnaive (· | xobs )) .
+
+Assume there exists a measurable set A ⊂ Θ such that 
+
+p⋆h(A | xobs ) = ρ > 0, p⋆l (A | xobs ) = ε > 0,
+
+with ε ≪ ρ, and further assume that Lh(xobs | θ) is upper bounded by M on A. Then, for the finite constant C := 
+
+Z−1M , we have 
+
+qnaive (A | xobs ) ≤ Cε, and (4) 
+
+Enaive ≥ ρ log ρCε + (1 − ρ) log(1 − ρ). (5) 
+
+Proof. The proof is given in Appendix A. This proposition shows that when the LF posterior under-estimates an HF-plausible region, i.e., ϵ ≪ ρ, directly using such an LF posterior for sequential HF refinement constrains the resulting posterior on this region as qnaive (A | xobs ) ≤ Cϵ .As a result, Naive-MF cannot sufficiently recover HF-plausible probability mass once it is severely underrepresented by the LF posterior. We refer to this failure mode as LF-induced pos-terior miscoverage. This motivates explicit LF–HF discrepancy correction when using the LF posterior to guide HF inference. 
+
+C. Bridged SBI 
+
+Bridged SBI explicitly separates the roles of LF and HF simulations. LF simulations are used to infer a coarse posterior over parameter regions, whereas limited HF simulations are used to learn a local correction that transports LF posterior samples to align with the HF simulation. We express the target posterior through an ideal correction kernel over the LF latent variable zl = ( θl, x l), where xl ∼ pl(x | θl):
+
+p⋆h(θh | xobs ) = 
+
+Z
+
+K⋆(θh | zl, x obs ) pl(zl | xobs ) dz l. (6) Here, K⋆(θh | zl, x obs ) denotes the ideal conditional correction distribution that transports an LF latent variable zl to an HF-consistent parameter θh, given the observation xobs . In Bridged SBI, we approximate this correction distribution using a parametric model qϕ(θh | zl, x ), where x = xh during training and x = xobs at inference. 
+
+qbridge (θh | xobs ) := 
+
+Z
+
+qϕ(θh | zl, x obs ) pl(zl | xobs ) dz l. (7) We refer to qϕ as the probabilistic bridge model. A key component of Bridged SBI is to parameterize this bridge as an additive residual correction. Specifically, instead of modeling the HF parameter θh directly, we learn a conditional residual density qϕ, ∆(∆ | zl, x ) with ∆ = θh − θl and obtain corrected samples by θh = θl + ∆ . This formulation trains a correction centered at LF-guided samples, making the bridge easier to learn when only limited HF data are available [20]. Details of the training and sampling process are given in Section III-D. The following results clarify the theoretical role of this bridge correction. 
+
+Proposition 2 (Bridge-Controlled Recovery Error) . Let p⋆h and 
+
+qbridge be defined by (6) and (7), respectively. Define the KL divergence as 
+
+Ebridge = DKL (p⋆h(· | xobs ) ∥ qbridge (· | xobs )) .
+
+Then 
+
+Ebridge ≤ Epl(zl|xobs )[DKL (K⋆(· | zl, x obs ) ∥ qϕ(· | zl, x obs ))] .
+
+(8) 
+
+Furthermore, for any A ⊂ Θ with p⋆h(A | xobs ) = ρ > 0, if the average bridge error on A satisfies 
+
+Epl(zl | xobs ) [|qϕ(A | zl, x obs ) − K⋆(A | zl, x obs )|] ≤ η, (9) 
+
+then, 
+
+qbridge (A | xobs ) ≥ ρ − η. (10) 
+
+Proof. The proof is given in Appendix A. Thus, unlike Naive-MF, whose mass on A is constrained by the LF posterior mass, Bridged SBI can recover the HF posterior mass on A up to the average conditional bridge approximation error η.
+
+D. Residual Bridge Learning and Posterior Sampling 
+
+This section describes how qbridge in (7) is implemented using an additive residual bridge, how the bridge is trained online with limited HF simulations, and how LF posterior samples are corrected. The overall procedure is summarized in Algorithm 1. We also describe an optional HF refinement step that constructs qbridge+ , which further sharpens qbridge when additional HF budget is available. 
+
+Training the LF estimator: We first train neural SBI to obtain an LF posterior ˆpl(θ | x). In this paper, we use neural posterior estimation (NPE) [11]–[13]. 4
+
+Residual bridge training: We collect a small number of HF simulations around the LF-guided parameter region. HF parameters are drawn from a sampling distribution rh(θ | xobs )
+
+constructed from the LF posterior ˆpl(θ | xobs ), for example, by perturbing or interpolating its samples. The simplest choice is to set rh(θ | xobs ) = ˆ pl(θ | xobs ). For each θh ∼ rh(θ | xobs ),we simulate xh ∼ ph(x | θh) and pair it with LF variables 
+
+zl = ( θl, x l) resampled from the LF dataset according to weights induced by ˆpl(θl | xobs ).The bridge is parameterized by a neural conditional density estimator and trained as 
+
+qϕ(θh | zl, x ) = qϕ, ∆(θh − θl | zl, x ), (11) where x = xh during training and x = xobs during inference. This formulation is not tied to a specific density model: Any neural network capable of approximating the conditional density can be used. The training data are collected conditional on xobs , so this residual model learns the local LF–HF residual structure from LF-consistent to HF-consistent samples around 
+
+xobs .
+
+Inference with Bridged SBI: Sampling from qbridge follows (7). In our implementation, we use the Dirac observation projection p(xl | xobs ) := δ(xl − xobs ). Under this projection, the LF latent variable zl ∼ pl(zl | xobs ) is sampled by setting 
+
+xl = xobs , θl ∼ ˆpl(θl | xobs ).
+
+The bridge model then maps this LF posterior sample toward an HF-consistent sample by applying a residual correction 
+
+∆ ∼ qϕ, ∆(∆ | θl, x l, x obs ), θcorr := θl + ∆ .
+
+Here, θcorr denotes the corrected parameter sample used as a sample from the bridged posterior qbridge (θ | xobs ).The Dirac projection used here is a simple deterministic choice. More generally, the LF latent distribution pl(zl | xobs )
+
+can be approximated as 
+
+pl(θl | xl, x obs ) p(xl | xobs ) ≈ ˆpl(θl | xl) p(xl | xobs ), (12) where we use the independence assumption θl ⊥⊥ xobs | xl.If there is available domain knowledge on how LF and HF observations differ, this extension can improve robustness at the observation level, beyond parameter-level correction alone. In this paper, we use the Dirac projection, but other choices, such as a spike-and-slab distribution [21], could also be used. 
+
+Optional HF refinement: When additional HF simulations are available, we can further refine qbridge by treating it as an informed prior: 
+
+qbridge+ (θ | xobs ) ∝ qbridge (θ | xobs )Lh(xobs | θ). (13) In practice, qbridge+ is obtained by training an additional NPE on HF simulations with parameters sampled from 
+
+qbridge (θ | xobs ), and equivalently by using the corrected sam-ples θcorr . This optional refinement step further sharpens the corrected posterior after the bridge correction has mitigated LF-induced miscoverage. 
+
+Algorithm 1: Pipeline of Bridged SBI                                                                                                                               
+
+> Input: Prior p(θ), Observation xobs , Simulators pl(x|θ), p h(x|θ),Budgets (Nl, N h, N k)
+> Output: Corrected samples {θ(m)corr }Mm=1 , Optional refined posterior
+> qbridge+
+> // Stage 1: LF Posterior Estimation
+> Generate LF dataset Dl={(θ(i)
+> l, x (i)
+> l)}Nl
+> i=1 where θ(i)
+> l∼p(θ)and
+> x(i)
+> l∼pl(x|θ(i)
+> l)
+> Train LF posterior estimator ˆpl(θ|x)on Dlvia NPE
+> // Stage 2-1: LF-Guided HF Sampling
+> Construct local HF proposal rh(θ|xobs )from ˆpl(θ|xobs )
+> Collect limited HF samples Dh={(θ(j)
+> h, x (j)
+> h)}Nh
+> j=1 where
+> θ(j)
+> h∼rh(θ|xobs )and x(j)
+> h∼ph(x|θ(j)
+> h)
+> // Stage 2-2: LF-HF Bridge Dataset Collection
+> Resample ˜Dl={(θ(k)
+> l, x (k)
+> l)}Nk
+> k=1 from Dlusing weights from
+> ˆpl(θl|xobs )
+> Form mixed pairs P={(θ(k)
+> l, x (k)
+> l, x (j)
+> h,∆(j,k ))}where
+> ∆(j,k )=θ(j)
+> h−θ(k)
+> l
+> // Stage 2-3: Residual Bridge Training
+> Train a neural conditional density estimator qϕ, ∆to minimize:
+> Lbridge (ϕ) = −1
+> |P|
+> P
+> Plog qϕ, ∆(∆ |θl, x l, x h)
+> // Stage 3: Inference with Bridged SBI
+> for m= 1 to Mdo
+> Sample LF parameter θ(m)
+> l∼ˆpl(θ|xobs )and set
+> x(m)
+> l←xobs // Dirac proj.
+> Predict residual ∆(m)∼qϕ, ∆(∆ |θ(m)
+> l, x (m)
+> l, x obs )
+> Apply correction θ(m)corr =θ(m)
+> l+ ∆ (m)
+> // [Optional] HF Refinement
+> Train HF estimator qbridge+ on sampling distribution qbridge .
+> return {θ(m)corr }Mm=1 and qbridge+
+
+IV. S IM -TO -S IM EXPERIMENT 
+
+We used a robot simulator equipped with a particle model. With earthwork applications in mind, we developed a simula-tion with an excavator model (Fig. 2). 
+
+A. Simulation Model 
+
+We simulate a particle-pouring task with an earthwork exca-vator in Isaac Gym [22]. In the LF simulator, the excavator’s bucket contains 90 cubes, each with an edge length of 10 cm, providing fast but coarse particle dynamics. In the HF simula-tor, the particle’s edge length is reduced to 2.5 cm. Since the number of particles scales with the inverse cube of the particle size, this yields 90 × 43 = 5760 particles. In both simulators, the excavator bucket is initialized 1.8 m above the ground and rotated at a fixed angular velocity to execute the pouring motion. After the motion is completed, a depth image of the resulting particle pile is captured and used as the observation for inference. The image is taken from a fixed 3.6 m × 3.6 m square region centered at a projection of the bucket link onto the ground plane. Table I summarizes the computational costs of the two simulators. Generating 1000 LF simulations requires 5 min 50 s, whereas generating 1000 HF simulations requires 16 h 10 min, corresponding to an approximately 166 × speedup. Experiments were conducted on a workstation equipped with an Intel Core i9-11900K CPU, 32 GB RAM, and an NVIDIA GeForce RTX 3080 GPU with 10 GB of VRAM. 5
+
+TABLE I: Wall-clock time required to generate 1000 simulation samples in sim-to-sim experiment. HF simulations were generated using 250 batches of 4 parallel environments, while LF simulations were generated using 10 batches of 100 parallel environments. 
+
+Time at high fidelity Time at low fidelity Speedup 16 h 10 m 45 s 5 m 50 s 166 ×
+
+Fig. 2: Particle pouring simulation with varying particle sizes. LF simulation uses cubes with 10-cm side length, whereas HF simulation uses cubes with 2.5-cm side length. 
+
+B. Parameterization and Ground-Truth Settings 
+
+The parameter vector is defined as θ = ( θf , θ rf , θ res ), where 
+
+θf , θrf , and θres denote the static friction, rolling friction, and restitution coefficients of the particles, respectively. These parameters were selected because they govern the dominant particle-level contact behaviors, such as sliding resistance, rolling resistance, and rebound behavior. Motivated by an earlier work [23] that estimated particle-level parameters in Isaac Gym, we constrain each parameter to [0 , 1] and assume a uniform prior over this domain during the initial LF explo-ration stage. In the sim-to-sim experiments, we consider two synthetic target particles: Particle-A with θtrue 
+
+A = (0 .7, 0.7, 0.3) and 
+
+Particle-B with θtrue 
+
+B = (0 .2, 0.2, 0.3) . For both cases, the observation is a depth image generated by the HF simulator. The ground-truth parameters are used only for data generation and evaluation, so they are not available during inference. 
+
+C. Experimental Setup 
+
+Network architecture: Observations are represented as 250 ×
+
+250 depth images. NPE uses a CNN-MDN architecture, where a CNN encoder extracts image embeddings and an MDN [24] outputs a k-component Gaussian mixture with 
+
+k = 10 . The bridge model also uses an MDN to model the conditional density over ∆. The CNN encoder consists of two convolutional/max-pooling blocks followed by three fully connected layers with sizes (120 , 128 , 128) and Tanh activations. All models are trained for 1500 iterations with a batch size of 30. 
+
+Baseline and cost allocation: We compare four methods. 
+
+• Naive-MF: Sequential multi-fidelity SBI that uses the LF posterior directly as the prior for the HF stage. 
+
+• Bridged SBI (proposed): Corrected posterior qbridge ob-tained via the proposed residual bridge correction. 
+
+• Bridged w/ Refine (proposed): Optional refined posterior 
+
+qbridge+ built on top of Bridged SBI. 
+
+• HF-only: NPE trained using only HF simulations. Simulation cost is measured in HF-equivalent units, where one HF simulation has cost N = 1 . According to Table I, 1000 <latexit sha1_base64="YgGbHU2Iv+ysPa3OerxdQo+VDDo=">AAAB73icbVBNS8NAEJ3Ur1q/qh69LBbBU0mkqMeiF48V7Ae0oWy2m3bpZhN3J0IJ/RNePCji1b/jzX/jts1BWx8MPN6bYWZekEhh0HW/ncLa+sbmVnG7tLO7t39QPjxqmTjVjDdZLGPdCajhUijeRIGSdxLNaRRI3g7GtzO//cS1EbF6wEnC/YgOlQgFo2ilTg9HHGk/7JcrbtWdg6wSLycVyNHol796g5ilEVfIJDWm67kJ+hnVKJjk01IvNTyhbEyHvGupohE3fja/d0rOrDIgYaxtKSRz9fdERiNjJlFgOyOKI7PszcT/vG6K4bWfCZWkyBVbLApTSTAms+fJQGjOUE4soUwLeythI6opQxtRyYbgLb+8SloXVe+yWruvVeo3eRxFOIFTOAcPrqAOd9CAJjCQ8Ayv8OY8Oi/Ou/OxaC04+cwx/IHz+QMguJAK</latexit> 
+
+✓f 
+
+> <latexit sha1_base64="YgGbHU2Iv+ysPa3OerxdQo+VDDo=">AAAB73icbVBNS8NAEJ3Ur1q/qh69LBbBU0mkqMeiF48V7Ae0oWy2m3bpZhN3J0IJ/RNePCji1b/jzX/jts1BWx8MPN6bYWZekEhh0HW/ncLa+sbmVnG7tLO7t39QPjxqmTjVjDdZLGPdCajhUijeRIGSdxLNaRRI3g7GtzO//cS1EbF6wEnC/YgOlQgFo2ilTg9HHGk/7JcrbtWdg6wSLycVyNHol796g5ilEVfIJDWm67kJ+hnVKJjk01IvNTyhbEyHvGupohE3fja/d0rOrDIgYaxtKSRz9fdERiNjJlFgOyOKI7PszcT/vG6K4bWfCZWkyBVbLApTSTAms+fJQGjOUE4soUwLeythI6opQxtRyYbgLb+8SloXVe+yWruvVeo3eRxFOIFTOAcPrqAOd9CAJjCQ8Ayv8OY8Oi/Ou/OxaC04+cwx/IHz+QMguJAK</latexit>
+
+✓f
+
+> <latexit  sha1_base64="DFiKdqRns2TRT2unnV14fcF2IKc=">AAAB83icbVBNS8NAEN3Ur1q/qh69LBbBU0lE1GPRi8cK9gOaUDbbSbt0swm7E6GE/g0vHhTx6p/x5r9x2+agrQ8GHu/NMDMvTKUw6LrfTmltfWNzq7xd2dnd2z+oHh61TZJpDi2eyER3Q2ZACgUtFCihm2pgcSihE47vZn7nCbQRiXrESQpBzIZKRIIztJLv4wiQ9XMNZtqv1ty6OwddJV5BaqRAs1/98gcJz2JQyCUzpue5KQY50yi4hGnFzwykjI/ZEHqWKhaDCfL5zVN6ZpUBjRJtSyGdq78nchYbM4lD2xkzHJllbyb+5/UyjG6CXKg0Q1B8sSjKJMWEzgKgA6GBo5xYwrgW9lbKR0wzjjamig3BW355lbQv6t5V/fLhsta4LeIokxNySs6JR65Jg9yTJmkRTlLyTF7Jm5M5L86787FoLTnFzDH5A+fzB5Xskg4=</latexit>
+> ✓res
+> <latexit  sha1_base64="DFiKdqRns2TRT2unnV14fcF2IKc=">AAAB83icbVBNS8NAEN3Ur1q/qh69LBbBU0lE1GPRi8cK9gOaUDbbSbt0swm7E6GE/g0vHhTx6p/x5r9x2+agrQ8GHu/NMDMvTKUw6LrfTmltfWNzq7xd2dnd2z+oHh61TZJpDi2eyER3Q2ZACgUtFCihm2pgcSihE47vZn7nCbQRiXrESQpBzIZKRIIztJLv4wiQ9XMNZtqv1ty6OwddJV5BaqRAs1/98gcJz2JQyCUzpue5KQY50yi4hGnFzwykjI/ZEHqWKhaDCfL5zVN6ZpUBjRJtSyGdq78nchYbM4lD2xkzHJllbyb+5/UyjG6CXKg0Q1B8sSjKJMWEzgKgA6GBo5xYwrgW9lbKR0wzjjamig3BW355lbQv6t5V/fLhsta4LeIokxNySs6JR65Jg9yTJmkRTlLyTF7Jm5M5L86787FoLTnFzDH5A+fzB5Xskg4=</latexit>
+> ✓res
+
+(a) Na ive -MF 
+
+(b) Bridged SBI (ours ) (c) Bridged w/ Refine (ours )
+
+Fig. 3: Resulting posteriors for sim-to-sim experiment (Particle-A) at total cost N = 50 , shown as 2D marginals over (θf , θ res ). Top-left: Reference HF (red) and LF (green) posterior samples. Solid contours denote 95% high-density regions, and star indicates ground-truth parameter. Naive-MF is biased toward the LF posterior, whereas Bridged SBI recovers HF-consistent regions. Optional refinement further improves posterior concentration. 
+
+LF simulations correspond to N = 6 . For all multi-fidelity methods, the LF posterior is trained with 1000 LF simulations. For Bridged w/ Refine, we use 1000 LF simulations for LF posterior estimation and 14 HF simulations for bridge learning, yielding a total pre-refinement cost of N = 20 .
+
+D. Evaluation 
+
+For quantitative evaluation, we train NPE using extensive HF simulations, approximately N = 4000 , and use it as the HF reference posterior, denoted by pref . This can be considered a reasonable reference, since the aim of multi-fidelity inference is to replace expensive single-fidelity HF inference. We report both DKL (pref |q) and DKL (q|pref ), where q denotes the estimated posterior. Both divergences are estimated using 300 samples drawn from each posterior and computed via finite summation. These metrics are complementary: Forward KL evaluates coverage of the HF reference posterior, whereas reverse KL evaluates posterior concentration by penalizing probability mass outside the reference high-density region. All reported results are averaged over 10 independent trials. 
+
+E. Results 
+
+Fig. 3 shows the inferred posteriors for Particle-A at a total simulation cost of N = 50 , visualized as two-dimensional marginals over (θf , θ res ). The top-left panel presents the reference LF and HF posteriors obtained from large-scale single-fidelity data, and it shows a clear mismatch in the parameter regions. Naive-MF remains confined to the LF-indicated region and fails to recover the HF posterior region containing the ground-truth parameter, providing empirical evidence of LF-induced posterior miscoverage consistent with Proposition 1. In contrast, Bridged SBI recovers posterior mass in the missing HF region, indicating that the bridge model corrects regions that would otherwise be excluded by the LF posterior. Bridged w/ Refine further sharpens the corrected 6Simulation Cost Simulation Cost      
+
+> Simulation Cost Simulation Cost
+> KL divergence Reverse KL  divergence
+> KL divergence (Particle -A) KL divergence (Particle -B)
+> Reverse KL divergence (Particle -A) Reverse KL divergence (Particle -B)
+> HF -only
+> Naive -MF
+> Bridged SBI (ours)
+> Bridged w/ Refine (ours)
+
+Fig. 4: KL and reverse KL divergences across simulation costs for sim-to-sim experiments. Upper and lower rows show KL and reverse KL di-vergences, respectively, for Particle-A and Particle-B. Bridged SBI reduces both divergences compared with HF-only and Naive-MF, especially in low-cost regimes, indicating effective recovery of target-consistent regions under limited budgets. Optional refinement further reduces reverse KL divergence at higher costs, improving posterior concentration. 
+
+posterior while maintaining agreement with the HF reference, highlighting the complementary roles of correction for cover-age recovery and refinement for posterior concentration. Fig. 4 reports the KL and reverse KL divergence for Particle-A and Particle-B across simulation costs N . In both particle types, Naive-MF yields substantially larger KL values than Bridged SBI, indicating that directly using the LF pos-terior for the HF stage fails to recover important HF-relevant posterior mass. In the low-cost regime, Bridged SBI clearly outperforms both Naive-MF and HF-only in terms of KL divergence. For example, at N = 7 for Particle-A, Bridged SBI achieves a mean KL divergence of 4.91, compared with 25.50 for Naive-MF and 24.36 for HF-only, corresponding to an 80.7% reduction relative to Naive-MF. These results show that the residual bridge enables cost-efficient HF posterior infer-ence with reliable coverage of the HF reference posterior under scarce simulation budgets. In terms of reverse KL, Bridged SBI remains stable in the low-cost regime, while Bridged w/ Refine substantially reduces reverse KL as additional HF evaluations become available. For example, at N = 100 for Particle-A, Bridged w/ Refine achieves a mean reverse KL of 2.43, whereas Bridged SBI and HF-only are both over 7. These results indicate the complementary roles of bridge correction and refinement: Correction recovers posterior mass covering HF parameter candidates, while refinement further sharpens the posterior after coverage has been restored. V. R EAL -TO -S IM EXPERIMENT 
+
+We next evaluate Bridged SBI in a real-to-sim setting, where the goal is to estimate simulator parameters corresponding to the real soil observation. 
+
+A. Observation Acquisition and Simulation Model 
+
+The real system (Fig. 5) uses a real excavator corresponding to the one modeled for the simulator used in Section IV, and 
+
+Fig. 5: Real and simulated excavator environments. Left: Real excavator performing soil manipulation. Right: Corresponding simulation setup for parameter estimation. (a) Real soil pile (b) 3D mesh from point cloud (c) Height map (mm) 
+
+> 200
+> 175
+> 150
+> 125
+> 100
+> 75
+> 50
+> 25
+> 0
+
+Fig. 6: Pipeline of real-to-sim data processing. (a) Soil pouring using an excavator, (b) acquisition of a 3D point cloud and reconstruction of a mesh, and (c) transformation into a 2D height map consistent with the simulation output format. 
+
+it performs the same pouring action. Before pouring, we load 0.09 m 3 of soil into the excavator bucket. After pouring, we capture a 3D point cloud of the real soil pile using a Leica BLK2GO scanner. The point cloud is then converted into a mesh and further transformed into a 2D height map, as shown in Fig. 6, which serves as the observation xobs . The captured area is the same as that used in the sim-to-sim experiments: a square region of 3.6 m × 3.6 m centered at the bucket link projection on the ground plane. We use the same LF and HF simulation settings as in the sim-to-sim experiment, while changing the observation source from simulated to real soil data. 
+
+B. Parameterization 
+
+In addition to the three parameters used in Section IV, we introduce a parameter to account for the void space between particles. The real soil volume of 0.09 m 3 nominally corre-sponds to 90 cubes with a side length of 10 cm in the LF simulator, or to 5760 cubes with a side length of 2.5 cm in the HF simulator. However, because simulated particle piles contain void space, fewer cubes than these nominal counts are required to reproduce the real soil pile. Therefore, we introduce a scaling parameter θnum ∈ [0 .5, 1] that controls the number of particles, where the lower bound is set to avoid overly sparse particle configurations that no longer preserve the overall pile shape. Accordingly, the LF simulator uses 
+
+θnum × 90 cubes, and the HF simulator uses θnum × 5760 
+
+cubes. The full parameter vector is defined as 
+
+θ = ( θf , θ rf , θ res , θ num ),
+
+where θf , θrf , and θres are defined in Section IV. The first three parameters lie in [0 , 1] , while θnum lies in [0 .5, 1] .
+
+C. Experimental Setup 
+
+We use the same network architecture, baselines, and budget allocation settings as described in Section IV. 7<latexit sha1_base64="DFiKdqRns2TRT2unnV14fcF2IKc=">AAAB83icbVBNS8NAEN3Ur1q/qh69LBbBU0lE1GPRi8cK9gOaUDbbSbt0swm7E6GE/g0vHhTx6p/x5r9x2+agrQ8GHu/NMDMvTKUw6LrfTmltfWNzq7xd2dnd2z+oHh61TZJpDi2eyER3Q2ZACgUtFCihm2pgcSihE47vZn7nCbQRiXrESQpBzIZKRIIztJLv4wiQ9XMNZtqv1ty6OwddJV5BaqRAs1/98gcJz2JQyCUzpue5KQY50yi4hGnFzwykjI/ZEHqWKhaDCfL5zVN6ZpUBjRJtSyGdq78nchYbM4lD2xkzHJllbyb+5/UyjG6CXKg0Q1B8sSjKJMWEzgKgA6GBo5xYwrgW9lbKR0wzjjamig3BW355lbQv6t5V/fLhsta4LeIokxNySs6JR65Jg9yTJmkRTlLyTF7Jm5M5L86787FoLTnFzDH5A+fzB5Xskg4=</latexit> 
+
+✓res  
+
+> <latexit sha1_base64="DFiKdqRns2TRT2unnV14fcF2IKc=">AAAB83icbVBNS8NAEN3Ur1q/qh69LBbBU0lE1GPRi8cK9gOaUDbbSbt0swm7E6GE/g0vHhTx6p/x5r9x2+agrQ8GHu/NMDMvTKUw6LrfTmltfWNzq7xd2dnd2z+oHh61TZJpDi2eyER3Q2ZACgUtFCihm2pgcSihE47vZn7nCbQRiXrESQpBzIZKRIIztJLv4wiQ9XMNZtqv1ty6OwddJV5BaqRAs1/98gcJz2JQyCUzpue5KQY50yi4hGnFzwykjI/ZEHqWKhaDCfL5zVN6ZpUBjRJtSyGdq78nchYbM4lD2xkzHJllbyb+5/UyjG6CXKg0Q1B8sSjKJMWEzgKgA6GBo5xYwrgW9lbKR0wzjjamig3BW355lbQv6t5V/fLhsta4LeIokxNySs6JR65Jg9yTJmkRTlLyTF7Jm5M5L86787FoLTnFzDH5A+fzB5Xskg4=</latexit>
+
+✓res 
+
+(a) Na ive -MF 
+
+(b) Bridged SBI (ours) (c) Bridged w/ Refine (ours) 
+
+> <latexit  sha1_base64="+WN1rEZRLDSjbrcgl/IYSXi/CXQ=">AAAB83icbVBNSwMxEM3Wr1q/qh69BIvgqeyKqMeiF48V7Ad0l5JNs21okl2SiVCW/g0vHhTx6p/x5r8xbfegrQ8GHu/NMDMvzgQ34PvfXmltfWNzq7xd2dnd2z+oHh61TWo1ZS2ailR3Y2KY4Iq1gINg3UwzImPBOvH4buZ3npg2PFWPMMlYJMlQ8YRTAk4KQxgxIP1cWTntV2t+3Z8Dr5KgIDVUoNmvfoWDlFrJFFBBjOkFfgZRTjRwKti0ElrDMkLHZMh6jioimYny+c1TfOaUAU5S7UoBnqu/J3IijZnI2HVKAiOz7M3E/7yeheQmyrnKLDBFF4sSKzCkeBYAHnDNKIiJI4Rq7m7FdEQ0oeBiqrgQguWXV0n7oh5c1S8fLmuN2yKOMjpBp+gcBegaNdA9aqIWoihDz+gVvXnWe/HevY9Fa8krZo7RH3ifP58SkhQ=</latexit>
+> ✓num
+> <latexit  sha1_base64="+WN1rEZRLDSjbrcgl/IYSXi/CXQ=">AAAB83icbVBNSwMxEM3Wr1q/qh69BIvgqeyKqMeiF48V7Ad0l5JNs21okl2SiVCW/g0vHhTx6p/x5r8xbfegrQ8GHu/NMDMvzgQ34PvfXmltfWNzq7xd2dnd2z+oHh61TWo1ZS2ailR3Y2KY4Iq1gINg3UwzImPBOvH4buZ3npg2PFWPMMlYJMlQ8YRTAk4KQxgxIP1cWTntV2t+3Z8Dr5KgIDVUoNmvfoWDlFrJFFBBjOkFfgZRTjRwKti0ElrDMkLHZMh6jioimYny+c1TfOaUAU5S7UoBnqu/J3IijZnI2HVKAiOz7M3E/7yeheQmyrnKLDBFF4sSKzCkeBYAHnDNKIiJI4Rq7m7FdEQ0oeBiqrgQguWXV0n7oh5c1S8fLmuN2yKOMjpBp+gcBegaNdA9aqIWoihDz+gVvXnWe/HevY9Fa8krZo7RH3ifP58SkhQ=</latexit>
+> ✓num
+
+Fig. 7: Resulting posteriors for real-to-sim experiment at total simulation cost of N = 50 , shown as 2D marginals over (θres , θ num ). Top-left: Reference HF (red) and LF (green) posterior samples. Solid contours denote 95% high-density regions. Naive-MF is biased toward LF posterior, whereas Bridged SBI recovers HF-consistent regions. Optional refinement further improves posterior concentration. 
+
+D. Evaluation 
+
+We train NPE on HF simulations ( N = 8000 ) and use it as the HF reference posterior. Following the sim-to-sim setting, we estimate forward and reverse KL divergences by finite summation over 300 samples from each posterior. 
+
+E. Results 
+
+Fig. 7 shows the inferred posteriors at a total simulation cost of N = 50 , visualized as two-dimensional marginals over 
+
+(θres , θ num ). The LF and HF reference posteriors exhibit a clear mismatch in the parameter regions. Naive-MF remains constrained to the LF-supported region but fails to recover HF-consistent regions, whereas Bridged SBI restores missing posterior mass and improves alignment with the HF reference. Bridged SBI w/ Refine further sharpens the posterior after correction. Fig. 8 reports KL and reverse KL divergence across simula-tion cost N . In the low-budget regime, Bridged SBI achieves the best performance in both metrics. At N = 7 , Bridged SBI obtains a KL divergence of 2.79 ± 0.77 , compared with 
+
+11 .19 ± 6.80 for Naive-MF and 6.53 ± 3.62 for HF-only, corresponding to approximately 75% and 67% lower KL val-ues, respectively. As the budget increases, HF-only improves KL and Reverse KL, which is consistent with Bridged SBI being designed primarily for inference in low-budget regimes. When additional HF evaluations are available, Bridged SBI w/ Refine further improves posterior concentration. Overall, the real-to-sim results support our main claim: Reliable posterior inference for particle-parameter calibration requires explicit LF–HF discrepancy correction, rather than treating the LF posterior as a trusted approximation and simply refining it with additional HF simulations. HF -only 
+
+Naive -MF 
+
+Bridged SBI (ours) 
+
+Bridged w/ Refine (ours) 
+
+> KL divergence Reverse KL  divergence
+
+Simulation Cost 
+
+HF -only 
+
+Naive -MF 
+
+Bridged SBI (ours) 
+
+Bridged w/ Refine (ours) 
+
+Fig. 8: KL and reverse KL divergences across simulation costs for real-to-sim experiment. Bridged SBI achieves lower KL divergence, especially in low-cost regimes, indicating effective recovery of target-consistent regions under limited budgets. Optional refinement further reduces reverse KL divergence at higher costs, improving posterior concentration. 
+
+VI. D ISCUSSION 
+
+The results show that Bridged SBI improves the trade-off between simulation cost and posterior accuracy by using LF simulations for coarse posterior estimation and limited HF simulations for LF–HF discrepancy correction. One limitation is that the residual bridge is learned locally around the LF-guided parameter regions. Consequently, the effectiveness of this approach depends on whether a meaning-ful local LF–HF correction can be learned in this region. If the LF posterior is severely biased or no local cross-fidelity relationship exists, the learned bridge may not fully recover the target posterior. This limitation could be mitigated by increasing exploration around LF posterior samples, using smoothed or broadened sampling distributions [25], or adopt-ing more expressive conditional density models for the residual bridge [26]. Another limitation is the use of a simple observation pro-jection when sampling LF latent variables. More informative projection models could be used when domain knowledge on the LF and HF observation spaces is available, but manually designing such models may introduce misspecification [21], [27]. Future work will study how to jointly learn observation projection and parameter correction from simulation data. VII. C ONCLUSION 
+
+In this paper, we proposed Bridged SBI, a cost-efficient calibration framework for particle-based simulators that per-forms high-fidelity inference through low-fidelity guidance and residual correction. Rather than treating the LF posterior as a trusted guide for sequential refinement, Bridged SBI instead uses it as an informative—albeit biased—guide and then corrects LF posterior samples with a locally learned residual bridge trained from a small number of HF simulations. Our analysis showed that sequential multi-fidelity SBI can suffer from LF-induced posterior miscoverage due to the LF–HF discrepancy. Bridged SBI is designed to alleviate this issue by explicitly modeling the LF–HF discrepancy using the residual 8
+
+bridge. Experiments in sim-to-sim and real-to-sim calibration demonstrated that Bridged SBI could improve HF inference under limited HF simulation budgets. REFERENCES [1] P. A. Cundall and O. D. L. Strack, “A discrete numerical model for granular assemblies,” Geotechnique , vol. 29, no. 1, pp. 47–65, 1979. [2] C. J. Coetzee, “Review: Calibration of the discrete element method,” 
+
+Powder Technology , vol. 310, pp. 104–142, 2017. [3] K. Cranmer, J. Brehmer, and G. Louppe, “The frontier of simulation-based inference,” Proceedings of the National Academy of Sciences of the United States of America , vol. 117, no. 48, pp. 30 055–30 062, 2020. [4] C. Bierwisch, T. Kraft, H. Riedel, and M. Moseler, “Three-dimensional discrete element models for the granular statics and dynamics of powders,” Journal of the Mechanics and Physics of Solids , vol. 57, no. 1, pp. 10–31, 2009. [5] Y. Dufresne, M. Boulet, and S. Moreau, “Energy dissipation and onset of instabilities in coarse-grained discrete element method on homogeneous cooling systems,” Physics of Fluids , vol. 34, no. 3, p. 033306, 2022. [6] T. Roessler and A. Katterfeld, “Scaling of the angle of repose test and its influence on the calibration of DEM parameters using upscaled particles,” Powder Technology , vol. 330, pp. 58–66, 2018. [7] Y. Kadokawa, H. Tahara, and T. Matsubara, “Progressive-resolution policy distillation: Leveraging coarse-resolution simulations for time-efficient fine-resolution policy learning,” IEEE Transactions on Automa-tion Science and Engineering , vol. 22, 2025. [8] F. Ramos, R. Possas, and D. Fox, “BayesSim: Adaptive domain randomization via probabilistic inference for robotics simulators,” in 
+
+Proceedings of Robotics: Science and Systems , 2019. [9] G. Kim and T. Matsubara, “ASBI: Leveraging informative real-world data for active black-box simulator tuning,” Applied Intelligence , vol. 55, no. 1028, 2025. [10] F. Muratore, T. Gruner, F. Wiese, B. Belousov, M. Gienger, and J. Peters, “Neural posterior domain randomization,” in Proceedings of the 5th Conference on Robot Learning , vol. 164, 2022, pp. 1532–1542. [11] G. Papamakarios and I. Murray, “Fast ϵ-free inference of simulation models with Bayesian conditional density estimation,” in Advances in Neural Information Processing Systems , vol. 29, 2016, pp. 1028–1036. [12] J.-M. Lueckmann, P. J. Gonc ¸alves, G. Bassetto, K. ¨ Ocal, M. Nonnen-macher, and J. H. Macke, “Flexible statistical inference for mechanistic models of neural dynamics,” in Advances in Neural Information Pro-cessing Systems , vol. 30, 2017, pp. 1289–1299. [13] D. Greenberg, M. Nonnenmacher, and J. H. Macke, “Automatic posterior transformation for likelihood-free inference,” in Proceedings of the 36th International Conference on Machine Learning , 2019, pp. 2404–2414. [14] A. Di Renzo, E. S. Napolitano, and F. P. Di Maio, “Coarse-grain DEM modelling in fluidized bed simulation: A review,” Processes , vol. 9, no. 2, p. 279, 2021. [15] D. J. Warne, R. E. Baker, and M. J. Simpson, “Multilevel rejection sam-pling for approximate Bayesian computation,” Computational Statistics & Data Analysis , vol. 124, pp. 71–86, 2018. [16] T. P. Prescott, D. J. Warne, and R. E. Baker, “Efficient multifidelity likelihood-free Bayesian inference with adaptive computational resource allocation,” Journal of Computational Physics , vol. 496, p. 112577, 2024. [17] L. Thiele, A. E. Bayer, and N. Takeishi, “Simulation-efficient cosmolog-ical inference with multi-fidelity SBI,” arXiv preprint arXiv:2507.00514 ,2025. [18] Y. Hikida, A. Bharti, N. Jeffrey, and F.-X. Briol, “Multilevel neural simulation-based inference,” arXiv preprint arXiv:2506.06087 , 2025. [19] A. N. Krouglova, H. R. Johnson, B. Confavreux, M. Deistler, and P. J. Gonc ¸alves, “Multifidelity simulation-based inference for computation-ally expensive simulators,” in International Conference on Learning Representations , 2026. [20] K. He, X. Zhang, S. Ren, and J. Sun, “Deep residual learning for image recognition,” in Proceedings of the IEEE Conference on Computer Vision and Pattern Recognition , 2016, pp. 770–778. [21] D. Ward, P. Cannon, M. Beaumont, M. Fasiolo, and S. Schmon, “Robust neural posterior estimation and statistical model criticism,” in Advances in Neural Information Processing Systems , vol. 35, 2022, pp. 33 845– 33 859. [22] V. Makoviychuk, L. Wawrzyniak, Y. Guo, M. Lu, K. Storey, M. Macklin, D. Hoeller, N. Rudin, A. Allshire, A. Handa, and G. State, “Isaac gym: High performance GPU-based physics simulation for robot learning,” 
+
+arXiv preprint arXiv:2108.10470 , 2021. [23] C. Matl, Y. Narang, R. Bajcsy, F. Ramos, and D. Fox, “Inferring the material properties of granular media for robotic tasks,” in 2020 IEEE International Conference on Robotics and Automation (ICRA) , 2020, pp. 2770–2777. [24] C. M. Bishop, “Mixture density networks,” Neural Computing Research Group, Aston University, Tech. Rep., 1994. [25] K. Giannoukou, S. Marelli, and B. Sudret, “Uncertainty-aware multi-fidelity surrogate modeling with noisy data,” ASCE-ASME Journal of Risk and Uncertainty in Engineering Systems, Part A: Civil Engineering ,vol. 11, no. 3, p. 04025037, 2025. [26] J. Wildberger, M. Dax, S. Buchholz, S. R. Green, J. H. Macke, and B. Sch¨ olkopf, “Flow matching for scalable simulation-based inference,” in Advances in Neural Information Processing Systems , vol. 36, 2023, pp. 16 837–16 864. [27] M. C. Kennedy and A. O’Hagan, “Bayesian calibration of computer models,” Journal of the Royal Statistical Society: Series B (Statistical Methodology) , vol. 63, no. 3, pp. 425–464, 2001. [28] T. M. Cover and J. A. Thomas, Elements of Information Theory , 2nd ed. Hoboken, NJ, USA: Wiley-Interscience, 2006. 
+
+APPENDIX A
+
+Proof of Proposition 1. For notational brevity, we write p⋆h(θ|xobs ) and 
+
+qnaive (θ|xobs ) as p⋆h and qnaive , respectively. From (3), 
+
+qnaive (A | xobs ) = Z−1
+
+Z
+
+> A
+
+p⋆l (θ | xobs )Lh(xobs | θ) dθ 
+
+≤ Z−1M
+
+Z
+
+> A
+
+p⋆l (θ | xobs ) dθ = Cϵ, 
+
+where C := Z−1M . Next, decompose the KL divergence over A and its complement Ac:
+
+DKL (p⋆h∥ qnaive ) = 
+
+Z
+
+> A
+
+p⋆h log p⋆h
+
+qnaive 
+
+dθ +
+
+Z
+
+> Ac
+
+p⋆h log p⋆h
+
+qnaive 
+
+dθ. 
+
+For the first term, the log-sum inequality [28] gives 
+
+Z
+
+> A
+
+p⋆h log p⋆h
+
+qnaive 
+
+dθ ≥ p⋆h(A | xobs ) log p⋆h(A | xobs )
+
+qnaive (A | xobs ) .
+
+Substituting p⋆h(A | xobs ) = ρ and qnaive (A | xobs ) ≤ Cϵ , we get 
+
+Z
+
+> A
+
+p⋆h log p⋆h
+
+qnaive 
+
+dθ ≥ ρ log ρCϵ .
+
+For the second term, applying the log-sum inequality on Ac yields 
+
+Z
+
+> Ac
+
+p⋆h log p⋆h
+
+qnaive 
+
+dθ ≥ p⋆h(Ac | xobs ) log p⋆h(Ac | xobs )
+
+qnaive (Ac | xobs ) .
+
+Since p⋆h(Ac | xobs ) = 1 − ρ and qnaive (Ac | xobs ) ≤ 1, we obtain 
+
+Z
+
+> Ac
+
+p⋆h log p⋆h
+
+qnaive 
+
+dθ ≥ (1 − ρ) log 1 − ρ
+
+1 = (1 − ρ) log(1 − ρ).
+
+Combining the two bounds gives 
+
+DKL (p⋆h ∥ qnaive ) ≥ ρ log ρCϵ + (1 − ρ) log(1 − ρ).
+
+Proof of Proposition 2. From the definition, we have 
+
+qbridge (θ | xobs ) = 
+
+Z
+
+qϕ(θ | zl, x obs )pl(zl | xobs ) dz l = Ezl [qϕ]
+
+Then, we can express 
+
+DKL 
+
+ p⋆h ∥ qbridge 
+
+ = DKL (Ezl [K⋆] ∥ Ezl [qϕ]) .
+
+From the joint convexity of KL divergence and Jensen’s inequality, 
+
+DKL (Ezl [K⋆] ∥ Ezl [qϕ]) ≤ Ezl [DKL (K⋆ ∥ qϕ)] .
+
+Next, by the definition of qbridge and p⋆h, and Tonelli’s theorem, 
+
+qbridge (A | xobs ) = 
+
+Z
+
+qϕ(A | zl, x obs )pl(zl | xobs ) dz l,p⋆h(A | xobs ) = 
+
+Z
+
+K⋆(A | zl, x obs )pl(zl | xobs ) dz l = ρ. 9
+
+Therefore, 
+
+qbridge (A | xobs ) − ρ
+
+=
+
+Z qϕ(A | zl, x obs ) − K⋆(A | zl, x obs ) pl(zl | xobs ) dz l
+
+≤
+
+Z
+
+qϕ(A | zl, x obs ) − K⋆(A | zl, x obs ) pl(zl | xobs ) dz l
+
+≤ η. 
+
+This implies 
+
+qbridge (A | xobs ) ≥ ρ − η.
