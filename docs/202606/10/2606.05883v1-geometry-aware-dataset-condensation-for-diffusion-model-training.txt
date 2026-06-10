@@ -1,0 +1,1527 @@
+Title: Geometry-Aware Dataset Condensation for Diffusion Model Training
+
+URL Source: https://arxiv.org/pdf/2606.05883v1
+
+Published Time: Fri, 05 Jun 2026 01:04:56 GMT
+
+Number of Pages: 34
+
+Markdown Content:
+# Geometry-Aware Dataset Condensation for Diffusion Model Training 
+
+Xiao Cui 1 Yulei Qin 2 Mo Zhu 3 Wengang Zhou 1 Hongsheng Li 4 Houqiang Li 1
+
+## Abstract 
+
+Dataset condensation aims to construct compact datasets from real data via synthesis or selec-tion. However, existing approaches are ill-suited for diffusion model training: synthetic data gen-eration often yields low-fidelity samples unsuit-able for authentic modeling, while real subset selection typically fails to preserve the distribu-tional geometry required by diffusion likelihood objectives. To address this, we propose to re-formulate real subset selection as a geometry-aware distribution alignment problem. By in-corporating one-sided partial optimal transport, our method selectively aligns a compact sub-set with the full data distribution while allowing unmatched mass in low-density regions, ensur-ing the preserved geometric structure necessary for effective diffusion model training. To fur-ther ensure distributional fidelity, we complement geometric alignment with lightweight feature-statistics and semantic consistency regularization. An efficient two-stage discrete optimization strat-egy is proposed to achieve this alignment objec-tive. Extensive experiments across diffusion vari-ants, subset sizes, image resolutions, and train-ing rounds show that our method achieves su-perior fidelity and distributional coverage in dif-fusion model training. Codes are available at 
+
+https://github.com/2018cx/GADC .
+
+## 1. Introduction 
+
+Deep learning has achieved remarkable success across dis-criminative and generative paradigms, largely driven by massive annotated datasets (Yan et al., 2025; Cui et al., 2021; Qin et al., 2025). However, reliance on large-scale data incurs substantial storage and computational costs, es-
+
+> 1
+
+University of Science and Technology of China 2Independent Researcher 3Zhejiang University 4CUHK MMLAB. Correspon-dence to: Houqiang Li <lihq@ustc.edu.cn >, Wengang Zhou 
+
+<zhwg@ustc.edu.cn >.
+
+Proceedings of the 43 rd International Conference on Machine Learning , Seoul, South Korea. PMLR 306, 2026. Copyright 2026 by the author(s). (c) Our Alignment –driven Selection   
+
+> Continuous
+> Pixel
+> Optimization
+> Fixed -Criterion
+> Selection
+> Geometry
+> Statistics
+> Semantics
+> Synthetic Set (from EDC)
+> Unaligned Subset (from D 2C)
+> Subset Distribution Aligned Distributional Alignment Objective
+> (b) Existing Real Subset Selection
+> Whole Data
+> Whole Data
+> Whole Data
+> (a) Synthetic Set Generation Low Fidelity for Diffusion Training
+> Training -objective Mismatch
+> Faithful Structure Match Real Distribution
+
+Figure 1. Comparison of dataset condensation methods. (a) Syn-thetic set generation methods create synthetic samples through continuous pixel optimization, often resulting in low-fidelity sam-ples that are unsuitable for diffusion training. (b) Existing real subset selection methods use fixed criteria to select real samples but do not align the subset with the full data distribution. (c) Our alignment-driven selection optimizes for distributional alignment, preserving structure and matching the real data distribution. 
+
+pecially in resource-constrained settings (Liu & Du, 2025; Yu et al., 2023). Dataset condensation addresses this chal-lenge by constructing more compact datasets through data synthesis or data selection , while preserving the essential knowledge of the full dataset (Geng et al., 2023; Sachdeva & McAuley, 2023). For training diffusion models, such condensation approaches are particularly important as the modeling of high-quality samples by diffusion models often requires extremely expensive or even prohibitive training in terms of both data and compute. It is therefore practi-cally important to enable diffusion generative modeling on condensed datasets, which remains underexplored. Most existing condensation methods are developed for recognition tasks such as classification (Shao et al., 2024; Wang et al., 2025b; Liu et al., 2023a; Cui et al., 2025a), and their optimization objectives are not aligned with diffusion training, which fundamentally targets modeling the data distribution rather than decision boundaries. In addition, a large portion of these methods instantiate condensation via data synthesis , where pixel-level synthesis is performed with gradient-based optimization. Such continuous synthe-sis, while beneficial for discriminative tasks, is prone to high variance and introduces noise that distorts fine-grained struc-tures and distributional characteristics. As a result, synthetic methods are fundamentally ill-suited for diffusion model 1
+
+> arXiv:2606.05883v1 [cs.CV] 4 Jun 2026 Geometry-Aware Dataset Condensation for Diffusion Model Training
+
+training, as diffusion models are highly sensitive to noise and structural distortions under extreme data budgets. Alternatively, a small number of works (Zheng et al., 2023; Zhou et al., 2023; Zhao et al., 2024) consider data selection 
+
+for dataset condensation. From a data perspective, such ap-proaches are inherently more promising for diffusion model training, as they retain the high-fidelity structure of real samples. However, as illustrated in Fig. 1, these methods select real subsets according to fixed or heuristic criteria, rather than optimizing a task-aligned objective. In particular, the only prior work that explicitly targets diffusion model training, D 2C (Huang et al., 2026), ranks images within each class by their diffusion difficulty and selects samples at equal intervals along this one-dimensional difficulty axis to construct the condensed subset. While effective to some extent, such a fixed-criterion strategy suffers from two funda-mental limitations. First, many existing selection strategies are not derived from an explicit, training-aligned optimiza-tion objective, but instead rely on heuristic or proxy criteria for subset selection. Even when an objective is specified, it is often only loosely related to diffusion training, which is fundamentally driven by likelihood maximization and therefore calls for distributional rather than scalar alignment. Second, even under the assumption of an ideal, training-aligned objective, the one-pass greedy selection strategies adopted by most existing methods generally lack the capac-ity to reliably optimize it in the discrete combinatorial space of subset selection. As a result, they are unable to perform principled distributional alignment, leading to subsets that can be poorly aligned with the full data distribution. To overcome these limitations, we cast dataset condensa-tion for diffusion training as a geometry-aware distribution alignment problem subject to a discrete selection constraint. Here, “geometry” refers to the distributional support geome-try in representation space. In the context of diffusion-based generative modeling, we aim to answer the following re-search questions: (i) How can we achieve principled distri-bution matching in the feature space? We utilize optimal transport (OT) to offer a principled mechanism for matching the selected subset to the full data distribution in feature space, capturing both global coverage and local geometric structure. (ii) How can we mitigate alignment degradation caused by severe capacity mismatches? The subset size budget is drastically smaller than that of the full dataset, leading to a severe capacity mismatch. Under this regime, enforcing balanced matching of the entire set is uninfor-mative during OT as transport mass is inevitably spread across peripheral, low-density regions. We propose the one-sided partial OT (POT) with target-side capacity constraints to allow unmatched mass and sharpen alignment toward high-density, geometrically stable, dominant regions. (iii) To what extent do auxiliary constraints enhance OT-based geometry shaping? We propose lightweight statistical and semantic regularization to complement OT-based geometry matching by promoting global distributional fidelity and semantic consistency of the selected subset. Together, these three components form a unified geometry-aware distribu-tion alignment objective. Optimizing this alignment objective over subset selection is inherently combinatorial, since the decision variable is a fixed-size subset rather than continuous parameters. To make the problem tractable at scale, we introduce a two-stage discrete optimization strategy that mirrors the needs of diffusion-oriented alignment: a geometry-guided greedy construction that quickly establishes broad manifold cov-erage under the POT-driven objective, followed by a swap-based refinement that corrects early myopic choices through targeted exchanges between selected and unselected sam-ples. This solver directly optimizes the same alignment ob-jective defined above, yielding compact subsets that remain faithful to both the geometric structure and the distributional profile required for effective diffusion model training. For efficiency, we compute the POT cost via entropic Sinkhorn iterations in a batch form, enabling scalable GPU computing through parallel scheduling and memory balancing. In summary, our contributions are: (1) Based on the diffu-sion training objective, we reformulate dataset condensation for diffusion models as a distribution alignment problem, where the condensed subset is selected by optimizing a one-sided POT objective with statistical regularization. (2) We propose a two-stage discrete optimization framework that efficiently solves this alignment problem, moving beyond fixed-criterion or ranking-based sampling. (3) Extensive experiments show that our method consistently outperforms prior approaches across various diffusion variants, subset sizes, training steps, and evaluation protocols, achieving superior fidelity and efficiency in diffusion training. 
+
+## 2. Related Work 
+
+Dataset Condensation. Existing dataset condensation methods fall into two optimization paradigms (Wu et al., 2025a): synthetic set generation and real subset selection. 
+
+Synthetic Set Generation. These methods directly optimize a compact synthetic dataset in a continuous space to approx-imate the learning behavior of the full dataset. Distribution-matching (Zhao & Bilen, 2023; Wang et al., 2025b; Li et al., 2025b; Cui et al., 2025b), trajectory-matching (Cazenavette et al., 2022; Zhong et al., 2025; Wang et al., 2025a; Zhao et al., 2025), gradient-matching (Zhao et al., 2020; Kim et al., 2022; Liu et al., 2023a;b), and model-inversion-based methods (Yin et al., 2023; Cui et al., 2025a; Shen et al., 2025; Hu et al., 2025; Cui et al., 2026a) all rely on differentiable optimization of pixel values to minimize surrogate objec-tives. However, such optimization, unconstrained by the real 2Geometry-Aware Dataset Condensation for Diffusion Model Training 
+
+data manifold, often yields low-fidelity and mode-collapsed samples, making these methods unsuitable for generative training tasks that require high-fidelity data. Generative-model-based methods (Chen et al., 2025; Moser et al., 2025; Wu et al., 2025b; Cui et al., 2026b) rely on pretrained gener-ators to produce images. Training these generators is com-putationally expensive, and their learned priors are often difficult to adapt across domains. Moreover, the generated samples inevitably deviate from real image distributions, making them less effective than directly selecting real im-ages for diffusion model training. 
+
+Real Subset Selection. Discrete condensation methods select informative real samples instead of synthesizing new ones. The K-center method (Gonzalez, 1985; Sener & Savarese, 2018), with its farthest-point greedy criterion, tends to push selected samples toward the embedding-space boundary, overemphasizing extreme and low-density regions, while herding (Welling, 2009) overfits to the global mean and lacks sufficient coverage of mid- and long-tail variations. CCS (Zheng et al., 2023) further strengthens coverage, yet it still operates as a one-shot, criterion-driven selec-tion scheme. Dataset quantization methods (Zhou et al., 2023; Zhao et al., 2024; Li et al., 2025a) discretize data into bins via submodular surrogates, but this binning col-lapses intra-bin geometry into coarse prototypes and in-troduces irreversible quantization bias. Beyond pure se-lection, methods such as RDED (Sun et al., 2024a) and OD3 (Khatib et al., 2025) further adapt distilled datasets to specific tasks through sample cropping and instance placement. D 2C (Huang et al., 2026) is the first work to adapt dataset condensation for diffusion model training by proposing difficulty-guided selection. However, this one-dimensional ranking collapses the inherently multi-mode data distribution and ignores the manifold structure underly-ing the data distribution. In contrast, our method formulates real subset selection as a geometry-aware distribution align-ment problem in the representation space. By incorporating one-sided POT and statistical regularization within a two-stage optimization framework, our approach preserves both geometric and distributional structures of real data while remaining fully discrete and computationally efficient. 
+
+Efficient Diffusion Model Training. Recent studies have explored various strategies to improve the efficiency of dif-fusion model training from the model side. Optimization-based approaches refine the noise schedule (Ho et al., 2020; Song et al., 2020; Karras et al., 2022), employ adaptive loss weighting (Nichol & Dhariwal, 2021; Hang et al., 2023), introduce OT-based training objectives (Kim et al., 2024), or distill the denoising trajectory into fewer steps (Sali-mans & Ho, 2022; Song et al., 2023) to accelerate conver-gence. Architectural improvements, including lightweight U-Net variants (Rombach et al., 2022; Saharia et al., 2022) and transformer-based diffusion backbones (Peebles & Xie, 2023; Ma et al., 2024), further enhance scalability and par-allelism. More recently, representation alignment methods such as REPA (Yu et al., 2025) and REPA-E (Leng et al., 2025) introduce auxiliary supervision that aligns intermedi-ate diffusion features with pretrained visual encoders, im-proving convergence speed and stability. Although these approaches effectively reduce computational cost, they all operate on the model side and still assume access to large, diverse datasets. In contrast, we focus on dataset condensa-tion, a complementary data-centric approach that optimizes the training data to improve efficiency. By constructing compact yet geometry-aligned subsets of real images, we reduce storage cost and accelerate diffusion model training, providing an orthogonal path to model-side methods. 
+
+## 3. Methods 
+
+3.1. Problem Statement 
+
+We study the problem of dataset condensation for diffu-sion model training via real subset selection. Given a large dataset T = SCc=1 Tc, where Tc denotes class c samples, the goal is to select a compact, real subset S = SCc=1 Sc, with 
+
+Sc ⊂ T c and |S c| ≪ |T c|, using equal subset size across classes. A diffusion model trained on S should achieve competitive generative performance with limited training iterations. 
+
+3.2. From Ranking-based to Geometry-aware Selection 
+
+Diffusion models are trained by maximizing data likeli-hood through a variational objective, where optimizing the ELBO enforces distribution-level matching between the learned generative process and the underlying data distri-bution. Unlike discriminative objectives that emphasize decision boundaries, diffusion training is inherently sensi-tive to distortions of the data support itself, as likelihood estimation depends on preserving relative relationships and local structure rather than reducing samples to scalar scores. When training data are condensed, the selected subset must therefore remain well aligned with the original data dis-tribution, as misalignment directly translates into a biased likelihood objective. This requirement exposes a fundamen-tal limitation of ranking-based selection strategies. The only existing method tailored for diffusion training, D 2C (Huang et al., 2026), projects samples onto a scalar difficulty axis derived from diffusion loss and performs selection by uni-formly spacing along this one-dimensional ranking. While such a score provides a coarse proxy for training difficulty, it collapses rich high-dimensional distributional information into a single scalar and does not explicitly optimize distri-bution alignment. As a result, samples from distinct modes may receive similar scores, while structurally related sam-ples can be separated along the ranking, leading to subsets 3Geometry-Aware Dataset Condensation for Diffusion Model Training Cost Matrix  
+
+> Sinkhorn
+> Normalization
+> Sinkhorn
+> Loss
+> OT Matrix Embedding
+> Space
+> Projection
+> Confidence
+> Regularization
+> Dummy Source
+> Real
+> Selected
+> Mean -variance
+> Regularization
+
+(a) Distribution alignment objective defined by one-sided POT and statistical regularization. Stage I: G reedy geometry -guided selection      
+
+> Stage II: Swap -based refinement
+> 11
+> 2
+> 1
+> 2
+> 313
+> 2
+> 1’
+> Real sample
+> Condensed sample
+
+(b) Two-stage optimization strategy. 
+
+Figure 2. Illustration of the proposed pipeline. Mean–variance regularization aligns real and selected embeddings, and confidence regularization ensures semantic reliability. A dummy-source-augmented cost matrix is normalized via Sinkhorn iterations to obtain the one-sided POT alignment. The total objective, composed of these three components, is optimized using a two-stage strategy. 
+
+that are suboptimal for diffusion training. These observations suggest that diffusion-oriented dataset condensation should be formulated as an explicit distribu-tion alignment problem in the representation space. Specif-ically, two requirements naturally arise from the ELBO objective: (1) geometric alignment , as ELBO-based diffu-sion training is sensitive to structural bias in the learned data support, and (2) distributional fidelity , since likelihood maximization requires preserving the global diversity and semantic balance of the data distribution. To jointly satisfy these requirements, we formulate dataset condensation as a geometry-aware transport alignment problem between the selected subset and the full dataset in the learned feature space. By leveraging one-sided POT with statistical regular-ization, our approach provides a principled and task-aligned mechanism for selecting representative real subsets. No-tably, our framework is agnostic to both the feature encoder and classifier, as detailed in Appendix G.3. We propose an alignment-driven discrete optimization framework. In the distribution alignment module (Fig. 2a), one-sided POT and statistical regularization define the ob-jective, which is optimized via a two-stage discrete strategy (Fig. 2b); the following subsections detail each component. 
+
+3.3. One-sided Partial Optimal Transport 
+
+Following previous works (Yin et al., 2023; Huang et al., 2026; Zhou et al., 2023), we perform condensation inde-pendently for each class to ensure balanced coverage and efficiency. Let Sc(e) = {xi}mi=1 and Tc(e) = {yj }nj=1 de-note the feature embeddings of the selected subset and the full real set for the class c. The pairwise transport cost is defined as the squared Euclidean distance: 
+
+Cij = ∥xi − yj ∥22. (1) Classical balanced OT enforces full mass alignment by: 
+
+min 
+
+> π≥0
+
+⟨C, π⟩ s.t. π1n = μ, π⊤1m = ν, (2) where π ∈ Rm×n 
+
+> +
+
+denotes the transport plan that specifies the mass transported from each source sample xi to each target sample yj . The cost matrix C encodes the pairwise distances between source and target embeddings, and μ and 
+
+ν are the source and target marginals, typically uniform dis-tributions. However, this rigid constraint is misaligned with diffusion-oriented subset selection, as it enforces symmetric full mass matching between real and selected samples. In diffusion training, the selected set serves as a training distri-bution optimized for likelihood approximation rather than a reconstruction target, making full alignment unnecessary and biasing the selected set away from the core manifold. Alignment should therefore be relaxed, allowing transport mass to concentrate on the core manifold. To enable selective matching, we employ a one-sided partial optimal transport formulation, where the source mass is still fully transported while the target side is relaxed to be satisfied under a capacity constraint: 
+
+min  
+
+> π≥0
+
+⟨C, π⟩ s.t. π1n = μ, π⊤1m ≤ κ ¯ν, (3) where μ = 1 
+
+> m
+
+1, ¯ν = 1 
+
+> n
+
+1 is the reference marginal on the target side, and κ is a scalar capacity scaling factor. When κ = 1 , Eq. (3) reduces to balanced OT; for κ > 
+
+1, the inequality allows part of the target mass to remain unmatched, concentrating transport on informative regions. 
+
+Dummy-source reformulation. To solve Eq. (3) efficiently, we reformulate it into a balanced optimal transport problem via the dummy-source trick (Chapel et al., 2020), as detailed in Appendix B. We first augment the cost matrix as 
+
+Caug = C ; δ 1⊤
+
+> n
+
+ , δ > 0. (4) where δ denotes a dummy-source cost introduced to ensure stable and differentiable computation, [ · ; · ] denotes vertical concatenation. In practice we set δ = median( C) · γ. We then introduce an augmented transport plan Π ∈ R(m+1) ×n
+
+> +
+
+with an additional dummy row supplying s = κ − 1 mass, which absorbs unused target capacity. We further apply 4Geometry-Aware Dataset Condensation for Diffusion Model Training 
+
+entropic regularization to provide a smooth and convex ap-proximation to the OT objective: 
+
+min  
+
+> Π≥0
+
+⟨Caug , Π⟩− εH (Π) s.t. Π1 = [ μ; s], Π⊤1 = κ ¯ν.
+
+(5) Here, the entropic regularization term H(Π), weighted by 
+
+ε, enables efficient optimization via Sinkhorn iterations. 
+
+Sinkhorn solver. We define the Gibbs kernel K =exp( −Caug /ε ) ∈ R(m+1) ×n, which encodes pairwise affinities derived from the augmented transport cost and serves as the foundation for entropic regularization in the Sinkhorn iterations (Cuturi, 2013). Starting from all-ones scalings u ∈ Rm+1 and v ∈ Rn, we alternate between: 
+
+u(r+1) = [μ; s]
+
+K v (r) , v(r+1) = κ ¯ν
+
+K⊤u(r+1) , (6) to satisfy the augmented marginals at each iteration r. After 
+
+T iterations, the transport plan is recovered as 
+
+Π(T ) = Diag  u(T ) K Diag  v(T ). (7) We discard the dummy row and retain the first m rows of 
+
+Π(T ), denoted as Treal , which satisfies Treal 1n = μ and 
+
+T⊤
+
+> real
+
+1m ≤ κ ¯ν. The Sinkhorn updates in Eq. (6) – (7) are efficiently computed in parallel over candidate subsets using batched matrix–vector operations. Finally, we compute the transport loss using only the real (non-dummy) mass: 
+
+LOT = ⟨C, Treal ⟩ =
+
+> m
+
+X
+
+> i=1
+> n
+
+X
+
+> j=1
+
+Cij Treal ,ij , (8) where the entropy term in Eq. (5) serves internally to stabi-lize the Sinkhorn updates. This formulation enables flexible mass allocation, allowing selected samples to concentrate on representative regions while maintaining adequate coverage of the real distribution required for diffusion training. 
+
+3.4. Statistical Regularization 
+
+Although the one-sided partial OT cost effectively captures geometric alignment, it does not explicitly preserve distribu-tional statistics or semantic clarity. We therefore introduce lightweight regularization terms that stabilize the condensa-tion process and enhance distributional fidelity. 
+
+Mean–variance regularization. We align the first- and second-order statistics (mean and variance) of feature repre-sentations between the selected subset and the full dataset: 
+
+Lsta = ∥μS − μT ∥22 + ∥σS − σT ∥22, (9) where (μS , σ2 
+
+> S
+
+) and (μT , σ2 
+
+> T
+
+) denote the mean and vari-ance of features computed from Sc(e) and Tc(e), respectively. This regularization encourages the subset to approximate the global statistics of the real data distribution. 
+
+Confidence regularization. To ensure semantic consistency and avoid selecting samples that would act as unreliable geometric anchors, we introduce a lightweight confidence regularization term based on the predicted class probability: 
+
+Lconf = 1
+
+m
+
+> m
+
+X
+
+> i=1
+
+− log p(c|xi), (10) where p(c|xi) denotes the predicted probability for the nom-inal class c. This term serves as a semantic reliability con-straint during selection, discouraging low-confidence or off-class samples whose embeddings provide unreliable geomet-ric evidence and would otherwise compromise the quality of geometry-preserving and distributional alignment. The overall objective for each subset Sc is defined as: 
+
+L = LOT + αLsta + βLconf . (11) The weights α and β balance the three loss terms. 
+
+3.5. Two-stage Discrete Optimization Strategy 
+
+Directly optimizing Eq. (11) over the discrete selection space 
+
+Sc ⊂ T c, |S c| = m ≪ |T c|
+
+is combinatorially intractable due to the exponential search space  |T c|
+
+> m
+
+. We therefore adopt a two-stage optimization scheme integrating progressive coverage and refinement. 
+
+Stage I: Greedy geometry-guided selection. We construct the subset Sc in an incremental manner for initialization. Starting from an empty set S(0)  
+
+> c
+
+= ∅, we evaluate the marginal gain at each step t for adding each unselected candidate image xk ∈ T c \ S (t−1)  
+
+> c
+
+:
+
+∆L(xk) = L S(t−1)  
+
+> c
+
+∪ { xk}, Tc
+
+ − L  S(t−1)  
+
+> c
+
+, Tc
+
+, (12) where L denotes the composite objective in Eq. 11. The sample that minimizes the incremental cost is selected: 
+
+x∗ 
+
+> t
+
+= arg min  
+
+> xk∈T c\S (t−1)
+> c
+
+∆L(xk), S(t) 
+
+> c
+
+= S(t−1)  
+
+> c
+
+∪ { x∗ 
+
+> t
+
+}. (13) This greedy process iterates until |S (t) 
+
+> c
+
+| = t = m. The objective L is efficiently computed in a batched manner. 
+
+Stage II: Swap-based refinement. While the greedy pro-cess provides a strong initialization, it may yield subopti-mal early selections. We further refine the subset through pairwise swaps between selected and unselected samples. For each xi ∈ S c (iterated in fixed numerical order) and 
+
+xj ∈ T c \ S c (evaluated in batched parallel form), we form a temporary subset S′ 
+
+> c
+
+= ( Sc \ { xi}) ∪ { xj }, and compute the relative improvement ∆i→j :
+
+∆i→j = L(S′
+
+> c
+
+, Tc) − L (Sc, Tc). (14) 5Geometry-Aware Dataset Condensation for Diffusion Model Training 
+
+Table 1. Comparison of FID-50K across data budgets using DiT-L/2 on ImageNet 256 ×256 (100k iters). Baselines: Ran-dom, K-Center (Gonzalez, 1985), Herding (Welling, 2009), and D2C (Huang et al., 2026). Baseline results are taken from D 2C.                     
+
+> Data Budget Random K-Center Herding D2COurs 0.8% (10K) 35.86 50.77 40.75 4.20 3.43
+> 4.0% (50K) 36.78 69.86 32.38 14.81 11.01
+> 8.0% (100K) 41.02 71.31 36.37 22.55 17.09
+
+If ∆i→j < 0, the swap is accepted before moving to next 
+
+i (if multiple candidates xj satisfy the condition, we select the one that provides the largest improvement): 
+
+Sc ← S ′
+
+> c
+
+, (15) and the refinement proceeds for a fixed number of rounds or until no further improvement is observed, i.e., 
+
+∀i, j, ∆i→j ≥ 0. (16) This refinement alleviates greedy bias and emphasizes sample-wise contribution to the global geometric alignment and consistency. Together, the two stages provide an effi-cient discrete optimization procedure for our task, yielding compact subsets that remain faithful to the real distribution. Convergence analyses are provided in Appendix C. The pseudocode of the full method is provided in Appendix I. 
+
+## 4. Experiments 
+
+4.1. Experimental Settings Datasets. We conduct experiments on ImageNet-1K (Rus-sakovsky et al., 2015), training diffusion models using sub-sets of 10K, 50K, and 100K images, corresponding to about 0.8%, 4%, and 8% of the full dataset, respectively. All images are center-cropped and resized to 256 ×256 and 512 ×512 resolutions following the ADM preprocessing pipeline (Dhariwal & Nichol, 2021). 
+
+Networks. Following D 2C (Huang et al., 2026), we adopt two diffusion variants: DiT-L/2 (Peebles & Xie, 2023) and SiT-L/2 (Ma et al., 2024). Both models are trained from scratch on the selected subsets. 
+
+Baselines. We compare our method against a wide range of real subset selection baselines, including Herding (Welling, 2009), K-Center (Gonzalez, 1985; Sener & Savarese, 2018), Random Sampling, Random † (with the attach phase), CCS (Zheng et al., 2023), DQ (Zhou et al., 2023), and D2C (Huang et al., 2026). For fairness, Random †, CCS, DQ, D 2C, and our method all employ the same attach phase implementation as D 2C (Huang et al., 2026), where each se-lected image is enriched with textual and visual embeddings during diffusion model training. Synthetic set generation baselines are compared in Appendix G.2. 
+
+Table 2. Comparison across different methods using DiT-L/2 (Pee-bles & Xie, 2023) on ImageNet 256 ×256 with 100K iterations and 10K data budget. We use 50K generated samples for evaluation. Random † adopts the attach phase from D 2C (Huang et al., 2026).                               
+
+> Method Data Budget FID ↓IS ↑Precision ↑Recall ↑
+> Random †0.8% (10K) 4.63 263.1 0.70 0.26 CCS (Zheng et al., 2023) 0.8% (10K) 5.45 364.9 0.77 0.21 DQ (Zhou et al., 2023) 0.8% (10K) 4.56 267.8 0.72 0.25 D2C (Huang et al., 2026) 0.8% (10K) 4.20 283.6 0.72 0.24 Ours 0.8% (10K) 3.43 414.3 0.78 0.28
+
+Evaluation Metrics. Following prior works (Huang et al., 2026; Peebles & Xie, 2023), we evaluate the generative per-formance using Fr ´echet Inception Distance (FID) (Heusel et al., 2017), Inception Score (IS) (Salimans et al., 2016), Precision, and Recall metrics. FID measures image fidelity and diversity, IS reflects semantic clarity, while Precision and Recall jointly assess generation fidelity and coverage. The implementation details are provided in Appendix E. 
+
+4.2. Results and Discussions Overall Comparison on ImageNet 256 ×256. We first eval-uate our method on ImageNet (Russakovsky et al., 2015) 
+
+256 × 256 within the DiT-L/2 (Peebles & Xie, 2023) setup. As shown in Tables 1, 2, and 3, our method consistently achieves the lowest FID and highest IS across all data bud-gets, outperforming classical selection strategies such as Random, K-Center (Sener & Savarese, 2018), and Herd-ing (Welling, 2009), as well as recent selection approaches like CCS (Zheng et al., 2023), DQ (Zhou et al., 2023) and D2C (Huang et al., 2026). The improvement arises from two complementary mechanisms: (1) OT establishes ex-plicit geometric alignment between the full and selected sets, while its one-sided partial form adaptively reallocates transport mass to emphasize informative regions; and (2) statistical alignment regularization enforces both global mo-ment consistency (mean and variance) and implicit semantic agreement between the selected subset and the full dataset, stabilizing condensation and preserving balanced class se-mantics. Together, these mechanisms yield subsets that are both geometrically faithful and statistically representative, enabling diffusion models to achieve high generative fidelity using only a small fraction of the original data. Here we fix the total number of training iterations at 100K to ensure a fair comparison between different condensation methods under the same training conditions. The purpose here IS not to compare different data budgets, but to evalu-ate which condensation method performs best in terms of FID and other metrics within the same number of iterations. By fixing the iteration count, we ensured consistency across methods, making the comparison between different conden-sation methods clear and direct. Data budget refers to the size of the subset that is selected for efficient training. The 6Geometry-Aware Dataset Condensation for Diffusion Model Training 
+
+Table 3. Comparison across different methods and data budgets using DiT-L/2 (Peebles & Xie, 2023) on ImageNet 256 ×256 with 100K iterations. We use 50K generated samples for evaluation.                                                        
+
+> Method Data Budget FID ↓IS ↑Precision ↑Recall ↑
+> Random †4.0% (50K) 14.00 120.1 0.67 0.53 CCS (Zheng et al., 2023) 4.0% (50K) 15.21 150.4 0.67 0.46 DQ (Zhou et al., 2023) 4.0% (50K) 13.56 123.3 0.67 0.52 D2C (Huang et al., 2026) 4.0% (50K) 14.81 131.8 0.68 0.50 Ours 4.0% (50K) 11.01 174.2 0.68 0.57
+> Random †8.0% (100K) 19.80 90.6 0.66 0.54 CCS (Zheng et al., 2023) 8.0% (100K) 22.36 101.5 0.66 0.48 DQ (Zhou et al., 2023) 8.0% (100K) 20.16 84.5 0.64 0.54 D2C (Huang et al., 2026) 8.0% (100K) 22.55 96.7 0.66 0.53 Ours 8.0% (100K) 17.09 116.3 0.67 0.59
+
+Table 4. Comparison across different methods using DiT-L/2 (Pee-bles & Xie, 2023) on ImageNet (Russakovsky et al., 2015) 512 ×512 with 100K iterations and 10K data budget. Baseline results are taken from D 2C (Huang et al., 2026).                     
+
+> Method Data Budget FID ↓IS ↑Precision ↑Recall ↑
+> Random 0.8% (10K) 24.8 74.3 0.65 0.42 D2C (Huang et al., 2026) 0.8% (10K) 14.8 109.2 0.63 0.52 Ours 0.8% (10K) 6.17 451.0 0.81 0.67
+
+observed trend is a result of fixed-iteration convergence lag. With a constant batch size and iteration count (100K), a larger data budget (e.g., 100K vs 10K images) drastically reduces the number of ”epochs” or updates per sample. Specifically, for a 10K subset, each sample is seen 1280 times, whereas for a 100K subset, it is seen only 128 times. Although larger budgets provide a higher performance ceil-ing, they require significantly more iterations to reach it. In the early stages of training, with the same number of iterations, smaller data budgets can perform better if the selection is well-optimized, as each sample is updated more frequently. This confirms our method’s core advantage: ac-celerating convergence by focusing the training process on a geometry-consistent core manifold. 
+
+Results on Higher Image Resolution. We further evaluate the advantages of our selected set at 512 × 512 resolution. As shown in Table 4, our method continues to outperform both random and D 2C selections, achieving substantial im-provements in FID and IS. This demonstrates that our strat-egy generalizes robustly across resolutions: even when the input resolution increases, the same selected subset still provides representative coverage of high-frequency details and global structures. Such resolution robustness suggests that our method captures intrinsic, scale-consistent data se-mantics rather than memorizing low-resolution appearance patterns. More results are provided in Appendix G.1. 
+
+Robustness across Diffusion Variants. We further evaluate our condensation strategy on SiT-L/2 (Ma et al., 2024), an interpolant-based diffusion variant of DiT-L/2 (Peebles & Xie, 2023) that replaces the standard noise-prediction objec-tive with a velocity-based interpolant formulation bridging diffusion and flow dynamics. As shown in Table 5 and 
+
+Table 5. Comparison of FID-50K across data budgets using SiT-L/2 on ImageNet 256 ×256 (100k iters). Baselines: Ran-dom, K-Center (Gonzalez, 1985), Herding (Welling, 2009), and D2C (Huang et al., 2026). Baseline results are taken from D 2C.                     
+
+> Data Budget Random K-Center Herding D2COurs 0.8% (10K) 4.35 14.77 22.96 3.98 3.56
+> 4.0% (50K) 31.13 61.66 29.11 11.21 7.26
+> 8.0% (100K) 36.64 66.96 32.30 15.01 8.83
+
+Table 6. Comparison across different methods using SiT-L/2 (Ma et al., 2024) on ImageNet 256 ×256 (100K training iterations and 100K data budget). We use 50K generated samples for evaluation. Random † adopts the attach phase from D 2C (Huang et al., 2026).                               
+
+> Method Data Budget FID ↓IS ↑Precision ↑Recall ↑
+> Random †8.0% (100K) 15.58 125.9 0.73 0.50 CCS (Zheng et al., 2023) 8.0% (100K) 15.41 142.9 0.74 0.43 DQ (Zhou et al., 2023) 8.0% (100K) 15.24 121.9 0.73 0.50 D2C (Huang et al., 2026) 8.0% (100K) 15.01 127.6 0.73 0.48 Ours 8.0% (100K) 8.83 167.5 0.74 0.53
+
+Table 6, our method continues to achieve consistent im-provements over all baselines under the SiT setting, comple-menting the DiT results reported earlier. This demonstrates that the selected subsets preserve transferable data-level statistics that generalize across different diffusion formula-tions, showing that our condensation framework provides a reliable data substrate for diffusion-style generative training. 
+
+Evaluation under Different Protocols. We further validate our approach under multiple evaluation protocols. Table 7 reports quantitative results using 10K generated samples to complement the standard 50K-sample evaluation in Ta-bles 2 and 3. In addition, Table 8 investigates the effect of extended training iterations (up to 300K). Across all eval-uation settings, our method consistently achieves the best results, indicating that the improvements are intrinsic and not tied to a specific evaluation configuration. Moreover, Figure 3 shows that our method reaches a substantially lower FID plateau compared with prior approaches, demonstrat-ing that the selected subsets lead to more stable and faithful generative training. Overall, these results confirm that our condensation strategy produces robust and high-quality sub-sets whose advantages persist across evaluation scales. 
+
+Ablation Studies. We conduct ablation studies to evaluate 
+
+Figure 3. FID comparison between Random †, D 2C (Huang et al., 2026), and Ours across different training steps, where the left and right panels respectively show FID-10K and FID-50K. 
+
+7Geometry-Aware Dataset Condensation for Diffusion Model Training 
+
+Table 7. Comparison across different methods and data budgets using DiT-L/2 (Peebles & Xie, 2023) on ImageNet 256 ×256 with 100K iterations. We use 10K generated samples for evaluation. Random † adopts the attach phase from D 2C (Huang et al., 2026).                                                        
+
+> Method Data Budget FID ↓IS ↑Precision ↑Recall ↑
+> Random †0.8% (10K) 7.73 263.1 0.69 0.68 CCS (Zheng et al., 2023) 0.8% (10K) 7.81 373.3 0.77 0.58 DQ (Zhou et al., 2023) 0.8% (10K) 7.55 271.0 0.73 0.69
+> D2C (Huang et al., 2026) 0.8% (10K) 7.73 279.8 0.72 0.69
+> Ours 0.8% (10K) 5.76 430.2 0.78 0.69
+> Random †4.0% (50K) 17.04 120.8 0.67 0.65 CCS (Zheng et al., 2023) 4.0% (50K) 17.21 147.9 0.67 0.60 DQ (Zhou et al., 2023) 4.0% (50K) 16.83 122.8 0.67 0.65 D2C (Huang et al., 2026) 4.0% (50K) 16.28 131.1 0.68 0.63 Ours 4.0% (50K) 13.73 173.5 0.68 0.69
+
+Table 8. Comparison across different methods using DiT-L/2 (Pee-bles & Xie, 2023) on ImageNet 256 ×256 with 300K iterations and 50K data budget. We use 50K generated samples for evaluation. Random † adopts the attach phase from D 2C (Huang et al., 2026).                               
+
+> Method Data Budget FID ↓IS ↑Precision ↑Recall ↑
+> Random †4.0% (50K) 6.02 188.5 0.69 0.58 CCS (Zheng et al., 2023) 4.0% (50K) 5.97 259.3 0.70 0.51 DQ (Zhou et al., 2023) 4.0% (50K) 4.33 214.2 0.70 0.58 D2C (Huang et al., 2026) 4.0% (50K) 4.76 207.0 0.70 0.57 Ours 4.0% (50K) 3.34 327.7 0.71 0.61
+
+the contribution of each component. As shown in Table 9, removing LOT degrades FID and reduces both precision and recall, indicating that the geometric constraint is essential for promoting coverage and faithful geometric alignment between the condensed and real distributions. Replacing the one-sided partial OT with the classical balanced OT degrades performance, indicating that relaxing alignment on peripheral samples yields more coherent and geometry-consistent subsets under small budgets. Further analysis of partial transport behavior is provided in Appendix G.4. Eliminating Lsta greatly worsens FID, verifying that en-forcing global distribution prevents mode imbalance and stabilizes training. Removing Lconf primarily decreases IS, demonstrating that the semantic constraint improves class-level clarity by filtering uncertain or low-confidence samples. More discussion on confidence regularization can be found in Appendix G.6. Table 10 further evaluates Stage II refinement. Introducing this stage consistently im-proves FID, precision, and recall compared with its absence, confirming that iterative exchange refines subset geometry, strengthens manifold coverage, and preserves compactness. 
+
+Table 9. Ablation study of key components in our dataset conden-sation framework, conducted on ImageNet at 256 ×256 resolution for 100K training iterations with a 10K-sample data budget.                            
+
+> Method FID ↓IS ↑Precision ↑Recall ↑
+> w/o LOT 3.82 414.1 0.72 0.26 w/o Lsta 4.62 451.6 0.81 0.26 w/o Lconf 3.55 337.0 0.79 0.27 balanced OT (w/o partial) 3.54 413.9 0.75 0.28 Ours (full) 3.43 414.3 0.78 0.28
+
+Table 10. Ablation study on Stage II optimization (swap-based refinement) on ImageNet 256 ×256 for 100K iterations.                          
+
+> Method Data Budget FID ↓IS ↑Precision ↑Recall ↑
+> w/o Stage II 0.8% (10K) 3.82 417.6 0.74 0.25 w Stage II 0.8% (10K) 3.43 414.3 0.78 0.28
+> w/o Stage II 4.0% (50K) 12.87 172.4 0.61 0.57
+> w Stage II 4.0% (50K) 11.01 174.2 0.68 0.57
+
+Table 11. Impact of κ (capacity scaling) and γ (dummy-source) on ImageNet 256 ×256 (10K data budget, 100K iterations). 
+
+κ 1.01 1.03 1.05 1.07 1.10 FID-50K 3.49 3.45 3.43 3.46 3.58 
+
+γ 0.3 0.5 0.7 1.0 2.0 FID-50K 3.43 3.43 3.43 3.46 3.47 
+
+Sensitivity Analysis. Table 11 shows the effect of varying the capacity scaling factor κ and the dummy-source param-eter γ, which determines the dummy-source cost δ. The results indicate that FID remains stable across a wide range of settings, demonstrating low sensitivity and robust opti-mization behavior. However, an excessively large κ may degrade performance, as discarding too many samples in partial OT weakens the retained information content. Anal-yses on α, β, ε, T are provided in Appendix F. 
+
+Visualizations. Figures 1 and 4 respectively show the se-lected sets and the images generated by DiT models trained on them. The subset produced by D 2C (Huang et al., 2026) sometimes contains visually homogeneous exemplars with consistent style, and in other cases includes semantically ambiguous selections that do not clearly represent the class. As a result, DiT trained on this subset exhibits reduced cov-erage of intra-class variation and may produce samples that either collapse to a few modes or drift semantically. In con-trast, our selected set provides broader manifold coverage and clearer exemplars, enabling the DiT to synthesize im-ages with richer diversity and faithful class characteristics. See Appendix G.4 and H for more visualizations. 
+
+Runtime Analysis. We measure the selection runtime on ImageNet (Russakovsky et al., 2015) with a 10K data bud-get. As summarized in Table 12, our method substantially D2C
+
+Our s
+
+Figure 4. Visualization of generated images (golden retriever). 
+
+8Geometry-Aware Dataset Condensation for Diffusion Model Training          
+
+> Table 12. Real subset selection time on ImageNet with a 10K data budget, measured on NVIDIA RTX 3090 GPUs.
+> Number of GPUs DQ (Zhou et al., 2023) D2C (Huang et al., 2026) Ours 130.4 hours 41.9 hours 5.5 hours
+> 8238 mins 314 mins 96 mins
+
+reduces wall-clock time compared with DQ (Zhou et al., 2023) and D 2C (Huang et al., 2026). The detailed run-time breakdown in Table 13 shows that data loading and preprocessing dominates computation (about 65%), while greedy initialization and swap refinement together account for the remaining time. This demonstrates that the discrete optimization stages are lightweight and practical in use.        
+
+> Table 13. Runtime breakdown of our pipeline on ImageNet with a 10K data budget, measured on 8 ×RTX 3090 GPUs.
+> Component Data & Feature Stage I (Greedy Init) Stage II (Swap Refine) Percentage 65.1% 9.0% 25.9%
+
+## 5. Conclusion 
+
+This work presents a geometry-aware alignment-driven framework for dataset condensation in diffusion model train-ing. We formulate the problem as a constrained discrete optimization task, where a one-sided POT objective selec-tively aligns informative and stable regions of the data man-ifold. By regularizing feature moments and class consis-tency, we further improve statistical and semantic coher-ence. The proposed two-stage optimization, consisting of geometry-guided greedy selection and swap-based refine-ment, efficiently approximates the global optimum with low computational cost. Experiments across different diffusion variants, subset sizes, training steps, and evaluation settings demonstrate consistent improvements in diffusion fidelity. 
+
+## Impact Statement 
+
+This paper presents work whose goal is to improve the data efficiency of diffusion model training through dataset con-densation. By reducing the amount of training data required, the proposed approach may help lower computational cost and energy consumption, supporting more efficient use of large-scale generative models. As with many data reduc-tion and generative modeling techniques, applying dataset condensation may alter the underlying data distribution and requires careful consideration in practice. Potential risks related to bias, privacy, and misuse are not unique to this work and can be addressed through established practices such as responsible dataset curation, evaluation, and trans-parent reporting. Overall, this work advances research in data-efficient generative modeling. We do not foresee any novel or uniquely harmful societal impacts beyond those already associated with diffusion models and dataset conden-sation methods more broadly. A more detailed discussion of broader impacts is provided in Appendix J. 
+
+## References 
+
+Abbasi, A., Shahbazi, A., Pirsiavash, H., and Kolouri, S. One category one prompt: Dataset distillation using dif-fusion models. arXiv preprint arXiv:2403.07142 , 2024. Arjovsky, M., Chintala, S., and Bottou, L. Wasserstein gen-erative adversarial networks. In International Conference on Machine Learning (ICML) , pp. 214–223, 2017. Baheri, A., Sharooei, Z., and Salgarkar, C. Wasserstein adaptive value estimation for actor-critic reinforcement learning. arXiv preprint arXiv:2501.10605 , 2025. Bai, Y., Medri, I. V., Diaz Martin, R., Khan, R. M. S., and Kolouri, S. Linear optimal partial transport embedding. In 
+
+International Conference on Machine Learning (ICML) ,volume 202, pp. 1492–1520, 2023a. Bai, Y., Schmitzer, B., Thorpe, M., and Kolouri, S. Sliced optimal partial transport. In IEEE Conference on Com-puter Vision and Pattern Recognition (CVPR) , pp. 13681– 13690, 2023b. Caffarelli, L. A. and McCann, R. J. Free boundaries in optimal transport and monge–amp `ere obstacle problems. 
+
+Ann. Math. , 171(2):673–730, 2010. doi: 10.4007/annals. 2010.171.673. Cazenavette, G., Wang, T., Torralba, A., Efros, A. A., and Zhu, J.-Y. Dataset distillation by matching training tra-jectories. In IEEE Conference on Computer Vision and Pattern Recognition (CVPR) , pp. 4750–4759, 2022. Chapel, L., Alaya, M. Z., and Gasso, G. Partial optimal transport with applications on positive-unlabeled learning. In Conference on Neural Information Processing Systems (NeurIPS) , volume 33, pp. 2903–2913, 2020. Chen, M., Du, J., Huang, B., Wang, Y., Zhang, X., and Wang, W. Influence-guided diffusion for dataset distilla-tion. In International Conference on Learning Represen-tations (ICLR) , 2025. Chen, W., Qiao, J., Cai, R., and Hao, Z. On the role of entropy-based loss for learning causal structure with con-tinuous optimization. IEEE Transactions on Neural Net-works and Learning Systems (TNNLS) , 2023. Conforti, M. and Cornu ´ejols, G. Submodular set functions, matroids and the greedy algorithm: Tight worst-case bounds and some generalizations of the rado–edmonds theorem. Discrete Applied Mathematics , 7(3):251–274, 1984. ISSN 0166-218X. doi: 10.1016/0166-218X(84) 90073-9. 9Geometry-Aware Dataset Condensation for Diffusion Model Training 
+
+Cui, J., Li, Z., Ma, X., Bi, X., Luo, Y., and Shen, Z. Dataset distillation via committee voting. arXiv preprint arXiv:2501.07575 , 2025a. Cui, X., Zhou, W., Hu, Y., Wang, W., and Li, H. Heredity-aware child face image generation with latent space dis-entanglement. arXiv preprint arXiv:2108.11080 , 2021. Cui, X., Qin, Y., Gao, Y., Zhang, E., Xu, Z., Wu, T., Li, K., Sun, X., Zhou, W., and Li, H. Sinkd: Sinkhorn distance minimization for knowledge distillation. IEEE Transactions on Neural Networks and Learning Systems (TNNLS) , 2024a. Cui, X., Qin, Y., Gao, Y., Zhang, E., Xu, Z., Wu, T., Li, K., Sun, X., Zhou, W., and Li, H. Sinkhorn distance mini-mization for knowledge distillation. In International Joint Conference on Language Resources and Evaluation and International Conference on Computational Linguistics (LREC-COLING) , pp. 14846–14858, 2024b. Cui, X., Sun, Q., Zhou, W., and Li, H. Exploring gpt-4 vision for text-to-image synthesis evaluation. In The Second Tiny Papers Track at ICLR 2024 , 2024c. Cui, X., Qin, Y., Zhou, W., Li, H., and Li, H. OPTICAL: Leveraging optimal transport for contribution allocation in dataset distillation. In IEEE Conference on Computer Vision and Pattern Recognition (CVPR) , 2025b. Cui, X., Zhu, M., Qin, Y., Xie, L., Zhou, W., and Li, H. Multi-level optimal transport for universal cross-tokenizer knowledge distillation on language models. AAAI Con-ference on Artificial Intelligence (AAAI) , 2025c. Cui, X., Qin, Y., Li, X., Zhou, W., Li, H., and Li, H. Rethink-ing long-tailed dataset distillation: A uni-level framework with unbiased recovery and relabeling. In Proceedings of the AAAI Conference on Artificial Intelligence (AAAI) ,volume 40, pp. 3443–3451, 2026a. Cui, X., Qin, Y., Zhou, W., Li, H., and Li, H. Optimizing distributional geometry alignment with optimal transport for generative dataset distillation. Advances in Neural Information Processing Systems (NeurIPS) , 38:121368– 121408, 2026b. Cuturi, M. Sinkhorn distances: Lightspeed computation of optimal transport. Conference on Neural Information Processing Systems (NeurIPS) , 26, 2013. Das, A. and Kempe, D. Submodular meets spectral: Greedy algorithms for subset selection, sparse approximation and dictionary selection. In International Conference on Machine Learning (ICML) , pp. 1057–1064, 2011. Dhariwal, P. and Nichol, A. Diffusion models beat GANs on image synthesis. In Conference on Neural Informa-tion Processing Systems (NeurIPS) , volume 34, pp. 8780– 8794, 2021. Elenberg, E. R., Khanna, R., Dimakis, A. G., and Negahban, S. Restricted strong convexity implies weak submod-ularity. arXiv preprint arXiv:1612.00804 , 2016. URL 
+
+https://arxiv.org/abs/1612.00804 .Figalli, A. The optimal partial transport problem. Archive for Rational Mechanics and Analysiss , 195(2):533–560, 2010. doi: 10.1007/s00205-008-0212-7. Geng, J., Chen, Z., Wang, Y., Woisetschlaeger, H., Schimm-ler, S., Mayer, R., Zhao, Z., and Rong, C. A survey on dataset distillation: Approaches, applications and future directions. In International Joint Conference on Artificial Intelligence (IJCAI) , 2023. Gonzalez, T. F. Clustering to minimize the maximum in-tercluster distance. Theoretical computer science , 38: 293–306, 1985. Gu, J., Vahidian, S., Kungurtsev, V., Wang, H., Jiang, W., You, Y., and Chen, Y. Efficient dataset distillation via minimax diffusion. In IEEE Conference on Computer Vision and Pattern Recognition (CVPR) , 2024. Gulrajani, I., Ahmed, F., Arjovsky, M., Dumoulin, V., and Courville, A. C. Improved training of wasserstein gans. 
+
+Conference on Neural Information Processing Systems (NeurIPS) , 30, 2017. Hang, T., Gu, S., Li, C., Bao, J., Chen, D., Hu, H., Geng, X., and Guo, B. Efficient diffusion training via min-snr weighting strategy. In IEEE International Conference on Computer Vision (ICCV) , 2023. He, K., Zhang, X., Ren, S., and Sun, J. Deep residual learning for image recognition. In IEEE Conference on Computer Vision and Pattern Recognition (CVPR) , pp. 770–778, 2016. Heusel, M., Ramsauer, H., Unterthiner, T., Nessler, B., and Hochreiter, S. Gans trained by a two time-scale update rule converge to a local nash equilibrium. In Conference on Neural Information Processing Systems (NeurIPS) ,volume 30. Conference on Neural Information Processing Systems (NeurIPS), 2017. Ho, J., Jain, A., and Abbeel, P. Denoising diffusion prob-abilistic models. In Conference on Neural Information Processing Systems (NeurIPS) , 2020. Hu, Y., Cheng, Y., Saukh, O., Ozdemir, F., Lu, A., Cao, Z., and Li, Z. Focusdd: Real-world scene infusion for robust dataset distillation. arXiv preprint arXiv:2501.06405 ,2025. 10 Geometry-Aware Dataset Condensation for Diffusion Model Training 
+
+Huang, R., Shao, S., Zhou, Z., Zhao, P., Guo, H., Ye, T., Bai, L., Yang, S., and Xie, Z. Accelerating diffusion model training under minimal budgets: A condensation-based perspective. arXiv preprint arXiv:2507.05914 , 2026. Iyer, R. K., Jegelka, S., and Bilmes, J. A. Curvature and optimal algorithms for learning and minimizing submod-ular functions. In Conference on Neural Information Processing Systems (NeurIPS) , pp. 2742–2750. Curran Associates, Inc., 2013. Jin, L.-B., Lei, N., Luo, Z.-X., Wu, J., Ai, C., and Gu, X. Semi-discrete optimal transport for long-tailed classifica-tion. JCST , 40(1):252–266, 2025. Karras, T., Aittala, M., Aila, T., and Laine, S. Elucidating the design space of diffusion-based generative models. In 
+
+Conference on Neural Information Processing Systems (NeurIPS) , 2022. Kaufman, L. and Rousseeuw, P. J. Clustering by means of medoids. In Dodge, Y. (ed.), Statistical Data Analysis Based on the L1-Norm and Related Methods , pp. 405– 416, Amsterdam, 1987. North-Holland. Khatib, S. K. A., ElHagry, A., Shao, S., and Shen, Z. Od3: Optimization-free dataset distillation for object detection. 
+
+arXiv preprint arXiv:2506.01942 , 2025. Kim, D., Choi, J., Shin, C., Hwang, U., and Yoon, S. Improv-ing diffusion-based generative models via approximated optimal transport. arXiv preprint arXiv:2403.05069 ,2024. Kim, J.-H., Kim, J., Oh, S. J., Yun, S., Song, H., Jeong, J., Ha, J.-W., and Song, H. O. Dataset condensation via efficient synthetic-data parameterization. arXiv preprint arXiv:2205.14959 , 2022. Kingma, D. P. and Welling, M. Auto-encoding variational bayes. arXiv preprint arXiv:1312.6114 , 2013. URL 
+
+https://arxiv.org/abs/1312.6114 .Klink, P., D’Eramo, C., Peters, J., and Pajarinen, J. On the benefit of optimal transport for curriculum reinforcement learning. IEEE Transactions on Pattern Analysis and Machine Intelligence (TPAMI) , 2024. Ko c¸ , O., Soen, A., Chiang, C.-K., and Sugiyama, M. Do-main adaptation and entanglement: an optimal transport perspective. arXiv preprint arXiv:2503.08155 , 2025. Lan, Y., Xu, X., Fang, Q., and Hao, J. Sample efficient deep reinforcement learning with online state abstraction and causal transformer model prediction. IEEE Transac-tions on Neural Networks and Learning Systems (TNNLS) ,2023. Leng, X., Singh, J., Hou, Y., Xing, Z., Xie, S., and Zheng, L. Repa-e: Unlocking vae for end-to-end tuning with latent diffusion transformers. arXiv preprint arXiv:2504.10483 ,2025. Li, M., Zhang, D., Dong, Q., Xie, X., and Qin, K. Adaptive dataset quantization. In AAAI Conference on Artificial Intelligence (AAAI) , volume 39, pp. 12093–12101, 2025a. Li, W., Li, G., Maeda, K., Ogawa, T., and Haseyama, M. Hyperbolic dataset distillation. In Conference on Neural Information Processing Systems (NeurIPS) , 2025b. Li, X., Luo, Z., Cui, Z., and Xu, Z. Geodm: Geometry-aware distribution matching for dataset distillation. arXiv preprint arXiv:2512.08317 , 2025c. Li, Z., Li, S., Wang, Z., Lei, N., Luo, Z., and Gu, D. X. Dpm-ot: a new diffusion probabilistic model based on optimal transport. In IEEE Conference on Computer Vision and Pattern Recognition (CVPR) , pp. 22624–22633, 2023. Liu, P. and Du, J. The evolution of dataset distillation: To-ward scalable and generalizable solutions. arXiv preprint arXiv:2502.05673 , 2025. Liu, Y., Gu, J., Wang, K., Zhu, Z., Jiang, W., and You, Y. Dream: Efficient dataset distillation by representative matching. In IEEE International Conference on Com-puter Vision (ICCV) , pp. 17314–17324, 2023a. Liu, Y., Gu, J., Wang, K., Zhu, Z., Zhang, K., Jiang, W., and You, Y. Dream+: Efficient dataset distillation by bidirectional representative matching. arXiv preprint arXiv:2310.15052 , 2023b. Liu, Y., Giunchiglia, F., Li, X., Huang, L., Feng, X., and Guan, R. Enhancing unsupervised graph few-shot learn-ing via set functions and optimal transport. arXiv preprint arXiv:2501.05635 , 2025. Luo, J., Cui, X., Yao, H., and Xu, C. Neighbor-aware geodesic transportation for neighborhood refinery. 2025. Lv, S. and Jiang, J. Scalda: Semantics-calibrated and diffusion-enhanced data augmentation. In International Conference on Machine Learning (ICML) , 2026. Lyu, J., Yan, M., Qiao, Z., Liu, R., Ma, X., Ye, D., Yang, J.-W., Lu, Z., and Li, X. Cross-domain offline policy adaptation with optimal transport and dataset constraint. In International Conference on Learning Representations (ICLR) , 2025. Ma, N., Goldstein, M., Albergo, M. S., Boffi, N. M., Vanden-Eijnden, E., and Xie, S. Sit: Exploring flow and diffusion-based generative models with scalable interpolant trans-formers. In Proceedings of the European conference on computer vision (ECCV) , pp. 23–40, 2024. 11 Geometry-Aware Dataset Condensation for Diffusion Model Training 
+
+Miyai, A., Yu, Q., Irie, G., and Aizawa, K. Gl-mcm: Global and local maximum concept matching for zero-shot out-of-distribution detection. International Journal of Com-puter Vision (IJCV) , 133(6):3586–3596, 2025. Montesuma, E. F., Habazi, A. E., and Mboula, F. N. Unsu-pervised anomaly detection through mass repulsing opti-mal transport. arXiv preprint arXiv:2502.12793 , 2025. Moser, B. B., Raue, F., Palacio, S., Frolov, S., and Dengel, A. Unlocking dataset distillation with diffusion models. In Conference on Neural Information Processing Systems (NeurIPS) , 2025. Nguyen, K., Nguyen, H., Pham, T., and Ho, N. Lightspeed geometric dataset distance via sliced optimal transport. 
+
+arXiv preprint arXiv:2501.18901 , 2025. Ni, J., Hernandez Abrego, G., Constant, N., Ma, J., Hall, K., Cer, D., and Yang, Y. Sentence-t5: Scalable sentence en-coders from pre-trained text-to-text models. In Muresan, S., Nakov, P., and Villavicencio, A. (eds.), Findings of the ACL , pp. 1864–1874, 2022. Nichol, A. Q. and Dhariwal, P. Improved denoising diffusion probabilistic models. In International Conference on Machine Learning (ICML) , 2021. Oquab, M., Darcet, T., Moutakanni, T., Vo, H., Szafraniec, M., Khalidov, V., Fernandez, P., Haziza, D., Massa, F., El-Nouby, A., Assran, M., Ballas, N., Galuba, W., Howes, R., Huang, P.-Y., Li, S.-W., Misra, I., Rabbat, M., Sharma, V., Synnaeve, G., Xu, H., Jegou, H., Mairal, J., Labatut, P., Joulin, A., and Bojanowski, P. Dinov2: Learning robust visual features without supervision. arXiv preprint arXiv:2304.07193 , 2023. Peebles, W. and Xie, S. Scalable diffusion models with transformers. In IEEE Conference on Computer Vision and Pattern Recognition (CVPR) , pp. 4195–4205, 2023. Qin, Y., Li, G., Li, Z., Xu, Z., Shi, Y., Lin, Z., Cui, X., Li, K., and Sun, X. Incentivizing reasoning for advanced instruction-following of large language models. Advances in Neural Information Processing Systems (NeurIPS) , 38: 108337–108401, 2025. Ren, Y., Feng, C., Xie, X., and Zhou, S. K. Partial optimal transport based out-of-distribution detection for open-set semi-supervised learning. In International Joint Confer-ence on Artificial Intelligence (IJCAI) , pp. 4851–4859, 2024. Rombach, R., Blattmann, A., Lorenz, D., Esser, P., and Ommer, B. High-resolution image synthesis with latent diffusion models. In IEEE Conference on Computer Vision and Pattern Recognition (CVPR) , 2022. Russakovsky, O., Deng, J., Su, H., Krause, J., Satheesh, S., Ma, S., Huang, Z., Karpathy, A., Khosla, A., Bernstein, M., et al. Imagenet large scale visual recognition chal-lenge. International Journal of Computer Vision (IJCV) ,2015. Sachdeva, N. and McAuley, J. Data distillation: A survey. 
+
+Transactions on Machine Learning Research (TMLR) ,2023. Saharia, C., Chan, W., Saxena, S., Li, L., Whang, J., Denton, E., Seyed Ghasemipour, S. K., Karagol Ayan, B., Mah-davi, S. S., Lopes, R. G., Salimans, T., Ho, J., Fleet, D. J., and Norouzi, M. Photorealistic text-to-image diffusion models with deep language understanding. In Conference on Neural Information Processing Systems (NeurIPS) ,2022. Salimans, T. and Ho, J. Progressive distillation for fast sam-pling of diffusion models. In International Conference on Learning Representations (ICLR) , 2022. Salimans, T., Goodfellow, I., Zaremba, W., Cheung, V., Radford, A., and Chen, X. Improved techniques for training GANs. In Conference on Neural Information Processing Systems (NeurIPS) , volume 29. Conference on Neural Information Processing Systems (NeurIPS), 2016. S ´ejourn ´e, T., Peyr ´e, G., and Vialard, F.-X. Unbalanced optimal transport, from theory to numerics. Handbook of Numerical Analysis (HNA) , 24:407–471, 2023. Sener, O. and Savarese, S. Active learning for convolutional neural networks: A core-set approach. In International Conference on Learning Representations (ICLR) , 2018. Shao, S., Zhou, Z., Chen, H., and Shen, Z. Elucidating the design space of dataset condensation. In Conference on Neural Information Processing Systems (NeurIPS) , 2024. Shen, Z., Sherif, A., Yin, Z., and Shao, S. Delt: A simple diversity-driven earlylate training for dataset distillation. In IEEE Conference on Computer Vision and Pattern Recognition (CVPR) , 2025. Song, J., Meng, C., and Ermon, S. Denoising diffusion implicit models. arXiv preprint arXiv:2010.02502 , 2020. Song, Y., Dhariwal, P., Chen, M., and Sutskever, I. Consis-tency models. In International Conference on Machine Learning (ICML) , 2023. Su, D., Hou, J., Gao, W., Tian, Y., and Tang, B. Dˆ4: Dataset distillation via disentangled diffusion model. In IEEE Conference on Computer Vision and Pattern Recognition (CVPR) , 2024. 12 Geometry-Aware Dataset Condensation for Diffusion Model Training 
+
+Sun, P., Shi, B., Yu, D., and Lin, T. On the diversity and re-alism of distilled dataset: An efficient dataset distillation paradigm. In IEEE Conference on Computer Vision and Pattern Recognition (CVPR) , pp. 9390–9399, 2024a. Sun, Q., Cui, X., Zhou, W., and Li, H. Exploiting gpt-4 vision for zero-shot point cloud understanding. arXiv preprint arXiv:2401.07572 , 2024b. Sun, Q., Nakayama, K., Yan, J. N., Huang, Q., Rush, A., Guibas, L., Wetzstein, G., Liao, J., and Yang, G. Mesh-flow: Mesh generation with equivariant flow matching. In 
+
+Proceedings of the ACM SIGGRAPH Conference on Com-puter Graphics and Interactive Techniques (SIGGRAPH) ,2026. Szegedy, C., Liu, W., Jia, Y., Sermanet, P., Reed, S. E., Anguelov, D., Erhan, D., Vanhoucke, V., and Rabinovich, A. Going deeper with convolutions. In IEEE Conference on Computer Vision and Pattern Recognition (CVPR) , pp. 1–9, 2015. Szegedy, C., Vanhoucke, V., Ioffe, S., Shlens, J., and Wojna, Z. Rethinking the inception architecture for computer vision. In IEEE Conference on Computer Vision and Pattern Recognition (CVPR) , pp. 2818–2826, 2016. Villani, C. and Villani, C. The wasserstein distances. Mono-graph: Optimal Transport: Old and New , pp. 93–111, 2009. Vondr ´ak, J. Submodularity and curvature: the optimal algo-rithm. Wang, K., Li, Z., Cheng, Z.-Q., Khaki, S., Sajedi, A., Vedan-tam, R., Plataniotis, K. N., Hauptmann, A., and You, Y. Emphasizing discriminative features for dataset distilla-tion in complex scenarios. In IEEE Conference on Com-puter Vision and Pattern Recognition (CVPR) , 2025a. Wang, S., Yang, Y., Liu, Z., Sun, C., Hu, X., He, C., and Zhang, L. Dataset distillation with neural character-istic function: A minmax perspective. arXiv preprint arXiv:2502.20653 , 2025b. Welling, M. Herding dynamical weights to learn. In Inter-national Conference on Machine Learning (ICML) , pp. 1121–1128, 2009. Wheeler, D. and Natarajan, B. Conceptual learning and causal reasoning for semantic communication. IEEE Transactions on Cognitive Communications and Network-ing (TCCN) , 2025. Wu, H., Su, D., Hou, J., and Li, G. Dataset con-densation with color compensation. arXiv preprint arXiv:2508.01139 , 2025a. Wu, H., Su, D., Hou, J., and Li, G. Dataset con-densation with color compensation. arXiv preprint arXiv:2508.01139 , 2025b. Yan, S., Zhu, M., Jiang, G.-q., Wang, J., Chen, J., Zhang, W., Liao, X., Cui, X., Zhang, C., Song, Z., et al. Scaling laws for speculative decoding. arXiv preprint arXiv:2505.07858 , 2025. Yang, Y., Gu, X., and Sun, J. Prototypical partial optimal transport for universal domain adaptation. In AAAI Con-ference on Artificial Intelligence (AAAI) , volume 37, pp. 10852–10860, 2023. Yin, Z., Xing, E., and Shen, Z. Squeeze, recover and re-label: Dataset condensation at imagenet scale from a new perspective. In Conference on Neural Information Processing Systems (NeurIPS) , 2023. Yu, R., Liu, S., and Wang, X. Dataset distillation: A compre-hensive review. IEEE Transactions on Pattern Analysis and Machine Intelligence (TPAMI) , 46(1):150–170, 2023. Yu, S., Kwak, S., Jang, H., Jeong, J., Huang, J., Shin, J., and Xie, S. Representation alignment for generation: Training diffusion transformers is easier than you think. In International Conference on Learning Representations (ICLR) , 2025. Zeng, Z., Du, B., Zhang, S., Xia, Y., Liu, Z., and Tong, H. Hierarchical multi-marginal optimal transport for network alignment. In AAAI Conference on Artificial Intelligence (AAAI) , volume 38, pp. 16660–16668, 2024. Zhang, H., Li, S., Wang, P., Zeng, D., and Ge, S. M3d: Dataset condensation by minimizing maximum mean discrepancy. In AAAI , volume 38, pp. 9314–9322, 2024a. Zhang, J., Liu, T., and Tao, D. An optimal transport analysis on generalization in deep learning. IEEE Transactions on Neural Networks and Learning Systems (TNNLS) , 34 (6):2842–2853, 2021. Zhang, Q., Leng, S., Ma, X., Liu, Q., Wang, X., Liang, B., Liu, Y., and Yang, J. Cvar-constrained policy opti-mization for safe reinforcement learning. IEEE Transac-tions on Neural Networks and Learning Systems (TNNLS) ,2024b. Zhang, X., Du, J., Li, Y., Xie, W., and Zhou, J. T. Spanning training progress: Temporal dual-depth scoring (tdds) for enhanced dataset pruning. In IEEE Conference on Computer Vision and Pattern Recognition (CVPR) , pp. 26223–26232, 2024c. Zhao, B. and Bilen, H. Dataset condensation with distribu-tion matching. In IEEE Winter Conference on Applica-tions of Computer Vision (WACV) , pp. 6514–6523, 2023. 13 Geometry-Aware Dataset Condensation for Diffusion Model Training 
+
+Zhao, B., Mopuri, K. R., and Bilen, H. Dataset condensation with gradient matching. In International Conference on Learning Representations (ICLR) , 2020. Zhao, Z., Shang, Y., Wu, J., and Yan, Y. Dataset quanti-zation with active learning based adaptive sampling. In 
+
+Proceedings of the European conference on computer vision (ECCV) , pp. 346–362. Springer, 2024. Zhao, Z., Wang, H., Shang, Y., Wang, K., and Yan, Y. Dis-tilling long-tailed datasets. In IEEE Conference on Com-puter Vision and Pattern Recognition (CVPR) , 2025. Zheng, H., Liu, R., Lai, F., and Prakash, A. Coverage-centric coreset selection for high pruning rates. In International Conference on Learning Representations (ICLR) , 2023. Zheng, Y., Gu, Y., Bai, P., Yuan, D., Zhou, S., Lyu, X., and Chen, A. Cyclic learning rate-based co-training for image classification with noisy labels. IEEE Access , 2025. Zhong, W., Tang, H., Zheng, Q., Xu, M., Hu, Y., and Nie, L. Towards stable and storage-efficient dataset distillation: Matching convexified trajectory. In IEEE Conference on Computer Vision and Pattern Recognition (CVPR) , 2025. Zhou, D., Wang, K., Gu, J., Peng, X., Lian, D., Zhang, Y., You, Y., and Feng, J. Dataset quantization. In Proceedings of the IEEE/CVF International Conference on Computer Vision (ICCV) , pp. 17205–17216, 2023. 14 Appendix of Geometry-Aware Dataset Condensation for Diffusion Model Training 
+
+Overview This appendix provides extended technical details and supplementary analyses to complement the main text. We begin with additional related works on optimal transport in Section A , followed by a rigorous dummy-source reformulation together with entropic Sinkhorn validation in Section B . Section C presents the theoretical convergence analysis of our two-stage selection framework, while Section D compiles all mathematical symbols used throughout the paper. Implementation details and additional hyperparameter sensitivity studies are provided in Section E and Section F ,respectively. Further experimental analyses are collected in Section G , including complementary 512 × 512 experiments in Section G.1 , comparisons with additional baselines in Section G.2 , ablations on the feature encoder and classifier in 
+
+Section G.3 , an in-depth examination of one-sided partial optimal transport in Section G.4 , the adaptation of existing distribution-matching objectives within our framework in Section G.5 , clarification for the meaning of “geometry” in 
+
+Section G.6 , and more discussion on confidence regularization in Section G.7 . We then present additional visualization results in Section H , provide the full pseudocode of our method in Section I , which includes the end-to-end condensation pipeline and its core subroutines, and conclude with a discussion of broader impacts in Section J .Key Highlights  
+
+> 1. Our method consistently outperforms existing real subset selection methods and synthetic set generation approaches in dataset condensation for diffusion model training. (see Section G.2). 2. Our method is feature-encoder and classifier agnostic (see Section G.3). 3. We provide an analysis of the two-stage discrete optimization scheme, including upper-bound characterizations under mild assumptions (see Appendix C). 4. Our framework remains stable across broad hyperparameter ranges, greatly simplifying tuning (see Section F). 5. Our one-sided partial OT suppresses peripheral low-density samples that would otherwise distort distance geometry and pull the condensed set away from the core manifold, preventing biased global and inconsistent local alignment (see Section G.4). 6. Our alignment-driven selection framework is compatible with some existing distribution-matching-based synthetic set generation objectives and allows them to be seamlessly adapted to discrete real subset selection (see Section G.5).
+
+## A. Related Works on Optimal Transport 
+
+Optimal Transport (OT) provides a principled geometric framework for comparing probability distributions by computing the minimal cost required to transform one distribution into another. Compared to divergences such as KL and Jensen–Shannon, OT remains meaningful even when supports do not overlap and thus yields a more faithful notion of distributional discrepancy (Villani & Villani, 2009; Zhang et al., 2021). The resulting Wasserstein distance has been widely adopted in image or mesh generation (Arjovsky et al., 2017; Gulrajani et al., 2017; Sun et al., 2026), causal discovery (Wheeler & Natarajan, 2025; Chen et al., 2023), unsupervised learning (Luo et al., 2025; Liu et al., 2025; Montesuma et al., 2025), and reinforcement learning (Baheri et al., 2025; Klink et al., 2024; Lan et al., 2023; Zhang et al., 2024b), but its exact computation is prohibitive in high dimensions. Entropy-regularized OT, or Sinkhorn distance (Cuturi, 2013), alleviates this limitation and has enabled scalable OT-based methods in domain adaptation (Lyu et al., 2025; Zeng et al., 2024; Ko c¸ et al., 2025), classification (Nguyen et al., 2025; Jin et al., 2025), and knowledge distillation (Cui et al., 2025c; 2024a;b). OT has also been exploited to improve diffusion models. AOT (Kim et al., 2024) reduces the curvature of the ODE trajectories and truncation errors during sampling via Approximated OT, leading to fewer sampling steps and improved stability. DPM-OT (Li et al., 2023) instead applies OT at the sampling stage, learning a direct mapping from noise to data that substantially shortens the reverse diffusion trajectory. Both AOT and DPM-OT apply OT on the model side to reshape the generative dynamics, which primarily affects the sampling process. In contrast, our approach adopts a data-centric perspective and uses OT to decide which real samples should be included during training. Partial optimal transport (POT) extends classical OT by transporting only a fixed amount of mass, inducing an active region 15 Geometry-Aware Dataset Condensation for Diffusion Model Training 
+
+with a free boundary. Caffarelli and McCann (Caffarelli & McCann, 2010) and Figalli (Figalli, 2010) established existence, uniqueness, and regularity for this problem, while S ´ejourn ´e et al. (S ´ejourn ´e et al., 2023) positioned POT within the broader theory of generalized and unbalanced OT. Algorithmically, Chapel et al. (Chapel et al., 2020) leveraged POT for robust positive–unlabeled learning, and Bai et al. developed scalable variants via Sliced Optimal Partial Transport (Bai et al., 2023b) and Linear Optimal Partial Transport Embedding (Bai et al., 2023a). POT has further supported representation alignment in universal domain adaptation (Yang et al., 2023) and open-set OOD detection (Ren et al., 2024). Most existing POT formulations relax mass constraints on both sides to allow bidirectional partial matching. In contrast, our task imposes an inherently asymmetric structure: the condensed set must fully participate in matching, while only a subset of the full dataset should be used. We therefore adopt a one-sided partial OT formulation tailored to this geometry, and design a discrete optimization scheme that balances convergence stability with practical selection efficiency. 
+
+## B. Dummy-source Reformulation and Validation 
+
+Recall Eq. (3) in the main text defines a one-sided partial OT where the source mass is fully transported while the target side is relaxed by a capacity factor κ ≥ 1:
+
+min  
+
+> π≥0
+
+⟨C, π⟩ s.t. π1n = μ, π⊤1m ≤ κ ¯ν. (17) Here C ∈ Rm×n is the pairwise cost matrix, and μ = 1 
+
+> m
+
+1m, ν = 1 
+
+> n
+
+1n denote the reference marginals on the source and target sides, respectively. The relaxation factor κ allows a portion of the target mass to remain unmatched. 
+
+Step 1: Introduce slack on the target side. Define the unused target capacity as a nonnegative slack vector: 
+
+r ≜ κ ¯ν − π⊤1m ∈ Rn
+
+> +
+
+. (18) Left-multiplying 1⊤ 
+
+> n
+
+and using π1n = μ yields 
+
+1⊤ 
+
+> n
+
+r = κ 1⊤ 
+
+> n
+
+¯ν − 1⊤
+
+> m
+
+π1n = κ − 1 ≜ s. (19) Hence, the total slack corresponds to a dummy supply s = κ − 1.
+
+Step 2: Augment the transport plan and marginals. Stack r⊤ under π to form an augmented plan: 
+
+Π =
+
+ π
+
+r⊤
+
+
+
+∈ R(m+1) ×n 
+
+> +
+
+, ˜μ =
+
+μ
+
+s
+
+
+
+, ˜ν = κ ¯ν. (20) Then the balanced marginal constraints become 
+
+Π1 n = ˜ μ, Π⊤1m+1 = ˜ ν, (21) which are algebraically equivalent to those in Eq. (3): the second equality implies π⊤1m = κ ¯ν − r ≤ κ ¯ν.
+
+Step 3: Augment the cost matrix. To absorb unmatched target mass, append a dummy-source row with constant cost δ > 0:
+
+Caug =
+
+ C
+
+δ 1⊤
+
+> n
+
+
+
+. (22) The objective becomes 
+
+⟨Caug , Π⟩ = ⟨C, π⟩ + δ 1⊤ 
+
+> n
+
+r = ⟨C, π⟩ + δs, (23) where the additional term δs is constant w.r.t. π. Thus, minimizing Eq. (3) is equivalent to minimizing: 
+
+min  
+
+> Π≥0
+
+⟨Caug , Π⟩ s.t. Π1 n = ˜ μ, Π⊤1m+1 = ˜ ν. (24) Eqs. (18)–(24) show that the feasible sets of Eq. (17) and Eq. (24) are in one-to-one correspondence, and the objectives differ by a constant δs . Hence both problems share identical minimizers for the real transport plan π.16 Geometry-Aware Dataset Condensation for Diffusion Model Training 
+
+Step 4: Entropic regularization and Sinkhorn formulation. For differentiability and computational efficiency, we add an entropy term H(Π) = − P 
+
+> ij
+
+Πij (log Πij − 1) with weight ε > 0, yielding the entropic OT: 
+
+min  
+
+> Π≥0
+
+⟨Caug , Π⟩ − εH (Π) s.t. Π1 n = ˜ μ, Π⊤1m+1 = ˜ ν, (25) which corresponds exactly to Eq. (5) in the main text. The optimal solution admits the Gibbs–Sinkhorn form: 
+
+Πε = diag( u) K diag( v), K = exp 
+
+
+
+− Caug 
+
+> ε
+
+
+
+, (26) where (u, v) are the scaling vectors enforcing ˜μ, ˜ν. As ε → 0, the entropic solution Πε converges to the linear programming optimum of Eq. (24), thus recovering the original partial OT formulation. 
+
+On the role and effect of δ. Even with δ = 0 , the dummy row can only carry a fixed total mass s = κ − 1. However, when ε
+
+is small and C spans a wide range, Km+1 ,j = e−δ/ε with δ = 0 may be much larger than many real entries, leading to ill-conditioned scaling (extreme u, v ). An excessively large δ makes the dummy row numerically inactive ( Km+1 ,j ≈ 0)yet still required to carry a fixed total mass s, forcing the algorithm to balance an unrealistically high-cost assignment and potentially destabilizing the Sinkhorn updates. Hence δ should remain within the typical scale of the transport costs. 
+
+Remarks. (i) When κ = 1 , the dummy source vanishes ( s = 0 ) and Eq. (25) reduces to balanced OT. (ii) The dummy-source cost δ is a positive constant ensuring numerical stability; in practice, δ = γ · median( C). (iii) The last row of Π
+
+corresponds solely to the dummy source, while the first m rows represent the real transport plan used in our loss computation. 
+
+## C. Convergence Analysis 
+
+Setup and notation. Fix a class c with ground set Tc (all candidate real samples) and target subset size m ≪ |T c|. Let 
+
+S(t) 
+
+> c
+
+⊂ T c denote the subset after t greedy additions, with |S(t) 
+
+> c
+
+| = t and S(0)  
+
+> c
+
+= ∅. Our composite loss is L(Sc, Tc) and we define the utility 
+
+F (Sc) ≜ − L (Sc, Tc). (27) Larger F means better performance. Let S⋆c ∈ arg max |S|≤ m F (S).For any A ⊆ B ⊆ T c and X ⊆ T c \ B, the weak submodularity ratio (Das & Kempe, 2011; Elenberg et al., 2016) is 
+
+γwm := inf 
+
+> A⊆B, X ∩B=∅
+
+P
+
+> x∈X
+
+F (B ∪ { x}) − F (B)
+
+F (B ∪ X) − F (B) ∈ (0 , 1] . (28) 
+
+C.1. Stage I (Greedy Geometry-guided Selection). 
+
+At iteration t, add x⋆t ∈ T c \ S(t−1)  
+
+> c
+
+maximizing F (S(t−1)  
+
+> c
+
+∪ { x}) − F (S(t−1)  
+
+> c
+
+). Under weak submodularity (Das & Kempe, 2011; Elenberg et al., 2016), for t = 1 , . . . , m ,
+
+F (S(t) 
+
+> c
+
+) − F (S(t−1)  
+
+> c
+
+) ≥ γwm 
+
+m
+
+ F (S⋆c ) − F (S(t−1)  
+
+> c
+
+). (29) Let ∆t := F (S⋆c ) − F (S(t) 
+
+> c
+
+) be the optimality gap. Then 
+
+∆t ≤
+
+
+
+1 − γwm 
+
+m
+
+
+
+∆t−1, t = 1 , . . . , m. (30) 
+
+Gap bound relative to S(1)  
+
+> c
+
+. Unrolling (30) from t = 2 gives, for t ≥ 2,
+
+∆t ≤
+
+
+
+1 − γwm 
+
+m
+
+t−1
+
+∆1. (31) Equivalently, 
+
+F (S(t) 
+
+> c
+
+) ≥ F (S⋆c ) −
+
+
+
+1 − γwm 
+
+m
+
+t−1
+
+F (S⋆c ) − F (S(1)  
+
+> c
+
+)
+
+
+
+, t = 2 , . . . , m, (32) 17 Geometry-Aware Dataset Condensation for Diffusion Model Training 
+
+or in loss form, 
+
+L(S(t) 
+
+> c
+
+, Tc) − L (S⋆c , Tc) ≤
+
+
+
+1 − γwm 
+
+m
+
+t−1h
+
+L(S(1)  
+
+> c
+
+, Tc) − L (S⋆c , Tc)
+
+i
+
+, t = 2 , . . . , m. (33) At t = m,
+
+L(S(m) 
+
+> c
+
+, Tc) − L (S⋆c , Tc) ≤
+
+
+
+1 − γwm 
+
+m
+
+m−1h
+
+L(S(1)  
+
+> c
+
+, Tc) − L (S⋆c , Tc)
+
+i
+
+. (34) This quantifies the contraction of the residual gap after the first greedy addition. 
+
+C.2. Stage II (Swap-based Refinement) Assumptions for Stage II. Throughout Stage II we assume a restricted monotonicity (RM) condition in size-m neighbor-hoods. Let Fm := {S ⊆ T c : |S| = m}.
+
+Restricted monotonicity (RM) at size-m contexts. We say F satisfies RM if for any U ∈ F m and any X ⊆ T c \ U with 
+
+|X| ≤ m,
+
+F (U ∪ X) ≥ F (U ). (35) This is weaker than global monotonicity and is the only monotonicity-type condition required in Lemma C.2. 
+
+Restricted block–singleton curvature. We say F has curvature (Iyer et al., 2013; Conforti & Cornu ´ejols, 1984; Vondr ´ak) 
+
+κb ∈ [0 , 1) on Fm if 
+
+X
+
+> v∈V
+
+ F (U ) − F (U \ { v}) ≤ 11 − κb
+
+ F (U ) − F (U \ V ), ∀ U ∈ F m, ∀ V ⊆ U. (36) This depends only on differences of F and is invariant under constant shifts. 
+
+Restricted approximate diminishing-returns (DR) ratio. We say F admits αDR ∈ (0 , 1] at size-m contexts if 
+
+F (T ∪ { x}) − F (T ) ≥ αDR 
+
+ F (U ∪ { x}) − F (U ), ∀ U ∈ F m, ∀ T ⊆ U, ∀ x / ∈ U. (37) When αDR = 1 , this is exact DR (submodularity). 
+
+Stage II setup. Let Sg = S(m) 
+
+> c
+
+be the greedy baseline, and let Stage II terminate at a 1-swap stable set bSc:
+
+F  ( bSc \ { i}) ∪ { j} ≤ F ( bSc), ∀ i ∈ bSc, ∀ j ∈ T c \ bSc. (38) Define A = S⋆c \ bSc and B = bSc \ S⋆c with |A| = |B| = r, and fix any bijection ϕ : A → B. Let the local weak submodularity ratio at base bSc and block A be denoted γwm ( bSc, A ); clearly γwm ≤ γwm ( bSc, A ) where γwm is the global infimum (28). 
+
+Lemma C.1 (Add vs. remove under 1-swap stability with approximate DR) . If F satisfies (37) , then for every x ∈ A and 
+
+y = ϕ(x),
+
+F ( bSc ∪ { x}) − F ( bSc) ≤ 1
+
+αDR 
+
+
+
+F ( bSc) − F ( bSc \ { y})
+
+
+
+. (39) 
+
+Proof. Apply (37) with U = bSc, T = bSc \ { y} and x / ∈ bSc:
+
+F (( bSc \ { y}) ∪ { x}) − F ( bSc \ { y}) ≥ αDR 
+
+ F ( bSc ∪ { x}) − F ( bSc). (40) By 1-swap stability (38) , F (( bSc \ { y}) ∪ { x}) ≤ F ( bSc), hence F ( bSc) − F ( bSc \ { y}) ≥ αDR 
+
+ F ( bSc ∪ { x}) − F ( bSc),which rearranges to (39). 
+
+Lemma C.2 (Weak-submodularity lower bound) .
+
+X
+
+> x∈A
+
+ F ( bSc ∪ { x}) − F ( bSc) ≥ γwm ( bSc, A )  F (S⋆c ) − F ( bSc). (41) 18 Geometry-Aware Dataset Condensation for Diffusion Model Training 
+
+Proof. By the definition of the local ratio at base bSc and block A,
+
+X
+
+> x∈A
+
+ F ( bSc ∪ { x}) − F ( bSc) ≥ γwm ( bSc, A ) F ( bSc ∪ A) − F ( bSc). (42) Since bSc ∪ A = S⋆c ∪ B and |B| = r, by RM in (35) we have F (S⋆c ∪ B) ≥ F (S⋆c ), i.e., F ( bSc ∪ A) ≥ F (S⋆c ). Therefore, 
+
+F ( bSc ∪ A) − F ( bSc) ≥ F (S⋆c ) − F ( bSc), (43) which together with the local weak submodularity ratio definition completes the proof. 
+
+Lemma C.3 (Curvature upper bound on singleton removals) . If F satisfies (36) , then for U = bSc and V = B,
+
+X
+
+> y∈B
+
+ F ( bSc) − F ( bSc \ { y}) ≤ 11 − κb
+
+
+
+F ( bSc) − F ( bSc \ B)
+
+
+
+. (44) 
+
+Theorem C.4 (Curvature-augmented Stage II under approximate DR (anchored form)) . Suppose F satisfies RM (35) , admits curvature (36) with κb < 1, and satisfies (37) with αDR > 0. Let γwm ∈ (0 , 1] denote the global weak submodularity ratio 
+
+(28) . Assume additionally that for B = bSc \ S⋆c we have 
+
+F ( bSc \ B) ≥ F (Sg ). (45) 
+
+Then any 1-swap stable m-set bSc returned by Stage II obeys 
+
+F ( bSc) ≥ F (Sg ) + θα ·  F (S⋆c ) − F (Sg ), θα := (1 − κb) αDR γwm 
+
+1 + (1 − κb) αDR γwm 
+
+. (46) 
+
+Proof. Summing (39) over x ∈ A (paired by y = ϕ(x)) gives 
+
+X
+
+> x∈A
+
+ F ( bSc ∪ { x}) − F ( bSc) ≤ 1
+
+αDR 
+
+X
+
+> y∈B
+
+ F ( bSc) − F ( bSc \ { y}). (47) Lower-bound the LHS by Lemma C.2 with γwm ( bSc, A ) ≥ γwm , and upper-bound the RHS by Lemma C.3: 
+
+γwm 
+
+ F (S⋆c ) − F ( bSc) ≤ 1
+
+αDR (1 − κb)
+
+
+
+F ( bSc) − F ( bSc \ B)
+
+
+
+. (48) Anchor at the greedy baseline via bF (S) := F (S) − F (Sg ) (all previous steps are difference-based and thus translation-invariant). Using the additional anchored dominance condition (45), we have 
+
+F ( bSc) − F ( bSc \ B) ≤ F ( bSc) − F (Sg ) = bF ( bSc). (49) Hence 
+
+γwm 
+
+  bF (S⋆c ) − bF ( bSc) ≤ 1
+
+αDR (1 − κb) bF ( bSc). (50) Rearranging gives bF ( bSc) ≥ (1 − κb)αDR γwm 
+
+1 + (1 − κb)αDR γwm 
+
+bF (S⋆c ), which is (46). 
+
+Remark (anchored dominance). Condition (45) is a technical anchored requirement used only to relate F ( bSc)−F ( bSc \B)
+
+to the baseline gap F ( bSc) − F (Sg ). Although it depends on the unknown optimal set S⋆c , it serves as a sufficient condition for the anchored guarantee and is empirically observed to hold in our experiments. 
+
+Corollary C.5 (Anchored loss form of Theorem C.4) . With the same assumptions as Theorem C.4 and F = −L , the terminal 1-swap stable set bSc satisfies 
+
+L( bSc, Tc) ≤ L (Sg , Tc) − θα
+
+
+
+L(Sg , Tc) − L (S⋆c , Tc)
+
+
+
+, θα = (1 − κb)αDR γwm 
+
+1 + (1 − κb)αDR γwm 
+
+. (51) 
+
+In words, Stage II closes a constant fraction θα of the greedy–optimal loss gap .
+
+Corollary C.6 (Exact DR (submodular) case) . When αDR = γwm = 1 , (46) simplifies to 
+
+F ( bSc) ≥ F (Sg ) + 1 − κb
+
+2 − κb
+
+ F (S⋆c ) − F (Sg ). (52) 19 Geometry-Aware Dataset Condensation for Diffusion Model Training 
+
+Normalized global form. For a global (nonnegative) normalization, define 
+
+Fmin := min 
+
+> S⊆T c
+
+F (S), eF (S) := F (S) − Fmin ≥ 0. (53) Since all inequalities above depend only on differences of F , replacing F by eF leaves γwm , κ b, α DR unchanged. Moreover, 
+
+eF ( bSc) − eF ( bSc \ B) ≤ eF ( bSc) holds trivially because eF ( bSc \ B) ≥ 0. Thus the same derivation yields 
+
+eF ( bSc) ≥ (1 − κb) αDR γwm 
+
+1 + (1 − κb) αDR γwm 
+
+eF (S⋆c ). (54) We emphasize that the anchored form (46) is translation-invariant and preferred in practice. 
+
+Discussion. (i) κb quantifies the overlap between singleton removals and their joint removal and remains well-defined even when F (∅) is undefined. (ii) At κb = 0 (no over-counting; e.g., modular objectives), Theorem C.4 yields the classical 
+
+1/2 factor when γwm =αDR =1 .
+
+Summary. Stage I contracts the residual optimality gap at a rate  1 − γwm 
+
+> m
+
+ per step, yielding an e−γwm -type reduction after m selections. Stage II performs 1-swap refinement. Under the stated RM/curvature/approximate-DR assumptions (and (45) for the anchored form), the terminal set bSc closes a constant fraction θα of the greedy–optimal utility gap (Eq. (51)). 
+
+## D. Symbol Description 
+
+To enhance clarity, a detailed description of mathematic symbols in the present study is provided in Table 14. 
+
+## E. Implementation Details 
+
+Image Selection Settings. We use InceptionV3 (Szegedy et al., 2016) as both the feature encoder and classifier (as discussed in G.3, the framework is encoder- and classifier-agnostic). The hyperparameters are set as κ=1 .05 , γ=0 .05 ,
+
+T =20 , ε=10 , α=5 , and β=1000 . The value of β depends on the encoder type: 1000 for InceptionV3, 100 for ResNet-50 (He et al., 2016), and 10 for ResNet-34 and GoogLeNet (Szegedy et al., 2015). Following D 2C (Huang et al., 2026), each subset is constructed in a class-wise manner, selecting 10 , 50 , and 100 samples per class, respectively. The input resolutions follow the standard ImageNet settings, with 299 ×299 for InceptionV3 (Szegedy et al., 2016) and 224 ×224 for ResNet-34, ResNet-50 (He et al., 2016), and GoogLeNet (Szegedy et al., 2015). These resolutions are used solely for feature extraction during subset selection and are independent of the resolution used in diffusion model training. 
+
+Training Settings. Following D 2C (Huang et al., 2026), we use the Adam optimizer with a fixed learning rate of 1 × 10 −4
+
+and (β1, β 2) = (0 .9, 0.999) , without applying weight decay. Mixed-precision (fp16) training with gradient clipping is employed for stability and efficiency. Latent representations are pre-computed using the Stable Diffusion VAE (Kingma & Welling, 2013) and decoded via its native decoder. The batch size is set to 128 for all experiments. For a fair comparison, we also adopt the Attach phase from D 2C, which enriches each selected image with semantic embeddings extracted from a T5 text encoder (Ni et al., 2022) and visual features obtained from a DINOv2 vision encoder (Oquab et al., 2023). These dual conditional signals provide class-level semantics and instance-level visual priors, thereby enhancing the efficiency and generation quality of diffusion model training. 
+
+## F. Sensitivity Analysis of Additional Hyperparameters 
+
+We further investigate the sensitivity of the proposed framework to auxiliary hyperparameters. As shown in Table 15, varying the loss weights α and β indicates that the method remains stable across a broad range of values. The statistical regularization term Lsta maintains global feature statistics and stabilizes the overall data distribution. When its weight is too small, the condensed samples exhibit weaker distributional coherence and degraded generative fidelity. Conversely, an excessively large α overemphasizes global alignment, suppressing the OT-driven geometric matching and leading to slight loss of local structural detail. Similarly, the confidence regularization Lconf enhances semantic consistency by discouraging ambiguous or low-confidence samples. Reducing its weight weakens this semantic constraint, while overly increasing it may bias the subset toward high-confidence regions, leading to a slight reduction in diversity. 20 Geometry-Aware Dataset Condensation for Diffusion Model Training  
+
+> Table 14. Descriptions of symbols used in the main text.
+
+Symbol Definition 
+
+T Full real dataset 
+
+S Condensed (selected) subset 
+
+Tc Real subset for class c
+
+Sc Condensed subset for class c
+
+Tc(e) Feature embeddings of Tc
+
+Sc(e) Feature embeddings of Sc
+
+xi Embedding of condensed sample i
+
+yj Embedding of real sample jm Number of samples in Sc
+
+n Number of samples in Tc
+
+C Cost matrix 
+
+Cij Pairwise cost between xi and yj
+
+π Balanced OT transport plan 
+
+Caug Augmented Cost matrix 
+
+Π Augmented transport plan with dummy source 
+
+μ Source marginal distribution 
+
+ν Target marginal distribution 
+
+¯ν Reference target marginal 
+
+κ Capacity scaling factor for one-sided partial OT 
+
+δ Dummy-source cost 
+
+γ Scaling coefficient for δε Entropic regularization weight 
+
+K Gibbs kernel in Sinkhorn iterations 
+
+u Sinkhorn scaling vector on source side 
+
+v Sinkhorn scaling vector on target side 
+
+Treal Real transport matrix after removing dummy mass 
+
+LOT One-sided partial OT loss 
+
+Lsta Mean–variance regularization loss 
+
+Lconf Confidence regularization loss 
+
+L Overall objective function 
+
+α Weight for Lsta 
+
+β Weight for Lconf 
+
+μS Mean of features in Sc
+
+σS Variance of features in Sc
+
+μT Mean of features in Tc
+
+σT Variance of features in Tc
+
+p(c|xi) Predicted probability of class c for xi
+
+xk Candidate image 
+
+∆L(xk) Marginal gain when adding candidate xk
+
+x⋆t Greedy-selected sample at iteration t
+
+S′ 
+
+> c
+
+Temporary subset after swapping one element 
+
+∆i→j Objective change for swapping xi with xj
+
+s Dummy mass absorbing unmatched targets 
+
+r Sinkhorn iteration index 
+
+T Total number of Sinkhorn iterations 
+
+1n All-one vector of length n
+
+Diag( ·) Diagonal matrix operator 21 Geometry-Aware Dataset Condensation for Diffusion Model Training 
+
+Table 15. Impact of loss weights α and β on ImageNet (Russakovsky et al., 2015) 256 ×256 (10K data budget, 100K iterations).                                                   
+
+> α356810 FID 3.47 3.43 3.45 3.43 3.48 IS 418.1 414.3 413.7 411.4 408.6 Precision 0.80 0.78 0.78 0.77 0.76 Recall 0.27 0.28 0.28 0.28 0.29
+> β100 500 1000 2000 5000 FID 3.50 3.45 3.43 3.48 3.56 IS 391.2 405.5 414.3 421.5 427.2 Precision 0.80 0.78 0.78 0.77 0.75 Recall 0.27 0.28 0.28 0.28 0.29
+
+Table 16. Impact of ε (entropic regularization) and T (number of Sinkhorn iterations) on ImageNet (Russakovsky et al., 2015) 256 ×256 (10K data budget, 100K iterations). 
+
+ε 5 8 10 12 15 FID-50K 3.53 3.45 3.43 3.45 3.48 
+
+T 5 10 20 30 50 FID-50K 3.55 3.47 3.43 3.42 3.43 
+
+We also analyze the effect of the entropic regularization coefficient ε and the number of Sinkhorn iterations T , as summarized in Table 16. The results demonstrate that the proposed partial OT solver is numerically stable and largely insensitive to these parameters. Smaller regularization or too few iterations may lead to unstable or under-smoothed updates, slightly perturbing the transport plan, whereas larger values produce smoother and more consistent convergence. However, excessively large 
+
+T yields diminishing returns, providing no further improvement in alignment or fidelity. These observations collectively confirm that our framework exhibits strong robustness to auxiliary hyperparameters, ensuring stable optimization and consistent generative performance across a wide range of configurations. 
+
+## G. Further Experimental Analyses 
+
+G.1. Additional 512 ×512 Results 
+
+Beyond the 512 ×512 DiT-L/2 results at 100K iterations reported in the main text, we further include SiT-L/2 at 100K to complement the high-resolution study, as summarized in Table 17. All models are trained from scratch on ImageNet (Rus-sakovsky et al., 2015) using a 10K data budget and evaluated with 10K generated samples. Baseline numbers are taken from D2C (Huang et al., 2026), and both diffusion variants (DiT-L/2 (Peebles & Xie, 2023), SiT-L/2 (Ma et al., 2024)) follow the same protocol as in the main text. Under this additional 512 ×512 setting, our geometry-aware selection consistently surpasses random sampling and D 2C across FID, IS, precision, and recall, confirming the robustness of the proposed selection strategy across different diffusion architectures at high resolution. 
+
+G.2. Comparison with More Baselines 
+
+We further compare our geometry-aware dataset condensation with a broader set of representative baselines for diffusion model training. We begin by categorizing existing synthetic data generation approaches into two major families. (i) 
+
+Small-scale synthetic-set methods , which include distribution-matching approaches (Zhao & Bilen, 2023; Wang et al., 2025b; Li et al., 2025b; Cui et al., 2025b; Li et al., 2025c), gradient-matching approaches (Zhao et al., 2020; Kim et al., 2022; Liu et al., 2023a;b), and trajectory-matching approaches (Cazenavette et al., 2022; Zhong et al., 2025; Wang et al., 2025a; 
+
+Table 17. Comparison of dataset condensation methods on ImageNet (Russakovsky et al., 2015) 512×512 with DiT-L/2 and SiT-L/2 trained for 100K iterations using a 10K data budget. Baseline results are from D 2C (Huang et al., 2026).                                                  
+
+> Model Method Data Budget Iteration FID ↓IS ↑Precision ↑Recall ↑
+> DiT-L/2 Random 0.8% (10K) 100K 24.8 74.3 0.65 0.42 DiT-L/2 D2C (Huang et al., 2026) 0.8% (10K) 100K 14.8 109.2 0.63 0.52 DiT-L/2 Ours 0.8% (10K) 100K 6.2 451.0 0.81 0.67
+> SiT-L/2 Random 0.8% (10K) 100K 13.3 197.1 0.69 0.68 SiT-L/2 D2C (Huang et al., 2026) 0.8% (10K) 100K 9.1 261.7 0.72 0.34 SiT-L/2 Ours 0.8% (10K) 100K 5.8 461.6 0.81 0.66
+
+22 Geometry-Aware Dataset Condensation for Diffusion Model Training 
+
+Table 18. Comparison of different dataset condensation methods using DiT-L/2 (Peebles & Xie, 2023) on ImageNet (Russakovsky et al., 2015) at 256 ×256 resolution. All methods are trained for 100K iterations with a 0.8% (10K) data budget and evaluated under two settings using 10K and 50K generated samples for FID and IS computation. For fairness, all baseline methods adopt the same attach phase as D2C (Huang et al., 2026). Best results are shown in bold .                                                                  
+
+> Method Data Budget Eval. Samples FID ↓IS ↑Precision ↑Recall ↑
+> CCS (Zheng et al., 2023) 0.8% (10K) 10K 7.81 373.3 0.77 0.58 EDC (Shao et al., 2024) 0.8% (10K) 10K 31.7 161.5 0.52 0.63 RDED (Sun et al., 2024a) 0.8% (10K) 10K 24.1 491.0 0.80 0.25 IGD (Chen et al., 2025) 0.8% (10K) 10K 15.92 433.9 0.83 0.41 Ours 0.8% (10K) 10K 5.76 430.2 0.78 0.69
+> CCS (Zheng et al., 2023) 0.8% (10K) 50K 5.45 364.9 0.77 0.21 EDC (Shao et al., 2024) 0.8% (10K) 50K 29.4 161.7 0.52 0.20 RDED (Sun et al., 2024a) 0.8% (10K) 50K 20.90 482.7 0.82 0.05 IGD (Chen et al., 2025) 0.8% (10K) 50K 12.67 412.5 0.85 0.10 Ours 0.8% (10K) 50K 3.43 414.3 0.78 0.28
+
+Table 19. Comparison of different dataset condensation methods using SiT-L/2 (Ma et al., 2024) on ImageNet (Russakovsky et al., 2015) at 256 ×256 resolution. All methods are trained for 100K iterations with a 0.8% (10K) data budget and evaluated under two settings using 10K and 50K generated samples for FID and IS computation. For fairness, all baseline methods adopt the same attach phase as D2C (Huang et al., 2026). Best results are shown in bold .                                                                  
+
+> Method Data Budget Eval. Samples FID ↓IS ↑Precision ↑Recall ↑
+> CCS (Zheng et al., 2023) 0.8% (10K) 10K 9.52 377.0 0.78 0.58 EDC (Shao et al., 2024) 0.8% (10K) 10K 29.3 171.8 0.55 0.64 RDED (Sun et al., 2024a) 0.8% (10K) 10K 26.0 490.3 0.82 0.26 IGD (Chen et al., 2025) 0.8% (10K) 10K 16.1 427.5 0.86 0.43 Ours 0.8% (10K) 10K 5.91 423.2 0.78 0.70
+> CCS (Zheng et al., 2023) 0.8% (10K) 50K 6.54 373.1 0.78 0.19 EDC (Shao et al., 2024) 0.8% (10K) 50K 26.7 169.9 0.54 0.22 RDED (Sun et al., 2024a) 0.8% (10K) 50K 22.7 483.1 0.82 0.06 IGD (Chen et al., 2025) 0.8% (10K) 50K 13.2 427.0 0.86 0.12 Ours 0.8% (10K) 50K 3.56 415.4 0.78 0.27
+
+Zhao et al., 2025). These methods typically operate at low resolution (e.g., CIFAR-level) due to their substantial memory and computational overhead. (ii) Large-scale synthetic-set methods designed for ImageNet-level settings, consisting of uni-level or model-inversion-based approaches (Yin et al., 2023; Cui et al., 2025a; Sun et al., 2024a; Shao et al., 2024) and generative-model-based approaches (Gu et al., 2024; Abbasi et al., 2024; Su et al., 2024; Chen et al., 2025). Most real subset selection baselines with publicly available implementations have already been compared in the main text. As a complement, we additionally consider selection with additional image-level processing (RDED (Conforti & Cornu ´ejols, 1984)) and traditional coreset selection methods equipped with the attachment phase from D 2C (Huang et al., 2026). 
+
+Why small-scale synthetic set generation methods are omitted here. Classical distribution-matching, gradient-matching, and trajectory-matching approaches construct a synthetic set by iteratively refining pixel values of a small set of images. They typically treat synthetic samples as fixed entities that must be stored and optimized throughout training, require exhaustive pixel-level updates coupled with backpropagation through the training trajectory, and repeatedly access the full real dataset for each refinement step. These three factors lead to substantial time and memory overhead, which in practice confines such methods to small-scale benchmarks (e.g., CIFAR, Tiny-ImageNet) at low resolution. Directly scaling these synthetic-set generation pipelines to ImageNet-1K at 256 ×256 or 512 ×512 would require prohibitive GPU memory and wall-clock time, and existing works do not report competitive performance in such regimes. For this reason, we do not include these small-scale synthetic baselines in our large-scale evaluation and instead focus on methods that have been explicitly designed or adapted for ImageNet-level settings. However, some optimization objectives from distribution-matching-based methods are amenable to integration into our alignment-driven selection framework, and the corresponding results are presented later in Appendix G.5. 
+
+More Real subset selection baselines. Tables 18 and 19 summarize results on ImageNet-1K at 256 ×256 using DiT-L/2 (Peebles & Xie, 2023) and SiT-L/2 (Ma et al., 2024), respectively, under a 0.8% (10K) data budget and 100K training iterations. 23 Geometry-Aware Dataset Condensation for Diffusion Model Training                                   
+
+> Table 20. Evaluation on ImageNet (Russakovsky et al., 2015) at 256 ×256 using DiT-L/2 (Peebles & Xie, 2023). K-Centers †and K-Medoids †denote classical coreset selection methods conducted in the feature space and augmented with the same attachment phase as D2C (Huang et al., 2026) to enable fair comparison under diffusion model training. Best results are shown in bold .
+> Method Data Budget Eval. Samples FID ↓IS ↑Precision ↑Recall ↑
+> K-Centers †(Gonzalez, 1985) 0.8% (10K) 50K 39.67 142.1 0.27 0.34
+> K-Mediods †(Kaufman & Rousseeuw, 1987) 0.8% (10K) 50K 4.13 315.7 0.77 0.24 Ours 0.8% (10K) 50K 3.43 414.3 0.78 0.28
+
+For our task, RDED (Sun et al., 2024a) exhibits a similar behavior in that it performs sample selection solely based on confidence scores. This strategy yields a very high Inception Score, but the absence of any distributional alignment leads to poor FID, and the lack of geometric constraints results in inadequate coverage, reflected by its very low Recall. For dataset quantization methods, we compare DQ (Zhou et al., 2023) in the main text. As DQAS (Zhao et al., 2024) and ADQ (Li et al., 2025a) do not release their code publicly, we are unable to conduct a direct comparison with them. As a complementary direction, we also consider real subset selection methods originating from data pruning. We include CCS (Zheng et al., 2023) as a representative pruning-based method. More recent pruning approaches such as TDDS (Zhang et al., 2024c) could also be relevant, but their ImageNet-1K implementations are not publicly available, preventing a fair comparison in our setting. CCS evaluates per-sample importance based on classification-oriented criteria such as correctness, forgetting events, prediction margin, and EL2N scores, aiming to retain examples that are most influential for supervised discriminative learning. However, these indicators are tailored to classification dynamics and do not capture the geometric, statistical, or manifold-level properties required for diffusion training; consequently, CCS-selected subsets fail to preserve distributional structure, exhibit limited coverage, and yield suboptimal FID, IS, precision, and recall compared to our geometry-aware formulation. Apart from comparisons with direct coreset selection methods in Figures 1 and 5, we further compare against coreset selection methods equipped with the attachment phase from D 2C (Huang et al., 2026) and include stronger baselines in Table 20. The K-center method (Gonzalez, 1985; Sener & Savarese, 2018), with its farthest-point greedy criterion, tends to push selected samples toward the boundary of the embedding space, thereby overemphasizing extreme and low-density regions. While this strategy improves geometric coverage, it often sacrifices representativeness with respect to the underlying data distribution. In contrast, K-Medoids (Kaufman & Rousseeuw, 1987) selects representative samples by minimizing the average distance between data points and their assigned medoids. Although this objective favors central and high-density regions, it can lead to insufficient coverage of the data manifold, particularly in the presence of multi-modal distributions. As a result, K-Medoids may overlook structurally important but less populated regions, yielding subsets that are biased toward the most dominant mode. 
+
+Large-scale synthetic set generation baselines. Large-scale synthetic set generation methods can be divided into two types: model-inversion-based approaches and generative-model-based methods. Model-inversion-based approaches compress the real dataset into a compact model representation, eliminating the need for real data during image refinement. We include a representative baseline EDC (Shao et al., 2024) for comparison. Generative-model-based approaches leverage pretrained generative models to avoid pixel-level refinements. In this category, we include IGD (Chen et al., 2025) as a recent representative method. EDC (Shao et al., 2024) extends RDED by performing pixel-level optimization to align the condensed set with the stored BatchNorm statistics of the real dataset. However, this continuous pixel-wise refinement disrupts the visual characteristics and structural integrity of the images, leading to significantly degraded FID and Inception Score. Moreover, because the optimization is unconstrained with respect to the real data manifold, it produces samples that deviate from plausible image space, resulting in poor Precision. Because our method jointly incorporates geometric distribution information, statistical alignment, and semantic confidence cues, and performs discrete optimization strictly over real images on the true data manifold, it avoids these issues and achieves a well-balanced trade-off across fidelity, coverage, and semantic quality. Generative-model-based condensation inherently suffers from two limitations. Training or adapting large generators to new domains is computationally expensive and often yields domain-specific priors that generalize poorly beyond the source distribution. Moreover, generative - model - based condensation exhibits a characteristic metric profile because the synthesized 24 Geometry-Aware Dataset Condensation for Diffusion Model Training                                    
+
+> Table 21. Ablation on the feature encoder / classifier used for selection on ImageNet (Russakovsky et al., 2015) at 256 ×256. All rows train the same diffusion model under a 10K (0.8%) budget for 100K iterations, and are evaluated with 50K generated samples.
+> Method Network Data Budget FID ↓IS ↑Precision ↑Recall ↑
+> D2C (Huang et al., 2026) DiT-XL/2 (Peebles & Xie, 2023) 0.8% (10K) 4.20 283.6 0.72 0.24 Ours ResNet-34 (He et al., 2016) 0.8% (10K) 3.42 385.4 0.78 0.27 ResNet-50 (He et al., 2016) 0.8% (10K) 3.47 407.1 0.77 0.29 GoogLeNet (Szegedy et al., 2015) 0.8% (10K) 3.44 396.8 0.78 0.28 InceptionV3 (Szegedy et al., 2015) 0.8% (10K) 3.43 414.3 0.78 0.28
+
+set is drawn from the generator’s learned manifold rather than the true data manifold. Without an explicit constraint to align these manifolds, a domain gap emerges, which inflates FID. At the same time, sampling concentrates probability mass on high -density modes that the generator models confidently. This mode concentration yields high Precision and a strong Inception Score, yet simultaneously induces mode collapse, omitting low - density and boundary regions of the real distribution. The resulting lack of coverage depresses Recall and further contributes to a higher FID through diversity loss and second-order statistic mismatch. In short, local fidelity around a few dominant modes (high Precision/IS) coexists with global misalignment and under -coverage (low Recall, elevated FID) due to the uncorrected domain gap between the generator’s manifold and the real manifold. In contrast, our geometry-aware condensation directly selects informative real samples without relying on generator synthesis or retraining. This design preserves both visual fidelity and manifold geometry of the original dataset, ensuring balanced coverage and accurate statistical representation. Consequently, the condensed subset maintains high precision while significantly improving recall and FID, demonstrating better data efficiency and overall generative performance compared to generative-model-based condensation approaches such as IGD (Chen et al., 2025). 
+
+Summary. Overall, the comparisons in Tables 18, 19 and 20 highlight that synthetic set generation methods either fail to scale to ImageNet-1K or exhibit undesirable trade-offs between fidelity and coverage. Real subset selection also does not fully address geometric alignment. By directly selecting informative real samples under a geometry-aware objective, our method preserves both visual fidelity and manifold structure of the original dataset, achieving superior FID and recall while maintaining competitive precision, recall and IS across different diffusion backbones and evaluation protocols. These results demonstrate that geometry-aware real subset selection is a more effective and scalable solution for large-scale diffusion training than existing synthetic set generation and real image selection based approaches. 
+
+G.3. Ablation of Feature Encoder and Classifier 
+
+We perform alignment in a pretrained representation space that is widely used to preserve semantic neighborhoods and perceptual similarity. Under this metric, preserving neighborhood structure provides a practical surrogate for preserving the support geometry relevant to likelihood-based generative training. To investigate the impact of the feature encoder and its paired classifier on the selection process, we conduct an ablation study using three representative backbones with different architectures and capacities. Specifically, the default feature extractor is replaced with ResNet-34 (He et al., 2016), ResNet-50 (He et al., 2016), GoogLeNet (Szegedy et al., 2015), and InceptionV3 (Szegedy et al., 2016), while all other settings remain unchanged. As shown in Table 21, all variants achieve comparable results in terms of FID, Inception Score, precision, and recall, exhibiting only negligible variations. This consistency demonstrates that the proposed framework is encoder-agnostic and classifier-agnostic , since the condensation performance depends primarily on the geometric and statistical structure of the learned embedding space rather than the specific encoder design. Each feature encoder is paired with its corresponding frozen classifier head, and no additional supervision or fine-tuning is introduced. The classifier serves solely as a semantic probe for computing confidence regularization, ensuring consistent conditions across all configurations. These results confirm that the method generalizes well to different pretrained encoders (classifiers) and maintains stable performance across different backbone designs. 
+
+G.4. Further Analysis of One-sided Partial Optimal Transport 
+
+As illustrated in Fig. 5, we further visualize a 2D toy case to compare the geometric behaviors of classical balanced OT and our one-sided partial OT. Under the balanced formulation, the transport plan enforces uniform mass matching across all real samples, including those lying in peripheral low-density regions. Such peripheral samples distort transport distances and 25 Geometry-Aware Dataset Condensation for Diffusion Model Training  
+
+> Figure 5. Visualization of the condensed subset selected by classical balanced OT (left) and one-sided partial OT (right) on a 2D toy dataset. Grey dots denote real samples, and blue dots denote selected condensed samples.
+
+mislead the alignment away from the high-density core manifold, resulting in redundant assignments and an over-dispersed condensed subset. In contrast, partial OT introduces a capacity relaxation that allows unmatched mass in these low-density areas, effectively suppressing spurious couplings and concentrating the condensed subset on the high-density manifold. This selective relaxation yields a more compact and geometry-consistent representation, highlighting the superiority of one-sided partial transport in mitigating structural imbalance and preserving the intrinsic data geometry. As reported in Tables 22 and 23, we further quantify the density–mass relationship under one-sided partial OT. Compared to the balanced counterpart, POT consistently allocates lower mass fraction and smaller average cost C in low-density bins (e.g., bins 0–2), while slightly increasing both in high-density regions. This pattern indicates that POT adaptively suppresses unreliable transport in sparse areas, thereby emphasizing dense and structurally coherent regions. Such redistribution aligns with the geometric intuition of partial matching, where the capacity relaxation effectively filters peripheral noise and promotes compact manifold coverage. Overall, this selective mass reallocation demonstrates that one-sided partial OT achieves a better balance between coverage and compactness, faithfully capturing the intrinsic data geometry while avoiding over-assignment to outliers. 
+
+G.5. Adapting Existing Distribution-Matching Objectives within Our Alignment-Driven Framework 
+
+Most existing synthetic set generation methods are not directly applicable to diffusion model training, as they rely on continuous sample synthesis and are primarily designed for discriminative or reconstruction-oriented objectives. Such synthesized samples often exhibit limited fidelity and are ill-suited for likelihood-based generative modeling. Nevertheless, a subset of these methods is built upon distribution-matching principles, which are conceptually aligned with the goal of diffusion model training. In this subsection, we demonstrate that distribution-matching objectives originally proposed for synthetic set generation can be seamlessly incorporated into our alignment-driven discrete subset selection framework. Specifically, we retain the proposed discrete optimization pipeline and selection strategy, while replacing our alignment objective with alternative distribution-matching objectives, including those from DM (Zhao & Bilen, 2023), M3D (Zhang et al., 2024a), and M3D+OPTICAL (Cui et al., 2025b). All other components of the framework remain unchanged. This setting allows us to isolate the effect of the objective itself and evaluate its compatibility with discrete real subset selection. Table 24 reports the resulting performance on ImageNet. While these adapted objectives yield reasonable results when instantiated within our framework, they consistently underperform our proposed formulation. This suggests that our alignment-driven objective is better suited for discrete subset selection under diffusion model training. At the same time, the competitive performance of these adapted objectives indicates that our framework serves as an effective bridge between 26 Geometry-Aware Dataset Condensation for Diffusion Model Training 
+
+Table 22. Density-bin comparison between POT ( κ = 1 .05 ) and classical balanced OT for class 0 ( kNN = 10 , 20 bins).                                                                                                                                    
+
+> Bin Density Quantile Range NPOT ( κ= 1 .05 )OT ( κ= 1 .0)
+> Mass Fraction Avg. CMass Fraction Avg. C
+> 0[0.0429, 0.0741] 65 0.0068 204.1019 0.0500 303.6486 1[0.0741, 0.0961] 65 0.0456 158.8873 0.0500 163.7466 2[0.0961, 0.1109] 65 0.0526 117.6554 0.0500 117.3249 3[0.1109, 0.1233] 65 0.0526 94.1423 0.0500 93.3965 4[0.1233, 0.1355] 65 0.0526 91.5579 0.0500 90.9135 5[0.1355, 0.1438] 65 0.0527 77.3135 0.0500 76.4463 6[0.1438, 0.1517] 65 0.0527 77.7354 0.0500 76.8634 7[0.1517, 0.1589] 65 0.0527 69.8942 0.0500 68.8171 8[0.1589, 0.1672] 65 0.0527 67.3078 0.0500 66.1017 9[0.1672, 0.1724] 65 0.0527 64.1577 0.0500 62.9709 10 [0.1724, 0.1786] 65 0.0527 62.1195 0.0500 60.9175 11 [0.1786, 0.1846] 65 0.0527 56.5397 0.0500 55.3196 12 [0.1846, 0.1907] 65 0.0527 53.5391 0.0500 52.3477 13 [0.1907, 0.1979] 65 0.0527 53.2931 0.0500 52.0506 14 [0.1979, 0.2049] 65 0.0527 51.6530 0.0500 50.3091 15 [0.2049, 0.2132] 65 0.0527 48.0480 0.0500 46.8166 16 [0.2132, 0.2216] 65 0.0527 46.8586 0.0500 45.5787 17 [0.2216, 0.2292] 65 0.0527 42.4270 0.0500 41.2335 18 [0.2292, 0.2468] 65 0.0527 39.1556 0.0500 37.9536 19 [0.2468, 0.2878] 65 0.0527 35.5625 0.0500 34.4713
+
+synthetic set generation objectives and real subset selection, providing a unified carrier for evaluating and comparing diffusion-oriented alignment criteria. We further analyze the behavior of different distribution-matching objectives when instantiated within our framework. DM (Zhao & Bilen, 2023) adopts an MMD-based objective that primarily enforces consistency of first-order statistics. As a result, the selected samples tend to concentrate around the central region of the data distribution, leading to limited coverage and weaker representativeness, which in turn degrades generative performance. M3D (Zhang et al., 2024a) extends this formulation by computing MMD in the kernel Hilbert space, thereby encouraging consistency of higher-order statistics beyond the mean. This modification substantially strengthens distributional alignment and yields clear improvements over DM in terms of both coverage and generation quality. Building upon this, M3D+OPTICAL (Cui et al., 2025b) further incorporates optimal transport to reallocate sample contributions, explicitly adjusting the matching between the selected subset and the full distribution. This transport-based correction enhances set-level alignment and leads to additional performance gains compared to MMD-based objectives alone. Despite these improvements, these objectives do not explicitly enforce semantic consistency of the selected samples. Consequently, while distributional alignment is improved, semantic reliability is not guaranteed, which is reflected in relatively lower inception scores. Moreover, the use of full matching in these objectives can overemphasize peripheral or low-density regions, introducing sensitivity to boundary samples that may partially distort the selected set. In contrast, our method combines geometry-aware alignment with semantic regularization and adopts a one-sided partial matching formulation, allowing it to focus on representative regions while preserving semantic fidelity, thereby achieving consistently superior performance. 
+
+G.6. Clarification for the Meaning of “Geometry” 
+
+Our method is not a generic metric matching approach but rather a distributional geometry alignment framework specifically designed for the score-matching objective of diffusion models. In our paper, we use the term “geometry” not in the strict differential-geometric sense, e.g., curvature or topology, but to refer to the distributional support geometry of the data in representation space. This concept encompasses the local neighborhood structure , mode coverage , and support allocation . Specifically, this is the type of geometry emphasized in Section 3.2, which is crucial for diffusion models to learn an accurate score function without distorting the underlying manifold. In this context, preserving relative relationships and local structure takes precedence over scalar ranking, as these aspects are directly relevant to the model’s ability to capture the true data distribution. In modern geometric analysis, this view is consistent with the classical understanding that the L2 Wasserstein distance is not merely a distance penalty, but endows the space of probability measures with a geometric structure ( ?? ). The cost matrix 27 Geometry-Aware Dataset Condensation for Diffusion Model Training 
+
+Table 23. Density-bin comparison between POT ( κ = 1 .05 ) and classical balanced OT for class 1 ( kNN = 10 , 20 bins).                                                                                                                                    
+
+> Bin Density Quantile Range NPOT ( κ= 1 .05 )OT ( κ= 1 .0)
+> Mass Fraction Avg. CMass Fraction Avg. C
+> 0[0.0492, 0.0654] 65 0.0094 269.4661 0.0500 330.3231 1[0.0654, 0.0763] 65 0.0424 234.1719 0.0500 239.7473 2[0.0763, 0.0869] 65 0.0517 190.7487 0.0500 188.7713 3[0.0869, 0.0979] 65 0.0527 152.7371 0.0500 149.8369 4[0.0979, 0.1066] 65 0.0527 135.2751 0.0500 131.3823 5[0.1066, 0.1139] 65 0.0527 119.0013 0.0500 115.9252 6[0.1139, 0.1209] 65 0.0527 105.5147 0.0500 102.6385 7[0.1209, 0.1281] 65 0.0527 96.2394 0.0500 93.5553 8[0.1281, 0.1350] 65 0.0527 90.6207 0.0500 88.0241 9[0.1350, 0.1435] 65 0.0527 83.5750 0.0500 81.5046 10 [0.1435, 0.1505] 65 0.0527 71.8745 0.0500 70.3046 11 [0.1505, 0.1575] 65 0.0527 72.7010 0.0500 71.1531 12 [0.1575, 0.1651] 65 0.0527 68.6823 0.0500 67.4286 13 [0.1651, 0.1706] 65 0.0527 65.1971 0.0500 63.7957 14 [0.1706, 0.1766] 65 0.0527 61.3405 0.0500 60.1314 15 [0.1766, 0.1826] 65 0.0527 59.9761 0.0500 58.8863 16 [0.1826, 0.1900] 65 0.0527 58.6127 0.0500 57.4309 17 [0.1900, 0.1987] 65 0.0527 55.1397 0.0500 54.0474 18 [0.1987, 0.2096] 65 0.0527 50.5011 0.0500 49.5143 19 [0.2096, 0.2382] 65 0.0527 43.4175 0.0500 42.5779
+
+Table 24. Compatibility of our alignment-driven discrete subset selection framework with existing synthetic set generation objectives, including DM (Zhao & Bilen, 2023), M3D (Zhang et al., 2024a), and M3D+OPTICAL (Cui et al., 2025b). These objectives are instantiated as alignment criteria within our discrete optimization framework and evaluated on ImageNet (Russakovsky et al., 2015) at 256 × 256 
+
+using DiT-L/2 (Peebles & Xie, 2023).                               
+
+> Method Data Budget Eval. Samples FID ↓IS ↑Precision ↑Recall ↑
+> DM (Zhao & Bilen, 2023) 0.8% (10K) 50K 4.34 321.9 0.78 0.23 M3D (Zhang et al., 2024a) 0.8% (10K) 50K 3.83 317.1 0.75 0.24 M3D+OPTICAL (Cui et al., 2025b) 0.8% (10K) 50K 3.72 312.6 0.76 0.26 Ours 0.8% (10K) 50K 3.43 414.3 0.78 0.28
+
+defines the distances between samples, but it is the OT/POT mechanism that realizes the alignment of data distributions in a way that captures the distributional geometry in representation space. One-sided POT is particularly important here. Under extreme condensation budgets, balanced OT enforces symmetric full mass matching between real and selected samples and may bias the selected set away from the core manifold. Our one-sided POT relaxes this requirement and suppresses such spurious couplings. By concentrating mass on the high-density, stable support, POT ensures that the geometry-preserving alignment is directly aligned with the score-matching objective of diffusion models, which requires maintaining local structure and relative relationships. We directly validate this notion of geometry in the paper, rather than merely reporting final generative metrics. Our analysis includes manifold coverage, mean nearest-neighbor distance, and the effect of POT in avoiding over-assignment to peripheral regions, as shown in Figure 5, Figure 7, Table 22, and Table 23. All of these measures are designed to assess the preservation of neighborhood- and support-level geometry in representation space. Here we report additional metrics that are designed to quantify how well a selected subset preserves the neighborhood geometry of the full dataset: • Mean nearest selected distance measures the average distance from each full-dataset sample to its nearest selected sample, with lower values indicating that the selected subset stays closer to the original data manifold. • Coverage at k-radius measures the proportion of samples whose nearest selected sample falls within that sample’s own local k-NN radius, such as the 10-NN radius, so higher values indicate better local coverage of the original distribution. • Nearest selected in k-NN rate further examines whether the nearest selected sample truly belongs to the sample’s original k nearest neighbors, with higher values reflecting better preservation of authentic local neighbor relationships. • Mean rank of nearest selected computes the average rank position of the nearest selected sample in the full neighbor 28 Geometry-Aware Dataset Condensation for Diffusion Model Training 
+
+(a) Multiple salient objects (b) Mislabeled samples (c) Severely degraded samples  
+
+> Figure 6. Representative failure cases in large-scale datasets such as ImageNet (Russakovsky et al., 2015) that motivate confidence regularization. (a) Images containing multiple salient objects, where the labeled category is not visually dominant (images adapted from (Miyai et al., 2025)). (b) Genuinely mislabeled samples, where the assigned category is inconsistent with the actual visual content (images adapted from (Zheng et al., 2025)). (c) Severely degraded samples with extreme blur, occlusion, or scale, where the labeled object is barely recognizable. While only (b) constitutes true annotation errors, all three cases can introduce unreliable geometric anchors and distort distribution alignment if treated equally.
+
+ordering of each point, where lower values mean that selected samples tend to remain top-ranked local neighbors rather than merely nearby points. These metrics are particularly suitable for quantifying neighborhood geometry preservation because they evaluate comple-mentary aspects of local structure, including distance proximity, local coverage, neighbor identity consistency, and relative rank ordering. Results in Table 25 show that our method preserves local neighborhood geometry much better than D 2C.                       
+
+> Table 25. Neighborhood geometry preservation of selected subsets. Lower mean nearest distance and mean nearest selected rank are better, while higher coverage and nearest-selected-in-10NN rate are better.
+> Subset Mean Nearest Distance ↓
+> Coverage@10 -radius ↑
+> Nearest-Selected -in-10NN ↑
+> Mean Nearest Selected Rank ↓
+> D2C (Class 0) 8.9 0.057 0.051 125.59 Ours (Class 0) 6.7 0.140 0.138 103.40 D2C (Class 1) 9.5 0.043 0.036 204.39 Ours (Class 1) 7.8 0.150 0.144 103.79
+
+G.7. Why Confidence Regularization Matters: Low-confidence Samples Undermine Geometry-Preserving Alignment Motivation. Our one-sided POT objective is designed to preserve feature-space geometry, yet large-scale datasets such as ImageNet inevitably contain images whose semantic evidence for the nominal class label is unreliable. As illustrated in Fig. 6, representative cases include (i) scenes with multiple salient objects where the labeled category is not visually dominant; (ii) genuinely mislabeled images where the assigned category is inconsistent with the actual visual content; and (iii) severely degraded images where extreme blur, occlusion, or scale makes the labeled object barely recognizable. Importantly, these cases are not simply “hard” classification instances; for conditional generative modeling they correspond to unreliable (and sometimes contradictory) conditioning signals, and treating them on par with clean data can bias distribution-preserving condensation. 
+
+A concrete example: how low-confidence selections harm geometric alignment. Consider a class c (e.g., golden retriever ) and a candidate image whose visual content is dominated by background clutter or co-occurring objects, or whose labeled object is barely visible. A pretrained classifier typically assigns a low confidence p(c | · ) to such an image, reflecting weak class-consistent evidence. In the embedding space induced by the pretrained encoder, these images are often mapped to regions closer to background-driven patterns or class-boundary areas than to the core class-conditional manifold. The key issue arises when such a sample is selected into the condensed set Sc: it becomes a source-side geometric anchor whose pairwise distances to other selected samples contribute to the global geometry used for alignment. Because its embedding is semantically unreliable and often lies off the class-conditional manifold, it can distort the overall distance structure of the selected set, shift the effective geometric center, and consume subset capacity to represent background-driven or boundary regions. Under tight condensation budgets, even a small number of such unreliable anchors can substantially 29 Geometry-Aware Dataset Condensation for Diffusion Model Training Coverage = 50.9%   
+
+> Mean Nearest Distance = 8. 9
+> Coverage = 70.4%
+> Mean Nearest Distance = 6.7
+> Figure 7. t-SNE visualization comparing D 2C (Huang et al., 2026) (left) and our method (right). We visualize the real data (gray) from class 0 (tench) of ImageNet and the selected subset samples (blue). In this visualization, D 2C selects samples by uniformly spacing along a scalar difficulty ranking, which can lead to uneven coverage in the embedding distribution. In contrast, our one-sided partial OT–guided alignment-driven selection produces subsets that appear more broadly distributed, providing qualitative intuition for the improved alignment achieved by our method.
+
+reduce intra-class coherence and bias the selected set away from the dominant manifold, which in turn compromises distribution-preserving alignment for diffusion training. 
+
+Why this is specifically harmful for diffusion-oriented condensation. Diffusion training is driven by likelihood maximization and is therefore highly sensitive to biases in the support and global geometry of the training distribution. Unlike discriminative training, where a small number of atypical hard examples may help sharpen decision boundaries, diffusion models require the training subset to faithfully represent the class-conditional data manifold. When semantically unreliable images enter Sc, they effectively behave as geometric outliers: their embeddings distort the global distance structure of the subset and misallocate limited subset capacity toward background-driven or semantically inconsistent regions, rather than the dominant class manifold. This effect is particularly pronounced under tight condensation budgets, where each selected sample carries substantial representational weight. Moreover, severely degraded images provide corrupted or information-poor visual evidence, which is fundamentally misaligned with the objective of learning high-fidelity generative distributions and can directly impair likelihood-based diffusion training. As a result, retaining such samples degrades distributional alignment and manifests as reduced semantic clarity and lower distribution fidelity in generation. 
+
+Confidence regularization as a semantic reliability constraint for discrete selection. We therefore introduce the confidence regularization 
+
+Lconf = 1
+
+m
+
+> m
+
+X
+
+> i=1
+
+− log p(c | xi),
+
+which penalizes selecting samples that a pretrained classifier deems weakly supported by the nominal class label. In practice, low classifier confidence correlates well with the failure cases illustrated in Fig. 6, including mislabeled samples, severely degraded images, and visually non-dominant instances, whose embeddings are more likely to be unstable and less faithful to the class manifold. By incorporating Lconf into the subset objective optimized by greedy construction and swap-based refinement, such low-confidence candidates become less likely to be selected and more likely to be replaced if selected, thereby preventing unreliable geometric anchors from entering Sc. This interpretation is consistent with our ablation behavior: removing Lconf primarily decreases IS, indicating degraded class-conditional semantic clarity due to the inclusion of semantically unreliable selections. 
+
+## H. More Visualization Results 
+
+Figure 8 showcases 512 × 512 images generated by DiT-L/2 trained for only 10K iterations on the condensed dataset obtained with our method. The results demonstrate high visual fidelity, rich diversity, and rapid convergence, indicating that our condensed subset provides broad and faithful coverage of the real data manifold, effectively supporting high-quality diffusion training even under limited iterations. Figure 9 further presents 256 × 256 samples generated by DiT-L/2 trained 30 Geometry-Aware Dataset Condensation for Diffusion Model Training Goldfish 
+
+Robi n
+
+Ringle t
+
+Monarch 
+
+Cannon 
+
+Chime & 
+
+Bell 
+
+Dining 
+
+Table 
+
+Golf 
+
+Ball 
+
+Figure 8. Examples of 512 × 512 images generated by DiT-L/2 (Peebles & Xie, 2023) after 10K training iterations on a condensed dataset (10K data budget) selected by our method. 
+
+31 Geometry-Aware Dataset Condensation for Diffusion Model Training Coffeepot    
+
+> Dishrag
+> Coral
+> Fungus
+> Corn
+> Daisy
+> Rapeseed
+> Figure 9. Examples of 256 ×256 images generated by DiT-L/2 (Peebles & Xie, 2023) after 30K training iterations on a condensed dataset (50K data budget) selected by our method.
+
+for 30K iterations using our 50K-image condensed subset. The model produces diverse and semantically coherent images with well-preserved fine-grained details, illustrating that the larger budget enhances coverage of relatively low-density regions and yields stable generative behavior. Figure 7 provides a qualitative comparison between D 2C (Huang et al., 2026) and our method on a representative ImageNet class ( tench ). We visualize the real data distribution in the embedding space using t-SNE, where gray dots denote all real samples and blue markers indicate the selected subset. As shown in Figure 7 (left), D 2C selects samples by uniformly spacing along a scalar difficulty ranking, which can lead to uneven coverage of the underlying embedding distribution and leave certain regions under-represented. In contrast, our method (Figure 7, right), guided by one-sided partial optimal transport, selects samples that are more broadly distributed across the data manifold. This results in higher coverage and a reduced mean nearest-neighbor distance to the real data, providing qualitative evidence that our approach achieves better geometric alignment with the full data distribution. 
+
+## I. PseudoCode 
+
+We present the pseudocode for our condensation pipeline in Algorithm 1. The computation of the one-sided partial optimal transport objective is detailed in Algorithm 2, while the greedy initialization and the subsequent swap-based refinement procedures are described in Algorithm 3 and Algorithm 4, respectively. At each greedy or swap evaluation, we compute the composite objective L(Sc, Tc) = LOT + α Lstat + β Lconf , where LOT 
+
+is obtained by invoking the Sinkhorn solver in Algorithm 2 using the current condensed embeddings Sc(e) and the fixed real embeddings Tc(e). In practice, for a fixed xi we evaluate all candidate swaps (xi → xj ) in a batched manner by recomputing 
+
+LOT with the updated S′
+
+> c(e)
+
+, enabling GPU-parallel scoring of ∆i→j .32 Geometry-Aware Dataset Condensation for Diffusion Model Training 
+
+Algorithm 1 Per-Class Alignment-driven Real Subset Selection via One-Sided Partial OT 
+
+Require: Full dataset T = SCc=1 Tc; subset size per class m; embedding extractor (to obtain Tc(e)); entropic OT parameters 
+
+(ε, T, κ ); weights (α, β ); batch size B; maximum refinement iterations I
+
+Ensure: Condensed subset S = SCc=1 Sc with |S c| = m 
+
+> 1:
+
+for each class c do  
+
+> 2:
+
+Compute feature embeddings Tc(e) = {yj }nj=1 from Tc 
+
+> 3:
+
+Compute confidence scores p(c | yj ) for Tc 
+
+> 4:
+
+Initialize Sc ← GREEDY INIT (Tc(e), m ) 
+
+> 5:
+
+Refine Sc ← SWAP REFINE (Sc, Tc(e), I ) 
+
+> 6:
+
+end for  
+
+> 7:
+
+Gather {S c} and return S
+
+Algorithm 2 One-Sided Partial OT Loss LOT via Dummy Source 
+
+Require: Condensed embeddings Sc(e) = {xi}mi=1 ; real embeddings Tc(e) = {yj }nj=1 ; ε; total Sinkhorn iters T ; capacity scaling κ ≥ 1; and scaling coefficient γ
+
+Ensure: One-sided partial OT loss LOT  
+
+> 1:
+
+Construct cost matrix C ∈ Rm×n with Cij = ∥xi − yj ∥22 
+
+> 2:
+
+Construct augmented cost matrix Caug =
+
+ C
+
+median( C)γ1⊤
+
+> n
+
+ 
+
+> 3:
+
+Set source marginal μ = 1 
+
+> m
+
+1m {fully shipped } 
+
+> 4:
+
+Set reference target marginal ¯ν = 1 
+
+> n
+
+1n and target capacity ν = κ ¯ν 
+
+> 5:
+
+Set dummy mass s = κ − 1 and augmented source marginal [μ; s] 
+
+> 6:
+
+Initialize Gibbs kernel K = exp( −Caug /ε ) 
+
+> 7:
+
+Initialize Sinkhorn scalings u ← 1, v ← 1 
+
+> 8:
+
+for r = 1 to T do  
+
+> 9:
+
+u ← [μ; s] ⊘ (Kv ) 
+
+> 10:
+
+v ← ν ⊘ (K⊤u) 
+
+> 11:
+
+end for  
+
+> 12:
+
+Compute augmented transport plan Π = Diag( u) K Diag( v) 
+
+> 13:
+
+Remove dummy row to obtain Treal ← Π1: m, : 
+
+> 14:
+
+LOT ← ⟨ C, Treal ⟩ 
+
+> 15:
+
+return LOT 
+
+## J. Broader Impact 
+
+Our geometry-aware dataset condensation framework enhances the efficiency of diffusion model training by reducing data size while preserving structural fidelity, enabling sustainable and accessible generative modeling. This advancement holds potential for widespread use in text-to-image generation, multimodal learning, and data-centric optimization, lowering the carbon footprint and democratizing large-scale generative modeling. Future work can further incorporate GPT-based evaluation as a complementary assessment protocol (Cui et al., 2024c; Sun et al., 2024b) and explore its use for data augmentation (Lv & Jiang, 2026). Nevertheless, dataset condensation inherently modifies the data distribution and may inadvertently amplify biases or underrepresent minority patterns if applied without care. Furthermore, condensed subsets preserve critical structural and semantic information, raising concerns about privacy, copyright, and potential misuse for generating synthetic or misleading media. These risks can be mitigated through fairness auditing, balanced sampling, anonymization, and transparent documentation of data provenance and condensation settings. Overall, our method advances energy-efficient AI while underscoring the importance of responsible governance, ethical safeguards, and open evaluation to ensure that data efficiency and social accountability progress hand in hand. 33 Geometry-Aware Dataset Condensation for Diffusion Model Training 
+
+Algorithm 3 Stage I: Greedy Initialization for Sc
+
+Require: Real set Tc; real embeddings Tc(e) = {yj }nj=1 ; subset size m
+
+Ensure: Initial condensed subset Sc with |S c| = m
+
+1: Sc ← ∅ 
+
+2: x⋆ 
+
+> 1
+
+← arg min xk ∈T c L({xk}, Tc)
+
+3: Sc ← { x⋆
+
+> 1
+
+}
+
+4: for t = 2 to m do 
+
+5: For each candidate xk ∈ T c \ S c, compute marginal gain 
+
+6: ∆L(xk) ← L (Sc ∪ { xk}, Tc) − L (Sc, Tc)
+
+7: x⋆t ← arg min xk ∈T c\S c ∆L(xk)
+
+8: Sc ← S c ∪ { x⋆t }
+
+9: end for 
+
+10: return Sc
+
+Algorithm 4 Stage II: Swap-Based Refinement for Sc
+
+Require: Current subset Sc with |S c| = m; real set Tc; max rounds I
+
+Ensure: Refined subset Sc
+
+1: for t = 1 to I do 
+
+2: improved ← false 
+
+3: for all xi ∈ S c in fixed order do 
+
+4: Evaluate ∆i→j for all xj ∈ T c \ S c in parallel 
+
+5: j⋆ ← arg min xj ∈T c\S c ∆i→j ; ∆⋆ ← ∆i→j⋆
+
+6: if ∆⋆ < 0 then 
+
+7: Sc ← (Sc \ { xi}) ∪ { xj⋆ }
+
+8: improved ← true 
+
+9: end if 
+
+10: end for 
+
+11: if not improved then 
+
+12: break 
+
+13: end if 
+
+14: end for 
+
+15: return Sc
+
+34

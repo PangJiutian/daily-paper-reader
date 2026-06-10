@@ -1,0 +1,1305 @@
+Title: Data assimilation for subsurface flow using latent diffusion model parameterization: performance of ensemble-Kalman and Monte Carlo techniques
+
+URL Source: https://arxiv.org/pdf/2606.11140v1
+
+Published Time: Wed, 10 Jun 2026 01:27:29 GMT
+
+Number of Pages: 41
+
+Markdown Content:
+Preprint submitted to Computational Geosciences 
+
+# Data assimilation for subsurface flow using latent diffusion model parameterization: performance of ensemble-Kalman and Monte Carlo techniques 
+
+## Guido Di Federico 1 Wenchao Teng 1 Louis J. Durlofsky 1
+
+> 1
+
+Department of Energy Science & Engineering, Stanford University, Stanford, CA, 94305, USA 
+
+{gdifede, wenchaot, lou }@stanford.edu 
+
+Abstract 
+
+Data assimilation (DA) in subsurface flow entails calibrating model parameters to match ob-served data, typically at wells, while preserving geological realism. Latent diffusion models (LDMs) provide efficient mappings from high-dimensional geological model space to a low-dimensional latent variable, reducing the dimensionality of the inverse problem while maintaining plausibility in poste-rior geomodels. However, the high nonlinearity in the LDM mapping may degrade the performance of Kalman-gain-based ensemble updates. We present a systematic comparison of DA algorithms applied to large-scale 3D channelized geomodels with hierarchical geological uncertainty. We com-pare model-space and latent-space DA using the ensemble smoother with multiple data assimilation (ESMDA), and demonstrate a key trade-off: model-space updates achieve significant uncertainty reduction but produce geologically unrealistic posterior models, while latent-space updates preserve realism but exhibit limited uncertainty reduction. Motivated by this, we explore rigorous Markov chain Monte Carlo (MCMC) and Sequential Monte Carlo (SMC) algorithms in the 3D-LDM latent space. To accommodate their high computational demands, we develop a fast surrogate flow model that approximates well-rate responses. MCMC and SMC are evaluated against ESMDA across three synthetic test cases, with DA performed in the LDM latent space. All models maintain geologi-cal realism due to the LDM parameterization. MCMC and SMC are consistent with one another and achieve lower data mismatch and more uncertainty reduction than latent-space ESMDA. Our overall results demonstrate that ensemble Kalman methods may provide overestimated posterior uncertainty with highly nonlinear parameterizations, while rigorous Monte Carlo sampling, enabled by fast surrogate models, can provide a more reliable alternative. 
+
+Keywords: Data assimilation, latent diffusion models, geological parameterization, Markov chain Monte Carlo, Sequential Monte Carlo, ensemble-Kalman methods 1
+
+> arXiv:2606.11140v1 [physics.geo-ph] 9 Jun 2026
+
+Preprint submitted to Computational Geosciences 
+
+# 1 Introduction 
+
+Data assimilation (DA) involves calibrating model parameters to minimize the mismatch between ob-served data and simulation predictions. In subsurface flow applications, this process is commonly referred to as history matching. Because of the high degree of prior uncertainty, and the fact that pressure, satu-ration, and flow-rate measurements are sparse and often noisy, history matching can provide uncertainty reduction but not the “true” geomodel. The model parameters of interest may include permeability, porosity, and rock-type (facies) distributions, along with flow functions such as relative permeabilities. Geomodel properties are assigned, block-by-block, to the discretized domain on which the governing flow equations are solved. This may result in, e.g., O(10 5 − 10 6) parameters to estimate during DA. Directly varying grid-based model parameters may not preserve the complex spatial correlations exhibited by realistic systems, such as channelized or deltaic fan systems characterized by multipoint statistics. In these cases, a mapping between the geomodel and a low-dimensional latent variable can be introduced. DA is then performed in a statistically well-behaved latent space, which involves many fewer parameters than the grid-based model. Performing DA through the manipulation of latent-space variables also acts to preserve geological realism in the posterior models, since the mapping is specifically designed to assure this. In this work, we perform systematic DA for parameterized geological models of (non-Gaussian) fluvial systems. We consider large 3D geomodels, containing channel, levee and mud facies, that are param-eterized using a latent diffusion model (LDM) representation. The flow problem entails immiscible, two-phase flow. While ensemble-Kalman-based algorithms are commonly applied due to their computa-tional efficiency (e.g., 4-20 iterations with ∼200-1000 ensemble members, resulting in O(10 3 − 10 4) flow simulations), we show that they may exhibit inaccuracy when combined with parameterized geomodels. We therefore present a DA workflow that involves LDM parameterization combined with formal Monte Carlo-based posterior sampling. To enable the large number of forward evaluations required in this framework, we introduce a fast surrogate model for flow simulation. This workflow is applied for a range of cases, allowing us to highlight the differences among methods in terms of uncertainty reduction, data mismatch, and posterior geomodel realism. Earlier parameterization methods for latent-space DA include wavelet (Jafarpour, 2011) and discrete cosine transform (Jafarpour and McLaughlin, 2009; Zhao et al., 2017) methods, as well as principal component analysis (PCA)-based methods (Vo and Durlofsky, 2015; Chen et al., 2016). Truncated pluri-Gaussian simulation (Liu and Oliver, 2005; Chang et al., 2010) and level-set representations (Chang et al., 2010) are parameterization techniques developed specifically for discrete facies geomodels. More recently, a number of deep learning (DL)-based parameterization methods have been proposed. These DL methods are referred to as generative, in that they can learn complex spatial patterns and generate unseen geological realizations from a latent variable input. In complex geological settings, like fluvial channel or deltaic fan systems, these methods typically outperform the earlier methods, though they do require O(10 3 − 10 4) prior realizations for training. DL-based methods include those that use convolutional neural networks, CNNs (Liu and Durlofsky, 2Preprint submitted to Computational Geosciences 
+
+2021; Tang et al., 2021), variational autoencoders, VAEs (Canchumuni et al., 2019a,b), and generative adversarial networks, GANs (Laloy et al., 2018; Bao et al., 2020; Canchumuni et al., 2021; Song et al., 2023). Diffusion models (DMs) address some of the limitations of these earlier DL methods, which include blurred VAE outputs, unstable GAN training, and the need for a significant amount of hard data in CNN-PCA methods. DMs are able to generate high-quality realizations (Dhariwal and Nichol, 2021), though they do require increased computational time for generation relative to VAEs and GANs. DMs have been used for both geomodel generation (Lee et al., 2025; Ovanger et al., 2025) and for DA tasks (Di Federico and Durlofsky, 2025; Lin and He, 2025; Fu et al., 2026). More broadly, DL-based parameterizations have also been extended to treat multiple geological scenarios, first with 2D or relatively small 3D models (Mohd Razak and Jafarpour, 2020; Song et al., 2021b; Yu and Jafarpour, 2023), and more recently in larger 3D domains (Di Federico and Durlofsky, 2026; Song et al., 2026). In addition, conditional generation on both static (e.g., facies indicators, geological trends) and dynamic data (e.g., flow rate, pressure, saturation) has been achieved with DMs, either through supervised conditional training (Feng et al., 2024; Zhan et al., 2025; Lee et al., 2025) or posterior-guided generation (Wang et al., 2025b; Miele and Linde, 2026). Ensemble-Kalman-based methods, such as the ensemble smoother with multiple data assimilation (ESMDA, Emerick and Reynolds (2013)) or the ensemble Kalman filter (EnKF, Evensen (1994)), would appear to be natural choices for latent-space DA due to their computational efficiency and Gaussian assumptions on prior model parameters. As such, they have been applied with a variety of geologi-cal parameterizations. Their performance can degrade, however, when they are used with DL-based parameterizations. This is because these parameterizations introduce an additional, potentially highly nonlinear, mapping between DA variables and model parameters. This increased nonlinearity can amplify entanglement between latent variables and geomodel features, as noted in Yu and Jafarpour (2023) for a VAE and Rongier and Peeters (2025) for a GAN. Consistent with this, various investigators have ob-served issues with posterior sampling accuracy when combining deep learning parameterizations with both ensemble-Kalman and gradient-based methods. The problems identified include inconsistency with the correct Bayesian posterior (Tang et al., 2021), limited uncertainty reduction relative to ob-served data (Di Federico and Durlofsky, 2025; Fan et al., 2026), and trapping in local minima in latent space (Laloy et al., 2019). Although partial mitigation strategies have been developed (Lopez-Alvis et al., 2021; Exterkoetter et al., 2024; Yu and Jafarpour, 2023; Merzoug and Pyrcz, 2025), the formal assess-ment of posterior sampling accuracy with DL-based parameterizations remains limited in the literature. One reason for this may be that ensemble-Kalman methods classically suffer from uncertainty underes-timation due to ensemble collapse. The overestimation of posterior uncertainty, which can occur with LDMs or other DL-based parameterizations, may therefore be taken to suggest adequate performance. Rigorous posterior sampling methods, such as rejection sampling (RS) or MCMC, target the exact Bayesian posterior without Gaussian or model linearity assumptions. However, they typically require 
+
+O(10 4 − 10 6) iterations. The high computational cost of forward simulations and the number of pa-rameters to calibrate motivate the use of surrogate flow models. Trained on a dataset of full-physics simulation runs, surrogate models approximate reservoir behavior for new geomodels at greatly reduced 3Preprint submitted to Computational Geosciences 
+
+computational cost. Earlier studies primarily focused on reduced-order models (Sayarpour et al., 2011; He et al., 2013) and physics-constrained neural networks (Wang et al., 2022; Tartakovsky et al., 2020). More recently, data-driven neural network surrogates have gained significant attention. The literature on subsurface flow surrogates for history matching is extensive, with architectures ranging from recurrent (RNN) and convolutional neural networks (Tang et al., 2020; Mo et al., 2019; Han et al., 2024) to Fourier neural operators (FNO, Wen et al. (2022)), diffusion models (Wang et al., 2025a), and transformers (Han and Durlofsky, 2026). We reiterate that the full-physics simulator is still required to generate training data (and potentially for post-history-matching validation), while the surrogate is used for function evaluations within the DA workflow. In this work, we address the key issues raised in the above discussion. We first provide a systematic analysis of data assimilation with ESMDA for both full (model-space) and LDM-parameterized geomod-els. For model-space ESMDA, we demonstrate uncertainty reduction consistent with the observed data, but degraded geological realism in the posterior models. Using latent-space DA, we observe the opposite behavior, that is, geologically realistic posterior models but limited uncertainty reduction relative to observed data. Motivated by this discrepancy, we then develop a fast and accurate flow surrogate to enable the extension of our workflow to include rigorous MCMC and Sequential Monte Carlo (SMC) algorithms operating on latent-space (LDM) variables. We show that these approaches retain geological realism while providing appropriate (relative to observed data) and consistent estimates of posterior un-certainty. This is demonstrated across multiple synthetic true models and evaluation metrics. Taken in total, our findings highlight the potential limitations of using DL-based parameterizations with standard ensemble-Kalman methods, and the improvements that can be achieved with rigorous sampling enabled through use of flow surrogates. This paper proceeds as follows. In Section 2, we describe the geomodels, including the uncertain scenario parameters, and the flow simulation problem. In Section 3 we review the 3D-LDM model and explain the data assimilation setup. Results for both model-space and latent-space ESMDA, for a synthetic true model, are provided in Section 4. In Section 5 we present our new surrogate flow model, and we briefly describe the MCMC and SMC algorithms. Comparative results across all methods, for three different true models using LDM-based parameterizations, are provided in Section 6. In Section 7 we summarize this work and provide directions for future research. 
+
+# 2 Geomodels and flow simulation setup 
+
+In this section, we describe the geomodels considered in this work. We then present the flow problem and simulation specifications. The geomodels and simulation setup are the same as those described in Di Federico and Durlofsky (2026). The geomodels are intended to represent channelized systems containing channel, levee, and mud facies. These facies are identified by cell values of 1, 0.5, and 0, respectively. Realizations are generated through object-based modeling (OBM) using Petrel (Schlumberger, 2019). Each realization, denoted as m0 ∈ RNc , contains Nc = Nx × Ny × Nz = 128 × 128 × 32 = 524,288 grid blocks. The geomodels 4Preprint submitted to Computational Geosciences 
+
+are conditioned to either channel or mud facies at Nw = 9 wells ( Ninj = 3 injectors and Nprod =6 producers) along the full vertical thickness, resulting in Nh = 288 conditioning locations. These channelized models are characterized in terms of three uncertain geological scenario parameters: mud fraction fm ∈ [0 .72 , 0.87], average channel orientation θch ∈ [30 ◦, 60 ◦], and average channel width wch ∈
+
+[4 , 6] grid blocks. Channel depth, wavelength, and amplitude do not change across realizations. In generating realizations within Petrel, fm, θch and wch are sampled from uniform distributions over their specified ranges. A tolerance of ±10% is used in the OBM procedure. The resulting geomodels exhibit a hierarchical uncertainty structure, as they are characterized by uncertain higher-level scenario parameters, with each set of scenario parameters corresponding to an (essentially) infinite number of geobody realizations. The channel bodies have a truly 3D structure – they are not simply extruded extensions of planar features. More specifically, individual channels exhibit decreasing width as a function of depth. Channels may be confined to specific depth intervals, with some present only in the upper portion and some in the lower portion of the model. Sample realizations and their associated scenario parameters are shown in Figure 1. In these images, the mud (background) facies has been omitted for better visualization. Differences in channel orientation (θch ) are quite noticeable from realization to realization. The variability in fm and wch , while impactful for flow, is more difficult to discern visually. The models on the bottom row will be used as the synthetic “true” models for DA (later denoted as Cases 1–3). These models are not included in the training set (the LDM architecture and training are described in Section 3) and are characterized by a diverse set of scenario parameters. The simulations involve two-phase immiscible flow driven by three injection wells and six production wells in a line-drive configuration. These wells, denoted I1–I3 and P1–P6, are shown in Figure 1. This setup may represent a waterflood for oil production or groundwater remediation involving an immiscible contaminant. We will refer to the two phases as oil and water. Grid blocks are of physical dimensions 65 ft × 65 ft × 6.5 ft (19.8 m × 19.8 m × 1.98 m). Porosity ( ϕ) and permeability ( k) vary by facies, though they are taken to be constant within each rock type. We specify kx = ky and kz = 0 .2kx for all facies, where kx, ky and kz denote directional permeabilities. The specific ( ϕ, k x) values are (0.2, 1000 mD) for channel, (0.15, 200 mD) for levee, and (0.05, 25 mD) for mud. The initial reservoir pressure, at a depth of 4160 ft (1268 m), is 4500 psi (31.03 MPa). Initial oil and water saturations are 0.85 and 0.15, and their viscosities are 5 cP and 1 cP, respectively. Wells are perforated only in channel facies. All wells are bottom-hole pressure (BHP) controlled, with injectors operating at 4700 psi (32.41 MPa) and producers at 4300 psi (29.65 MPa). The simulation time frame is 1500 days, and the maximum time step in any run is 50 days (there are Nt = 30 recorded time steps in each run). All simulations are performed using tNavigator (Rock Flow Dynamics, 2024). Each run requires approximately 10 minutes on 16 cores for an AMD EPYC CPU. For additional details on the geomodeling and flow simulation setup, please refer to Di Federico and Durlofsky (2026). 5Preprint submitted to Computational Geosciences                                     
+
+> (a) fm= 0 .79, θch = 38 ◦,wch =5.3
+> (b) fm= 0 .84, θch = 55 ◦,wch =4.2
+> (c) fm= 0 .81, θch = 36 ◦,wch =4.6
+> (d) fm= 0 .85, θch = 45 ◦,wch =4.0
+> (e) fm= 0 .78, θch = 33 ◦,wch =5.5
+> (f) fm= 0 .75, θch = 58 ◦,wch =5.9
+
+Figure 1: Example Petrel realizations and associated scenario parameters ( fm is mud fraction, θch is channel orientation, wch is channel width in grid cells). Injection (I1–I3) and production (P1–P6) wells, which honor hard data, are also shown. Realizations in (d), (e), (f) are used later as true models for DA. 
+
+# 3 LDM parameterization and data assimilation setup 
+
+In this section we describe the parameterization procedure used in this work along with the basic setup for the DA problem. 
+
+## 3.1 3D-LDM parameterization 
+
+The LDM geological parameterization used here was first proposed for 2D systems (Di Federico and Durlofsky, 2025) and was extended to 3D systems with variable geological scenario parameters by Di Fed-erico and Durlofsky (2026). The method is based on the original LDM paper by Rombach et al. (2022). These authors extended standard generative diffusion models (Ho et al., 2020), which operate directly in the pixel (or voxel) space, to include a low-dimensional latent encoding. The dataset used to train the 3D-LDM parameterization in this study consists of 3000 realizations of the fluvial channel system described in Section 2. These realizations represent our prior knowledge of the distribution of subsurface properties before DA is applied. Diffusion models are based on two processes, each performed over T discrete steps – a forward noising stage, in which Gaussian perturbations are progressively added to a data sample, and a learned denoising stage (typically by a U-net, (Ronneberger et al., 2015)), through which noise is progressively removed. In this way, new samples from the dataset distribution can be generated by denoising input Gaussian noise. In the 3D-LDM, both stages operate in a compressed latent space. A VAE (Kingma and Welling, 2013) is used to perform the mapping between the original data and its encoded representation. 6Preprint submitted to Computational Geosciences 
+
+The VAE comprises an encoder E : RNx×Ny ×Nz → Rnx×ny ×nz and a decoder D : Rnx×ny ×nz →
+
+RNx×Ny ×Nz where nd = Nd/f for d ∈ { x, y, z }, and f is the downsampling ratio. The overall compression is thus f 3. Note that in the above both the geomodel and LDM latent space are 3D fields. Because they are treated as flattened vectors within the history matching workflow, we will express them as m0 ∈ RNc
+
+and ξ0 ∈ Rnc , with nc = nx × ny × nz . The encoder outputs the parameters of a Gaussian distribution, from which the latent variable is sampled via reparameterization as ξ0 = Eμ(m0) + Eσ (m0) ⊙ ϵ, where 
+
+ϵ ∼ N (0, Inc ). For simplicity, we denote this operation as ξ0 = E(m0). The VAE is trained by minimizing the loss 
+
+LVAE (θ) = Lrecon + λKL LKL + λhLh + λperc Lperc . (1) In the above, Lrecon = ∥m0 − D (E(m0)) ∥22 is the pixel-wise reconstruction loss between the original geo-model and the decoded latent representation. The loss term LKL = DKL (N (Eμ(m0), E2 
+
+> σ
+
+(m0)) ||N (0, Inc )) is the Kullback-Leibler divergence, which regularizes the latent space towards a multi-Gaussian distri-bution. The term Lh = 1 
+
+> Nh
+
+|| H(m0 − D (E(m0)) || 22 enforces conditioning at hard-data locations, selected from the full geomodel by the binary selection matrix H. Finally, Lperc denotes a perceptual loss that compares deep feature representations of input and reconstructed geomodels, as extracted by a pretrained network (see (Di Federico and Durlofsky, 2026) for additional details). In our implementation, the loss weights are set to λKL = 10 −6, λh = 10 −2, and λperc = 10 −3. A downsampling ratio of f = 8 (total compression factor f 3 = 512) is used, such that nc = 1024. Once the VAE is trained and its weights are frozen, a U-net is trained to perform denoising in the latent space. In the forward (noising) stage, Gaussian noise is added to a “clean” latent variable 
+
+ξ0 = E(m0), up to a randomly selected step t, to obtain the noisy latent variable ξt as 
+
+ξt = √¯αt ξ0 + √1 − ¯αt ϵt, ϵt ∼ N (0, Inc ). (2) The coefficients αs for ¯ αt = Qts=1 αs are defined by a scheduler function of t, which typically decreases linearly from α1 to αT . Eq. 2 and the ¯ αt parameters act in a manner that, at step T , the latent variable is indistinguishable from pure Gaussian noise. In the reverse (denoising) stage, the U-net learns to predict the added noise ϵt using Eq. 2 and the noisy latent variable ξt. It is trained by minimizing 
+
+LU-net (θ) = ∥ϵt − ϵθ (ξt, t )∥22, (3) where ϵθ (ξt, t ) is the output of the U-net. We adopt a linear scheduler, with T = 20 steps and coefficients α1 = 0 .9985 and αT = 0 .9805. Full architectural and training details are provided in (Di Federico and Durlofsky, 2026). Since ξT is approximately Gaussian, a new realization can be generated by sampling ξT ∼ N (0, Inc )and reversing the forward noising process in Eq. 2. Using the predicted noise ϵθ (ξt, t ) from the U-net, 7Preprint submitted to Computational Geosciences 
+
+ξT is iteratively denoised as 
+
+ξt−1 = √¯αt−1
+
+ ξt − √1 − ¯αt ϵθ (ξt, t )
+
+√¯αt
+
+
+
++ p1 − ¯αt−1 ϵθ (ξt, t ), t = T, . . . , 1, (4) until a fully denoised latent variable ξ0 is obtained. Eq. 4 refers specifically to the denoising diffusion implicit model (DDIM), proposed by Song et al. (2021a). The final geomodel realization is recovered by decoding through the VAE, mLDM 0 = D(ξ0). We note that the overall mapping mLDM 0 (ξT ) is highly nonlinear but it is deterministic, which is essential for our DA procedures. In (Di Federico and Durlofsky, 2026), we observed high degrees of consistency between ensembles of reference Petrel geomodels and 3D-LDM-generated models. These assessments were both qualitative (e.g., channel shape, continuity, facies ordering) and quantitative (e.g., geostatistical metrics and flow simulation results). Examples of random 3D-LDM realizations are presented in Figure 2, along with the corresponding scenario parameters. The mud fraction can be directly computed as the fraction of 0-facies grid blocks. The average channel orientation and width are determined from the 3D-LDM geomodel through application of a lightweight CNN, trained on the Petrel dataset and input OBM labels, as described in (Di Federico and Durlofsky, 2026). We observed about 98% accuracy in hard data conditioning in the generated realizations. In total, our previous results clearly demonstrate that the 3D-LDM parameterization can accurately sample from the (prior) distribution represented by the Petrel dataset, indicating it can be effectively used in our DA framework.                   
+
+> (a) fm= 0 .83, θch = 57 ◦,wch =4.4
+> (b) fm= 0 .84, θch = 37 ◦,wch =5.1
+> (c) fm= 0 .80, θch = 37 ◦,wch =4.8
+
+Figure 2: Example 3D-LDM generated realizations and associated scenario parameters. We reiterate that scenario parameters are encoded jointly with the geobody distribution in our 3D-LDM. This approach differs from some of the methods described in Section 1, which utilize additional encoded inputs to condition or guide geomodel generation. Although the geology in this study is hierar-chical (and hierarchically uncertain), with our approach we only need a single level of parameterization. This represents a key strength of the 3D-LDM formulation. 
+
+## 3.2 Data assimilation setup 
+
+We now describe the DA problem considered here. Observed data, dtrue ∈ RNd , where Nd is the number of observations, are obtained by running the flow simulator on a synthetic true model. The true models 8Preprint submitted to Computational Geosciences 
+
+used in this study, which are part of the testing dataset, are shown in Figure 1d,e,f. To approximate measurement error, we perturb dtrue with Gaussian noise of zero-mean and standard deviation of 5% of the corresponding simulated value. No temporal or spatial correlation is introduced. It follows that 
+
+d∗ 
+
+> obs
+
+= dtrue + N (0, C d), where Cd ∈ RNd×Nd is a diagonal covariance matrix. We do not include model error, meaning we assume the simulated forward model is correct and the priors defined by p(m0) have been validated. Observations consist of water injection rates at the Ninj = 3 injection wells and oil and water production rates at the Nprod = 6 production wells. These observations provide 15 data streams, or quantities of interest (i.e., NQoI = Ninj + 2 Nprod = 15). Data are recorded every 50 days during the historical period of 250 days, corresponding to a total of Nd = 5 × NQoI = 75 observations. The remaining 1250 days are treated as the forecast period. In this study we perform DA in both model space and latent space. In model space, permeability (kx = ky , kz = 0 .2kx) is updated in every grid block. We denote the full set of log( kx) for a particular model as K ∈ RNc , with Nc = 524 , 288. Given the updated log( kx)i, i = 1 , . . . , N c, we update log( ky )and log( kz ) via ( ky )i = ( kx)i, ( kz )i = 0 .2( kx)i, i = 1 , . . . , N c. Porosity is treated through the porosity-permeability relationship. Specifically, we fit a second-degree polynomial for ϕi using the facies values for ( ϕ, log( kx)) given in Section 2. This expression can be written as ϕi = a0 + a1 log( kx)i + a2[log( kx)i]2,for i = 1 , . . . , N c. We apply a cutoff (truncation) to assure ( kx)i (and thus ϕi) is within the prior range, i.e., 25 mD ≤ (kx)i ≤ 1000 mD. The inverse problem in this case reduces to sampling from the unknown distribution p(m0 | d∗
+
+> obs
+
+), where m0 = K.When the 3D-LDM parameterization is used, DA is performed in the latent space using ξT as the model parameter variable. As such, the number of (approximately multi-Gaussian) parameters to cal-ibrate is now nc (recall nc ≪ Nc). At every DA step, 3D-LDM denoises the updated latent variable 
+
+ξT through the U-net to obtain ξ0 (Eq. 4), which is then decoded into an updated, full facies model, 
+
+mLDM 0 = D(ξ0). Grid block porosity and permeability values are assigned based on facies, as in Section 2. The inverse problem in this case reduces to sampling from the unknown distribution p(ξT | d∗
+
+> obs
+
+). For both model and latent-space DA, the input to the flow simulator is the full geomodel m0. We represent the numerical flow simulator as a nonlinear operator F (m0) : RNc → RNt×NQoI that maps m0 to a set of time-varying injection rates for each injector and a set of time-varying oil and water production rates for each producer. These quantities are denoted, respectively, as qi 
+
+> inj
+
+∈ RNt (i = 1 , . . . , N inj ), 
+
+qj 
+
+> oil
+
+∈ RNt , and qj 
+
+> wat
+
+∈ RNt (j = 1 , . . . , N prod ). The full set of injection and production rate data is thus 
+
+F (m0) = [ q1inj , . . . , qNinj  
+
+> inj
+
+, q1oil , . . . , qNprod  
+
+> oil
+
+, q1wat , . . . , qNprod  
+
+> wat
+
+]. (5) The goal of DA is to tune model parameters to minimize the mismatch between d∗ 
+
+> obs
+
+and the correspond-ing simulated data d ∈ RNd – that is, the first five time steps of the well rates in F (m0). We express this sub-sampling operation as d = Fobs (m0). 9Preprint submitted to Computational Geosciences 
+
+# 4 ESMDA in model space and latent space 
+
+In this section, we apply the popular ESMDA algorithm (Emerick and Reynolds, 2013) both in model space and in latent space (i.e., parameterized with 3D-LDM) for the setup described in Section 3. We first provide a brief overview of ESMDA and the localizations applied in this work. 
+
+## 4.1 ESMDA algorithm with localization 
+
+ESMDA iteratively updates an ensemble of Ne uncertain model parameter fields {pn}Ne 
+
+> n=1
+
+∈ RNp , where 
+
+Np denotes the number of model parameters, using ensemble-estimated cross-covariances between pa-rameters and observations. At each iteration k of the Na assimilation steps, the update equation involves the Kalman gain matrix K(k) ∈ RNp×Nd and the mismatch between observed and simulated data, 
+
+p(k+1)  
+
+> n
+
+= p(k) 
+
+> n
+
++ K(k)(d∗ 
+
+> obs
+
+− d(k) 
+
+> n
+
+)= p(k) 
+
+> n
+
++ C(k)
+
+> pd
+
+
+
+C(k) 
+
+> dd
+
++ α(k)Cd
+
+−1
+
+(d∗ 
+
+> obs
+
+− d(k) 
+
+> n
+
+), n = 1 , . . . , N e,
+
+(6) where p(k+1)  
+
+> n
+
+∈ RNp is the updated parameter vector of the ensemble member n and d(k) 
+
+> n
+
+∈ RNd is the simulated data vector. The matrix C(k) 
+
+> pd
+
+∈ RNp×Nd is the cross-covariance between parameters and simulated data and C(k) 
+
+> dd
+
+∈ RNd×Nd is the autocovariance of the simulated data, both estimated from the ensemble. The scalar α(k) is an inflation coefficient, such that d∗ 
+
+> obs
+
+= dtrue + N (0, α (k)Cd). The set of these coefficients satisfies PNa  
+
+> k=1 1
+> α(k)
+
+= 1. This distributes the full Bayesian update over multiple linear steps (Emerick and Reynolds, 2013). The updated parameters (and the number of parameters) differ between model space and latent space. Specifically, for model-space ESMDA, p(k) = m(k)0 ∈ RNc and Np = Nc. For latent-space ESMDA, p(k) = ξ(k) 
+
+> T
+
+and Np = nc.Due to the finite size of the ensemble, ESMDA, like other algorithms based on Kalman-type updates (e.g., ensemble Kalman filter, EnKF (Evensen, 1994)), can be susceptible to sampling error in Cpd . The resulting spurious correlations may result in ensemble collapse (underestimated uncertainty) or other problematic effects. To mitigate these issues, localization (Houtekamer and Mitchell, 2001; Chen and Oliver, 2010; Emerick, 2016) is often applied. This entails defining the elements of a correction matrix 
+
+L(k) ∈ RNp×Nd , such that K(k)loc = K(k) ⊙ L(k) is used in Eq. 6 instead of K(k). The most common form of localization is distance-based (Gaspari and Cohn, 1999), where correlations are weighted based on physical distance from the data source. This approach, however, is based on the assumption that correlation decreases with distance, which may not be strictly applicable in our setup. This is because, in model-space DA for channelized systems, parameter-data correlations are governed by geological connectivity rather than proximity (Seabra et al., 2025). In addition, in 3D-LDM space, latent variables have no direct spatial interpretation. For these reasons, here we apply a non-distance-based localization method. After experimenting with correlation-based (Luo et al., 2018) and bootstrap methods (Zhang and Oliver, 2010), we opted for pseudo-optimal localization (Furrer and Bengtsson, 2007) due to its lack of tuning parameters and robustness, as found in Lacerda et al. (2019). With this 10 Preprint submitted to Computational Geosciences 
+
+treatment, a generic element lij of L(k) is defined as 
+
+lij = c2
+
+> ij
+
+c2 
+
+> ij
+
++ ( c2 
+
+> ij
+
++ cii cjj )/N e
+
+. (7) Here cij is the correlation between model parameter i and simulated observation j. In this way, ensemble-estimated covariances are used to reduce the weight of (potentially) spurious correlations, while preserving those that are statistically significant. The form of Eq. 7 was derived by minimizing the expected Frobenius-norm error between true and localized covariances (Furrer and Bengtsson, 2007). To quantify spurious updates and assess the effectiveness of this localization, flow-independent dummy parameters are updated together with model parameters. We use 3 3 = 27 dummy variables (which are readily concatenated to the 3D geomodel or latent variable by increasing all dimensions by 3). Prior dummy variables have a normal distribution with zero mean. In latent space, the standard deviation is set to 1 (as for latent variables). In model space, it is set to 1.26, which represents the standard deviation of all model parameters (in log kx) across all realizations. Since they have no impact on flow and, therefore, on observations, their posterior distribution is expected to vary very little from the prior. Conversely, significant updates to dummy variables are a sign of spurious correlations. Algorithmic details for model and latent-space ESMDA are reported in Algorithm 1. A comprehensive discussion of best practices for ESMDA can be found in Emerick (2024) and papers referenced therein. 
+
+Algorithm 1 ESMDA-based data assimilation with localization  
+
+> 1:
+
+Initialization: set k = 0  
+
+> 2:
+
+Sample {p(k) 
+
+> n
+
+}Ne 
+
+> n=1
+> 3:
+
+Set inflation coefficients {α(k)}Na 
+
+> k=1
+
+such that PNa  
+
+> k=1 1
+> α(k)
+
+= 1  
+
+> 4:
+
+for k = 0 , 1, . . . , N a − 1 do  
+
+> 5:
+
+for n = 1 , . . . , N e do  
+
+> 6:
+
+if p = ξT then  
+
+> 7:
+
+Generate mLDM 0 (p(k) 
+
+> n
+
+) 
+
+> 8:
+
+Simulate d(k) 
+
+> n
+
+= Fobs 
+
+ mLDM 0 (p(k) 
+
+> n
+
+) 
+
+> 9:
+
+else  
+
+> 10:
+
+Simulate d(k) 
+
+> n
+
+= Fobs 
+
+ p(k)
+
+> n
+
+ 
+
+> 11:
+
+end if  
+
+> 12:
+
+end for  
+
+> 13:
+
+Apply localization to K(k) using Eq. 7  
+
+> 14:
+
+for n = 1 , . . . , N e do  
+
+> 15:
+
+Update parameters p(k+1)  
+
+> n
+
+using Eq. 6  
+
+> 16:
+
+end for  
+
+> 17:
+
+end for 
+
+## 4.2 ESMDA results for model space and latent space 
+
+We now present results for model and latent space ESMDA for Case 1, which is the synthetic true model shown in Figure 1d. We set Ne = 1000, Na = 10, and the same inflation coefficient, α(k) = 10, for all iterations. We also use pseudo-optimal localization, as described above. Since ensemble members are independent, flow simulations can be performed in parallel. Running the ensemble in batches of 20 requires approximately 8 hours per ESMDA iteration, for a total of about 80 hours for a full DA run. Model-space and latent-space updates through Eq. 6 (including the 3D-LDM mapping from latent to 11 Preprint submitted to Computational Geosciences 
+
+model space) are negligible compared to the forward simulation time. Figure 3 shows posterior (after DA) realizations for model-space (top row) and latent-space (bottom row) ESMDA. The upper part of the right-most portion of each geomodel has been removed to enable visualization of the lower half of the model. It is evident that model-space updates do not maintain full geological realism in the posterior geomodels. This is highlighted in the circular magnification regions, which show details of the geomodels. Specifically, in Figure 3a,b, we observe “smeared” channels, broken channel bodies, and incorrect facies ordering in many portions of the models. The 3D-LDM parameterization, by contrast, automatically maintains geological realism and discrete facies for any model parameter ξT . Therefore, the posterior realizations in Figure 3c,d exhibit the correct spatial features, with continuous channel bodies and the levee facies surrounding them within the mud background. Such features are clearly in general accordance with the synthetic true model (Figure 1d), even though there is still ensemble variability. It should be noted that the “speckling” observed in the lower halves of Figure 3c,d is a consequence of the vertical slicing, which in this view leaves the deepest elements of some channels isolated. The ability to maintain geological realism in posterior geomodels is a key reason for using advanced parameterization techniques (such as 3D-LDM) for DA. Prior and posterior flow responses are shown in Figure 4 (model-space) and Figure 5 (latent-space). The prior P 10 –P 90 (percentile) range appears in gray, while the P 10 and P 90 posterior curves across the ensemble are shown in black and green. The vertical black line at 250 days indicates the end of the historical period and the start of the forecast period. The data points used as observations are plotted as red circles, and the true model simulation results are shown as the solid red line. In these figures we also show posterior flow responses for the same case without localization (dash-dotted lines). Given the large ensemble size ( Ne = 1000), the impact of localization is very small in model space (Figure 4). There are more noticeable differences in latent space (Figure 5), though the size of the P 10 –P 90 ranges are similar with and without localization. In all cases, we observe narrower spreads in the posterior predictions than in the prior results, indicat-ing uncertainty reduction after DA. There is, however, substantially more uncertainty reduction in the model space than in latent space. To directly compare model-space and latent-space predictions (both with localization), we present results for the same wells in Figure 6. Here the prior results have been omitted for better visualization. These plots clearly highlight large differences in the amount of uncer-tainty reduction achieved and in the degree of correspondence of the P 10 –P 90 ranges with the observed data. Data matching accuracy is consistently higher when performing DA in model space. To quantify the accuracy of data matching, we use the root mean squared error (RMSE) between observed and simulated posterior data RMSE = 1
+
+NeNeX
+
+> n=1
+
+ 1
+
+NdNdX
+
+> i=1
+
+
+
+d(Na) 
+
+> n
+
+(i) − dtrue (i)
+
+2  12
+
+. (8) We quantify the degree of uncertainty reduction on model parameters using the normalized variance 12 Preprint submitted to Computational Geosciences   
+
+> (a) Posterior 1 (model) (b) Posterior 2 (model)
+> (c) Posterior 1 (latent) (d) Posterior 2 (latent)
+
+Figure 3: Case 1: posterior geomodels using model-space ESMDA (top row) and latent-space ESMDA (bottom row). The right-most portion of each model is extracted to enable visualization of the lower half. Circles show magnified views to highlight the details of the geological features. 13 Preprint submitted to Computational Geosciences   
+
+> (a) P3 oil production rate (b) P1 water production rate
+> (c) P6 water production rate (d) I3 water injection rate
+
+Figure 4: Case 1: model-space ESMDA results for selected wells, with localization (solid lines) and without localization (dash-dotted lines). Gray regions show the prior P 10 –P 90 range, black lines denote the posterior P 10 and P 90 curves, and red points and red curves represent observed and true data, respectively. The vertical black dot-dash line indicates the end of the history matching period. 14 Preprint submitted to Computational Geosciences   
+
+> (a) P3 oil production rate (b) P1 water production rate
+> (c) P6 water production rate (d) I3 water injection rate
+
+Figure 5: Case 1: latent-space ESMDA results for selected wells, with localization (solid lines) and without localization (dash-dotted lines). Gray regions show the prior P 10 –P 90 range, green lines denote the posterior P 10 and P 90 curves, and red points and red curves represent observed and true data, respectively. The vertical black dot-dash line indicates the end of the history matching period. 15 Preprint submitted to Computational Geosciences   
+
+> (a) P3 oil production rate (b) P1 water production rate
+> (c) P6 water production rate (d) I3 water injection rate
+
+Figure 6: Case 1: model-space (black) and latent-space (green) ESMDA results, with localization, for selected wells. Black and green lines denote the posterior P 10 and P 90 curves, and red points and red curves represent observed and true data, respectively. The vertical black dot-dash line indicates the end of the history matching period. 16 Preprint submitted to Computational Geosciences 
+
+(NV), as in Lacerda et al. (2021) NV = tr( C(Na) 
+
+> pp
+
+)tr( C(0)  
+
+> pp
+
+) . (9) NV essentially measures the relative change from prior (superscript 0) to posterior (superscript Na)variance across model parameters. It is computed in all cases in the geological space. An NV of 1 indicates virtually no variance loss from the prior to posterior ensemble, while an NV of 0 indicates ensemble collapse. NV is also computed separately for the dummy variables (this quantity is denoted NV dum ). The uncertainty reduction in well rates is quantified as the ratio of posterior and prior P 90 –P 10 ranges, i.e., ∆P 90 −10 = 1
+
+NdNdX
+
+> i=1
+
+P90 
+
+
+
+d(Na) 
+
+> n
+
+(i)
+
+
+
+− P10 
+
+
+
+d(Na) 
+
+> n
+
+(i)
+
+
+
+P90 
+
+
+
+d(0)  
+
+> n
+
+(i)
+
+
+
+− P10 
+
+
+
+d(0)  
+
+> n
+
+(i)
+
+ . (10) This quantity corresponds to the uncertainty reduction between prior and posterior results shown in the well rate plots (Figures 4 and 5). Like NV, it spans from 0 (ensemble collapse), to 1 (no uncertainty reduction). Values for these metrics, for both methods with (“+ loc.”) and without localization, are reported in Table 1. Model-space ESMDA achieves better data fitting than latent-space ESMDA, with RMSE values of ∼33 STB/d and ∼90 STB/d, respectively, for the cases with localization. The NV dum values are all close to 1, confirming that spurious correlations have limited impact on the ESMDA updates with these 1000-member ensembles. Slight improvements in the NV dum values are observed for the cases with localization, as would be expected. NV values for the model parameters are consistently lower in model space, indicating more uncertainty reduction in model space than in latent space. Uncertainty reduction in the flow responses reflects the same trend. For the cases with localization, the ∆P 90 −10 ratio is 2 .6×
+
+higher (0.31 versus 0.12) in latent space than in model space. Table 1: Performance metrics for ESMDA in model and latent space for Case 1, with and without localization. 
+
+Algorithm RMSE [STB/d] NV NV dum ∆P90 −10 
+
+ESMDA (model) 32.97 0.43 0.93 0.11 ESMDA (model + loc.) 33.37 0.43 0.97 0.12 ESMDA (latent) 68.45 0.51 0.90 0.28 ESMDA (latent + loc.) 90.42 0.56 0.93 0.31 The results presented in this section highlight the differences between model-space and latent-space ESMDA. On the one hand, more realistic uncertainty reduction and better data matching are achieved in model space (with or without localization) than in latent space. On the other hand, latent-space parameterization ensures plausible, geologically realistic posterior models, in contrast to the channel smear and loss of continuity observed in model space. The higher level of uncertainty reduction in flow results in model space is due in part to the larger number of parameters available to achieve the data match, as well as to the lack of geological plausibility constraints. However, latent-space ESMDA seems to exhibit an inability to achieve more significant uncertainty reduction. Importantly, this behavior is 17 Preprint submitted to Computational Geosciences 
+
+opposite to the classical problem of ensemble collapse with ensemble-Kalman methods. We performed additional tests with higher numbers of ESMDA iterations (up to 40) and we evaluated other ensemble Kalman filter methods (EnKF) in place of ESMDA. The same general trends as in the results presented above were consistently observed. This suggests that Kalman-gain-based algorithms (Eq. 6) may not provide accurate posterior estimates when combined with highly nonlinear parame-terizations, such as 3D-LDM. Motivated by these findings, our goal is now to achieve both appropriate uncertainty reduction and the geological realism captured by the 3D-LDM parameterization. Along these lines, in the next section we describe a latent-space DA workflow that utilizes rigorous Monte Carlo-based sampling algorithms. Since these methods typically require O(10 4 − 10 6) function evaluations, we also develop a fast and accurate surrogate for the flow simulator. 
+
+# 5 Flow surrogate and MC-based data assimilation methods 
+
+In this section, we present the methods required for rigorous DA performed in the 3D-LDM latent space. First, we describe our flow surrogate model, which enables the evaluation of large numbers of forward runs at greatly reduced computational cost. Then, we present the Markov chain Monte Carlo (MCMC) and Sequential Monte Carlo (SMC) posterior sampling methods, applied on the latent variable ξT .
+
+## 5.1 Flow surrogate model 
+
+We develop a neural network-based surrogate, denoted ˆF : RNc → RNt×NQoI ( ˆF ≈ F ), to learn the mapping in Eq. 5 from m0 to the well flow rates, i.e., ˆF (m0, θ ) = [ˆ q1inj , . . . , ˆqNinj  
+
+> inj
+
+, ˆq1oil , . . . , ˆqNprod  
+
+> oil
+
+, ˆq1wat , . . . , ˆqNprod  
+
+> wat
+
+]. (11) Here θ represents the trainable parameters of the surrogate and the ˆ superscript indicates a surrogate-predicted output. Unlike many surrogate models, our model does not predict reservoir state variables (e.g., pressure and saturation) and then compute well responses. Instead, we adopt a fit-for-purpose strategy that directly predicts the full well-rate time series. The surrogate is therefore not intended to replicate the full output of the numerical simulator, but rather to provide fast and accurate esti-mates of the quantities required for DA. This greatly simplifies the surrogate architecture and training requirements. A schematic representation of the surrogate model is shown in Figure 7. The architecture combines 3D convolutional layers to learn geological spatial features, and recurrent layers (long short-term memory, LSTM (Hochreiter and Schmidhuber, 1997)), to learn the temporal evolution of well rates. The geomodel 
+
+m0 is first encoded by the convolutional layers into a lower-dimensional representation, which is then decoded by the LSTM unit to predict the time-varying well rates. The detailed architecture of the surrogate model is provided in Table 2. Each Conv3D Block in the encoder consists of Conv3D →
+
+BatchNorm3D → ReLU. The latent representation is passed through an LSTM with time embedding, and the output layer provides NQoI time series. 18 Preprint submitted to Computational Geosciences 
+
+Table 2: Architecture of the flow surrogate model, with input shape (1 , N x, N y , N z ). 
+
+Stage Operation Parameters Output 
+
+Input Input - (1 , N x, N y , N z )Encoder Conv3D Block 1 16 filters, 3 × 3 × 3, s=1, p=1 (16 , N x, N y , N z )MaxPool3D 2 × 2 × 2, s=2 (16 , N x/2, N y /2, N z /2) Conv3D Block 2 32 filters, 3 × 3 × 3, s=1, p=1 (32 , N x/2, N y /2, N z /2) MaxPool3D 2 × 2 × 2, s=2 (32 , N x/4, N y /4, N z /4) Conv3D Block 3 64 filters, 3 × 3 × 3, s=1, p=1 (64 , N x/4, N y /4, N z /4) MaxPool3D 2 × 2 × 2, s=2 (64 , N x/8, N y /8, N z /8) Conv3D Block 4 128 filters, 3 × 3 × 3, s=1, p=1 (128 , N x/8, N y /8, N z /8) MaxPool3D 2 × 2 × 2, s=2 (128 , N x/16 , N y /16 , N z /16) Spatial Pooling AdaptiveAvgPool3d - (128 , 1, 1, 1) Flatten Flatten - (128) Latent Vector Linear + ReLU - (512) Time Embedding Embedding 30 × 512 (Nt, 512) Concatenation Cat([latent, time emb]) - (Nt, 1024) Decoder LSTM (1 layer) Nhid = 64 (Nt, 64) Output Linear - (Nt, N QoI )
+
+Figure 7: Schematic of the flow surrogate model. Each block represents the output of the corresponding layer(s), with values indicating the number of channels and dimension. The z axis is hidden (and reported in brackets) to simplify the stacked 3D feature maps. 19 Preprint submitted to Computational Geosciences 
+
+The surrogate is trained on tNavigator simulation results for the same set of 3000 geomodels as were used to construct the 3D-LDM (Section 2). The simulation setup is as described in Section 2. Training simulations are performed 20 runs at a time, resulting in a total elapsed runtime of approximately 25 hours. The dataset is split into 80-10-10% for training, validation, and testing, respectively. For each sample, the training loss is evaluated on a per-well and per-time-step basis by computing mean-squared error (MSE) between simulator and surrogate well-rate quantities, i.e., 
+
+Lsurr = MSE( ˆF (m0, θ ), F (m0)) . (12) The loss is computed and averaged over batches of size Nb.The model is trained using the Adam optimizer (Kingma and Ba, 2015) with a batch size of 16 and a learning rate of 5 × 10 −3. The total training time is approximately 35 minutes on a single NVIDIA A100 GPU. Once trained, a single forward evaluation requires approximately 0.001 s on the same GPU, or about 0.2 s on a CPU. This represents significant speedup relative to the numerical simulator (which requires about 10 minutes per run on a CPU). 
+
+## 5.2 Surrogate model performance 
+
+We now evaluate the accuracy of well rate predictions for the trained flow surrogate model. All metrics refer to the testing set of Ntest = 300 samples. We define the following relative errors for water injection, oil production, and water production 
+
+δinj = 1
+
+NtNinj 
+
+> Ninj
+
+X
+
+> i=1
+> Nt
+
+X
+
+> t=1
+
+ˆqi
+
+> inj
+
+(t) − qi
+
+> inj
+
+(t)
+
+qi
+
+> inj
+
+(t) + ϵd
+
+, (13) 
+
+δoil = 1
+
+NtNprod 
+
+> Nprod
+
+X
+
+> j=1
+> Nt
+
+X
+
+> t=1
+
+ˆqj
+
+> oil
+
+(t) − qj
+
+> oil
+
+(t)
+
+qj
+
+> oil
+
+(t) + ϵd
+
+, (14) 
+
+δwat = 1
+
+NtNprod 
+
+> Nprod
+
+X
+
+> j=1
+> Nt
+
+X
+
+> t=1
+
+ˆqj
+
+> wat
+
+(t) − qj
+
+> wat
+
+(t)
+
+qj
+
+> wat
+
+(t) + ϵd
+
+, (15) where ϵd = 0 .1 is a constant to prevent division by very small values and t is the physical simulation time (not to be confused with the diffusion step index introduced in Section 3). We considered a range of values for ϵd and found the error results to be quite insensitive to this specification. Box plots for δinj , δoil , and δwat are presented in Figure 8. The lines extending beyond the boxes show the P 10 and P 90 percentile errors, and the box edges indicate the P 25 and P 75 percentile errors. The orange lines inside the boxes denote the P 50 errors. The mean values for δinj , δoil , and δwat are 3.7%, 4.7%, and 6.3%, respectively. These errors are comparable to those reported in Tang et al. (2022) and Han et al. (2024), who also used RNN-based surrogate models for DA in subsurface flow problems. Scatter plots for cumulative quantities at the end of the simulation time frame (1500 days) are shown in Figure 9. We observe a high degree of surrogate model accuracy for all three quantities, with the scatter points closely aligned with the 45-degree line (i.e., R2 near 1). As a final assessment, in Figure 10 20 Preprint submitted to Computational Geosciences 
+
+Figure 8: Relative errors for water injection, oil production, and water production rates for the surrogate model relative to the simulator for the testing set. we present flow statistics for field-level flow rates across the testing set. The dashed lines indicate the P10 and P 90 responses, and solid lines show the P 50 results. Very close visual agreement between the two sets of curves is clearly achieved. Although not reported for purposes of brevity, similar surrogate model performance is observed at the well level. 
+
+(a) Water injection (b) Oil production (c) Water production 
+
+Figure 9: Scatter plots comparing surrogate model and simulator results for cumulative water injection, oil production, and water production over the full simulation time frame. The R2 coefficient is reported for each plot. Although the results presented above demonstrate that the surrogate model is quite accurate, it is (technically) an imperfect model relative to the reference numerical simulator. Thus, it is important to account for this error within the DA workflow. To accomplish this we follow the approach used in Han et al. (2024), where the surrogate model error is quantified for each of the Ntest samples from the testing set. The error for each sample n, denoted ϵsurr ,n ∈ RNobs , is given by 
+
+ϵsurr ,n = dn − ˆdn, (16) where dn and ˆdn represent the simulator and surrogate model observations (that is, Fobs (m0,n ) and ˆFobs (m0,n , θ )). The full centered matrix Esurr ∈ RNobs ×Ntest can be constructed as follows 
+
+Esurr = 1
+
+√Ntest − 1 [ϵsurr ,1 − ¯ϵsurr , ϵsurr ,2 − ¯ϵsurr , · · · , ϵsurr ,N test − ¯ϵsurr ] , (17) 21 Preprint submitted to Computational Geosciences   
+
+> (a) Water injection (b) Oil production (c) Water production
+
+Figure 10: Field-level flow statistics from the simulator (red curves) and surrogate model (blue curves) over the testing set of 300 geomodels. The upper, middle (solid) and lower curves correspond to the P 90 ,P50 and P 10 percentile results. where ¯ ϵsurr ∈ RNobs is the mean of the surrogate model error vector over the Ntest samples. The mean and standard deviation of the rate errors across all observation points are 4.3 STB/d and 62.4 STB/d, respectively. We also compute the bias for each observation normalized by the corresponding standard deviation of the same quantity across the testing set. The average value obtained is 0.007, meaning the bias is on average less than 1% of one standard deviation of the observations. It is therefore appropriate to treat the trained flow surrogate model as unbiased, in which case the model error can be represented in terms of a covariance. Following Oliver et al. (2008), this model error covariance, denoted Csurr ∈ RNobs ×Nobs , is given by 
+
+Csurr = Esurr E⊤
+
+> surr
+
+. (18) This matrix is, in general, nondiagonal and can thus account for both spatial and temporal correlations. We combine Csurr with measurement error to give the total covariance matrix Ctot ,
+
+Ctot = Cd + Csurr . (19) The low (and essentially unbiased) surrogate model error, combined with our accounting for imperfect-model effects through Csurr , enable the use of the surrogate for DA. This is an essential capability given the very high computational demands of the Monte Carlo-based methods we now describe. 
+
+## 5.3 Markov chain Monte Carlo algorithm 
+
+The Markov chain Monte Carlo (MCMC) algorithm entails simulating a Markov chain, or a few chains in parallel, to generate a sequence of samples. With a sufficient number of iterations, MCMC is considered to approximate the posterior distribution. In this work we use the preconditioned Crank-Nicholson (pCN) MCMC algorithm (Cotter et al., 2012; Chen et al., 2019), which is appropriate for Gaussian variables. At every new iteration k + 1, the current latent sample ξ(k) 
+
+> T
+
+is perturbed to generate a new candidate sample, denoted ξ′ 
+
+> T
+
+, through application of 
+
+ξ′ 
+
+> T
+
+= {1 − β2MCMC } 12 ξ(k) 
+
+> T
+
++ βMCMC ϵ, with ϵ ∼ N (0, Inc ). (20) 22 Preprint submitted to Computational Geosciences 
+
+Here βMCMC is a scalar coefficient that controls the update step size. This parameter is typically adjusted to achieve an acceptance rate in the range of 10-40%. The pCN proposal preserves the Gaussian prior for ξ′ 
+
+> T
+
+and is dimension-robust, enabling stable performance even for a relatively high-dimensional latent space. The likelihood is taken to be of the usual form, i.e., 
+
+p(d∗ 
+
+> obs
+
+| ξT ) ∝ exp 
+
+
+
+− 12 (d − d∗
+
+> obs
+
+)⊤ C−1tot (d − d∗
+
+> obs
+
+)
+
+
+
+. (21) Here d denotes the simulated data, obtained by first generating the corresponding geomodel mLDM 0 (ξT )through 3D-LDM, and then evaluating the flow response using the surrogate, d = ˆFobs 
+
+ mLDM 0 (ξT ). We apply the Metropolis-Hastings acceptance criterion (Hastings, 1970), where the probability of accepting the proposed latent variable ξ′ 
+
+> T
+
+is given by 
+
+α = min 1, p(d∗ 
+
+> obs
+
+| ξ′ 
+
+> T
+
+)
+
+p(d∗ 
+
+> obs
+
+| ξ(k) 
+
+> T
+
+)
+
+!
+
+. (22) The maximum number of iterations is set to Nmax = 150,000. The first 3000 iterations, which constitute the burn-in period, are discarded to mitigate initialization bias. Algorithmic details are provided in Algorithm 2. 
+
+Algorithm 2 MCMC-based data assimilation (single chain)  
+
+> 1:
+
+Initialization: k = 0  
+
+> 2:
+
+Sample ξ(k) 
+
+> T
+
+∼ N (0, Inc ) 
+
+> 3:
+
+Generate mLDM 0 (ξ(k) 
+
+> T
+
+) 
+
+> 4:
+
+Simulate d(k) = ˆFobs 
+
+ mLDM 0 (ξ(k) 
+
+> T
+
+) 
+
+> 5:
+
+Compute p(d(k) | ξ(k) 
+
+> T
+
+) using Eq. 21  
+
+> 6:
+
+while k < N max do  
+
+> 7:
+
+Propose ξ′ 
+
+> T
+
+using Eq. 20  
+
+> 8:
+
+Repeat steps 3–5 using ξ′ 
+
+> T
+
+to obtain d′ and p(d∗ 
+
+> obs
+
+| ξ′ 
+
+> T
+
+) 
+
+> 9:
+
+Compute acceptance probability α using Eq. 22  
+
+> 10:
+
+Draw u ∼ U (0 , 1)  
+
+> 11:
+
+if u < α then  
+
+> 12:
+
+ξ(k+1)  
+
+> T
+
+= ξ′ 
+
+> T
+> 13:
+
+else  
+
+> 14:
+
+ξ(k+1)  
+
+> T
+
+= ξ(k) 
+
+> T
+> 15:
+
+end if  
+
+> 16:
+
+k = k + 1  
+
+> 17:
+
+end while 
+
+In our implementation, we run five chains in parallel. The ˆR diagnostic (Gelman and Rubin, 1992; Vehtari et al., 2021) is used to assess the overall convergence of the DA procedure. This metric quantifies the within-chain and between-chain variance for every (latent) model parameter. Convergence is taken to occur when all parameters have reached ˆR ≤ 1.01. 23 Preprint submitted to Computational Geosciences 
+
+## 5.4 Tempered Sequential Monte Carlo algorithm (SMC) 
+
+The tempered SMC algorithm (Del Moral et al., 2006; Dai et al., 2022) combines the computational efficiency of ensemble-based methods with rigorous Monte Carlo posterior sampling. For this method, at each iteration k, the target density is defined as 
+
+pk(ξT | d∗
+
+> obs
+
+) ∝ p(ξT ) p(d∗ 
+
+> obs
+
+| ξT )βk , (23) where βk ∈ [0 , 1] denotes the tempering parameter. An ensemble of Ne samples, denoted {ξ(k)
+
+> T,n
+
+}Ne
+
+> n=1
+
+, is propagated from pk(ξT | d∗
+
+> obs
+
+) to pk+1 (ξT | d∗
+
+> obs
+
+) through three steps – importance weighting, resampling, and MCMC mutation. When βk = 0, the target is the prior distribution p(ξT ), and when βk = 1, the target is the posterior distribution p(ξT | d∗
+
+> obs
+
+). The goal of tempering is to gradually introduce the posterior distribution via the adaptive βk schedule. Likelihoods are computed through Eq. 21, as in the MCMC method. Our tempered SMC implementation proceeds as follows. First, we apply 3D-LDM to provide the geomodel corresponding to the latent variable, mLDM 0 (ξT ). The surrogate flow model then predicts the flow response, d = ˆFobs 
+
+ mLDM 0 (ξT ). The next tempering parameter βk+1 is selected adaptively to satisfy a prescribed effective sample size (ESS) target. This is achieved by determining ∆ βk ∈ [0 , 1 − βk](and thus βk+1 = βk + ∆ βk) through application of ESS(∆ β) = 
+
+PNe 
+
+> n=1
+
+p(d∗ 
+
+> obs
+
+| ξ(k)
+
+> T,n
+
+)∆β
+
+2
+
+PNe 
+
+> n=1
+
+p(d∗ 
+
+> obs
+
+| ξ(k)
+
+> T,n
+
+)2∆ β . (24) This follows the standard ESS definition from importance weighting. It measures how evenly the likeli-hood is spread across the ensemble as a function of ∆ βk. Eq. 24 is solved, using the bisection method, to find the largest ∆ βk that keeps the ESS above a specified threshold (0 .5Ne in this work). An excessively large ∆ βk would cause the likelihood to change abruptly, concentrating weight on a few members, while the rest collapse to zero. This would result in the loss of diversity within the ensemble. Once the next βk+1 is computed, weights are assigned as 
+
+ω(k+1)  
+
+> n
+
+= ω(k) 
+
+> n
+
+p
+
+
+
+d∗ 
+
+> obs
+
+| ξ(k)
+
+> T,n
+
+∆βk
+
+, with ∆βk = βk+1 − βk, (25) which leads to higher-likelihood samples having higher weights. The initial weights are set to 1 /N e. After normalization, the normalized weights {˜ω(k+1)  
+
+> n
+
+}Ne 
+
+> n=1
+
+define a discrete probability distribution over the current ensemble. Systematic resampling is then used to draw a new ensemble of Ne equally weighted samples, which acts to reduce or eliminate low-probability samples. The resampled ensemble is then mutated with MCMC steps using the pCN proposal (and constant step size βmut ), as described in Section 5.3. Here these are very short chains, in contrast to those in the standalone MCMC procedure, 24 Preprint submitted to Computational Geosciences 
+
+with a maximum ( Nmax ) of 35 iterations. The acceptance probability in Eq. 22 is modified to 
+
+α = min 
+
+1, p d∗ 
+
+> obs
+
+| ξ′
+
+> T,n
+
+βk+1 
+
+p
+
+
+
+d∗ 
+
+> obs
+
+| ξ(k+1) 
+
+> T,n
+
+βk+1 
+
+ . (26) This modification is introduced to ensure sampling is performed from the tempered target distribution. The above steps are repeated until βk+1 = 1. Algorithmic details of our SMC procedure are provided in Algorithm 3. 
+
+Algorithm 3 Tempered SMC-based data assimilation  
+
+> 1:
+
+Initialization: set k = 0, β0 = 0, {ω(k+1)  
+
+> n
+
+}Ne 
+
+> n=1
+
+= { 1 
+
+> Ne
+
+}Ne 
+
+> n=1
+> 2:
+
+Sample {ξ(k)
+
+> T,n
+
+}Ne 
+
+> n=1
+
+∼ N (0, Inc ) 
+
+> 3:
+
+for n = 1 , . . . , N e do  
+
+> 4:
+
+Generate mLDM 0 (ξ(k)
+
+> T,n
+
+) 
+
+> 5:
+
+Simulate d(k) 
+
+> n
+
+= ˆFobs 
+
+ mLDM 0 (ξ(k)
+
+> T,n
+
+) 
+
+> 6:
+
+Compute p(d∗ 
+
+> obs
+
+| ξ(k)
+
+> T,n
+
+) 
+
+> 7:
+
+end for  
+
+> 8:
+
+while βk < 1 do  
+
+> 9:
+
+Determine βk+1 using Eq. 24  
+
+> 10:
+
+for n = 1 , . . . , N e do  
+
+> 11:
+
+Update weights ω(k+1)  
+
+> n
+
+using Eq. 25  
+
+> 12:
+
+end for  
+
+> 13:
+
+Normalize weights {˜ω(k+1)  
+
+> n
+
+}Ne 
+
+> n=1
+> 14:
+
+Resample {ξ(k+1)  
+
+> T,n
+
+}Ne 
+
+> n=1
+
+according to {˜ω(k+1)  
+
+> n
+
+} 
+
+> 15:
+
+for n = 1 , . . . , N e do  
+
+> 16:
+
+j = 0  
+
+> 17:
+
+while j < N max do  
+
+> 18:
+
+Propose ξ′ 
+
+> T,n
+
+using Eq. 20  
+
+> 19:
+
+Repeat steps 4–6 for ξ′ 
+
+> T,n
+> 20:
+
+Compute α using Eq. 26  
+
+> 21:
+
+Draw u ∼ U (0 , 1)  
+
+> 22:
+
+if u < α then  
+
+> 23:
+
+ξ(k+1)  
+
+> T,n
+
+= ξ′ 
+
+> T,n
+> 24:
+
+else  
+
+> 25:
+
+ξ(k+1)  
+
+> T,n
+
+= ξ(k+1)  
+
+> T,n
+> 26:
+
+end if  
+
+> 27:
+
+j = j + 1  
+
+> 28:
+
+end while  
+
+> 29:
+
+end for  
+
+> 30:
+
+k = k + 1  
+
+> 31:
+
+end while 
+
+# 6 Latent-space DA results using ESMDA, MCMC and SMC 
+
+In this section, we compare ESMDA, MCMC, and SMC, all operating in latent space, using the flow surrogate described in Section 5 as the forward model. The DA and flow problems are as presented in Section 3. For SMC, we specify Ne = 1000. To assess the robustness of the workflow, we test three different true models (shown in Figure 1). Case 1 is the same as that used in Section 4. For ESMDA, we use the same parameters and apply the localization procedure described earlier. 25 Preprint submitted to Computational Geosciences 
+
+An order-of-magnitude comparison for the three DA methods for wall-clock computational time and function evaluations for a typical run, with all evaluations performed using the surrogate, is provided in Table 3. The computational time reported for MCMC is for 5 chains. Even with a large ensemble size, ESMDA requires the lowest number of function evaluations, taking advantage of the fully parallelized (limited only by GPU memory) forward runs. Each MCMC chain, on the other hand, operates sequen-tially, so this algorithm has the highest computational cost. SMC has characteristics of both ESMDA and MCMC and ranks between them. Table 3: Comparison of DA algorithms for Cases 1–3 using flow surrogate (DA performed in 3D-LDM latent space). 
+
+Algorithm Ensemble size # of function evals. Computational time [h] 
+
+ESMDA 1000 10 4 0.5 MCMC 5 chains ∼ 4 × 10 5 7SMC 1000 ∼ 3 × 10 5 3
+
+## 6.1 Case 1 results 
+
+For this case, we set βmut = 0 .05 for SMC and βMCMC = 0 .05. These values are set based on numerical experiments, involving low numbers of iterations, in which performance (e.g., acceptance rate) was tracked. MCMC requires approximately 86,000 iterations of Algorithm 2, and has a final acceptance rate of 27%. With Nchains = 5, this equates to a total of ∼430,000 function evaluations. SMC requires 9 iterations of Algorithm 3, for a total of 315,000 function evaluations. In Figure 11, we show one randomly selected posterior realization for each of the three algorithms. Since DA is performed in the 3D-LDM latent space, geological realism is preserved with all algorithms. Compared to the high variability of the priors (see Figure 1), the posterior models show geological features consistent with the synthetic true model (Figure 1d), e.g., two distinct parallel channels along the main diagonal. Table 4 reports mean and standard deviation values for the geological scenario parameters for the prior, posterior and true models. As noted earlier, the mud fraction fm is computed as the fraction of mud-facies grid blocks, while the average channel orientation θch and width wch are extracted using a CNN trained on the prior dataset and labeled with the input parameters from the Petrel OBM tool (Di Federico and Durlofsky, 2026). We reiterate that the scenario parameters are not separately encoded into our 3D-LDM parameterization or directly updated during DA. Across almost all metrics and methods, we observe mean values shifting in the direction of the true scenario parameters ( fm = 0 .85, θch = 45 ◦, wch = 4). Uncertainty reduction is reflected in the lower standard deviation of the posterior distributions relative to the priors. The performance of MCMC and SMC is very consistent, with relative errors on mean values (compared to true values) below 5%. ESMDA, by contrast, exhibits slightly lower accuracy and less uncertainty reduction, with posterior standard deviations about 2 × larger than those of MCMC and SMC. 26 Preprint submitted to Computational Geosciences   
+
+> (a) ESMDA (b) MCMC (c) SMC
+
+Figure 11: Randomly selected posterior realizations obtained using ESMDA, MCMC, and SMC (Case 1). DA performed in 3D-LDM latent space. All models maintain geological realism and display features consistent with the true model (Figure 1d). Table 4: DA algorithm performance for scenario parameters (Case 1, DA performed in 3D-LDM latent space). 
+
+fm θch wch 
+
+Mean Std Mean Std Mean Std Prior 0.795 0.043 45.0 8.66 5.00 0.577 ESMDA 0.843 0.013 49.6 6.03 4.29 0.28 MCMC 0.857 0.005 44.6 3.54 4.15 0.166 SMC 0.857 0.005 44.0 3.03 4.18 0.165 True 0.85 45 ◦ 4Posterior results for well flow rates for representative wells are shown in Figure 12. The prior P 10 –P 90 
+
+region is shown in gray and the true and observed data are in red (these results are identical to those shown in Figure 5). The P 10 –P 90 curves for latent-space ESMDA, MCMC and SMC are shown in solid green, dash-dotted blue, and dashed purple, respectively. Across different wells, and for both water and oil flow rates, the P 10 –P 90 posterior curves for MCMC and SMC are in very close agreement (minor discrepancies are evident in Figure 12d). Conversely, there are large differences between ESMDA and the MCMC/SMC results. In particular, we consistently observe much less uncertainty reduction with ESMDA. This is particularly noticeable in the historical period (before 250 days) for oil production rates (e.g., Figure 12a,c) and in water production rates at later times (e.g., Figure 12b,d). Summary statistics, analogous to those in Table 1, are reported in Table 5. The lower values of NV for MCMC (0.57) and SMC (0.54), compared to that for ESMDA (0.72), indicate a higher degree of uncertainty reduction in the geomodels (recall NV is computed in model space). This is consistent with the differences in the posterior ranges for the scenario parameters in Table 4. Similarly, the values for RMSE ( ∼34 STB/d versus ∼103 STB/d) and ∆P 90 −10 (0.14–0.15 versus 0.41) reflect differences in the accuracy of data matching and in uncertainty reduction in the well rates. These values are in alignment with the results in Figure 12. Note that in the simulation-based latent-space ESMDA results presented in Section 4, we used Cd
+
+in the ESMDA update (Eq. 6). In the results here, in which the flow surrogate is applied, we use Ctot ,given by Eq. 19. Thus we expect some differences in the latent-space ESMDA results here relative to those in Table 1. In particular, the inclusion of surrogate model error would be expected to increase 27 Preprint submitted to Computational Geosciences    
+
+> (a) P1 oil production rate (b) P1 water production rate
+> (c) P6 oil production rate (d) P6 water production rate
+> (e) P3 oil production rate (f) I3 water injection rate
+
+Figure 12: DA results for selected wells (Case 1, DA for all methods performed in 3D-LDM latent space). Gray regions show the prior P 10 –P 90 range. Green, blue, and purple lines denote the posterior P 10 –P 90 
+
+ranges for ESMDA, MCMC, and SMC, respectively. Red points and red curves represent observed and true data. The vertical black dot-dash line indicates the end of the history matching period. 28 Preprint submitted to Computational Geosciences 
+
+RMSE, NV, and ∆P 90 −10 , and this is indeed what we observe. Table 5: Performance metrics for DA algorithms (Case 1, DA performed in 3D-LDM latent space). 
+
+Algorithm RMSE [STB/d] NV NV dum ∆P90 −10 
+
+ESMDA 103.41 0.72 0.98 0.41 MCMC 34.53 0.57 – 0.15 SMC 32.88 0.54 – 0.14 
+
+## 6.2 DA results for Cases 2 and 3 
+
+The true models for Cases 2 and 3 are shown in Figure 1e,f. These correspond to quite different mud fractions, channel orientations and widths than in Case 1 (though all cases share the same prior distribu-tion). For ESMDA, the algorithmic parameters are not modified from Case 1. For MCMC, for Case 2 we set βMCMC = 0 .05 ( ∼70,000 iterations, acceptance rate of 12%) and for Case 3, βMCMC = 0 .1 ( ∼120,000 iterations, acceptance rate of 22%). For SMC, 11 iterations using βmut = 0 .03 are required for Case 2, and 8 iterations using βmut = 0 .15 are needed for Case 3. The choices for βMCMC and βmut are again based on limited numerical experimentation. Figure 13 shows a randomly sampled realization from each of the posterior ensembles for ESMDA, MCMC, and SMC, for Case 2 (top row) and Case 3 (bottom row). The level of geological realism and visual similarity to the true models (shown in Figure 1e and f) in the posterior samples are analogous to those in Case 1. In particular, posterior realizations for Case 2 all display channel orientations of approximately 30 ◦, while for Case 3, the channels are orientated at an angle of about 60 ◦. These orientations are in agreement with the true models. The channels in Cases 2 and 3 are also wider than those in Case 1, which is again consistent with the true models. Summary statistics for the geological scenario parameters are reported in Table 6, which confirms the qualitative visual assessments above. All the algorithms are accurate in terms of the means. As in Case 1, we observe more significant uncertainty reduction (smaller standard deviations) using the Monte Carlo-based methods than with ESMDA. Rather than show well-by-well flow rates, for Cases 2 and 3 we present P 10 –P 90 field-level responses for oil production, water production, and water injection. These field-level quantities are simply sums over all wells. These results appear in Figure 14, with Case 2 results in the left column and Case 3 in the right column. Prior ranges, observed data points, and true curves are also shown. As in the Case 1 results, we again observe close agreement between MCMC and SMC, and much wider P 10 –P 90 ranges for ESMDA. The discrepancies in the ESMDA posterior estimates are again quite noticeable at early times in the oil production curves and at late times in the water production curves. Finally, we report summary metrics for Cases 2 and 3 in Table 7. These results confirm our previous observations for Case 1. Namely, MCMC and SMC show a high degree of consistency, with more accurate data matching (RMSE) and more pronounced uncertainty reduction in model parameters (NV) and well rate responses (∆P 90 −10 ) than ESMDA. We note finally that NV values for MCMC are somewhat sensitive to the effective sample size, while those for SMC appear to be more stable. Importantly, the 29 Preprint submitted to Computational Geosciences     
+
+> (a) Case 2: ESMDA (b) Case 2: MCMC (c) Case 2: SMC
+> (d) Case 3: ESMDA (e) Case 3: MCMC (f) Case 3: SMC
+
+Figure 13: Randomly selected posterior realizations obtained using ESMDA, MCMC, and SMC for Case 2 (top row) and Case 3 (bottom row). DA performed in the 3D-LDM latent space. All models maintain geological realism and display features consistent with the corresponding true models (shown in Figure 1e and f). Table 6: DA algorithm performance for scenario parameters (Cases 2 and 3, DA performed in 3D-LDM latent space). 
+
+fm θch wch 
+
+Mean Std Mean Std Mean Std 
+
+Case 2 
+
+Prior 0.795 0.043 45.0 8.66 5.00 0.577 ESMDA 0.790 0.013 35.0 2.44 5.46 0.319 MCMC 0.795 0.008 33.6 1.37 5.63 0.200 SMC 0.791 0.006 33.5 1.40 5.41 0.157 True 0.78 33 ◦ 5.5 
+
+Case 3 
+
+Prior 0.795 0.043 45.0 8.66 5.00 0.577 ESMDA 0.782 0.016 55.3 3.05 5.50 0.345 MCMC 0.761 0.007 58.8 1.29 5.87 0.133 SMC 0.756 0.011 57.5 2.88 5.88 0.135 True 0.75 58 ◦ 5.9 30 Preprint submitted to Computational Geosciences    
+
+> (a) Case 2: field oil production rate (b) Case 3: field oil production rate
+> (c) Case 2: field water production rate (d) Case 3: field water production rate
+> (e) Case 2: field water injection rate (f) Case 3: field water injection rate
+
+Figure 14: DA results for field rates for Case 2 (left column) and Case 3 (right column). DA for all methods performed in 3D-LDM latent space. Gray regions show the prior P 10 –P 90 range, and green, blue, and purple lines denote the posterior P 10 –P 90 ranges for ESMDA, MCMC, and SMC, respectively. Red points and red curves represent observed and true data. The vertical black dot-dash line indicates the end of the history matching period. 31 Preprint submitted to Computational Geosciences 
+
+MCMC results for ∆P 90 −10 , which are probably of more practical interest than those for NV, are much less sensitive to the effective sample size. Table 7: Performance metrics for DA algorithms (Cases 2 and 3, DA performed in 3D-LDM latent space). 
+
+Case 2 Case 3 Alg. RMSE NV NV dum ∆P 90 −10 RMSE NV NV dum ∆P 90 −10 
+
+ESMDA 140.25 0.65 0.94 0.54 110.36 0.81 0.94 0.51 MCMC 85.90 0.39 – 0.23 62.18 0.66 – 0.22 SMC 87.38 0.39 – 0.21 54.17 0.68 – 0.19 The findings reported in this section, which are consistent over the three cases considered, highlight important differences between computationally efficient, ensemble-Kalman-based algorithms (ESMDA) and computationally expensive, more rigorous Monte Carlo-based methods (MCMC, SMC). In particular, ensemble-Kalman methods, when combined with the highly nonlinear 3D-LDM parameterization, provide significantly overestimated posterior uncertainties. This is observed even using localization to limit spurious updates along with large ESMDA ensemble sizes and large numbers of assimilation steps. This behavior is the opposite of the ensemble-collapse problem that can occur with ensemble-Kalman methods operating in model space (with small ensemble sizes). We attribute the problems observed with latent-space ESMDA to the use of Kalman-gain-based updates on the highly nonlinear, nonsmooth LDM latent space. The 3D-LDM mapping introduces a shift between the space in which updates are performed (latent space) and the space in which the data mismatch is evaluated (model space). As a result, Kalman-gain-based corrections may fail to identify optimal descent directions, causing ensemble members to oscillate around a residual level of uncertainty that cannot be further reduced with additional iterations. This suggests that 3D-LDM (and other deep learning parameterization methods) may be more suitable for use with Monte Carlo-type algorithms, as their stochastic components allow for more reliable exploration of the latent space. SMC appears to be particularly appropriate, as it combines the large sample size and computational efficiency of ensemble methods with Monte Carlo sampling. Taken in total, our findings suggest that formal DA with deep learning parameterization is indeed achievable, provided that a fast and accurate flow surrogate is available. 32 Preprint submitted to Computational Geosciences 
+
+# 7 Concluding remarks 
+
+In this study, we performed a systematic comparison of data assimilation (DA) algorithms for large-scale 3D systems parameterized with a latent diffusion model (3D-LDM). The geomodels considered represent three-facies fluvial channel systems characterized by hierarchical geological uncertainty. This means the geological scenario parameters (mud fraction, channel orientation, channel width) are themselves uncertain, as are the cell-by-cell facies indicators in each realization. The training dataset for the 3D-LDM parameterization consisted of 3000 conditional realizations of dimensions 128 × 128 × 32 (524,288 total grid blocks), while the latent space was of overall dimension 1024. In the first part of this study, we characterized a key trade-off that arises when an ensemble-Kalman algorithm is used for DA. Specifically, we showed that model-space updates achieved significant un-certainty reduction but produced geologically unrealistic posterior models, while latent-space updates preserved geological realism but exhibited limited uncertainty reduction. This finding motivated the application of rigorous posterior sampling methods – Markov chain Monte Carlo (MCMC) and Sequen-tial Monte Carlo (SMC) – operating in the 3D-LDM latent space. To accommodate the large number of forward evaluations required by MCMC and SMC, we developed a fast and accurate deep learning surrogate model that predicts well rate time series directly from the input geomodel. The model was trained using flow results for the same 3000 realizations as were used for the construction of the 3D-LDM representation. Surrogate model error was characterized and incorporated into the DA workflow through a full covariance treatment. We then applied ESMDA, MCMC, and SMC (all operating in the 3D-LDM latent space) to three synthetic test cases characterized by different geological scenario parameters. For all cases, posterior geomodels preserved geological realism through the 3D-LDM parameterization. MCMC and SMC were found to be in essential agreement with one another, providing more accurate data matching and more pronounced uncertainty reduction than latent-space ESMDA. Posterior scenario parameter estimates from MCMC and SMC also exhibited lower mean errors relative to the true values. ESMDA, even using 1000-member ensembles, consistently overestimated posterior P 10 –P 90 intervals for well rates by a factor of 2.5 or more. This suggests that standard ensemble-Kalman methods, though computationally efficient, may not be ideally suited for use with parameterizations such as 3D-LDM. SMC was found to be a particularly attractive option, as it combines the parallel efficiency of ensemble methods with rigorous Monte Carlo sampling. We therefore recommend using SMC in combination with deep learning parameterizations, though a fast surrogate model for flow is essential. Future work could involve the development of treatments that enable ensemble-Kalman methods to provide proper uncertainty reduction when combined with 3D-LDM or other nonlinear parameterizations. On the DA algorithm side, this may entail adjusting the data-parameter covariance matrix to account for the nonlinearity of the mapping or performing some type of “equivalent” model-space update. On the parameterization side, it could involve modifying the 3D-LDM algorithm to obtain a more physically interpretable latent space via the use of regularized loss functions or scenario parameter conditioning. The development of a “one-shot” inversion capability, in which posterior 3D-LDM-based geomodels are 33 Preprint submitted to Computational Geosciences 
+
+generated directly from observed data, could also be pursued. These solutions may, however, require larger training datasets or frequent retraining when the simulation setup is modified. We note that other investigators (Laloy et al., 2019; Lopez-Alvis et al., 2021; Yu and Jafarpour, 2023; Exterkoetter et al., 2024) have observed limitations in DA when using VAE and GAN-based parameterizations (with potentially more entangled latent spaces than LDM), and there has been some work in these directions with other parameterizations. A better quantification of the smoothness (or lack of smoothness) of the latent space may help facilitate the choice of DA algorithm, or provide an estimate of the degree of uncertainty reduction that is achievable. The development of specific metrics for this purpose is thus of interest. Finally, the application of the overall methodology to real models should be pursued. This will enable us to identify additional areas for future developments. 
+
+# Declaration of competing interest 
+
+The authors declare that they have no known competing financial interests or personal relationships that could have appeared to influence the work reported in this paper. The last author is on the editorial board of this journal. 
+
+# Acknowledgments 
+
+We are grateful to the Stanford Smart Fields Consortium and the Stanford Graduate Fellowship in Science and Engineering for financial support. We also thank the SDSS Center for Computation for providing the computational resources used in this work. 
+
+# Data and code availability 
+
+The codes and datasets used in this work for 3D-LDM training are available for download at https:// github.com/guidodf09/ldm_3d_geomodel . The codes are based on the implementations provided in the 
+
+https://github.com/huggingface/diffusers and https://github.com/Project-MONAI/GenerativeModels 
+
+repositories. The Python libraries diffusers and monai are used in our implementation. The codes for the flow surrogate model and latent-space data assimilation will be made available upon publication of this paper at https://github.com/guidodf09/ldm_data_assimilation .34 Preprint submitted to Computational Geosciences 
+
+# References 
+
+Bao, J., Li, L., Redoloza, F., 2020. Coupling ensemble smoother and deep learning with generative adversarial networks to deal with non-Gaussianity in flow and transport data assimilation. Journal of Hydrology 590, 125443. doi: 10.1016/j.jhydrol.2020.125443 .Canchumuni, S.W., Emerick, A.A., Pacheco, M.A.C., 2019a. History matching geological facies models based on ensemble smoother and deep generative models. Journal of Petroleum Science and Engineer-ing 177, 941–958. doi: 10.1016/j.petrol.2019.02.037 .Canchumuni, S.W., Emerick, A.A., Pacheco, M.A.C., 2019b. Towards a robust parameterization for conditioning facies models using deep variational autoencoders and ensemble smoother. Computers & Geosciences 128, 87–102. doi: 10.1016/j.cageo.2019.04.006 .Canchumuni, S.W.A., Castro, J.D.B., Potratz, J., Emerick, A.A., Pacheco, M.A.C., 2021. Recent de-velopments combining ensemble smoother and deep generative networks for facies history matching. Computational Geosciences 25, 433–466. doi: 10.1007/s10596-020-10015-0 .Chang, H., Zhang, D., Lu, Z., 2010. History matching of facies distribution with the EnKF and level set parameterization. Journal of Computational Physics 229, 8011–8030. doi: 10.1016/j.jcp.2010.07. 005 .Chen, C., Gao, G., Gelderblom, P., Jimenez, E., 2016. Integration of cumulative-distribution-function mapping with principal-component analysis for the history matching of channelized reservoirs. SPE Reservoir Evaluation & Engineering 19, 278–293. doi: 10.2118/170636-PA .Chen, V., Dunlop, M.M., Papaspiliopoulos, O., Stuart, A.M., 2019. Dimension-robust mcmc in Bayesian inverse problems. doi: https://doi.org/10.48550/arXiv.1904.02127 , arXiv:1803.03344 .Chen, Y., Oliver, D.S., 2010. Cross-covariances and localization for EnKF in multiphase flow data assimilation. Computational Geosciences 14, 579–601. doi: 10.1007/s10596-009-9174-6 .Cotter, S., Roberts, G., Stuart, A., White, D., 2012. MCMC methods for functions: modifying old algorithms to make them faster. Statistical Science 28. doi: 10.1214/13-STS421 .Dai, C., Heng, J., Jacob, P.E., Whiteley, N., 2022. An invitation to sequential Monte Carlo sam-plers. Journal of the American Statistical Association 117, 1587–1600. doi: 10.1080/01621459.2022. 2087659 .Del Moral, P., Doucet, A., Jasra, A., 2006. Sequential Monte Carlo samplers. Journal of the Royal Statistical Society: Series B (Statistical Methodology) 68, 411–436. doi: 10.1111/j.1467-9868.2006. 00553.x .Dhariwal, P., Nichol, A., 2021. Diffusion models beat GANs on image synthesis, in: Advances in Neural Information Processing Systems, Curran Associates, Inc., Virtual. pp. 8780–8794. doi: 10.48550/ arXiv.2105.05233 .35 Preprint submitted to Computational Geosciences 
+
+Di Federico, G., Durlofsky, L.J., 2025. Latent diffusion models for parameterization of facies-based geomodels and their use in data assimilation. Computers & Geosciences 194, 105755. doi: 10.1016/j. cageo.2024.105755 .Di Federico, G., Durlofsky, L.J., 2026. Three-dimensional latent diffusion models for parameterizing and history matching facies systems under hierarchical uncertainty. Mathematical Geosciences 58, 347–379. doi: 10.1007/s11004-025-10245-x .Emerick, A., 2024. Practical considerations in the application of ensemble smoother for assimilating production and 4D seismic data, in: 19th European Conference on the Mathematics of Oil Recovery (ECMOR), Oslo, Norway. doi: 10.3997/2214-4609.202437027 .Emerick, A.A., 2016. Analysis of the performance of ensemble-based assimilation of production and seismic data. Journal of Petroleum Science and Engineering 139, 219–239. doi: 10.1016/j.petrol. 2016.01.029 .Emerick, A.A., Reynolds, A., 2013. Ensemble smoother with multiple data assimilation. Computers & Geosciences 55, 3–15. doi: 10.1016/j.cageo.2012.03.011 .Evensen, G., 1994. Sequential data assimilation with a nonlinear quasi-geostrophic model using Monte Carlo methods to forecast error statistics. Journal of Geophysical Research: Oceans 99, 10143–10162. doi: 10.1029/94JC00572 .Exterkoetter, R., de Figueiredo, L.P., Bordignon, F.L., Emerick, A.A., Roisenberg, M., Rodrigues, B.B., 2024. Ensemble smoother with fully convolutional VAE for seismic facies inversion. Computers & Geosciences 189, 105619. doi: 10.1016/j.cageo.2024.105619 .Fan, Y., Huang, T., Jiang, S., 2026. Deep-learning-based fracture network parameterization and history matching for enhanced geothermal reservoirs, in: Proceedings of the 51st Workshop on Geothermal Reservoir Engineering, Stanford, CA, USA. Feng, R., Mosegaard, K., Grana, D., Mukerji, T., Hansen, T.M., 2024. Stochastic facies inversion with prior sampling by conditional generative adversarial networks based on training image. Mathematical Geosciences 56, 665–690. doi: 10.1007/s11004-023-10119-0 .Fu, W., Chen, Y., Wang, Z., Zheng, Q., Zhang, D., 2026. Parameterization of complex geological models with PCA-guided adversarial diffusion for ensemble data assimilation. Journal of Hydrology 668, 135044. doi: 10.1016/j.jhydrol.2026.135044 .Furrer, R., Bengtsson, T., 2007. Estimation of high-dimensional prior and posterior covariance matrices in Kalman filter variants. Journal of Multivariate Analysis 98, 227–255. doi: 10.1016/j.jmva.2006. 08.003 .Gaspari, G., Cohn, S.E., 1999. Construction of correlation functions in two and three dimensions. Quarterly Journal of the Royal Meteorological Society 125, 723–757. doi: 10.1002/qj.49712555417 .36 Preprint submitted to Computational Geosciences 
+
+Gelman, A., Rubin, D.B., 1992. Inference from iterative simulation using multiple sequences. Statistical Science 7, 457–472. doi: 10.1214/ss/1177011136 .Han, Y., Durlofsky, L.J., 2026. Recurrent transformer U-net surrogate for flow modeling and data assimilation in subsurface formations with faults. Journal of Computational Physics 556, 114801. URL: https://www.sciencedirect.com/science/article/pii/S0021999126001518 , doi: https:// doi.org/10.1016/j.jcp.2026.114801 .Han, Y., Hamon, F.P., Jiang, S., Durlofsky, L.J., 2024. Surrogate model for geological CO 2 storage and its use in hierarchical MCMC history matching. Advances in Water Resources 187, 104678. doi: 10.1016/j.advwatres.2024.104678 .Hastings, W., 1970. Monte Carlo sampling methods using Markov chains and their applications. Biometrika 57, 97 – 109. doi: 10.1093/biomet/57.1.97 .He, J., Sarma, P., Durlofsky, L.J., 2013. Reduced-order flow modeling and geological parameterization for ensemble-based data assimilation. Computers & Geosciences 55, 54–69. doi: 10.1016/j.cageo. 2012.03.027 .Ho, J., Jain, A., Abbeel, P., 2020. Denoising diffusion probabilistic models, in: Advances in Neural Information Processing Systems, Curran Associates, Inc., 34th International Conference on Neural Information Processing Systems (NeurIPS), Vancouver, Canada. doi: 10.48550/arXiv.2006.11239 .Hochreiter, S., Schmidhuber, J., 1997. Long short-term memory. Neural computation 9, 1735–1780. Houtekamer, P.L., Mitchell, H.L., 2001. A sequential ensemble Kalman filter for atmospheric data assimilation. Monthly Weather Review 129, 123 – 137. doi: 10.1175/1520-0493(2001)129<0123: ASEKFF>2.0.CO;2 .Jafarpour, B., 2011. Wavelet reconstruction of geologic facies from nonlinear dynamic flow measure-ments. IEEE Transactions on Geoscience and Remote Sensing 49, 1520–1535. doi: 10.1109/TGRS. 2010.2089464 .Jafarpour, B., McLaughlin, D., 2009. Reservoir characterization with the discrete cosine transform. SPE Journal 14, 182–201. doi: 10.2118/106453-PA .Kingma, D.P., Ba, J., 2015. Adam: A method for stochastic optimization, in: International Conference on Learning Representations (ICLR) 2015, San Diego, CA, USA. doi: 10.48550/arXiv.1412.6980 .Kingma, D.P., Welling, M., 2013. Auto-encoding variational Bayes. doi: 10.48550/arXiv.1312.6114 .Lacerda, J.M., Emerick, A.A., Pires, A.P., 2019. Methods to mitigate loss of variance due to sampling errors in ensemble data assimilation with non-local model parameters. Journal of Petroleum Science and Engineering 172, 690–706. doi: 10.1016/j.petrol.2018.08.056 .Lacerda, J.M., Emerick, A.A., Pires, A.P., 2021. Using a machine learning proxy for localization in ensem-ble data assimilation. Computational Geosciences 25, 931–944. doi: 10.1007/s10596-020-10031-0 .37 Preprint submitted to Computational Geosciences 
+
+Laloy, E., H´ erault, R., Jacques, D., Linde, N., 2018. Training-image based geostatistical inversion using a spatial generative adversarial neural network. Water Resources Research 54, 381–406. doi: 10.1002/ 2017wr022148 .Laloy, E., Linde, N., Ruffino, C., H´ erault, R., Gasso, G., Jacques, D., 2019. Gradient-based deterministic inversion of geophysical data with generative adversarial networks: is it feasible? Computers & Geosciences 133, 104333. doi: 10.1016/j.cageo.2019.104333 .Lee, D., Ovanger, O., Eidsvik, J., Aune, E., Skauvold, J., Hauge, R., 2025. Latent diffusion model for conditional reservoir facies generation. Computers & Geosciences 194, 105750. doi: 10.1016/j.cageo. 2024.105750 .Lin, Z., He, Q., 2025. Differentiable inverse modeling with physics-constrained latent diffusion for het-erogeneous subsurface parameter fields. doi: 10.48550/arXiv.2512.22421 .Liu, N., Oliver, D.S., 2005. Critical evaluation of the ensemble Kalman filter on history matching of geologic facies. SPE Reservoir Evaluation & Engineering 8, 470–477. doi: 10.2118/92867-PA .Liu, Y., Durlofsky, L.J., 2021. 3D CNN-PCA: A deep-learning-based parameterization for complex geomodels. Computers & Geosciences 148, 1046–1076. doi: 10.1016/j.cageo.2020.104676 .Lopez-Alvis, J., Laloy, E., Nguyen, F., Hermans, T., 2021. Deep generative models in inversion: the impact of the generator’s nonlinearity and development of a new approach based on a variational autoencoder. Computers & Geosciences 152, 104762. doi: 10.1016/j.cageo.2021.104762 .Luo, X., Bhakta, T., Nævdal, G., 2018. Correlation-based adaptive localization with applications to ensemble-based 4D-seismic history matching. SPE Journal 23, 396–427. doi: 10.2118/185936-PA .Merzoug, A., Pyrcz, M., 2025. Conditional generative adversarial networks for multivariate Gaussian subsurface modeling: how good are they? Mathematical Geosciences 57, 733–757. doi: 10.1007/ s11004-025-10176-7 .Miele, R., Linde, N., 2026. Diffusion models for multivariate subsurface generation and efficient proba-bilistic inversion. Computers & Geosciences 207, 106076. doi: 10.1016/j.cageo.2025.106076 .Mo, S., Zhu, Y., Zabaras, N., Shi, X., Wu, J., 2019. Deep convolutional encoder-decoder networks for uncertainty quantification of dynamic multiphase flow in heterogeneous media. Water Resources Research 55, 703–728. doi: 10.1029/2018WR023528 .Mohd Razak, S., Jafarpour, B., 2020. Convolutional neural networks (CNN) for feature-based model calibration under uncertain geologic scenarios. Computational Geosciences 24, 1625–1649. doi: 10. 1007/s10596-020-09971-4 .Oliver, D.S., Reynolds, A.C., Liu, N., 2008. Inverse theory for petroleum reservoir characterization and history matching. Cambridge University Press, Cambridge, UK. 38 Preprint submitted to Computational Geosciences 
+
+Ovanger, O., Lee, D., Eidsvik, J., Hauge, R., Skauvold, J., Aune, E., 2025. A statistical study of latent diffusion models for geological facies modeling. Mathematical Geosciences doi: 10.1007/ s11004-025-10178-5 .Rock Flow Dynamics, 2024. Reservoir modelling and simulation platform (version 24.3). [Online; accessed June 6, 2025]. Rombach, R., Blattmann, A., Lorenz, D., Esser, P., Ommer, B., 2022. High-resolution image synthesis with latent diffusion models, in: Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR), IEEE Xplore, New Orleans, Louisiana, USA. doi: 10.48550/arXiv. 2112.10752 .Rongier, G., Peeters, L., 2025. Towards geological inference with process-based and deep generative modeling, part 2: inversion of fluvial deposits and latent-space disentanglement. doi: 10.48550/arXiv. 2510.17478 , arXiv:2510.17478 . arXiv preprint arXiv:2510.17478. Ronneberger, O., Fischer, P., Brox, T., 2015. U-net: convolutional networks for biomedical image segmentation, in: Proceedings of the Medical Image Computing and Computer-Assisted Intervention (MICCAI), Springer, Munich, Germany. doi: 10.1007/978-3-319-24574-4\_28 .Sayarpour, M., Kabir, C., Sepehrnoori, K., Lake, L.W., 2011. Probabilistic history matching with the capacitance–resistance model in waterfloods: a precursor to numerical modeling. Journal of Petroleum Science and Engineering 78, 96–108. doi: 10.1016/j.petrol.2011.05.005 .Schlumberger, 2019. Petrel e&p software platform (version 2019.2). [Online; accessed May 10, 2024]. Seabra, G.S., M¨ ucke, N.T., Silva, V.L.S., Emerick, A.A., Voskov, D., Vossepoel, F., 2025. Integrating score-based diffusion models with machine learning-enhanced localization for advanced data assimila-tion in geological carbon storage. doi: 10.48550/arXiv.2511.05266 .Song, J., Meng, C., Ermon, S., 2021a. Denoising diffusion implicit models, in: Proceedings of the 9th International Conference on Learning Representations (ICLR), Vienna, Austria. doi: 10.48550/arXiv. 2010.02502 .Song, S., Mukerji, T., Hou, J., 2021b. GANSim: conditional facies simulation using an improved pro-gressive growing of generative adversarial networks (GANs). Mathematical Geosciences 53, 1413–1444. doi: 10.1007/s11004-021-09934-0 .Song, S., Mukerji, T., Scheidt, C., Alqassab, H.M., Feng, M., 2026. Geomodelling of multi-scenario non-stationary reservoirs with enhanced gansim. Petroleum Exploration and Development 53, 205–220. doi: 10.1016/S1876-3804(26)60685-4 .Song, S., Zhang, D., Mukerji, T., Wang, N., 2023. GANSim-surrogate: an integrated framework for stochastic conditional geomodelling. Journal of Hydrology 620, 129493. doi: 10.1016/j.jhydrol. 2023.129493 .39 Preprint submitted to Computational Geosciences 
+
+Tang, M., Ju, X., Durlofsky, L.J., 2022. Deep-learning-based coupled flow-geomechanics surrogate model for CO 2 sequestration. International Journal of Greenhouse Gas Control 118, 103692. doi: 10.1016/ j.ijggc.2022.103692 .Tang, M., Liu, Y., Durlofsky, L.J., 2020. A deep-learning-based surrogate model for data assimilation in dynamic subsurface flow problems. Journal of Computational Physics 413, 109456. doi: 10.1016/ j.jcp.2020.109456 .Tang, M., Liu, Y., Durlofsky, L.J., 2021. History matching complex 3D systems using deep-learning-based surrogate flow modeling and CNN-PCA geological parameterization, in: SPE Reservoir Simulation Conference. doi: 10.2118/203924-MS .Tartakovsky, A.M., Marrero, C.O., Perdikaris, P., Tartakovsky, G.D., Barajas-Solano, D., 2020. Physics-informed deep neural networks for learning parameters and constitutive relationships in subsurface flow problems. Water Resources Research 56, e2019WR026731. doi: 10.1029/2019WR026731 .Vehtari, A., Gelman, A., Simpson, D., Carpenter, B., B¨ urkner, P.C., 2021. Rank-normalization, folding, and localization: An improved ˆR for assessing convergence of MCMC (with discussion). Bayesian Analysis 16. doi: 10.1214/20-ba1221 .Vo, H.X., Durlofsky, L.J., 2015. Data assimilation and uncertainty assessment for complex geological models using a new PCA-based parameterization. Computational Geosciences 19, 747–767. doi: 10. 1007/s10596-015-9483-x .Wang, N., Chang, H., Zhang, D., 2022. Surrogate and inverse modeling for two-phase flow in porous media via theory-guided convolutional neural network. Journal of Computational Physics 466, 111419. doi: 10.1016/j.jcp.2022.111419 .Wang, Z., Chen, Y., Chen, G., Zheng, Q., Wu, T., Zhang, D., 2025a. Generative emulation and un-certainty quantification of geological CO 2 storage with conditional diffusion models. Applied Soft Computing 182, 113542. doi: 10.1016/j.asoc.2025.113542 .Wang, Z., Chen, Y., Wang, N., Chen, G., Zhang, D., 2025b. Generative subsurface flow modeling with pretrained diffusion model and training-free knowledge alignment. Geophysical Research Letters 52, e2025GL118000. doi: 10.1029/2025GL118000 .Wen, G., Li, Z., Azizzadenesheli, K., Anandkumar, A., Benson, S.M., 2022. U-FNO—an enhanced Fourier neural operator-based deep-learning model for multiphase flow. Advances in Water Resources 163, 104180. doi: 10.1016/j.advwatres.2022.104180 .Yu, J., Jafarpour, B., 2023. Deep learning-based disentangled parametrization for model calibration under multiple geologic scenarios, in: SPE Reservoir Simulation Conference, Galveston, TX, USA. doi: 10.2118/212177-MS .40 Preprint submitted to Computational Geosciences 
+
+Zhan, C., Dai, Z., Jiao, J.J., Soltanian, M.R., Yin, H., Carroll, K.C., 2025. Toward artificial general intelligence in hydrogeological modeling with an integrated latent diffusion framework. Geophysical Research Letters 52, e2024GL114298. doi: 10.1029/2024GL114298 .Zhang, Y., Oliver, D.S., 2010. Improving the ensemble estimate of the Kalman gain by bootstrap sampling. Mathematical Geosciences 42, 327–345. doi: 10.1007/s11004-010-9267-8 .Zhao, Y., Forouzanfar, F., Reynolds, A.C., 2017. History matching of multi-facies channelized reservoirs using ES-MDA with common basis DCT. Computational Geosciences 21, 1343–1364. doi: 10.1007/ s10596-016-9604-1 .41
