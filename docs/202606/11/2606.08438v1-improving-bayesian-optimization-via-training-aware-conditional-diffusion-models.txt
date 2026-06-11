@@ -1,0 +1,2235 @@
+Title: Improving Bayesian Optimization via Training-Aware Conditional Diffusion Models
+
+URL Source: https://arxiv.org/pdf/2606.08438v1
+
+Published Time: Tue, 09 Jun 2026 01:13:40 GMT
+
+Number of Pages: 33
+
+Markdown Content:
+# IMPROVING BAYESIAN OPTIMIZATION VIA TRAINING -A WARE 
+
+# CONDITIONAL DIFFUSION MODELS 
+
+Yilin Zheng ∗
+
+National University of Singapore Singapore 
+
+Haowei Wang ∗
+
+National University of Singapore Singapore 
+
+Szu Hui Ng 
+
+National University of Singapore Singapore 
+
+Enlu Zhou 
+
+Georgia Institute of Technology Atlanta, GA, USA June 9, 2026 
+
+# ABSTRACT 
+
+Bayesian optimization (BO) is a widely used approach for black-box optimization that uses a Gaussian process (GP) as a surrogate and guides sequential evaluations via an acquisition function, with the ultimate goal of locating the global optimum x⋆. To align with this goal, information-based acquisition functions such as Predictive Entropy Search (PES) model x⋆ as a random variable and reduce the entropy of its distribution, but approximating this distribution via traditional GP posterior sampling is computationally expensive. To address this limitation, we leverage Conditional Diffusion Models (CDMs) to efficiently approximate the distribution of x⋆ and develop BO-inherent training strategies for CDMs. Motivated by the structural properties of the CDM-learned distribution, we further develop an acquisition strategy termed Diffusion-based Mode Seeking (DMS) to guide the sequential evaluation. We establish a sub-optimality guarantee for the CDM-learned distribution and demonstrate through extensive experiments that DMS outperforms standard BO baselines. 
+
+# 1 Introduction 
+
+Black-box optimization problems are prevalent in various scientific and engineering domains, such as hyperparameter tuning for neural networks [ 41 , 7 ], optimal molecular design in drug discovery [ 31 , 19 ], and experimental design in food science [20]. Without loss of generality, such optimization problems can be formulated as 
+
+max  
+
+> x∈X
+
+f (x), (1) where the design space X is a compact subset of Rd. In many cases, the black-box function f can only be evaluated through noisy observations, and its derivatives are unavailable [ 11 ]. The ultimate goal of black-box optimization is to identify the location of the global optimum x⋆, which is a nontrivial challenge in general. When sequential evaluations of the black-box function are permitted, Bayesian Optimization (BO) is a widely used approach for addressing such challenging problems because of its high data efficiency [ 18 , 39 , 11 , 37 ]. BO typically employs a Gaussian Process (GP) as a probabilistic surrogate model for the black-box function f , and relies on an acquisition function to determine the next evaluation point. Among various acquisition strategies, information-based acquisition functions, including Entropy Search (ES) [ 12 ] and Predictive Entropy Search (PES) [ 13 ] are particularly relevant to the ultimate goal of black-box optimization. They treat x⋆ as a random variable, model its distribution using the GP posterior, and select the next evaluation point by maximizing the expected reduction in the entropy of the distribution of x⋆. However, these approaches are computationally expensive and poorly scalable with the input dimension, as modeling the distribution of x⋆ requires repeatedly sampling function sample paths from the GP posterior and computing their global optima. 
+
+> ∗
+
+Equal contribution. 
+
+> arXiv:2606.08438v1 [stat.ML] 7 Jun 2026
+
+A PREPRINT - J UNE 9, 2026 To model the distribution of x⋆ in a more efficient and effective manner, we notice that prior works in data-driven black-box optimization [ 22 , 21 , 24 , 43 , 38 ] have explored modeling the one-to-many inverse mapping from a target observation y to the corresponding inputs x such that f (x) + ϵ = y, where ϵ represents the noise. As multiple inputs may yield the same observation, this inverse mapping can naturally be represented by a conditional distribution P (x | y).Consequently, given an estimate by⋆ of the optimal function value, the resulting conditional distribution P (x | y = by⋆)
+
+can be regarded as an estimate of the distribution of x⋆, sampling from which can consequently provide reliable x⋆
+
+candidates. In these prior works, Conditional Diffusion Models (CDMs) [ 33 , 8 , 14 ] are typically employed to approximate the target distribution P (x | y), and we denote by bP (x | y) the distribution learned by CDMs. The outstanding performance CDMs and their efficiency of generating candidates of x⋆ make them promising to be used in BO to approximate the distribution of x⋆.However, we observe that directly applying CDMs in BO presents nontrivial challenges, particularly in how to properly train a CDM under BO-specific scenarios. These challenges arise mainly from two sources: (1) BO typically starts with a very small dataset Dn = {(xi, y i)}ni=1 , making it difficult for a CDM to learn a meaningful conditional distribution. While augmenting the dataset via pseudo-labeling according to a regression model [ 24 ] is a natural remedy, it raises another non-trivial question of how to assign reasonable pseudo-labels to unevaluated designs; (2) even with pseudo-labeling augmentation ideas, it remains challenging to identify input designs associated with high pseudo-label values, which are crucial for training CDMs to generate high-quality x⋆ candidates. This is because pseudo-labels are intended to indicate the potential optimality of an input and provide guidance to CDMs on which input regions are likely to contain high-quality x⋆ candidates. Without finding inputs with high pseudo-labels, CDMs may fail to receive informative training signals and thus struggle to generate high-quality x⋆ candidates. In this paper, we propose BO-inherent training strategies to address the above challenges, enabling the training of CDMs to effectively approximate the distribution of x⋆. While the distribution learned by CDMs could in principle be used to provide samples of x⋆ for entropy approximations in ES/PES, we observe a difference in its structure compared to the distribution induced by GP posterior sampling. In particular, the CDM-learned distribution tends to be sharply concentrated around a small set of high-quality regions, whereas GP-induced distributions over x⋆ often spread their mass over broader regions of the input space. Consequently, entropy reduction is well suited to the latter, but less natural for the former. Motivated by this observation, we introduce an intuitive and effective acquisition strategy termed Diffusion-based Mode Seeking (DMS), which selects the mode of the density of the learned distribution bP (x | y = by⋆)
+
+as the next evaluation point. Moreover, motivated by recent analyses of diffusion-based optimization [ 44 , 24 ], we derive sub-optimality bounds for CDM-learned distribution under non-linear objectives modeled by GP posteriors, which is, to our best knowledge, not covered by prior analyses that mainly based on assumptions of linear objectives. Our contributions are summarized as follows: 1). We develop effective CDM training strategies that leverage the GP as the estimator to the objective function for pseudo-label assignment, and employ short-run L-BFGS to identify input regions with high pseudo-labels. Building on the CDM trained by the pseudo-dataset, we further design the DMS acquisition strategy, together forming a practical and scalable pipeline for integrating CDMs into BO. 2). We establish the sub-optimality guarantee for CDM-learned distribution under non-linear objective functions modeled by the GP posterior, which provides a quality certificate for the next evaluation point determined by DMS. 3). We evaluate DMS on both synthetic benchmarks and real-world optimization tasks, and show that it achieves strong performance against other commonly used BO baselines. Ablation studies further validate the effective-ness of our proposed training strategies for CDMs, and align with our theoretical analysis. The remainder of this paper is organized as follows. Section 2 recaps main components of both BO and CDM. Section 3 presents the proposed method and algorithmic details. Section 4 provides our theoretical analysis. Section 5 reports our experimental results, followed by conclusions in Section 6. 
+
+# 2 Background 
+
+2.1 Bayesian Optimization 
+
+BO aims to find the global maximizer of a black-box function f given an observed dataset Dn = {(xi, y i)}ni=1 , where 
+
+yi = f (xi) + ϵi and the noise terms ϵi ∼ N  0, σ 2 are i.i.d. The objective function f is typically assumed to be 2A PREPRINT - J UNE 9, 2026 continuous over the input space X , and its analytical form and derivatives are unknown. Standard BO algorithms alternate between fitting a GP posterior to the current observed dataset and maximizing an acquisition function αacq  
+
+> n
+
+(x) to find the next evaluation point, repeating this process until the given evaluation budget B is exhausted. For completeness, we briefly recap GP and acquisition functions respectively as follows. 
+
+2.1.1 Gaussian Process 
+
+A Gaussian process (GP) prior is commonly placed over the objective function f , fully specified by a mean function μ(x) := E[f (x)] and a kernel function k (x, x′) := E [( f (x) − μ0(x)) ( f (x′) − μ0 (x′))] , such that 
+
+f (x) ∼ GP (μ(x), k (x, x′)) . For simplicity, we assume a zero prior mean, i.e., μ(x) = 0 . Given the observed dataset Dn, the GP posterior f (x) | D n ∼ GP (μn(x), k n(x, x′)) has mean μn(x) = kn(x)⊤(Kn + σ2I)−1yn
+
+and covariance kn (x, x′) = k (x, x′) − kn(x)⊤(Kn + σ2I)−1kn (x′), where kn(x) = [ k (x, xi)] xi∈D n , Kn =[k (xi, xj )] xi,xj ∈D n , yn = [ yi]ni=1 . The posterior variance is σ2
+
+> n
+
+(x) = kn(x, x).
+
+2.1.2 Acquisition Functions 
+
+Based on the current GP posterior, different heuristic strategies have been proposed to develop different acquisition functions. Commonly used acquisition functions include Probability of Improvement (PI) [ 23 ], Expected Improvement (EI) [ 18 ], Upper Confidence Bound (UCB) [ 34 ], and Thompson Sampling (TS) [ 1 ]. More recently, information-based acquisition functions have emerged as an effective class of methods, such as Predictive Entropy Search (PES) [ 13 ], Max-value Entropy Search (MES) [ 39 ] and Joint Entropy Search (JES) [ 16 ]. We refer readers to the survey of Wang et al. [37] for a comprehensive overview of acquisition functions. 
+
+2.2 Conditional Diffusion Models 
+
+Diffusion models are a class of generative models that approximates complex data distributions P (x) by progressively corrupting samples from P (x) with noise and subsequently denoising it through a learned reverse process [ 32 , 15 ]. Conditional Diffusion Models (CDMs) extend this framework to approximate a conditional distribution P (x | y),enabling controlled sample generation under a specified condition y, such as a textual prompt in image generation tasks or a target observation in optimization problems. In this work, we focus on score-based CDMs formulated through Stochastic Differential Equations (SDEs), as proposed by Song et al. [33]. For clarification, hereafter we let P denote the distribution, and p the corresponding density. 
+
+2.2.1 Forward & Backward Process 
+
+To model the progressive corruption of data with noise, CDMs define a forward process as a continuous-time stochastic process {xyt }t∈(0 ,T ], where xy 
+
+> 0
+
+are samples drawn from P (x | y), and xyt denotes the random variable obtained by perturbing xy 
+
+> 0
+
+with noise up to time t. We denote by Pt(x | y) the distribution of xyt , with P0(x | y) = P (x | y).Formally, the forward process can be represented by the following SDE with t ∈ [0 , T ]:
+
+dxyt = f (xyt , t ) d t + σ(t) d wt (2) where f : Rd × [0 , T ] → Rd is the drift coefficient, σ : [0 , T ] → R is the diffusion coefficient, and wt denotes a 
+
+d-dimensional standard Brownian motion. The drift f and diffusion coefficient σ are usually designed so that the terminal distribution PT (x | y) converges to a simple and tractable distribution Π, such as a standard Gaussian. Backward process aims to reverse the forward process, with xy, ← 
+
+> t
+
+following PT −t(x | y). Specifically, starting from a sample xy, ← 
+
+> 0
+
+drawn from the terminal distribution PT (x | y), backward process is a reverse-time stochastic process that gradually removes noise such that Pt(x | y) evolves toward the target distribution, i.e., Pt(x | y) → P0(x | y) as 
+
+t → 0. The backward process corresponding to Eq. 2 can be characterized by another SDE with t ∈ [0 , T ] [2]: 
+
+dxy, ← 
+
+> t
+
+= f (xy, ← 
+
+> t
+
+, t ) − σ(t)2∇x log pt (xy, ← 
+
+> t
+
+| y) dt + σ(t)d wt, (3) where ∇x log pt(xy, ← 
+
+> t
+
+| y) is known as the conditional score function of the marginal density at time t, and ¯wt is a 
+
+d-dimensional reverse-time Brownian motion. 
+
+2.2.2 Training 
+
+In practice, the unknown conditional score function is approximated by a neural network sθ (x, t, y ) with parameters θ,which can be trained via minimizing a loss function called denoising score matching [36, 33]: 
+
+E
+
+> t
+
+
+
+E 
+
+> xy
+> 0,y
+
+
+
+E 
+
+> xyt|xy
+> 0
+
+h
+
+∥sθ (xyt , t, y ) − ∇ x log pt (xyt | xy 
+
+> 0
+
+)∥22
+
+i 
+
+(4) 3A PREPRINT - J UNE 9, 2026 
+
+Algorithm 1 Bayesian Optimization with Diffusion-based Mode Seeking  
+
+> 1:
+
+Input: dataset Dn, evaluation budget B, GP prior, score predictor sθ , surrogate bf 
+
+> 2:
+
+Output: final dataset Dn+B 
+
+> 3:
+
+for j = n to n + B − 1 do  
+
+> 4:
+
+μj (x), σ j (x) ← FitGP( Dj ) 
+
+> 5:
+
+{xi}mi=1 ← ShortRunL -BFGS(GP( μj (x), σ j (x)))  
+
+> 6:
+
+{byi}mi=1 ← bf ({xi}mi=1 ), bDm ← { (xi, byi)}mi=1  
+
+> 7:
+
+bsθ (x, t, y ) ← DenoisingScoreMatching( bDm) 
+
+> 8:
+
+xj+1 ← DMS( bsθ , bDm) 
+
+> 9:
+
+yj+1 ← f (xj+1 ) + ϵj+1 , Dj+1 ← D j ∪ { (xj+1 , y j+1 )} 
+
+> 10:
+
+end for  
+
+> 11:
+
+Function DMS( bsθ , bDm) 
+
+> 12:
+
+by⋆ ← max i∈[m] byi 
+
+> 13:
+
+for s = 1 to S do  
+
+> 14:
+
+x←,(s)0 ∼ Π, e.g., N (0, I) 
+
+> 15:
+
+x⋆s ← BackwardSDE( x←,(s)0 , bsθ , by⋆) 
+
+> 16:
+
+end for  
+
+> 17:
+
+xnext ← MeanShift( {x⋆s }Ss=1 ) 
+
+> 18:
+
+return xnext 
+
+where t ∼ U (0 , T ), and (xy 
+
+> 0
+
+, y ) are Monte Carlo samples drawn from the given training dataset. The expectation over 
+
+xt is taken with respect to the forward transition kernel pt(xyt | xy 
+
+> 0
+
+). This objective is tractable since, under commonly used forward SDEs, the transition kernel admits a closed form. More details are provided in Appendix A.1. After training, the learned score predictor bsθ (xy, ← 
+
+> t
+
+, t, y ) is used to replace the unknown conditional score 
+
+∇x log pt(xy, ← 
+
+> t
+
+| y) in the backward SDE, enabling conditional sampling by simulating the SDE. We denote by 
+
+bPT −t(x | y) the distribution of the random variable xy, ← 
+
+> t
+
+.Notably, in practice, rather than the terminal distribution PT , the backward process starts from the limiting tractable distribution Π. Additionally, we need an early stopping time t0 > 0 close to zero and sample t uniformly from [t0, T ]
+
+during training. This choice is made for numerical stability, as the score ∇x log pt (xt | x0, y ) becomes ill-conditioned and may diverge as t → 0 [ 33 , 24 ]. For the same reason, the backward SDE is only simulated from 0 to T − t0. Finally, the CDM effectively learns the distribution bPt0 (x | y), which is used in practice as an approximation to the target distribution P (x | y). Following the notation introduced in Section 1, we simply denote this learned distribution by 
+
+bP (x | y), and by bp(x | y) the corresponding density. It is also worth noting that, to enhance the fidelity of generated samples with respect to the given condition y, Classifier-Free Guidance (CFG) [ 14 ] has been proposed as an effective engineering technique, and further details are provided in Appendix A.2. 
+
+# 3 Methodology 
+
+In this section, we first introduce the strategies that could effectively address the two challenges of training CDMs in BO as introduced in Section 1. Secondly, we propose our acquisition strategy Diffusion-based Mode Seeking (DMS) based on the properly trained CDM. 
+
+3.1 Training strategies 3.1.1 Strategy for Limited Training Data 
+
+The first challenge in applying CDMs to BO is the extremely limited size of the observed dataset Dn. Since CDMs aim to approximate a conditional distribution P (x | y), training them directly on Dn is ineffective when n is small. This data scarcity prevents the model from capturing meaningful conditional structure and often leads to unstable or degenerate generation. 4A PREPRINT - J UNE 9, 2026 An intuitive remedy is to augment the training dataset via pseudo-labeling, thereby constructing additional labeled pairs beyond the expensive evaluations of f . In the context of BO, the GP surrogate provides a natural and principled model 
+
+bf of the unknown objective function f .To obtain a predictive estimate of the objective function f that accounts for both the posterior mean and uncertainty, we adopt the following bf (x):
+
+bf (x) = μn(x) + ρσ n(x), (5) where x is an input design that has not been evaluated yet. Then we assign the pseudo-label by by(x) = bf (x).This strategy assigns larger values to input designs that either exhibit high posterior mean or high posterior uncertainty. As a result, regions that are potentially optimal or insufficiently explored are both emphasized during the construction of the training data. When training CDMs on such pseudo-labels, the learned conditional distribution encourages candidate generation toward these regions, enabling the model to balance exploitation and exploration simultaneously. Therefore, we refer to it as balance-aware pseudo-labeling strategy. Of note, another naive strategy is simply the GP regression estimator, i.e. bf (x) = μn(x). While simple, this approach neglects posterior uncertainty and thus provides purely exploitative information, which may restrict candidate generation to already explored regions and hinder effective exploration. 
+
+3.1.2 Strategy for Identifying Promising Inputs 
+
+The second challenge is how to identify input designs associated with high balance-aware pseudo-label values, which are essential for providing informative training signals to CDMs. High pseudo-labels are intended to indicate the potential optimality of an input and guide CDMs toward regions likely to contain high-quality x⋆ candidates. If pseudo-labels are assigned to arbitrary input designs, the resulting pseudo-label values are unlikely to be high, especially as the input dimensionality d increases. Training CDMs on such data therefore provides weak signals, which in turn limits their ability to generate high-quality x⋆ candidates. To address this issue, we explicitly guide the selection of input designs toward promising regions. At each iteration, we first generate a set of initial inputs {x(0)  
+
+> i
+
+}mi=1 using a Sobol sequence over the input space X = [ l, u]. Starting from each 
+
+x(0)  
+
+> i
+
+, we apply K iterations of short-run L-BFGS to locally refine the inputs toward regions with high pseudo-labels: 
+
+x(k+1)  
+
+> i
+
+= Π X
+
+
+
+x(k) 
+
+> i
+
++ η(k) 
+
+> i
+
+d(k)
+
+> i
+
+
+
+, k = 0 , . . . , K − 1, (6) where d(k) 
+
+> i
+
+is the L-BFGS search direction computed from ∇ bf
+
+
+
+x(k)
+
+> i
+
+
+
+, η(k) 
+
+> i
+
+is determined by a strong Wolfe line search method [42], and ΠX denotes projection onto X , i.e., ΠX (x) = min {max {x, l}, u}.Here, “short-run” indicates that the L-BFGS procedure is deliberately truncated after a small K, so that the refined inputs explore multiple basins of attraction rather than collapsing to a single local optimum. At the same time, the resulting inputs {xi}mi=1 remain concentrated around promising input regions with high balance-aware pseudo-labels, providing diverse and informative data pairs that capture local structures. The resulting {x(K) 
+
+> i
+
+}mi=1 are subsequently assigned balance-aware pseudo-labels, forming the pseudo-dataset bDm = {(xi, byi)}mi=1 for the following training of CDMs. In contrast, using only the initial Sobol sequence {x(0)  
+
+> i
+
+}mi=1 in the input space without refinement, provides broad coverage but insufficient focus on promising regions. This often leads to less-informative pseudo-labels and degrade the performance of CDM. 
+
+3.2 Diffusion-based Mode Seeking 
+
+With the pseudo-dataset bDm constructed in Section 3.1, we can subsequently train the CDM by the denoising score matching. Notably, since the CDM is solely trained on the pseudo-dataset bDm, the distribution learned by CDM should be understood as an approximation to P (x | by) rather than the ground truth P (x | y). Hence, hereafter we denote by 
+
+bP (x | by) the distribution learned by the CDM, and bp(x | by) the density. After training, the maximal pseudo-label in bDm, denoted by by⋆, typically serves as a reasonable approximation of the highest attainable balance-aware pseudo-label and, consequently, of the optimal function value. Hence, bP (x | by = by⋆)
+
+can be interpreted as the distribution of x⋆ learned by the CDM. 5A PREPRINT - J UNE 9, 2026                                  
+
+> (a) Styblinski-Tang (d= 2) (b) Griewank (d= 3) (c) Shekel (d= 4) (d) Rastrigin (d= 5)
+> (e) Rosenbrock (d= 7) (f) Ackley (d= 8) (g) Levy (d= 10) (h) Michalewicz (d= 10)
+> (i) Ackley (d= 20) (j) Levy (d= 20) (k) Ackley (d= 50) (l) Levy (d= 50)
+
+Figure 1: Comparison between DMS and other baselines on synthetic benchmark functions. For tasks with d ≤ 10 ,experiments are conducted with 30 macro-replications; for higher-dimensional tasks with d > 10 , experiments are conducted with 10 macro-replications, with mean and one standard error reported. The remaining question is how to select the next evaluation point. A natural idea is to follow ES/PES by using the CDM to generate candidates for x⋆ and computing the corresponding entropy. However, the motivation behind ES/PES relies on the observation that the GP-induced distribution over x⋆ is typically highly dispersed and uncertain, making entropy reduction a meaningful objective. In contrast, we empirically observe that the distribution learned by the CDM is more sharply concentrated than GP-induced distribution. This difference is illustrated in Appendix C, where we visualize the corresponding distributions in a two-dimensional setting. These observations motivate us to design a new acquisition strategy tailored to the CDM-learned distribution. While dispersed GP-induced distribution necessitates entropy reduction, the sharper concentration of the CDM-learned distribution provides a more reliable and confident indicator of the location of global optimum. Consequently, we propose selecting the mode of the learned density bp(x | by = by⋆), which represents the location that the CDM deems most likely to correspond to x⋆, as the next evaluation point. However, since bP is available only through samples rather than an explicit density expression, we first draw {x⋆s }Ss=1 
+
+from bP (x | by = by⋆) via the backward SDE, and then apply mean-shift clustering [ 6] to estimate the dominant mode of the empirical sample distribution. The resulting mode estimate is used as the next evaluation point, and we refer to this acquisition strategy as Diffusion-based Mode Seeking (DMS), as summarized in Algorithm 1. Introduction to mean-shift is provided in Appendix A.3. 6A PREPRINT - J UNE 9, 2026 
+
+# 4 Theoretical Analysis 
+
+In this section, we analyze the sub-optimality of the CDM-learned distribution. We begin by briefly recapping notations aforementioned, and introducing some new notations that will be used. 
+
+Notations Let P (x | y) denote the ground-truth conditional distribution induced by the unknown black-box function 
+
+f , and let Pxy denote the corresponding joint distribution, from which the observed data (xi, y i) ∈ D n are drawn. We denote by Px a reference distribution over X . While the input x can be anywhere in the input space in our setting, assuming that x ∼ Px provides a convenient probabilistic framework for the theoretical analysis. To facilitate the analysis, we introduce a surrogate-induced conditional distribution P (x | by), where by = bf (x) + ξ with ξ ∼ N  0, ν 2.Note that ξ is introduced solely for theoretical purposes. We further denote by Pxby the corresponding joint distribution, from which the pseudo-dataset (xi, byi) ∈ bDm is generated. Finally, we denote by bP (x | by) the distribution learned by the CDM, which is a direct approximation to P (x | by), and indirectly related to the ground truth distribution P (x | y).
+
+Definition 1. Given the condition value a, we define the sub-optimality of the distribution bP (x | by = a) learned by the CDM as SubOpt ( bPa; a) = a − Ex∼ bPa [f (x)] , (7) where bPa is short for bP (x | by = a).
+
+Theorem 1. Training CDM under Assumptions 1, 2, 3 and 4 gives rise to 
+
+SubOpt( bPa; a) ≤ E 1 + E2 (8) 
+
+where with high probability, 
+
+E1 = eO
+
+ σ(log n)d+1 
+
+√n + ρ(log n)(d+1) /2
+
+√n
+
+
+
+, (9) 
+
+and with probability at least (1 − η)(1 − δ),
+
+E2 = O
+
+ Lf diam( X )
+
+ηt 20
+
+s
+
+N (S, 1 
+
+> m
+
+)d log( 1 
+
+> δ
+
+)
+
+m
+
+ , (10) 
+
+where Lf denotes the Lipschitz constant of the objective function f , diam( X ) denotes the diameter of the domain 
+
+X , defined as diam( X ) = sup x,x′∈X |x − x′|2, and S denotes the function class induced by the neural network architecture of sθ in Assumption 2, and N (S, 1/m ) denotes the ϵ-covering number of S with ϵ = 1 /m .
+
+All proof details are provided in Appendix G. 
+
+Remark 1. The bound in Theorem 1 admits a natural two-stage interpretation. The term E1 captures the gap between 
+
+P (x | y) and the GP-induced distribution P (x | by). The term E2 reflects the approximation error incurred between 
+
+P (x | by) and the CDM learned distribution bP (x | by).
+
+Remark 2. The bound E1 separates the effects of observation noise and balance-aware pseudo-labeling. The former is governed by the noise level σ, while the latter is controlled by the exploration parameter ρ. Both terms decay at the same rate eO(n−1/2), indicating that balance-aware pseudo-labeling does not introduce asymptotic bias. 
+
+Remark 3. The bound E2 reflects intuitive problem-dependent factors, including the smoothness of f and the scale of the domain X . Its inverse dependence on t20 highlights the instability caused by excessively small diffusion times, consistent with the discussion in Section 2.2. Moreover, the bound decreases with the training size m, confirming improved estimation with more training data. 
+
+# 5 Experiments 
+
+5.1 Experimental Setup 
+
+We evaluate our algorithms on both synthetic functions and real-world hyperparameter optimization. For synthetic functions, we consider a suite of widely used benchmark functions across different input dimensions. The standard benchmark set includes Styblinski–Tang ( d = 2 ), Griewank ( d = 3 ), Shekel ( d = 4 ), Rastrigin ( d = 5 ), Rosenbrock ( d = 7 ), Michalewicz ( d = 10 ), Ackley ( d = 8 ), and Levy ( d = 10 ). To evaluate scalability, we further test 7A PREPRINT - J UNE 9, 2026    
+
+> (a) Wine Recognition (b) Vehicle Silhouette (c) Image Segmentation (d) Protein Structure
+
+Figure 2: Comparison between DMS and other baselines on different real-world tasks. All experiments are conducted with 30 macro-replications, with mean and one standard error reported. input dimensions with d = 20 and d = 50 for both Levy and Ackley functions. These functions cover a broad range of optimization challenges, including differing smoothness, strong non-convexity, pronounced multi-modality, numerous local optima, and increasing input dimensionality. Definitions of all synthetic functions adopted in the experiments are provided in Appendix B.1. We evaluate performance on synthetic functions using simple regret: given a black-box function f : X → R and a sequence of evaluation points {x1, . . . , xn} queried by the optimizer, the simple regret after 
+
+n evaluations is defined as: rsimple  
+
+> n
+
+= f ⋆ − max 1≤i≤n f (xi), where f ⋆ = max x∈X f (x) denotes the ground truth global maximum of the objective function. For real-world tasks, we consider hyperparameter optimization benchmarks from both classification and regression settings. Following the Bayesmark protocol, we tune an MLP with four hyperparameters on three OpenML classification datasets, and report the best observed validation accuracy. We further tune a neural network with nine hyperparameters on a regression task from the HPOLib benchmark, where the observation is the validation loss. For this task, we set optimal loss ℓ⋆ = 0 and report simple regret in validation loss. Details are provided in Appendix B.2. We compare DMS with BO methods as introduced in Section 2, including PI, EI, UCB, TS, PES, General-purpose Information-Based Bayesian optimizatioN (GIBBON, a.k.a lower-bound MES) [ 28 ], and JES. Configurations of these baselines are provided in Appendix B.5. Note that we omit PES for d = 20 , 50 and JES for d = 50 due to their prohibitive computational costs. For each synthetic test function f , we initialize the observed dataset Dn with n = 10 d Sobol-generated input points and noisy observations y = f (x) + ϵ, where ϵ ∼ N (0 , 0.12). We set the evaluation budget to B = 10 d + 20 when d ≤ 10 ,and B = 10 d when d = 20 , 50 . For real-world hyperparameter optimization tasks, each experiment is initialized with an observed dataset Dn of size n = 10 , where the initial configurations are sampled from each benchmark using a Sobol sequence. The total evaluation budget is also set to B = 10 d + 20 .We use BoTorch framework [ 3] to construct the GP model for both our algorithms and BO baselines. We adopt constant mean function and squared exponential covariance function as the GP prior, with details in Appendix B.3. Algorithm 1 introduces several hyperparameters, including the pseudo-dataset size m, the number of short-run L-BFGS steps K, the balance-aware coefficient ρ, and the number of x⋆ candidates S. Details of these hyperparameters for all tasks are deferred to Appendix B.4. 
+
+5.2 Main Results 
+
+Figure 1 and Figure 2 summarize the optimization performance of DMS on both synthetic benchmarks and real-world tasks. On synthetic benchmarks, DMS consistently achieves lower simple regret than the baselines and exhibits a sustained decreasing trend on most tasks, while many baselines plateau after limited progress. On real-world tasks, DMS also maintains competitive improvement and outperforms the compared BO baselines, further supporting the effectiveness of learning a high-quality conditional distribution for candidate generation. 
+
+5.3 Ablation Studies 
+
+We conduct ablation studies on Styblinski-Tang and Levy to examine the effectiveness of our proposed training strategies in DMS, including pseudo-labeling, steps of short-run L-BFGS, the pseudo-dataset size bDm, and the number of generated candidates x⋆. Details are deferred to Appendix B.7. 8A PREPRINT - J UNE 9, 2026 The ablation results show that pseudo-labeling is essential for learning an informative conditional distribution, while training the CDM solely on the observed dataset Dn leads to a clear performance degradation. We also observe that setting ρ = 0 consistently performs the worst, while overly large values of ρ make the optimization excessively exploratory. In addition, using short-run L-BFGS to refine Sobol-sampled inputs improves performance over using Sobol sequence alone. Finally, we observe that the number of generated x⋆ candidates has little effect on performance, while moderately increasing the pseudo-dataset size m can further improve the performance. 
+
+5.4 Computational Complexity and Wall-Clock Time 
+
+We provide details of the computational overhead of DMS in Appendix D. Specifically, we analyze the bound of the computational complexity for PES and DMS to generate samples of x⋆. We also empirically report two types of wall-clock time comparisons: the time required by DMS and PES to generate the same number of x⋆ samples, and the average per-iteration time of all compared BO methods across different input dimensions. These results show that DMS is more efficient than PES in generating x⋆ candidates. Additionally, compared with other simple acquisition functions, DMS introduces additional overhead, but its per-iteration runtime still remains in the regime of seconds and is acceptable in practice. 
+
+# 6 Conclusion 
+
+In this work, we propose DMS, a CDM-based BO acquisition strategy that efficiently learns the distribution of x⋆ and selects its mode as the next evaluation point. We introduce balance-aware pseudo-labeling and short-run L-BFGS to construct informative pseudo-training data for CDM training. We provide a distribution-level sub-optimality guarantee and demonstrate strong empirical performance on extensive synthetic and real-world BO tasks. 
+
+# References 
+
+[1] Shipra Agrawal and Navin Goyal. Analysis of thompson sampling for the multi-armed bandit problem. In 
+
+Conference on learning theory , pages 39–1. JMLR Workshop and Conference Proceedings, 2012. [2] Brian DO Anderson. Reverse-time diffusion equation models. Stochastic Processes and their Applications , 12(3): 313–326, 1982. [3] Maximilian Balandat, Brian Karrer, Daniel Jiang, Samuel Daulton, Ben Letham, Andrew G Wilson, and Eytan Bakshy. Botorch: A framework for efficient monte-carlo bayesian optimization. Advances in neural information processing systems , 33:21524–21538, 2020. [4] Minshuo Chen, Kaixuan Huang, Tuo Zhao, and Mengdi Wang. Score approximation, estimation and distribution recovery of diffusion models on low-dimensional data. In International Conference on Machine Learning , pages 4672–4712. PMLR, 2023. [5] Sayak Ray Chowdhury and Aditya Gopalan. On kernelized multi-armed bandits. In International Conference on Machine Learning , pages 844–853. PMLR, 2017. [6] Dorin Comaniciu and Peter Meer. Mean shift: A robust approach toward feature space analysis. IEEE Transactions on pattern analysis and machine intelligence , 24(5):603–619, 2002. [7] Alexander I Cowen-Rivers, Wenlong Lyu, Rasul Tutunov, Zhi Wang, Antoine Grosnit, Ryan Rhys Griffiths, Alexandre Max Maraval, Hao Jianye, Jun Wang, Jan Peters, et al. Hebo: Pushing the limits of sample-efficient hyper-parameter optimisation. Journal of Artificial Intelligence Research , 74:1269–1349, 2022. [8] Prafulla Dhariwal and Alexander Nichol. Diffusion models beat gans on image synthesis. Advances in neural information processing systems , 34:8780–8794, 2021. [9] Shiv Ram Dubey, Satish Kumar Singh, and Bidyut Baran Chaudhuri. Activation functions in deep learning: A comprehensive survey and benchmark. Neurocomputing , 503:92–108, 2022. [10] Lawrence C Evans. An introduction to stochastic differential equations , volume 82. American Mathematical Soc., 2012. [11] Peter I Frazier. A tutorial on bayesian optimization. arXiv preprint arXiv:1807.02811 , 2018. [12] Philipp Hennig and Christian J Schuler. Entropy search for information-efficient global optimization. The Journal of Machine Learning Research , 13(1):1809–1837, 2012. [13] José Miguel Hernández-Lobato, Matthew W Hoffman, and Zoubin Ghahramani. Predictive entropy search for efficient global optimization of black-box functions. Advances in neural information processing systems , 27, 2014. 9A PREPRINT - J UNE 9, 2026 [14] Jonathan Ho and Tim Salimans. Classifier-free diffusion guidance. arXiv preprint arXiv:2207.12598 , 2022. [15] Jonathan Ho, Ajay Jain, and Pieter Abbeel. Denoising diffusion probabilistic models. Advances in neural information processing systems , 33:6840–6851, 2020. [16] Carl Hvarfner, Frank Hutter, and Luigi Nardi. Joint entropy search for maximally-informed bayesian optimization. 
+
+Advances in Neural Information Processing Systems , 35:11494–11506, 2022. [17] Carl Hvarfner, Erik Orm Hellsten, and Luigi Nardi. Vanilla bayesian optimization performs great in high dimensions. arXiv preprint arXiv:2402.02229 , 2024. [18] Donald R Jones, Matthias Schonlau, and William J Welch. Efficient global optimization of expensive black-box functions. Journal of Global optimization , 13:455–492, 1998. [19] Asif Khan, Alexander I Cowen-Rivers, Antoine Grosnit, Derrick-Goh-Xin Deik, Philippe A Robert, Victor Greiff, Eva Smorodina, Puneet Rawat, Rahmad Akbar, Kamil Dreczkowski, et al. Toward real-world automated antibody design with combinatorial bayesian optimization. Cell Reports Methods , 3(1), 2023. [20] Waritsara Khongkomolsakul, Poompol Buathong, Eunhye Yang, Younas Dadmohammadi, Yufeng Zhou, Peilong Li, Lixin Yang, Peter I Frazier, and Alireza Abbaspourrad. Improving thermal and gastric stability of phytase via ph shifting and coacervation: A demonstration of bayesian optimization for rapid process tuning. bioRxiv , pages 2025–04, 2025. [21] Siddarth Krishnamoorthy, Satvik Mehul Mashkaria, and Aditya Grover. Diffusion models for black-box optimiza-tion. In International Conference on Machine Learning , pages 17842–17857. PMLR, 2023. [22] Aviral Kumar and Sergey Levine. Model inversion networks for model-based optimization. Advances in neural information processing systems , 33:5126–5137, 2020. [23] Harold J Kushner. A new method of locating the maximum point of an arbitrary multipeak curve in the presence of noise. 1964. [24] Zihao Li, Hui Yuan, Kaixuan Huang, Chengzhuo Ni, Yinyu Ye, Minshuo Chen, and Mengdi Wang. Diffusion model for data-driven black-box optimization. arXiv preprint arXiv:2403.13219 , 2024. [25] Ilya Loshchilov and Frank Hutter. Sgdr: Stochastic gradient descent with warm restarts. arXiv preprint arXiv:1608.03983 , 2016. [26] Ilya Loshchilov and Frank Hutter. Decoupled weight decay regularization. arXiv preprint arXiv:1711.05101 ,2017. [27] Diganta Misra. Mish: A self regularized non-monotonic activation function. arXiv preprint arXiv:1908.08681 ,2019. [28] Henry B Moss, David S Leslie, Javier Gonzalez, and Paul Rayson. Gibbon: General-purpose information-based bayesian optimisation. Journal of Machine Learning Research , 22(235):1–49, 2021. [29] Alexander Quinn Nichol and Prafulla Dhariwal. Improved denoising diffusion probabilistic models. In Interna-tional conference on machine learning , pages 8162–8171. PMLR, 2021. [30] Simo Särkkä and Arno Solin. Applied stochastic differential equations , volume 10. Cambridge University Press, 2019. [31] Artur M Schweidtmann, Adam D Clayton, Nicholas Holmes, Eric Bradford, Richard A Bourne, and Alexei A Lapkin. Machine learning meets continuous flow chemistry: Automated optimization towards the pareto front of multiple objectives. Chemical Engineering Journal , 352:277–282, 2018. [32] Yang Song and Stefano Ermon. Generative modeling by estimating gradients of the data distribution. Advances in neural information processing systems , 32, 2019. [33] Yang Song, Jascha Sohl-Dickstein, Diederik P Kingma, Abhishek Kumar, Stefano Ermon, and Ben Poole. Score-based generative modeling through stochastic differential equations. arXiv preprint arXiv:2011.13456 ,2020. [34] Niranjan Srinivas, Andreas Krause, Sham M Kakade, and Matthias Seeger. Gaussian process optimization in the bandit setting: No regret and experimental design. arXiv preprint arXiv:0912.3995 , 2009. [35] Ashish Vaswani, Noam Shazeer, Niki Parmar, Jakob Uszkoreit, Llion Jones, Aidan N Gomez, Łukasz Kaiser, and Illia Polosukhin. Attention is all you need. Advances in neural information processing systems , 30, 2017. [36] Pascal Vincent. A connection between score matching and denoising autoencoders. Neural computation , 23(7): 1661–1674, 2011. 10 A PREPRINT - J UNE 9, 2026 [37] Xilu Wang, Yaochu Jin, Sebastian Schmitt, and Markus Olhofer. Recent advances in bayesian optimization. ACM Computing Surveys , 55(13s):1–36, 2023. [38] Yuhao Wang, Haowei Wang, Enlu Zhou, and Szu Hui Ng. Nested denoising diffusion sampling for global optimization. In 2025 Winter Simulation Conference (WSC) , pages 3406–3417. IEEE, 2025. [39] Zi Wang and Stefanie Jegelka. Max-value entropy search for efficient bayesian optimization. In International conference on machine learning , pages 3627–3635. PMLR, 2017. [40] James Wilson, Viacheslav Borovitskiy, Alexander Terenin, Peter Mostowsky, and Marc Deisenroth. Efficiently sampling functions from gaussian process posteriors. In International Conference on Machine Learning , pages 10292–10302. PMLR, 2020. [41] Martin Wistuba, Nicolas Schilling, and Lars Schmidt-Thieme. Scalable gaussian process-based transfer surrogates for hyperparameter optimization. Machine Learning , 107(1):43–78, 2018. [42] Stephen Wright, Jorge Nocedal, et al. Numerical optimization. Springer Science , 35(67-68):7, 1999. [43] Dongxia Wu, Nikki Lijing Kuang, Ruijia Niu, Yi-An Ma, and Rose Yu Diff-bbo. Diffusion-based inverse modeling for black-box optimization. arXiv preprint arXiv:2407.00610 , 2024. [44] Hui Yuan, Kaixuan Huang, Chengzhuo Ni, Minshuo Chen, and Mengdi Wang. Reward-directed conditional diffusion: Provable distribution estimation and reward improvement. Advances in Neural Information Processing Systems , 36:60599–60635, 2023. [45] Taeyoung Yun, Kiyoung Om, Jaewoo Lee, Sujin Yun, and Jinkyoo Park. Posterior inference with diffusion models for high-dimensional black-box optimization. arXiv preprint arXiv:2502.16824 , 2025. 11 A PREPRINT - J UNE 9, 2026 
+
+# A Additional Backgrounds 
+
+A.1 Transition Kernel in Forward SDEs 
+
+For the general SDE in Eq. 2, a key property is that when the drift coefficient f (xyt , t ) is affine in xyt , the resulting transition kernel pt (xyt | xy 
+
+> 0
+
+, y ) admits a Gaussian form [ 10 , 30 ]. Moreover, since the evolution of xyt depends on the initial condition xy 
+
+> 0
+
+alone, the transition kernel can be simplified to pt (xyt | xy 
+
+> 0
+
+).In diffusion models, the Variance-Preserving (VP) SDE [ 33 , 21 ] is a representative instance of the affine SDE family, defined as 
+
+dxyt = − 12 β(t)xyt dt + pβ(t)Idwt, t ∈ [0 , 1] , (11) where the drift and diffusion coefficients are governed by a non-negative time-dependent noise schedule function 
+
+β(t) = βmin + t(βmax − βmin ).The corresponding transition kernel admits a closed-form Gaussian solution, pt(xyt | xy 
+
+> 0
+
+) = N (xyt ; μt, Σt), with 
+
+μt = xy 
+
+> 0
+
+exp 
+
+
+
+− 12
+
+Z t
+
+> 0
+
+β(s)d s
+
+
+
+, Σt =
+
+
+
+1 − exp 
+
+
+
+−
+
+Z t
+
+> 0
+
+β(s)d s
+
+ 
+
+I. (12) For notational convenience in the theoretical analysis in Appendix F and Appendix G, we equivalently denote the distribution of the transition kernel as N (xyt ; xy 
+
+> 0
+
+α(t), h (t)) , where α(t) = exp 
+
+
+
+− 12
+
+R t 
+
+> 0
+
+β(s)d s
+
+
+
+and h(t) = 1 −
+
+exp 
+
+
+
+− R t 
+
+> 0
+
+β(s)d s
+
+
+
+.
+
+A.2 Classifier-Free Guidance 
+
+Many empirical results show that directly training the conditional score predictor as introduced in Section 2.2 will generate low-quality samples [ 8, 14 , 21 ]. Classifier-free training strategy proposed by [ 14 ] is a mitigation to such issues. Specifically, during training, the condition y is randomly dropped with probability pdrop , resulting in a mixed loss function that jointly learns conditional and unconditional score predictors. The resulting loss function can be written as 
+
+E
+
+> t
+
+
+
+E
+
+> x0,y
+
+
+
+E
+
+> xt|x0,y
+
+h
+
+∥sθ (xyt , t, ˜y) − ∇ x log pt (xyt | x0, ˜y)∥22
+
+i 
+
+, (13) where the effective condition ˜y is defined as 
+
+˜y =
+
+y, with probability 1 − pdrop ,
+
+∅, with probability pdrop , (14) and ∅ denotes the absence of conditioning. This formulation allows a single neural network to simultaneously learn the conditional score ∇x log pt (xt | y) and the unconditional score ∇x log pt (xt), improving robustness and stability in conditional score learning. After the training, the classifier-free guidance score is formulated as 
+
+scfg  
+
+> θ
+
+(x yt , t, y ) = (1 + w)s θ (x yt , t, y ) − w sθ (x yt , t, ∅) , (15) where w ≥ 0 is a guidance scale controlling the strength of conditioning. This guided score scfg  
+
+> θ
+
+(x t, t, y ) is then used in place of the unknown conditional score function ∇x log pt(xt | y) in the backward SDE to generate samples. 
+
+A.3 Mean-Shift Clustering 
+
+Specifically, in our algorithm, mean-shift is initialized from each candidate point of x⋆, i.e., z(0)  
+
+> s
+
+= x⋆s for s = 1 , . . . , S .Starting from an initial point z(0) , mean shift iteratively updates 
+
+z(t+1) =
+
+PSs=1 Kh
+
+ z(t) − x⋆s
+
+ x⋆s
+
+PSs=1 Kh
+
+ z(t) − x⋆s
+
+ , (16) 12 A PREPRINT - J UNE 9, 2026 where Kh(·) is a kernel function with bandwidth h. When initialized from different candidates x⋆s , this procedure converges to a set of local modes of the empirical density induced by {x⋆s }Ss=1 , yielding multiple cluster centers corresponding to different modes. Among all resulting cluster centers, the one with the largest number of converged samples is regarded as the dominant mode, which is exactly the next evaluation point selected by Algorithm 1. 13 A PREPRINT - J UNE 9, 2026 
+
+# B Experiment Details 
+
+B.1 Synthetic Functions 
+
+The expression of the synthetic functions we test are defined in Table 1. Recall that we consider maximization problems throughout this work. Hence, all of the synthetic benchmark functions are given in their negative forms. Table 1: Synthetic benchmark functions used in the experiments. 
+
+Function Expression (neg.) Bounds Styblinski–Tang − 12
+
+Pdi=1 
+
+ x4 
+
+> i
+
+− 16 x2 
+
+> i
+
++ 5 xi
+
+ [−5, 5] d
+
+Griewank −
+
+
+
+1 + 14000 
+
+Pdi=1 x2 
+
+> i
+
+− Qdi=1 cos 
+
+ xi√i
+
+ 
+
+[−600 , 600] d
+
+Shekel P10 
+
+> i=1
+
+P4 
+
+> j=1
+
+(xj − Cji )2 + βi
+
+−1
+
+[0 , 10] d
+
+Rastrigin − Pdi=1 
+
+x2 
+
+> i
+
+− 10 cos (2 πx i) + 10  [−5.12 , 5.12] d
+
+Rosenbrock − Pd−1
+
+> i=1
+
+h
+
+100  xi+1 − x2
+
+> i
+
+2 + ( xi − 1) 2i
+
+[−2.048 , 2.048] d
+
+Ackley 20 exp 
+
+
+
+−0.2
+
+q 1
+
+> d
+
+Pdi=1 x2
+
+> i
+
+
+
+− exp 
+
+ 1
+
+> d
+
+Pdi=1 cos (2 πx i)
+
+
+
++ 20 + e [−32 .768 , 32 .768] d
+
+Levy −
+
+h
+
+sin 2(πw 1) + Pd−1 
+
+> i=1
+
+(wi − 1) 2 1 + 10 sin 2(πw i + 1)  + ( wd − 1) 2
+
+i
+
+[−10 , 10] d
+
+Michalewicz Pdi=1 sin ( xi)
+
+h
+
+sin 
+
+ ix 2
+
+> i
+> π
+
+i 2m
+
+[0 , π ]d
+
+Notably, some benchmark functions involve additional parameters beyond the input domain and dimensionality. We specify the corresponding parameters below. In Shekel function, we adopt 
+
+m = 10 , C =
+
+
+
+4 4 4 41 1 1 18 8 8 86 6 6 63 7 3 72 9 2 95 3 5 38 1 8 16 2 6 27 3.6 7 3.6
+
+
+
+, β = [0 .1 0.2 0.2 0.4 0.4 0.6 0.3 0.7 0.5 0.5] ⊤ .
+
+In Levy function, we adopt wi = 1 + xi−14 for i = 1 , . . . , d .In Michalewicz, we adopt m = 10 .
+
+B.2 Real-World Tasks 
+
+The datasets used in our experiments are obtained from OpenML, with the following dataset identifiers: Wine (ID: 187), Vehicle (ID: 54), and Image Segmentation (ID: 36). All datasets can be accessed via https://www.openml.org .For real-world hyperparameter optimization tasks, we adopt the MLP model with Adam optimizer provided by 
+
+Bayesmark benchmark suite. We tune four hyperparameters of the MLP model: the ℓ2 regularization coefficient alpha, the initial learning rate, the hidden layer size, and the mini-batch size. All remaining hyperparameters are set to their default values as specified in Bayesmark .The corresponding hyperparameter search spaces are defined following the Bayesmark configuration. Specifically, alpha is searched on a logarithmic scale over the range [10 −5, 10] , and initial learning rate is searched on a logarithmic scale over [10 −5, 0.1] . The hidden layer size is searched on a linear scale within [50 , 200] , while the mini-batch size is searched on a linear scale within [10 , 250] . Since both parameters are discrete in practice, the next evaluation point determined by the algorithms will be rounded to the nearest valid integers before training the MLP. In addition to the Bayesmark-based real-world tasks, we further consider the HPOLib FCNet tabular benchmark for higher-dimensional hyperparameter optimization. Specifically, we use the protein_structure regression task from the HPOLib FCNet benchmark, where the goal is to tune the hyperparameters of a two-hidden-layer fully connected 14 A PREPRINT - J UNE 9, 2026 neural network. The benchmark provides precomputed evaluations of neural network configurations, and therefore each function evaluation is obtained by querying the tabular benchmark rather than retraining the neural network from scratch. The search space contains nine hyperparameters: the activation functions of the first and second hidden layers, the mini-batch size, the dropout rates of the first and second hidden layers, the initial learning rate, the learning-rate schedule, and the numbers of units in the first and second hidden layers. The activation functions are selected from {relu , tanh }, the learning-rate schedule is selected from { cosine , const }, the mini-batch size is selected from {8, 16, 32, 64}, the dropout rates are selected from {0.0, 0.3, 0.6}, the initial learning rate is selected from {0.0005, 0.001, 0.005, 0.01, 0.05, 0.1}, and the numbers of units in each hidden layer are selected from {16, 32, 64, 128, 256, 512}. For compatibility with our continuous optimization framework, all hyperparameters are represented in a normalized input space [0 , 1] 9. Each coordinate is mapped to the corresponding discrete hyperparameter set before querying the benchmark. 
+
+B.3 Gaussian Process 
+
+For the GP surrogate, we adopt the default modeling configuration used in BoTorch . We employ a GP prior with a constant mean function and a Squared Exponential (SE) covariance kernel with automatic relevance determination (ARD), which assigns a separate length-scale ℓi to each input dimension. All hyperparameters are assigned the same prior distributions as in Hvarfner et al. [17] , and are learned via MAP estimation. Additionally, the observed dataset is preprocessed by normalizing the inputs to the unit cube and standardizing the outputs to zero mean and unit variance. 
+
+B.4 Conditional Diffusion Model B.4.1 SDE Configurations 
+
+We adopt VP SDE introduced in Appendix A.1 as the forward SDE, with βmin = 0 .1 and βmax = 20 respectively. When generating x⋆ candidates, the backward SDE is simulated by the second-order Heun solver. 
+
+B.4.2 Classifier-Free Guidance Settings 
+
+We adopt classifier-free guidance strategy to train the CDM and generate x⋆ candidates, where we set pdrop = 0 .15 and 
+
+w = 2 .0, following common practice in the diffusion model literature, and keep them fixed across all tasks. 
+
+B.4.3 Architecture of Score Predictor 
+
+We employ an MLP as the backbone of the conditional score predictor sθ (xt, t, y ). Specifically, the two scalar inputs t
+
+and y are first mapped through separate positional embedding layers [ 35 ], producing embeddings of dimensions dt and 
+
+dy , respectively, where we set dt = dy = 8 . These embeddings are then concatenated with the input xt ∈ Rd, forming a combined feature vector of dimension dt + dy + d. The resulting vector is processed by an MLP consisting of three linear layers with hidden size H = 256 , interleaved with Mish activations [27]. 
+
+B.4.4 Training Details 
+
+When constructing the pseudo-dataset bDm, we set the balance-aware pseudo-labeling coefficient ρ to 1.0 for all tasks. We then train the CDM by bDm. Similar to fitting GP, the pseudo-dataset is preprocessed by normalizing the inputs to the unit cube and standardizing the outputs to zero mean and unit variance. At each BO iteration, we train the score predictor using the AdamW optimizer [ 26 ] with weight decay set to 1 × 10 −4 for 100 epochs and a mini-batch size of 
+
+256 . At the first BO iteration, all linear layers are initialized using Kaiming normal initialization with zero-initialized biases; from the second BO iteration onward, model parameters are loaded from the previous iteration. At each BO iteration, the learning rate is initialized to 1 × 10 −3, then we apply a warm-up phase for the first 20 epochs, during which the learning rate is held constant. After the warm-up phase, we adopt a cosine annealing schedule [ 25 ] to gradually decay the learning rate to a minimum value of 1 × 10 −4 by the end of epochs. Other additional task-specific hyperparameters are listed in Table 2. 15 A PREPRINT - J UNE 9, 2026 Table 2: Task-specific hyperparameters for all tested benchmarks.                                                         
+
+> Tasks Size of Pseudo-Dataset mSteps of Short-Run L-BFGS KNumber of x⋆Candidates S
+> Synthetic Functions
+> Styblinski-Tang 500 5200 Griewank 500 5200 Shekel 500 5200 Rastrigin 800 5300 Rosenbrock 800 5300 Michalewicz 800 25 300 Ackley-8 800 25 300 Levy-10 800 25 300 Ackley-20 1200 25 400 Levy-20 1200 25 400 Levy-50 1500 25 400 Ackley-50 1500 25 400
+> Real-world tasks
+> Wine Recognition 500 5200 Vehicle Silhouette 500 5200 Image Segmentation 500 15 200 Protein Structure 800 25 300
+
+B.4.5 Others 
+
+Mean-shift clustering was implemented using scikit-learn package, with the bandwidth automatically selected via the package’s quantile-based estimator. A default flat kernel was used, such that all points within the bandwidth contribute equally to the mean shift. 
+
+B.5 Configurations of BO Baselines 
+
+In this section, we provide the hyperparameters we set for BO baselines. For a fair comparison, all BO baselines use the same GP fitting procedure and hyperparameter configuration as described in Section B.3. For baselines that do not require additional hyperparameters, such as EI and PI, we use the default settings provided by BoTorch .
+
+UCB We set the exploration coefficient to 1.0 across all benchmarks., which is a common practice. 
+
+PES We draw GP posterior sample paths using BoTorch ’s Matheron-path sampler, based on Matheron’s update rule [40]. We set the number of optimal candidates required to 100 for all benchmarks according to practical usage. 
+
+TS Similar to PES, we implement TS using posterior function paths drawn via BoTorch ’s Matheron-path sampler. 
+
+GIBBON We set the number of input candidates required to 10000 for all benchmarks, according to the original paper [28]. 
+
+JES We set the number of optimal candidates to 100 for all benchmarks with lower bound estimation method, according to the original paper [16]. Note that we do not directly compare with prior diffusion-based black-box optimization methods, since their problem settings differ substantially from the sequential BO setting considered in this work. For example, DDOM [ 21 ] and the method of Li et al. [24] mainly target offline black-box optimization, where no sequential function evaluations are permitted. Diff-BBO [ 43 ] focuses on real-world tasks whose valid input designs are assumed to concentrate on a low-dimensional data manifold, whereas our setting assumes that designs can be valid over the entire compact input space. We also note that DiBO proposed by Yun et al. [45] targets high-dimensional black-box optimization problems, typically with d ≥ 100 , and relies on large-batch evaluations per iteration, rather than the classical sequential evaluation setup considered in this work. Therefore, these methods are not directly comparable to DMS under our experimental setting. 16 A PREPRINT - J UNE 9, 2026 
+
+B.6 Hardware Information 
+
+All experiments were conducted on a workstation equipped with an NVIDIA GeForce RTX 4090 GPU with 24GB memory and an Intel Core i9-13900K CPU. Unless otherwise stated, all reported results were obtained on the same hardware platform. The diffusion model training and sampling procedures were accelerated using the GPU, while the Gaussian process fitting and acquisition-related computations were executed on the CPU or GPU depending on the corresponding implementation. 17 A PREPRINT - J UNE 9, 2026 
+
+B.7 Ablation Studies 
+
+As stated in Section 5.3, we conduct ablation studies on Styblinski-Tang (d = 2) and Levy (d = 10) .
+
+B.7.1 Ablation on Pseudo-Labeling 
+
+Recall that we analyze the effect of pseudo-labeling by comparing the optimization performance of training the CDM on the pseudo-dataset bDm versus training it solely on the observed dataset Dn. In the latter case, no pseudo-labeled data pairs are incorporated, and during sampling we condition the CDM on the maximum observed value 
+
+ymax = max (xi,y i)∈D n yi to generate candidates of x⋆.As shown in Figure 3, training the CDM without pseudo-labeling leads to a substantial degradation in optimization performance across both test functions. Specifically, when trained only on Dn, the resulting method exhibits significantly higher simple regret throughout the optimization process, along with a markedly slower rate of improvement. In contrast, incorporating pseudo-labeled samples enables the CDM to achieve faster convergence and substantially lower final simple regret. This performance gap is particularly pronounced in the early and intermediate stages of optimization, where the observed dataset is small and provides limited coverage of the input space. These results suggest that relying solely on the observed dataset is insufficient for learning an informative and accurate conditional distribution, which in turn restricts the quality of the generated x⋆ candidates. By augmenting the training data with pseudo-labeling, the CDM is exposed to a broader range of conditioning values and input locations, resulting in more effective guidance during the sampling stage.      
+
+> (a) Styblinski-Tang (d= 2) (b) Levy (d= 10)
+
+Figure 3: Ablation study on training the CDM using pseudo-dataset bDm versus using only the observed dataset Dn. All experiments are conducted with 30 macro-replications, with mean and one standard error reported. 
+
+B.7.2 Ablation On Coefficient ρ
+
+Recall that we study the effect of the balance-aware pseudo-labeling coefficient by varying the scaling factor ρ ∈{0.0, 1.0, 2.0, 3.0} when constructing the pseudo-dataset bDm. This coefficient controls the impact of the uncertainty term used during pseudo-labeling and thus influences the resulting pseudo-labels. As shown in Figure 4, we observe that setting ρ = 0 consistently results in the worst optimization performance across both test functions. In this case, the simple regret decreases slowly and plateaus at a relatively high level, indicating limited improvement throughout the optimization process. In contrast, moderate values of ρ lead to substantially faster convergence and lower final regret. We further observe that excessively large values of ρ also degrade performance. Although larger ρ encourages exploration by emphasizing high-uncertainty regions during pseudo-labeling, this behavior can result in pseudo-labels that are overly explorative, which may cause the evaluation to focus on regions with high posterior uncertainty but low posterior mean, thereby slowing down convergence and limiting final performance. Overall, these results suggest that extreme choices of ρ, either too small or too large, are unfavorable in practice. Empirically, intermediate values of ρ provide more effective guidance for training the conditional diffusion model, leading to improved optimization performance. 18 A PREPRINT - J UNE 9, 2026      
+
+> (a) Styblinski-Tang (d= 2) (b) Levy (d= 10)
+
+Figure 4: Ablation study on the choice of the balance-aware pseudo-labeling coefficient ρ. All experiments are conducted with 30 macro-replications, with mean and one standard error reported. 
+
+B.7.3 Ablation on Short-Run L-BFGS 
+
+Recall that we analyze the effect of short-run L-BFGS by varying the number of optimization steps used to refine the initial Sobol-sampled inputs. Our results in Figure 5 show that employing short-run L-BFGS consistently outperforms the case of K = 0 , where inputs are constructed solely from the initial Sobol sequence without local refinement. Furthermore, the performance improvements become increasingly pronounced in Levy (d = 10) compared to relatively lower-dimensional Styblinski-Tang (d = 2) .A plausible explanation lies in the effect of dimensionality on the quality of Sobol-sampled inputs. In low-dimensional settings, the initial Sobol sequence has a higher likelihood of being close to regions associated with high pseudo-label values, thereby limiting the marginal benefit of additional local optimization. In contrast, as the dimensionality increases, the curse of dimensionality makes it unlikely for Sobol samples to directly fall into input regions associated with high pseudo-label values. In such cases, short-run L-BFGS plays a crucial role in refining inputs toward regions with higher pseudo-label values, leading to more substantial performance gains. Notably, we do not further increase K, as we observe that excessively large values of K can cause the L-BFGS procedure to converge, resulting in all inputs collapsing to a single point.      
+
+> (a) Styblinski-Tang (d= 2) (b) Levy (d= 10)
+
+Figure 5: Ablation study on the number of short-run L-BFGS optimization steps on selected synthetic benchmark functions. All experiments are conducted with 30 macro-replications, with mean and one standard error reported. 
+
+B.7.4 Ablation on the Size of Pseudo-Dataset 
+
+We study the sensitivity of our algorithm to the size of pseudo-dataset m on selected synthetic benchmarks. As shown in Figure 6, in Styblinski-Tang (d = 2) , varying m has a relatively limited impact on the final optimization performance. However, we observe that using m = 100 leads to a noticeably slower decrease in simple regret compared to larger values such as m = 500 or m = 1000 . A plausible explanation is that, in low-dimensional settings, a moderate 19 A PREPRINT - J UNE 9, 2026 number of m already provides sufficient coverage of the input space, so further increasing m yields diminishing improvement. However, when m is too small, the pseudo-dataset offers a poor approximation of the conditional distribution, slowing CDM training and delaying effective guidance toward high-quality regions. In contrast, for Levy (d = 10) , increasing m yields more substantial performance improvements, as higher-dimensional spaces require larger pseudo-datasets to mitigate sparsity and better capture high-value regions, leading to more effective generation of high-quality candidates.      
+
+> (a) Styblinski-Tang (d= 2) (b) Levy (d= 10)
+
+Figure 6: Ablation study on the size of pseudo-dataset m on selected synthetic benchmarks. All experiments are conducted with 30 macro-replications, with mean and one standard error reported. 
+
+B.7.5 Ablation on the Number of x⋆ Candidates 
+
+We study the sensitivity of DMS to the number of candidate points S on selected synthetic benchmarks. As shown in Figure 7, with different selections of S, we observe no substantial change in optimization performance, suggesting that DMS is relatively insensitive to this hyperparameter once S is sufficiently large. Considering the computational cost of candidate generation and the additional overhead of applying mean-shift clustering to identify cluster centers, we therefore adopt a moderate number of x⋆ candidates in all experiments.      
+
+> (a) Styblinski-Tang (d= 2) (b) Levy (d= 10)
+
+Figure 7: Ablation study on the number of x⋆ candidates on selected synthetic benchmark functions. All experiments are conducted with 30 macro-replications, with mean and one standard deviation reported. 20 A PREPRINT - J UNE 9, 2026 
+
+# C Visualization of GP-induced Distribution and CDM-Learned Distribution 
+
+Now we present a visual comparison between the distribution of x⋆ induced by GP posterior and CDM-learned distribution, i.e., bP (x | by = by∗). We employ the Styblinski-Tang function (d = 2) for the sake of visualization, and extract snapshots at iterations 10 and 30 from the first replication of DMS, with the same experimental configurations as described in Appendix B.4. These two iterations are chosen to represent the early and late stages of the optimization process, respectively.    
+
+> (a) Candidates by GP (b) Candidates by CDM (c) Candidates by GP (d) Candidates by CDM
+
+Figure 8: Comparison between the distributions of x⋆ induced by the GP posterior and the CDM. Panels (a)–(b) correspond to iteration 10 , while Panels (c)–(d) correspond to iteration 30 .Figure 8 reveals a clear discrepancy: the GP candidates are obviously dispersed across potential candidate regions, whereas the CDM candidates consistently concentrate around promising input regions, as discussed in Section 3.2. 
+
+# D Computational Complexity Analysis and Wall-Clock Time Comparison 
+
+In this section, we provide additional details on the computational cost of DMS. We first compare the cost of generating 
+
+S samples of x⋆ using PES and DMS. We then report the wall-clock time for generating the same number of x⋆ samples. Finally, we report the average wall-clock time per BO iteration across different baselines. 
+
+D.1 Computational Complexity of Generating x⋆ Samples 
+
+We compare the computational complexity of generating S samples x⋆ for PES and DMS, respectively. This comparison focuses on the dominant overhead beyond fitting the GP surrogate, since all GP-based acquisition functions share the GP posterior update as a common component. For PES, generating samples of x⋆ typically requires two main steps. First, one samples approximate GP sample paths using random Fourier features. Let V be the number of random features. Constructing the feature-space posterior requires operations involving a V × V covariance matrix, which contributes a cost of order 
+
+O(V 3 + nV 2), (17) where n is the number of observed BO data points. The term V 3 comes from matrix factorization or inversion in the random-feature space, while the term nV 2 comes from incorporating the n observations into the feature-space posterior. Second, after drawing approximate GP paths, PES needs to optimize each sampled path to obtain a single sample of x⋆. Suppose we generate S samples of x⋆, use R random restarts for optimizing each sampled path, and run K
+
+optimization steps for each restart. Evaluating a random-feature GP sample path and its derivative has cost proportional to the random-feature dimension and the input dimension, which we write as O(V d ). Therefore, optimizing all sampled paths contributes 
+
+O(SRKV d ). (18) Combining the random-feature posterior construction and the path optimization cost, the total complexity of generating 
+
+S samples of x⋆ for PES is 
+
+O  V 3 + nV 2 + SRKV d  . (19) This cost can become large when the number of optimizer samples S, the random-feature dimension V , the input dimension d, or the number of restarts R increases. For DMS, the generation of x⋆ samples is based on the training and sampling of the CDM. The dominant cost consists of two parts: training the conditional score network and sampling from the backward SDE. Let m be the pseudo-dataset 21 A PREPRINT - J UNE 9, 2026 size, B be the training batch size, and E be the number of training epochs. If Cnet denotes the cost of one score-network evaluation, then the training cost is 
+
+O
+
+
+
+E
+
+l mB
+
+m
+
+Cnet 
+
+
+
+. (20) After training, generating S samples requires simulating the backward SDE in Eq 3 for L discretization steps. Each step requires one score-network evaluation per sample. Hence, the reverse-time sampling cost is 
+
+O (SLC net ) . (21) The total dominant complexity of DMS for generating S samples is therefore 
+
+O
+
+
+
+E
+
+l mB
+
+m
+
+Cnet + SLC net 
+
+
+
+. (22) In our implementation in Section B.4, the score network is a lightweight three-layer MLP with hidden size H. Therefore, the cost of one score-network evaluation is approximately 
+
+Cnet ≈ O (H2), (23) up to lower-order terms depending on the input dimension and embedding dimensions. Thus, the DMS sampling cost scales mainly with the number of reverse-time steps L, the number of generated samples S, and the MLP width 
+
+H. In contrast, PES requires repeated optimization of random-feature GP sample paths, and its cost scales with the random-feature dimension V , the number of restarts R, and the input dimension d. This difference explains why PES becomes significantly more expensive in higher-dimensional problems, while DMS remains relatively efficient once the score network is trained, as we will show in the following section. We also note that the pseudo-dataset construction cost in DMS is not the dominant term in our implementation. The short-run L-BFGS refinement is applied for a small fixed number of steps and is lightweight compared with score-network training and backward SDE simulation. Therefore, we omit it from the leading-order complexity expression above. 
+
+D.2 Wall-Clock Time for Generating x⋆ Samples 
+
+We next empirically compare the wall-clock time for generating S samples of x⋆ using DMS and PES. We report the results on Styblinski-Tang with d = 2 and Levy with d = 10 . These two tasks represent a low-dimensional and a moderately higher-dimensional setting, respectively. Table 3: Average wall-clock time (/sec) with one standard deviation for sampling x⋆.Task Method S = 100 S = 200 S = 300 
+
+Styblinski-2 DMS 1.32 ± 0.08 1.46 ± 0.07 1.60 ± 0.13 
+
+Styblinski-2 PES 1.25 ± 0.04 2.60 ± 0.16 5.73 ± 0.09 
+
+Levy-10 DMS 2.20 ± 0.07 2.48 ± 0.03 2.67 ± 0.06 
+
+Levy-10 PES 9.58 ± 2.36 14 .49 ± 3.31 28 .74 ± 2.55 
+
+As shown in Table 3, DMS is comparable to PES on the low-dimensional Styblinski-Tang task when S = 100 , and becomes faster as the number of generated samples increases. On the Levy-10 task, DMS is consistently faster than PES across all tested values of S. The difference becomes more pronounced when either the input dimension or the number of generated samples increases. This is consistent with the complexity analysis in Appendix D.1. 
+
+D.3 Wall-Clock Time per BO Iteration 
+
+Finally, we report the average wall-clock time per BO iteration for all compared methods in the experiments. The purpose of this comparison is to clarify the practical overhead of DMS relative to different classes of BO baselines. Table 4 reports the average per-iteration time on Styblinski-2, Levy-10, Levy-20 and Levy-50, showing the overhead of each method across growing input dimensions. Note that PES is marked as N/A on Levy-20 and Levy-50 because its computational cost becomes prohibitively high in our experimental setup. JES is also marked as N/A on Levy-50 for the same reason. We observe that DMS is indeed slower than simple acquisition functions such as EI and UCB, since DMS additionally trains a CDM and simulates backward SDE. However, DMS still remains in the regime of seconds per BO iteration. By contrast, PES becomes much more expensive on Levy-10 due to the repeated random-feature path optimization required for sampling x⋆.22 A PREPRINT - J UNE 9, 2026 Table 4: Average wall-clock time (/sec) with one standard deviation per BO iteration across different tasks.                                    
+
+> Task EI GIBBON UCB DMS PI PES TS Styblinski-2 0.34 ±0.11 0.29 ±0.13 0.20 ±0.08 2.13 ±0.20 0.43 ±0.09 8.90 ±2.50 0.23 ±0.12
+> Levy-10 0.70 ±0.37 2.04 ±0.15 0.50 ±0.16 4.07 ±0.40 3.20 ±1.05 390 .20 ±23 .40 0.47 ±0.18
+> Levy-20 1.70 ±0.67 4.26 ±2.39 1.20 ±0.43 8.16 ±1.71 3.82 ±1.58 N/A 1.07 ±0.67
+> Levy-50 2.74 ±0.56 6.85 ±1.86 3.64 ±1.85 12 .23 ±2.38 3.98 ±0.88 N/A 5.99 ±2.18
+
+Overall, these results show that DMS introduces additional overhead compared with simple acquisition functions, but the overhead remains moderate in absolute wall-clock time. In many practical BO applications, a single function evaluation can take minutes or even hours, in which case a few seconds of acquisition overhead is often acceptable. 
+
+# E Limitations and Broader Impacts 
+
+Limitations DMS has three main limitations. First, it involves several hyperparameters, including K, ρ, and m.Although better task-specific configurations may exist, finding them can require substantial additional overhead, and we leave adaptive selection strategies to future work. Second, our theory provides a distribution-level sub-optimality guarantee, but does not yet establish algorithm-level convergence or regret guarantees for the sequential BO procedure. Third, the computational cost of DMS may increase in very high-dimensional settings, especially when d ≥ 100 ,motivating future work on more efficient pseudo-dataset construction, sampling, and dimension-aware architectures. 
+
+Broader Impacts This work develops a general-purpose method for black-box optimization. It may benefit scientific and engineering applications where evaluations are expensive, such as hyperparameter tuning, experimental design, and automated system optimization. At the same time, like other general optimization methods, its societal impact depends on the downstream application. The method could be used to optimize objectives in domains with either beneficial or harmful consequences. We do not release new datasets involving sensitive personal information, and our experiments are conducted on standard synthetic benchmarks and public hyperparameter optimization benchmarks. 23 A PREPRINT - J UNE 9, 2026 
+
+# F Sub-Optimality of x⋆ Candidates 
+
+The sub-optimality defined in 1 can be decomposed according to the following lemma: 
+
+Lemma 1. Recall bPa := bP (· | by = a) (CDM-learned distribution) and Pa := P (· | by = a) (distribution induced by the surrogate bf ), similar to the decomposition in Li et al. [24], we have 
+
+SubOpt 
+
+ bPa; a
+
+
+
+=a − Ex∼ bPa [f (x)] 
+
+≤ Ex∼Pa
+
+h
+
+f (x) − bf (x)
+
+i| {z }
+
+> E1
+
++ Ex∼Pa [f (x)] − Ex∼ bPa [f (x)] 
+
+| {z }
+
+> E2
+
+. (24) 
+
+Proof. See G.1. Now we provide upper bounds for term E1 and E2 respectively. 
+
+F.1 Bound for E1
+
+Assumption 1. We assume that the unknown objective f belongs to the Reproducing Kernel Hilbert Space (RKHS) Hk
+
+induced by the SE kernel k, and ∥f ∥Hk ≤ C, i.e., 
+
+f (x) = ⟨ψ, Φ( x)⟩Hk , ∥ψ∥Hk ≤ C, (25) 
+
+where Φ : X → H k satisfies k(x, x′) = ⟨Φ( x), Φ ( x′)⟩Hk .
+
+While we focus on the SE kernel to streamline our theoretical derivation, the underlying analytical framework naturally extends to kernels with lower regularity, such as the Matérn family. Recall that we have the observed dataset Dn = {(xi, y i)}ni=1 , with yi = f (xi) + ϵi. The GP posterior mean μn(x)
+
+introduced in Section 2.1.1 is essentially estimating ψ with Kernel Ridge Regression (KRR), i.e., 
+
+bψ ∈ arg min 
+
+> θ∈H k
+> n
+
+X
+
+> i=1
+
+(⟨ψ, Φ ( xi)⟩ − yi)2 + λ∥ψ∥2 
+
+> Hk
+
+, (26) by which the GP posterior mean can be equivalently represented by μn(x) = ⟨ bψ, Φ( x)⟩.
+
+Lemma 2. Under Assumption 1, with high probability, 
+
+Ex∼Pa [|f (x) − μn(x)|] = eO
+
+ σ(log n)d+1 
+
+√n
+
+
+
+(27) 
+
+Proof. See G.2. 
+
+Lemma 3. With high probability, 
+
+E1 = Ex∼Pa [|f (x) − bf (x)|]= eO
+
+ σ(log n)d+1 
+
+√n +
+
+√β(log n)(d+1) /2
+
+√n
+
+ (28) 
+
+Proof. See G.3. 
+
+F.2 Bound for E2
+
+Hereafter, for notational simplicity, we omit the superscript y in xyt and xy, ← 
+
+> t
+
+when presenting relevant random variables in the forward and backward SDEs. 
+
+Assumption 2. We assume that the ground-truth conditional score function can be represented by a score predictor in the following function class: 
+
+∇xt log pt(xt | y) ∈ S =
+
+
+
+sθ (xt, t, y ) = α(t)
+
+h(t) ϑθ (xt, t, y ) − xt
+
+h(t) : ϑθ ∈ Θ
+
+
+
+, (29) 
+
+where ϑθ : Rd × [t0, T ] × R → Rd is represented by an MLP with ReLU activations. 
+
+24 A PREPRINT - J UNE 9, 2026 Note that this theoretical architecture differs from our implementation in Appendix B.4 in two aspects. First, the theoretical form above explicitly writes the score predictor as sθ (xt, t, y ) = α(t) 
+
+> h(t)
+
+ϑθ (xt, t, y ) − xt 
+
+> h(t)
+
+, whereas our implementation directly parameterizes sθ by a standard MLP. The above form is adopted only to simplify notation in the proof of Lemma 4. In particular, the proof first decomposes the conditional score as ∇xt log pt(xt, y ) = 
+
+− xt 
+
+> h(t)
+
++ α(t) 
+
+> h(t)
+
+u(xt, t, y ), and then regards ϑθ as an approximation of u. If we instead use the implementation architecture, the same proof can be written by taking the function class to be the direct MLP class for sθ . Then the uniform bound on  
+
+> α(t)
+> h(t)
+
+ϑθ (xt, t, y ) in Lemma 4 is replaced by the corresponding uniform bound on sθ (xt, t, y ) + xt 
+
+> h(t)
+
+. The subsequent steps, including the truncation argument, the metric entropy bound, and the empirical-to-population loss comparison, remain unchanged. Therefore, using the direct MLP parameterization changes only the notation and constants in the bound, not the conclusion. Details can be found in the proof of Lemma 4. Second, our implementation additionally uses positional embeddings for the scalar inputs t and y, and uses Mish activa-tions instead of ReLU activations. These choices are made for engineering and empirical performance considerations. Positional embeddings provide a richer representation of scalar conditioning variables and are widely used in deep learning models to encode time or index-dependent inputs [ 35 , 15 , 29 ]. Mish is a smooth non-monotonic activation function, which can improve gradient flow and often yields stronger empirical performance than piecewise-linear activations in neural network training [27, 9]. 
+
+Assumption 3. We assume the Novikov’s condition holds, i.e., 
+
+exp 12
+
+Z T −t0
+
+> 0
+
+pβ(T − t) ( bsθ (x← 
+
+> t
+
+, T − t, y ) − ∇ log pT −t (x← 
+
+> t
+
+| y)) 22
+
+dt
+
+!
+
+< ∞ (30) 
+
+Assumption 4. We assume the ground truth objective function f is Lf -Lipschitz over the input space X , i.e., 
+
+|f (x) − f (x′)| ≤ Lf ∥x − x′∥2 , ∀x, x′ ∈ X . (31) Now we are ready to derive the bound for term E2. We first derive the upper bound ϵdiff of the score matching error, i.e. 
+
+1
+
+T − t0
+
+Z Tt0
+
+E(xt,y )∼Pt
+
+h
+
+∥∇ log pt (xt | y) − bsθ (xt, t, y )∥22
+
+i
+
+dt ≤ ϵ2diff . (32) 
+
+Lemma 4. Under Assumption 2, for δ ≥ 0, with probability 1 − δ, the square score matching error is bounded by 
+
+ϵ2diff = O 1
+
+t20
+
+r N (S, 1/m )d log(1 /δ )
+
+m
+
+!
+
+. (33) 
+
+Proof. See G.4. 
+
+Lemma 5. Suppose Assumption 3 holds. With probability (1 − δ)(1 − η), the conditional total variation distance satisfies 
+
+TV 
+
+
+
+Pt0 , bPt0
+
+
+
+= O 1
+
+ηt 20
+
+r N (S, 1/m )d log(1 /δ )
+
+m
+
+!
+
+, (34) 
+
+where Pt0 is the distribution at time T − t0 of the ground truth backward SDE, and bPt0 is the distribution at time T − t0
+
+of the learned backward SDE. Proof. See G.5. 
+
+Lemma 6. Let P1 and P2 be two probability distribution supported on X . Under Assumption 4, we have 
+
+|Ex∼P1 [f (x)] − Ex∼P2 [f (x)] | ≤ Lf W1(P1, P 2) ≤ Lf diam( X )TV( P1, P 2), (35) 
+
+where W1(·, ·) is the 1-Wasserstein distance and diam( X ) := sup x,x′∈X ∥x − x′∥2.Proof. See G.6. 
+
+Lemma 7. With probability at least (1 − δ)(1 − η), we have 
+
+E2 = O Lf diam( X )
+
+ηt 20
+
+r N (S, 1/m )d log(1 /δ )
+
+m
+
+!
+
+(36) 
+
+Proof. See G.7. 25 A PREPRINT - J UNE 9, 2026 
+
+# G Proof of Lemmas Omitted in Appendix F 
+
+G.1 Proof of Lemma 1 
+
+Proof. By triangular inequality, we have 
+
+Ex∼ bPa [f (x)] ≥ Ex∼Pa [f (x)] − Ex∼ bPa [f (x)] − Ex∼Pa [f (x)] 
+
+≥ Ex∼Pa [ bf (x)] − Ex∼Pa
+
+h bf (x) − f (x)
+
+i| {z }
+
+> E1
+
+− Ex∼ bPa [f (x)] − Ex∼Pa [f (x)] 
+
+| {z }
+
+> E2
+
+. (37) Substituting the result into Definition 1 completes the proof. 
+
+G.2 Proof of Lemma 2 
+
+Proof. We define Vλ := Pni=1 Φ ( xi) ⊗ Φ ( xi) + λI, ∥u∥Vλ := p⟨u, Vλu⟩, ∥v∥V−1
+
+> λ
+
+:= 
+
+q
+
+⟨v, V−1 
+
+> λ
+
+v⟩.For any x ∈ X , we have 
+
+|f (x) − μn(x)| =
+
+D
+
+ψ − bψ, Φ( x)
+
+E
+
+≤ ψ − bψ Vλ
+
+· ∥ Φ( x)∥V−1
+
+> λ
+
+,
+
+(38) Taking expectation with respect to Pa, we have 
+
+Ex∼Pa [|f (x) − μn(x)|] ≤ ψ − bψ Vλ
+
+| {z }
+
+> (A)
+
+· Ex∼Pa
+
+h
+
+∥Φ( x)∥V−1
+
+> λ
+
+i| {z }
+
+> (B)
+
+. (39) For term (A), under Assumption 1, and according to the results of kernelized self-normalized bound in Chowdhury and Gopalan [5], with probability at least 1 − δ1
+
+bψ − ψ Vλ
+
+≤ σ
+
+s
+
+2
+
+
+
+γn(λ) + log 1
+
+δ1
+
+
+
++ √λC, (40) where γn(λ) := 12 log det( I + λ−1Kn) with Kn = [ k(xi, xj )] xi,xj ∈D n the Gram matrix. Moreover, we can verify that when using SE kernel function, there exists a constant C0, such that γn(λ) ≤ C0(log n)d+1 .Therefore, term (A) can be rewritten as eO
+
+
+
+σ(log n)(d+1) /2 + σplog (1 /δ 1) + √λC 
+
+
+
+.For term (B), we have 
+
+EPa ∥Φ( x)∥V−1
+
+> λ
+
+≤ qEPa ∥Φ( x)∥2
+
+> V−1
+> λ
+
+=
+
+q
+
+EPa Φ( x), V−1 
+
+> λ
+
+Φ( x)
+
+=
+
+r
+
+Tr 
+
+
+
+V−1 
+
+> λ
+
+Σ(Φ) 
+
+> Pa
+
+
+
+,
+
+(41) where we define Σ(Φ)  
+
+> Pa
+
+:= Ex∼Pa [Φ( x) ⊗ Φ( x)] .Recall that in our analysis, the target conditional distribution Pa := P (x | by = a) is induced through the construction 
+
+by = bf (x) + ξ, where ξ ∼ N  0, ν 2 is an independent Gaussian perturbation introduced for technical convenience. As a consequence, Pa admits an explicit density with respect to the reference distribution Px (e.g. a uniform distribution on X ), given by 
+
+dPa
+
+dPx
+
+(x) ∝ exp − ( bf (x) − a)2
+
+2ν2
+
+!
+
+. (42) Therefore, Pa is absolutely continuous with respect to Px, and for any non-negative measurable function g, we have 26 A PREPRINT - J UNE 9, 2026 
+
+Ex∼Pa [g(x)] = 
+
+Ex∼Px
+
+h
+
+g(x) exp 
+
+
+
+− ( bf (x)−a)2
+
+> 2ν2
+
+i 
+
+Z(a) , (43) where Z(a) := Ex∼Px
+
+h
+
+exp 
+
+
+
+− ( bf (x)−a)2
+
+> 2ν2
+
+i 
+
+is the normalizing constant. In this work, we restrict attention to target values a within a non-extreme range (recall that we only assign a = by⋆ in our experiments), such that the reference distribution provides sufficient coverage of the induced conditional distributions. In particular, we assume that there exists a constant Z∗ > 0 satisfying inf a∈A Z(a) ≥ Z∗, where A denotes the set of target values within a non-extreme range. Defining ρ := 1 /Z ∗, it follows that 
+
+Ex∼Pa [g(x)] ≤ ρEx∼Px [g(x)] , ∀a ∈ A . (44) Applying this inequality to g(x) = ∥Φ( x)∥2
+
+> V−1
+> λ
+
+gives 
+
+Ex∼Pa ∥Φ( x)∥2
+
+> V−1
+> λ
+
+≤ ρEx∼Px ∥Φ( x)∥2
+
+> V−1
+> λ
+
+(45) Furthermore, by standard information-gain arguments for kernelized regression and GP [ 34 , 5 ], the average posterior variance under the reference distribution satisfies 
+
+Ex∼Px ∥Φ( x)∥2
+
+> V−1
+> λ
+
+≤ 2γn(λ)
+
+n . (46) Combining the above inequalities and taking square roots yields 
+
+Ex∼Pa ∥Φ( x)∥V−1
+
+> λ
+
+≤
+
+r 2ργ n(λ)
+
+n . (47) Combining (A) and (B) and choosing λ = 1 gives 
+
+Ex∼Pa [|f (x) − μn(x)|] ≤ σ
+
+s
+
+2
+
+
+
+γn(1) + log 1
+
+δ1
+
+
+
++ C
+
+!
+
+·
+
+r 2ργ n(1) 
+
+n
+
+≤ 2σ√ρ
+
+√n
+
+
+
+γn(1) + 
+
+r
+
+γn(1) log 1
+
+δ1
+
+
+
++ C
+
+r 2ργ n(1) 
+
+n
+
+(48) Moreover, we can verify that when using SE kernel function, there exists a constant C0 such that γn(1) ≤
+
+C0(log( n)) d+1 . Therefore, with probability at least 1 − δ1, we have 
+
+Ex∼Pa [|f (x) − μn(x)|] ≤√ρ
+
+√n
+
+
+
+O  σ(log n)d+1  + O
+
+
+
+σ(log n) d+1 2
+
+r
+
+log 1
+
+δ1
+
+
+
++ O
+
+
+
+C(log n) d+1 2
+
+
+
+= eO
+
+ σ(log n)d+1 
+
+√n
+
+
+
+,
+
+(49) which completes the proof. 
+
+G.3 Proof of Lemma 3 
+
+Proof. Recall we use the surrogate bf (x) = μn(x) + σn(x). We have 
+
+E1 = EPa [| bf (x) − f (x)|]
+
+≤ EPa [|f (x) − μn(x)|]
+
+| {z }
+
+> (A)
+
++ pβ EPa [σn(x)] 
+
+| {z }
+
+> (B)
+
+. (50) Term (A) can be bounded by Lemma 2. 27 A PREPRINT - J UNE 9, 2026 For term (B), similar to the arguments in the proof of Lemma 2, we have 
+
+pβEPa [σn(x)] ≤ pβρ EPx [σn(x)] 
+
+≤ pβρ pEPx [σ2
+
+> n
+
+(x)] 
+
+≲ pβρ γn(1) 
+
+n
+
+= eO
+
+pβ (log n)(d+1) /2
+
+√n
+
+
+
+(51) Combining the bounds for (A) and (B) completes the proof. 
+
+G.4 Proof of Lemma 4 
+
+Proof. We first clarify the role of the short-run L-BFGS step in the score-matching analysis. Let Pinit denote the initialization distribution used to generate the initial pseudo-inputs, e.g., the Sobol initialization distribution over the compact domain X . Given the current GP surrogate and the balance-aware pseudo-label function bf , the K-step short-run L-BFGS procedure defines a measurable map 
+
+ΦK : X → X , (52) where ΦK (z) denotes the point obtained after applying K steps of short-run L-BFGS starting from z ∼ Pinit . Since each update is followed by projection onto the compact domain X , we have ΦK (z) ∈ X for all z ∈ X . Therefore, the refined pseudo-input 
+
+x0 = Φ K (z), z ∼ Pinit , (53) induces a valid probability distribution on X , denoted by Px := (Φ K )#Pinit , where (Φ K )#Pinit is the pushforward distribution of Pinit under ΦK . The corresponding pseudo-label is given by y = bf (x0). Hence, the pseudo-training pairs used to train the conditional diffusion model are sampled from the joint distribution induced by 
+
+x0 ∼ Px, y = bf (x0). (54) The short-run L-BFGS step is therefore absorbed into the data-generating distribution Px. It does not introduce an additional score-matching error term. Once Px is a well-defined probability distribution supported on X , the empirical-to-population score-matching argument applies with respect to this distribution. We now derive a decomposition of the conditional score function similar to [ 24 ]. Hereafter, for notational simplicity, we omit the hat in by and use y to denote the conditioning variable. Recall that we take the training input distribution for x as 
+
+Px, with density px. In our algorithm, as clarified above, Px is the pushforward distribution induced by the initialization distribution and the finite-step projected short-run L-BFGS map. Recall that in Appendix A.1, the transition kernel 
+
+pt(xt | x0) is denoted by N (xt; α(t)x0, h (t)I). We have 
+
+pt(xt, y ) = 
+
+Z
+
+pt(xt, y | x0)px(x0)d x0
+
+=
+
+Z
+
+pt(xt | x0) · p(y | x0)px(x0)d x0.
+
+(55) Taking the logarithm and the derivative with respect to xt on pt(xt, y ), we have 
+
+∇xt log pt(xt, y ) = 1
+
+pt(xt, y )
+
+Z
+
+∇xt pt(xt | x0)p(y | x0)px(x0)d x0
+
+=
+
+Z
+
+∇xt log pt (xt | x0) pt (xt | x0) p (y | x0) px (x0)
+
+pt (xt, y )
+
+| {z }
+
+> =: pt(x0|xt,y )
+
+dx0
+
+=
+
+Z
+
+− xt − α(t)x0
+
+h(t) pt(x0 | xt, y )d x0
+
+= − xt
+
+h(t) + α(t)
+
+h(t)
+
+Z
+
+x0pt(x0 | xt, y )d x0
+
+| {z }
+
+> := u(xt,t,y )
+
+.
+
+(56) 28 A PREPRINT - J UNE 9, 2026 Hence, the score function can be compactly written as 
+
+∇xt log pt (xt, y ) = − xt
+
+h(t) + α(t)
+
+h(t) u(xt, t, y ). (57) This result motivates us to assume the neural network architecture in Assumption 2, where ϑ aims to approximate u.Recall that we estimate the conditional score function by minimizing the denoising score matching loss as introduced in Section 2.2. For a single pseudo-training pair (x0, y ) sampled from the joint distribution induced by x0 ∼ Px and 
+
+y = bf (x0), define 
+
+ℓ(x0, y ; sθ ) := 1
+
+T − t0
+
+Z Tt0
+
+Ext|x0
+
+h
+
+∥∇ xt log pt (xt | x0) − sθ (xt, t, y )∥22
+
+i
+
+dt. (58) The population loss and empirical loss are defined as 
+
+L(sθ ) := E(x0,y )∼Px,y [ℓ(x0, y ; sθ )] , bL(sθ ) := 1
+
+m
+
+> m
+
+X
+
+> i=1
+
+ℓ (xi, y i; sθ ) , (59) where Px,y denotes the joint distribution of the short-run L-BFGS refined pseudo-input and its balance-aware pseudo-label. This makes explicit that the population loss is taken with respect to the same distribution from which the empirical pseudo-training pairs are sampled. Similarly, we define the truncated loss for a single data pair as 
+
+ℓtrunc (x0, y ; sθ ) := ℓ (x0, y ; sθ ) 1 {∥ x0∥2 ≤ R, |y| ≤ R} , (60) where R is a truncation radius. Since the input space X ⊂ Rd is compact and Px is supported on X , there exists a constant RX > 0 such that ∥x0∥2 ≤ RX almost surely under Px. Moreover, the balance-aware pseudo-label y, with the hat omitted for notational simplicity, is uniformly bounded over X due to standard properties of GP, i.e., |y| ≤ Ry .Consequently, we set the truncation radius as 
+
+R = max {RX , R y } . (61) Additionally, we denote by Ltrunc (sθ ) and bLtrunc (sθ ) the corresponding population and empirical loss functions, respectively. We also denote by Knet the uniform upper bound of α(t) 
+
+> h(t)
+
+ϑ(xt, t, y )1 {∥ x0∥2 ≤ R, |y| ≤ R}, i.e., 
+
+sup 
+
+> ϑ∈Θ
+
+α(t)
+
+h(t) ϑ(xt, t, y )1 {∥ x0∥2 ≤ R, |y| ≤ R}
+
+> 2
+
+≤ Knet . (62) Here we use Knet to avoid notational confusion with the number K of short-run L-BFGS steps. Following the oracle inequality as introduced in Li et al. [24], we have 
+
+L(bsθ ) ≤ sup  
+
+> sθ∈S
+
+Ltrunc (sθ ) − bLtrunc (sθ )
+
+| {z }
+
+> (A)
+
++ sup  
+
+> sθ∈S
+
+L(sθ ) − L trunc (sθ )
+
+| {z }
+
+> (B)
+
+.
+
+(63) 29 A PREPRINT - J UNE 9, 2026 We bound term (A) by similar arguments in [[4], Theorem 2]: 
+
+ℓtrunc (x0, y ; sθ ) = 1
+
+T − t0
+
+Z Tt0
+
+Ext|x0
+
+h
+
+∥∇ xt log pt (xt | x0) − sθ (xt, t, y )∥22
+
+i
+
+1 {∥ x0∥2 ≤ R, |y| ≤ R} dt
+
+= 1
+
+T − t0
+
+Z Tt0
+
+Ext|x0
+
+"
+
+sθ + xt
+
+h(t) − α(t)x0
+
+h(t)
+
+> 22
+
+#
+
+1 {∥ x0∥2 ≤ R, |y| ≤ R} dt
+
+≤ 2
+
+T − t0
+
+Z Tt0
+
+Ext|x0
+
+"
+
+sθ + xt
+
+h(t)
+
+> 22
+
+#
+
+1 {∥ x0∥2 ≤ R, |y| ≤ R} dt
+
++ 2
+
+T − t0
+
+Z Tt0
+
+α(t)x0
+
+h(t)
+
+> 22
+
+1 {∥ x0∥2 ≤ R, |y| ≤ R} dt
+
+≤ 2
+
+T − t0
+
+Z Tt0
+
+sup 
+
+> ϑ∈Θ
+
+α(t)
+
+h(t) ϑ(xt, t, y )1 {∥ x0∥2 ≤ R, |y| ≤ R}
+
+> 22
+
+dt
+
++
+
+Z Tt0
+
+α(t)x0
+
+h(t)
+
+> 22
+
+1 {∥ x0∥2 ≤ R, |y| ≤ R} dt
+
+!
+
+≤ 2( K2net + R2)
+
+T − t0
+
+Z Tt0
+
+ α(t)
+
+h(t)
+
+2
+
+dt
+
+> (i)
+
+≲ 2( K2net + R2)
+
+T − t0
+
+T − t0
+
+(1 − exp( −βmin t0)) 2
+
+= O
+
+ K2net + R2
+
+(1 − exp( −βmin t0)) 2
+
+
+
+,
+
+(64) where inequality (i) comes from the fact that α(t) = exp( −t/ 2) ≤ 1 and 
+
+h(t) = 1 − exp 
+
+
+
+−
+
+Z t
+
+> 0
+
+β(s)d s
+
+
+
+≥ 1 − exp( −βmin t). (65) When βmin t0 is close to 0, which is also the practical regime, we have the approximation 
+
+1 − exp( −βmin t0) ≈ βmin t0. (66) Moreover, following Li et al. [24] , the quantity Knet mainly depends on the input dimension d. In particular, when ϑ is Lipschitz continuous and ∥x∥2 ≤ RX
+
+√d, we can verify that Knet = O(√d). Therefore, the truncated single-sample loss is bounded by a dimension-dependent quantity of order 
+
+ℓtrunc (x0, y ; sθ ) = O
+
+√dt20
+
+!
+
+, (67) up to constants depending on the diffusion schedule and the truncation radius. By standard metric entropy and symmetrization techniques similar to the arguments of [[ 24 ], Lemma B.1], with probability at least 1 − δ,
+
+(A) = O 1
+
+t20
+
+r N (S, 1/m ) d log(1 /δ )
+
+m
+
+!
+
+, (68) where N (S, 1/m ) denotes the ϵ-covering number of the function space S with ϵ = 1 /m . This concentration step is taken over the pseudo dataset drawn from Px,y , which already includes the effect of the short-run L-BFGS refinement through the pushforward distribution Px = (Φ K )#Pinit .For term (B), recall that 
+
+(B) := sup  
+
+> sθ∈S
+
+E(x0,y )∼Px,y [ℓ(x0, y ; sθ )1{∥ x0∥2 > R }] . (69) Under the compact input space setting, the projected short-run L-BFGS map satisfies ΦK (X ) ⊆ X . Hence Px is supported on X , and ∥x0∥2 ≤ R almost surely. Therefore, the indicator function vanishes almost surely, and we obtain 
+
+(B) = 0 . (70) 30 A PREPRINT - J UNE 9, 2026 Finally, note that the score estimation error satisfies 
+
+ϵ2 
+
+> diff
+
+= L(bsθ ) − L (∇ log pt(xt | y)) ≤ L (bsθ ), (71) which follows from the equivalence between denoising score matching and L2 score estimation up to an additive constant [36, 33]. Therefore, summing up (A) and (B) completes the proof. 
+
+G.5 Proof of Lemma 5 
+
+Proof. For clarity, we rewrite backward SDE from time T to time t0 on [0 , T − t0]:
+
+dx← 
+
+> t
+
+= b (x← 
+
+> t
+
+, T − t; y) d t + pβ(T − t)d ¯ wt, x← 
+
+> 0
+
+∼ pT (· | y), (72) with the ground truth reverse drift coefficient, i.e., the drift coefficient containing the ground truth conditional score function: 
+
+b(xt, t ; y) = − 12 β(t)xt − β(t)∇x log pt(xt | y). (73) Now we define the learned backward SDE, i.e., the backward SDE with conditional score function substituted by the learned conditional score predictor bs:
+
+dex← 
+
+> t
+
+= bb (ex← 
+
+> t
+
+, T − t; y) d t + pβ(T − t)d ¯ wt, (74) where bb(xt, t ; y) = − 12 β(t)xt − β(t)bsθ (xt, t, y ), and ex← 
+
+> 0
+
+∼ N (0 , I).To be consistent with the notation in the main text, we denote by Pt0 (· | y) the marginal distribution of xT −t0 | y under the ground true backward SDE (equivalently, the marginal distribution at time t0 in the forward SDE), and by bPt0 (· | y)
+
+the marginal distribution of ˜x←  
+
+> T−t0
+
+| y under the learned backward SDE. Let eQt0 (· | y) be the marginal law at time T − t0 of the learned reverse SDE, but started from the same initialization as the ground truth reverse SDE, i.e. ex←,Q  
+
+> 0
+
+∼ pT (· | y). That is, eQt0 corresponds to ex←,Q T −t0 .By triangle inequality, we have 
+
+TV 
+
+
+
+Pt0 , bPt0
+
+
+
+≤ TV 
+
+
+
+Pt0 , eQt0
+
+| {z }
+
+> TV 1
+
++ TV 
+
+ eQt0 , bPt0
+
+| {z }
+
+> TV 2
+
+. (75) Now we derive the bound for TV 1 and TV 2 respectively. We denote by P the law of {x← 
+
+> t
+
+}t∈[0 ,T −t0] with drift coefficient b(·, T − t; y), and Pθ the law of {ex←,Q t }t∈[0 ,T −t0]
+
+with drift coefficient bb(·, T − t; y).Then we define the drift difference ∆b(xt, t ; y) := bb(xt, t ; y) − b(x, t ; y) = −β(t) ( bsθ (xt, t, y ) − ∇ log pt(xt | y)) .Recall that the diffusion coefficient at reverse-time t is σ(T − t) = pβ(T − t)I. Thus the Girsanov "control" term is 
+
+gt(x) := σ(T − t)−1∆b(xt, T − t; y) = pβ(T − t) ( bsθ (xt, T − t, y ) − ∇ log pT −t(xt | y)) .
+
+Under Assumption 3, Girsanov’s theorem applies and yields the KL divergence between the path laws 
+
+KL  P∥Pθ  = 12 EP
+
+Z T −t0
+
+> 0
+
+∥gt (x← 
+
+> t
+
+)∥22 dt (76) Substituting gt and changing variable τ = T − t gives 
+
+KL  P∥Pθ  = 12 E
+
+Z Tt0
+
+β(τ ) ∥bsθ (xτ , τ, y ) − ∇ log pτ (xτ | y)∥22 dτ ≤ 12 βmax (T − t0)ϵ2
+
+> diff
+
+(y) (77) where we use the fact that the reverse path {x← 
+
+> t
+
+, T − t} has the same marginals as the forward path {xτ , τ }, and we define the conditional score matching error ϵ2 
+
+> diff
+
+(y) := 1 
+
+> T−t0
+
+R Tt0 EXt∼pt(·| y)
+
+h
+
+∥bs (Xt, t ; y) − s⋆ (Xt, t ; y)∥22
+
+i
+
+dt.Applying Pinsker’s inequality, we can bound term TV 1: 
+
+TV 
+
+
+
+Pt0 (· | y), eQt0 (· | y)
+
+
+
+≤
+
+r 12 KL 
+
+
+
+Pt0 ∥ eQt0
+
+
+
+≤
+
+r 12 KL ( P∥Pθ ) ≤ 12
+
+pβmax (T − t0)ϵdiff (y). (78) 31 A PREPRINT - J UNE 9, 2026 By Lemma 4 and Markov inequality, for any η ∈ (0 , 1) , it holds with probability at least (1 − δ)(1 − η) over the randomness of both the training data and the condition y ∼ p(y) that 
+
+ϵ2diff (y) ≤ 1
+
+η ϵ2diff = O 1
+
+ηt 20
+
+r N (S, 1/m )d log(1 /δ )
+
+m
+
+!
+
+. (79) Therefore, we have 
+
+TV 
+
+
+
+Pt0 , eQt0
+
+
+
+= O 1
+
+ηt 20
+
+r N (S, 1/m )d log(1 /δ )
+
+m
+
+!
+
+(80) Notice that the processes defining eQt0 and bPt0 follow the same learned reverse SDE (same drift bb, same diffusion), differing only in the initial law: 
+
+ex←,Q  
+
+> 0
+
+∼ pT (· | y), ex← 
+
+> 0
+
+∼ N (0 , I D ) . (81) Let K denote the Markov kernel mapping the initial distribution at time 0 to the marginal at time T − t0 under this learned SDE. Then 
+
+eQt0 = K ♯ (pT (· | y)) , bPt0 = K ♯ (N (0 , I D )) . (82) By data processing (contractivity of KL under Markov kernels), we have 
+
+KL 
+
+ eQt0 ∥ bPt0
+
+
+
+≤ KL ( pT (· | y)∥N (0 , I D )) . (83) Again by Pinsker, we can bound term TV 2: 
+
+TV 
+
+ eQt0 , bPt0
+
+
+
+≤
+
+r 12 KL 
+
+ eQt0 ∥ bPt0
+
+
+
+≤
+
+r 12 KL ( pT (· | y)∥N (0 , I D )) , (84) where the term KL ( pT (· | y)∥N (0 , I D )) characterizes the mismatch between the terminal marginal of the forward process and the Gaussian prior. When using VP SDE as the forward SDE, this mismatch decays exponentially fast in T
+
+[4], and becomes negligible compared to TV 1. Moreover, we have the Wasserstein-2 distance between Pt0 and P (or P0, i.e., the distribution at time 0 in the forward SDE): 
+
+W2(Pt0 , P ) = O(pdt 0), (85) which follows from the results in [Chen et al. [4] , Theorem 3]. Since in practice t0 is close to 0, this term is also negligible compared to TV 1. Finally, summing up TV 1, TV 2 and W 2 completes the proof. 
+
+G.6 Proof of Lemma 6 
+
+Proof. By the Kantorovich-Rubinstein duality, we have 
+
+W1(P1, P 2) = sup 
+
+> Lip (g)≤1
+
+∥EP1 [g(x)] − EP2 [g(x)] ∥ (86) Taking g(x) = f (x)/L f , we have 
+
+|EP1 [f (x)] − EP2 [f (x)] | ≤ Lf W1 (P1, P 2) (87) Moreover, since both distributions are supported on the compact set X , we have W1(P1, P 2) ≤ diam (X )TV (P1, P 2),which completes the proof. 32 A PREPRINT - J UNE 9, 2026 
+
+G.7 Proof of Lemma 7 
+
+Proof. By Lemma 5 and Lemma 6, with probability (1 − δ)(1 − η), we have 
+
+E2 = Ex∼Pa [f (x)] − Ex∼ bPa [f (x)] 
+
+≤ Ex∼P (·| a)[f (x)] − Ex∼Pt0 (·| a)[f (x)] + Ex∼Pt0 (·| a)[f (x)] − Ex∼ bPt0 (·| a)[f (x)] 
+
+≤ Lf W1(P (· | a), P t0 (· | a)) + Lf diam( X ) TV 
+
+
+
+Pt0 (· | a), bPt0 (· | a)
+
+
+
+≤ Lf W2(P, P t0 ) + Lf diam (X )TV (Pt0 , bPt0 )= O
+
+
+
+Lf
+
+pdt 0
+
+
+
++ O Lf diam( X )
+
+ηt 20
+
+r N (S, 1/m )d log(1 /δ )
+
+m
+
+!
+
+.
+
+(88) And for the same reason in G.5, the first term is negligible, which completes the proof. 33

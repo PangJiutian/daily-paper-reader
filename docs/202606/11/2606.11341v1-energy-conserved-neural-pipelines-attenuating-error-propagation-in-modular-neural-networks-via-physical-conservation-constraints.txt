@@ -1,0 +1,598 @@
+Title: Energy-Conserved Neural Pipelines: Attenuating Error Propagation in Modular Neural Networks via Physical Conservation Constraints
+
+URL Source: https://arxiv.org/pdf/2606.11341v1
+
+Published Time: Thu, 11 Jun 2026 00:09:13 GMT
+
+Number of Pages: 22
+
+Markdown Content:
+Energy-Conserved Neural Pipelines 1
+
+# Energy-Conserved Neural Pipelines 
+
+## Attenuating Error Propagation in Modular Neural Networks via Physical Conservation Constraints 
+
+David Young † Swan Yi Htet †
+
+ORION Robotics 
+
+> †Equal contribution
+
+Working Technical Report 
+
+Abstract. Modular neural network pipelines suffer from error compounding: noise at any module boundary propagates and potentially amplifies through subsequent modules. We introduce energy conservation as a hard physical constraint on inter-module information flow. Activation energy (the squared L2 norm of feature vectors) is enforced to be exactly preserved at every module boundary. Unlike soft energy penalties, conservation is an inviolable law: the network may redistribute energy across neurons but cannot create or destroy it. Four experiments on CIFAR-10 demonstrate: (1) conservation retains 77 .4% ± 1.0% of clean accuracy at noise σ = 0 .2, versus 35 .1% ±1.1% for baselines and 30 .9% ±0.9% for energy-penalized models ( p < 0.001 , 5 seeds); (2) pipelines become depth-invariant, retaining 93.3% at depths 2 through 5 with noise at every boundary; (3) the advantage generalizes to systematic bias (+45 .1% ), Gaussian ( +40 .4% ), and adversarial noise ( +4 .8% ), with a principled non-effect on dropout ( −0.3% ); (4) on CIFAR-ResNet-18, the conservation advantage tracks the absence of intrinsic normalization: with BatchNorm, the gap at σ = 0 .2 is +0 .3 pp; without BatchNorm, it widens to +26 .2 pp and reaches +58 .0 pp at σ = 0 .5. This localizes conservation as a substitute for intra-architectural normalization at module boundaries. Experiment 5 validates the operator on a real modular robotic pipeline (perception module + motor-control module, MuJoCo physics, Franka Panda manipulator). Across three independent runs on separate machines (90 trials per cell), conservation provides a consistent +18 .9 pp average advantage on monocular-depth-style noise, the failure mode that dominates real perception-to-control deployments. The operator acts neutrally on isotropic Gaussian noise in 3D, confirming that the advantage is noise-type-specific. A formal bound proves conserved noise energy is strictly less than input noise energy. 
+
+Keywords: energy conservation, modular neural networks, error propagation, noise attenuation, physical constraints 
+
+## 1. Introduction 
+
+Modular neural network architectures compose independently functioning subnetworks into multi-stage pipelines. This design arises naturally in robotic systems (perception → planning → control), multi-modal reasoning (vision → language → action), and hierarchical inference. Modularity enables independent development, testing, and improvement of components.  
+
+> arXiv:2606.11341v1 [cs.LG] 9 Jun 2026 Energy-Conserved Neural Pipelines 2
+
+However, modularity introduces a well-documented failure mode: error compounding . When module k produces corrupted output, module k+ 1 processes this corrupted input. If the weight matrix Wk+1 has spectral norm greater than unity (common in trained networks), noise is amplified. Over K modules, noise energy can grow exponentially: 
+
+E(ϵK ) ≤ 
+
+> (K∏
+> k=1
+
+σmax (Wk)2
+
+> )
+
+· E (ϵ0) (1) where σmax (Wk) is the spectral norm at layer k. This exponential growth has been identified as the primary reason the classical sense-plan-act paradigm in robotics was abandoned in favor of end-to-end systems [1, 22]. Two existing categories of approaches address this problem: 
+
+• End-to-end learning eliminates module boundaries entirely, training a single monolithic model. This avoids compounding but sacrifices modularity, interpretability, and the ability to improve individual components. 
+
+• Regularization adds penalty terms to the training loss (dropout, noise injection, energy penalties) that statistically improve robustness but provide no deterministic guarantee. This work introduces a third approach grounded in physics: energy conservation as a hard constraint on inter-module information flow . At every module boundary, we enforce that output activation energy exactly equals input activation energy. This is not a penalty to be minimized; it is a conservation law that holds during both training and inference. 
+
+1.1 Contributions 
+
+1. A formal definition of the energy conservation operator for neural activations, with a proof that conserved noise energy is strictly bounded below the input noise energy (Theorem 2.2). 2. Empirical demonstration that conservation provides +42 .3% accuracy retention over uncon-strained baselines, while the superficially similar energy penalty degrades performance by −5.8% .3. Evidence that conservation makes pipelines depth-invariant: 5-module pipelines retain identical performance to 2-module pipelines, even with noise at every boundary. 4. Identification of a principled limitation: conservation attenuates energy-additive noise but not energy-removing noise (dropout), consistent with the theoretical framework. 5. A normalization ablation on ResNet-18 that localizes the conservation mechanism. The advantage scales inversely with the architecture’s intrinsic normalization, supporting the interpretation that conservation provides at module boundaries the regularization that BatchNorm provides within blocks. 6. Validation on a real modular robotic pipeline (perception + motor control, MuJoCo physics, Franka Panda), reproduced across three independent machines (90 trials per cell), showing Energy-Conserved Neural Pipelines 3
+
+a consistent +18 .9 pp average advantage on depth-drift noise. Conservation acts neutrally on isotropic Gaussian noise in 3D, confirming the advantage is noise-type-specific rather than universal. 
+
+## 2. Theoretical Framework 
+
+2.1 Activation Energy Definition 2.1 (Activation Energy) . Let x ∈ Rd be an activation vector produced by a neural network layer. The energy of x is: 
+
+E(x) := ∥x∥22 =
+
+> d∑
+> i=1
+
+x2 
+
+> i
+
+(2) This is the standard definition of signal energy in physics and signal processing. Energy is non-negative and additive for uncorrelated signals: when ⟨x, ϵ⟩ = 0 ,
+
+E(x + ϵ) = E(x) + E(ϵ) (3) All constraints are computed and enforced independently per sample within each minibatch, pre-serving standard stochastic gradient descent dynamics. 
+
+2.2 The Conservation Operator Definition 2.2 (Energy Conservation Operator) . Let xin ∈ Rd1 be the input to a module and 
+
+yraw = f (xin ) ∈ Rd2 the unconstrained output. The conservation operator is: 
+
+C(xin , yraw ) := yraw ·
+
+> √
+
+E(xin )
+
+E(yraw ) (4) with E(yraw ) clamped to max( E(yraw ), 10 −8) for numerical stability. 
+
+Proposition 2.1 (Exact Energy Preservation) . The conservation operator preserves energy exactly: 
+
+E(C(xin , yraw )) = E(xin )
+
+Proof. Let s = √E(xin )/E(yraw ). Then: 
+
+E(s · yraw ) = s2 · E (yraw ) = E(xin )
+
+E(yraw ) · E (yraw ) = E(xin )
+
+Definition 2.3 (Energy Budget Operator) . At the pipeline entry point, we establish a fixed energy budget E0 > 0:
+
+B(x, E 0) := x ·
+
+> √
+
+E0
+
+E(x) (5) Energy-Conserved Neural Pipelines 4
+
+This normalizes any feature vector to energy exactly E0, establishing the initial energy supply for the pipeline. 
+
+2.3 Geometric Interpretation 
+
+Geometrically, the conservation operator C projects yraw onto a hypersphere of radius r = ∥xin ∥
+
+centered at the origin. The direction of yraw (which encodes the learned transformation) is preserved; only the magnitude is adjusted. The network can learn any angular transformation, including any rotation, reflection, or non-uniform scaling of directions, subject only to the constraint that the output lies on the same-radius sphere as the input. This differs from existing normalization in a critical way: 
+
+• L2 normalization projects onto the unit sphere ( r = 1 ), destroying all magnitude information. Two inputs of vastly different magnitudes produce identical-norm outputs. 
+
+• BatchNorm standardizes across the batch to zero mean and unit variance, but does not constrain per-sample energy. 
+
+• LayerNorm standardizes each sample independently, fixing energy to a dimension-dependent constant regardless of input energy .The critical distinction is causality : conservation ties output energy to input energy, establishing a directional energy flow through the pipeline. A confident upstream module (high energy) propagates high energy downstream. An uncertain module (low energy) propagates low energy. This causal coupling is absent in all existing normalization methods. 
+
+2.4 Noise Attenuation Bound Theorem 2.2 (Noise Attenuation Bound) . Let x ∈ Rd be a clean feature vector with energy 
+
+E0 = E(x), and let ˜x = x + ϵ where ϵ is additive noise uncorrelated with x (i.e., ⟨x, ϵ⟩ = 0 ). After applying the energy budget operator B(˜ x, E 0), the noise energy in the conserved output satisfies: 
+
+E(ϵconserved ) = E0 · E (ϵ)
+
+E0 + E(ϵ) < E(ϵ) (6) 
+
+The conserved noise energy is strictly less than the input noise energy for all E(ϵ) > 0.Proof. Under the uncorrelated noise assumption: 
+
+E(˜ x) = E(x) + E(ϵ) = E0 + E(ϵ)
+
+The conservation scale factor is: 
+
+s =
+
+> √
+
+E0
+
+E0 + E(ϵ)Energy-Conserved Neural Pipelines 5
+
+The conserved output is B( ˜x, E 0) = s · (x + ϵ). The noise component after scaling is s · ϵ, with energy: 
+
+E(s · ϵ) = s2 · E (ϵ)= E0
+
+E0 + E(ϵ) · E (ϵ)= E0 · E (ϵ)
+
+E0 + E(ϵ) (7) Since E0 + E(ϵ) > E 0 for any E(ϵ) > 0, the fraction E0/(E0 + E(ϵ)) < 1, and therefore E(s · ϵ) <
+
+E(ϵ).
+
+Corollary 2.3 (Asymptotic Suppression) . As noise energy grows without bound: 
+
+lim  
+
+> E(ϵ)→∞
+
+E(ϵconserved ) = E0
+
+Regardless of how large the noise becomes, the conserved noise energy never exceeds the energy budget E0. This establishes a hard ceiling on noise propagation that is absent in unconstrained pipelines, where noise energy can grow as σmax (W)2 · E (ϵ) without bound. 
+
+2.5 Why Conservation and Penalty Produce Opposite Effects 
+
+Let S = E(x) denote signal energy and N = E(ϵ) denote noise energy (fixed at test time). The signal-to-noise ratio is SNR = S/N .
+
+Energy penalty adds λ ∑ 
+
+> k
+
+E(xk) to the training loss. This drives S → 0 during training. At test time, noise has fixed magnitude N , so SNR = S/N → 0. The features become more fragile to noise, not less. 
+
+Energy conservation preserves S = E0 during training. The network learns to concentrate signal energy in informative dimensions. At test time, noise adds energy but conservation rescales back to E0. The learned weight structure preferentially preserves signal-rich dimensions during rescaling, maintaining or improving the effective SNR. This theoretical distinction predicts exactly the experimental results: penalty degrades robustness (−5.8% ), conservation improves it ( +42 .3% ). 
+
+2.6 Learned Energy Redistribution 
+
+The conservation operator applies a uniform scale factor to all neurons. However, the network’s learned weight matrix W applies a non-uniform transformation before conservation acts. During training under the conservation constraint, the optimization landscape favors weights that: 1. Assign large output magnitudes to neurons correlated with task-relevant features. 2. Assign small output magnitudes to neurons carrying noise or irrelevant information. Energy-Conserved Neural Pipelines 6
+
+After the linear transformation and conservation rescaling, high-magnitude neurons retain pro-portionally more of the energy budget. This creates an implicit signal separation : the network develops an energy allocation strategy that preferentially preserves informative dimensions during the conservation step. No explicit denoising objective is required: the conservation constraint alone provides sufficient selection pressure. 
+
+2.7 Density Conservation for Variable-Dimension Pipelines 
+
+The conservation operator of Definition 2.2 preserves total energy when input and output share the same dimension. Modern deep architectures often change dimension across stage boundaries: ResNet-18, for instance, has stages of width 64 , 128 , 256 , 512 , with spatial resolution halving between stages 1–4. Applying total-energy conservation across such boundaries forces an inflation or compression that interferes with the architecture’s natural representation transitions. We extend the operator by conserving energy density per activation slot .
+
+Definition 2.4 (Density Conservation Operator) . For an input xin ∈ Rd1 and a raw output 
+
+yraw ∈ Rd2 , the density conservation operator is: 
+
+Cρ(xin , yraw ) := yraw ·
+
+> √
+
+(d2/d 1) E(xin )
+
+E(yraw ) (8) which preserves the per-slot density E(·)/d exactly across the boundary: 
+
+E(Cρ(xin , yraw )) / d 2 = E(xin ) / d 1.
+
+Remark 2.1 . When d1 = d2, density conservation reduces exactly to total-energy conservation. Density conservation is therefore a strict generalization of Definition 2.2: it coincides with the original operator on equal-dimension pipelines and extends meaningfully to unequal-dimension ones. The noise attenuation bound of Theorem 2.2 extends to the density operator with the same proof structure. The density-budget operator Bρ(x, E 0/d ) := x · √(E0/d )/(E(x)/d ) on a noisy vector produces conserved noise energy strictly less than input noise energy, by the same algebra applied to per-slot quantities. In Experiment 4 we apply density conservation at every inter-stage boundary of ResNet-18. For convolutional features of shape (C, H, W ), both d1 and d2 are computed as C · H · W , and the operator scales the entire tensor by a single per-sample factor. 
+
+## 3. Method 
+
+3.1 Pipeline Architecture 
+
+All pipelines consist of three components, with identical architectures and parameter counts across all experimental conditions (Table 1). 
+
+Feature Extractor (Module A). A convolutional network mapping images to d-dimensional Energy-Conserved Neural Pipelines 7
+
+feature vectors: Conv (3 →32) → BN → ReLU → MaxPool (2) → Conv (32 →64) → BN → ReLU → MaxPool (2) 
+
+→ Conv (64 →d) → BN → ReLU → AvgPool (1) → Flatten 
+
+Processing Blocks. Each block is a fully-connected layer with batch normalization and ReLU activation: 
+
+fk(x) = ReLU (BN (Wkx + bk)), Wk ∈ Rd×d
+
+A depth-K pipeline contains K−1 processing blocks between the feature extractor and the classifi-cation head. 
+
+Classification Head. A single linear layer Rd → R10 , with no conservation constraint applied (logits must remain unconstrained for the softmax computation). Table 1: Parameter counts are identical across all conditions at each depth. Condition Depth 2 Depth 5 Baseline 61,578 74,442 Energy Penalty 61,578 74,442 Conservation 61,578 74,442 
+
+3.2 Three Experimental Conditions Condition 1: Baseline (unconstrained). Standard forward pass with no energy mechanism: 
+
+xk+1 = fk(˜ xk)
+
+Condition 2: Energy Penalty (soft regularizer). Standard forward pass with an energy penalty added to the training loss: 
+
+Lpenalty = LCE (ˆ y, y) + λ ∑
+
+> k
+
+E(xk), λ = 0 .001 
+
+Condition 3: Energy Conservation (hard constraint). Forward pass with conservation enforced at every module boundary. The training loss is standard cross-entropy with no additional terms: 
+
+Lconservation = LCE (ˆ y, y)
+
+The full conservation-aware forward pass is given in Algorithm 1. 
+
+3.3 Noise Types 
+
+We evaluate four physically motivated noise types that model distinct real-world error sources: Energy-Conserved Neural Pipelines 8
+
+Algorithm 1 Energy-Conserved Forward Pass 
+
+Require: Image I, energy budget E0, noise level σ, noise type τ
+
+Ensure: Class logits  
+
+> 1:
+
+x ← fA(I) ▷ Feature extraction  
+
+> 2:
+
+x ← B (x, E 0) ▷ Set energy budget  
+
+> 3:
+
+if σ > 0 then  
+
+> 4:
+
+x ← x + Noise (σ, τ ) ▷ Inject noise  
+
+> 5:
+
+x ← B (x, E 0) ▷ Conserve energy after noise  
+
+> 6:
+
+end if  
+
+> 7:
+
+for k = 1 , . . . , K −1 do  
+
+> 8:
+
+xprev ← x 
+
+> 9:
+
+x ← fk(x) ▷ Module computation  
+
+> 10:
+
+x ← C (xprev , x) ▷ Conserve energy  
+
+> 11:
+
+end for  
+
+> 12:
+
+return fhead (x) ▷ Classification (no conservation) 
+
+Gaussian noise: ϵ ∼ N (0, σ 2I). Models random sensor noise and stochastic estimation errors. This is energy-additive : noise increases the total energy of the signal. 
+
+Systematic bias: ϵ = b, where b ∼ N (0, σ 2I) is drawn once and applied identically to all samples. Models calibration offsets, fixed perception biases, and systematic sensor drift. Energy-additive. 
+
+Adversarial: ϵ = σ · ∥ x∥ · ˆx, where ˆx = x/ ∥x∥. Noise is aligned with the activation direction, maximizing energy addition per unit noise magnitude. Models worst-case corruption. Energy-additive. 
+
+Dropout: Each dimension is zeroed independently with probability σ: ˜xi = xi · mi, mi ∼
+
+Bernoulli (1 − σ). Models information loss from sensor failure or communication dropout [ 16 ]. 
+
+Energy-removing : total energy decreases. Theorem 2.2 predicts that conservation attenuates the first three types (which add energy) but has no mechanism to help with dropout (which removes energy). 
+
+3.4 Training Protocol 
+
+All models are trained on CIFAR-10 [ 20 ] (50,000 training images, 10 classes) with the following shared hyperparameters: feature dimension d = 64 , energy budget E0 = 64 .0, batch size 256, Adam optimizer [21] (learning rate 10 −3), cosine annealing schedule, 30 epochs. Models are trained on clean data only . Noise is injected exclusively at test time, simulating de-ployment conditions where inter-module errors arise from environmental factors, sensor degradation, or domain shift. 
+
+Evaluation metric. The primary metric is accuracy retained : the ratio of test accuracy under noise to clean test accuracy: 
+
+R(σ) = Acc (σ)
+
+Acc (0) × 100% Energy-Conserved Neural Pipelines 9
+
+This normalizes for differences in clean accuracy across models and seeds, isolating the noise robustness effect. 
+
+## 4. Experiments 
+
+4.1 Experiment 1: Statistical Robustness Objective. Verify that conservation’s advantage is consistent across random initializations, ruling out lucky seeds. 
+
+Protocol. Train each condition (Baseline, Penalty, Conservation) five times with seeds {42 , 123 , 456 , 789 , 1024 }
+
+at pipeline depth 2. Evaluate at noise levels σ ∈ { 0, 0.1, 0.2, 0.5, 1.0, 2.0} with Gaussian noise injected at the module boundary. 
+
+Results. Table 2 reports mean ± standard deviation of accuracy retained across the 5 seeds. Table 2: Experiment 1: Accuracy retained (%) under Gaussian noise. Mean ± std across 5 random seeds, pipeline depth = 2. Noise σ Baseline Energy Penalty Conservation 
+
+0.0 100 .0 ± 0.0 100 .0 ± 0.0 100 .0 ± 0.0
+
+0.1 58 .3 ± 1.1 51 .4 ± 0.6 93 .2 ± 0.4
+
+0.2 35 .1 ± 1.1 30 .9 ± 0.9 77 .4 ± 1.0
+
+0.5 19 .9 ± 0.3 18 .7 ± 0.4 42 .8 ± 1.2
+
+1.0 16 .4 ± 0.4 15 .6 ± 0.5 26 .1 ± 0.3
+
+2.0 14 .6 ± 0.3 14 .5 ± 0.2 18 .6 ± 0.5
+
+At σ = 0 .2, the conservation advantage over baseline is +42 .3 percentage points. This gap is approximately 40 × larger than either standard deviation ( ±1.0% and ±1.1% ), establishing overwhelming statistical significance. At σ = 0 .1, conservation retains 93.2%, indicating that the pipeline barely registers the noise. The energy penalty performs worse than the unconstrained baseline at every noise level. At σ = 0 .2:penalty retains 30.9% versus baseline’s 35.1%, a degradation of −4.2% . This confirms the SNR degradation predicted in Section 2.5: soft energy minimization shrinks feature magnitudes, making them more vulnerable to fixed-magnitude noise. 
+
+4.2 Experiment 2: Depth Invariance Objective. Test whether conservation prevents error compounding as pipeline depth increases, with noise injected at every module boundary. 
+
+Protocol. Train Baseline and Conservation pipelines at depths {2, 3, 4, 5}. Inject Gaussian noise at every module boundary (a depth-K pipeline receives K noise injections). Evaluate at 
+
+σ ∈ { 0, 0.05 , 0.1, 0.2, 0.5}. Seed = 42. 
+
+Results. Table 3 reports accuracy retained with noise at every boundary. Energy-Conserved Neural Pipelines 10 
+
+Table 3: Experiment 2: Accuracy retained (%) with Gaussian noise injected at every module boundary. Deeper pipelines receive more noise injections. 
+
+σ = 0 .1 σ = 0 .2
+
+Depth Baseline Conserv. Baseline Conserv. 
+
+2 58.5 93.3 34.7 77.4 
+
+3 58.7 92.4 36.4 76.8 
+
+4 60.3 92.5 35.5 77.2 
+
+5 61.6 93.3 37.2 78.2 
+
+The conservation column at σ = 0 .1 reads: 93.3%, 92.4%, 92.5%, 93.3%. This is effectively a flat line within measurement noise. Adding more modules to the pipeline, with each module introducing an additional noise injection, has no effect on conservation’s noise robustness. Conservation renders the pipeline depth-invariant under noise. The conservation advantage is +31 to +43 percentage points at every depth and noise level tested. 
+
+4.3 Experiment 3: Noise Type Generalization Objective. Verify that conservation generalizes across fundamentally different error types, not just Gaussian noise. 
+
+Protocol. Train Baseline and Conservation at depth 3. Test with four noise types (Section 3.3) at 
+
+σ ∈ { 0, 0.05 , 0.1, 0.2, 0.5}. Seed = 42. 
+
+Results. Table 4 reports accuracy retained at σ = 0 .2 for each noise type. Table 4: Experiment 3: Conservation advantage across noise types at σ = 0 .2, pipeline depth = 3. Noise Type Baseline Conservation Advantage Gaussian 35.7% 76.1% +40 .4% 
+
+Systematic Bias 32.0% 77.0% +45 .1% 
+
+Adversarial 95.2% 100.0% +4 .8% 
+
+Dropout 41.2% 40.9% −0.3% 
+
+Conservation provides strong attenuation for all three energy-additive noise types. The strongest advantage ( +45 .1% ) is on systematic bias noise, which directly models the calibration offsets and consistent perception errors that arise between real-world robotic modules. Conservation renders the pipeline perfectly immune to adversarial noise at σ ≤ 0.2 (100.0% retained), because adversarial noise adds energy along the activation direction and conservation immediately rescales it back. Conservation provides no advantage against dropout ( −0.3% ). This result is predicted by the theoretical framework: dropout removes energy rather than adding it. Conservation constrains total energy but has no mechanism to recover information that has been destroyed. This is a principled, Energy-Conserved Neural Pipelines 11 
+
+physically interpretable limitation. 
+
+4.4 Experiment 4: Architectural Normalization Ablation on ResNet-18 Objective. Test whether the conservation advantage observed in shallow CNN+FC pipelines persists in a deeper, modern convolutional architecture, and identify whether the magnitude of the effect depends on the architecture’s intrinsic normalization. 
+
+Architecture. CIFAR-ResNet-18 [ 7 ]: a stem ( 3 → 64 convolution with BatchNorm [ 3] and ReLU) followed by four stages of width 64 , 128 , 256 , 512 . Each stage contains two BasicBlocks; the first block of stages 2–4 uses stride 2 for spatial downsampling. The classification head consists of global average pooling and a 512 → 10 linear layer. The three inter-stage transitions ( stage 1 → stage 2,stage 2 → stage 3, stage 3 → stage 4) serve as module boundaries: noise is injected at each, and density conservation (Section 2.7) is applied at each. Density conservation is required because stage outputs differ in both channel count and spatial resolution; total-energy conservation is undefined here. 
+
+Two regimes. We train and evaluate three pipeline variants under two architectural conditions: 
+
+• With BN. Standard ResNet-18 with BatchNorm in every BasicBlock. 
+
+• Without BN. Identical architecture with all BatchNorm layers replaced by identity (and biases added to the convolutions to compensate). 
+
+Penalty configuration. ResNet activations are several orders of magnitude larger than the FC pipeline activations of Experiments 1–3. We use λ = 10 −5 for both ResNet variants ( 100 × smaller than the λ = 10 −3 of the FC experiments). Smaller penalty coefficients were tested but did not change the qualitative outcome. 
+
+Training protocol. Adam optimizer, cosine annealing schedule, batch size 256, density budget set so the post-stem feature has unit per-slot density. With BN: 30 epochs, learning rate 10 −3.Without BN: 40 epochs, learning rate 3 × 10 −4, gradient clipping at norm 1.0 (training is unstable without these adjustments). Single seed (42); the effect sizes reported below are far larger than the seed-to-seed standard deviations measured in Experiment 1 ( ±1% ). 
+
+Results: With BatchNorm. Clean test accuracies after training: baseline 91 .97% , penalty 
+
+90 .99% , conservation 92 .08% . Table 5 reports accuracy retained under Gaussian noise injected at every inter-stage boundary. The picture in this regime departs from Experiments 1–3 in three ways. First, the conservation advantage at σ = 0 .2 shrinks to +0 .3 percentage points (versus +42 .3 in the FC pipeline of Experiment 1). Both baseline and conservation retain near-clean accuracy through 
+
+σ = 0 .5.Second, the penalty result is dramatic: collapse to 20 .7% at σ = 0 .2 and to chance accuracy ( ≈ 11% )for all σ ≥ 0.5. Penalty stays substantially below baseline at every nonzero noise level, reproducing and amplifying the directionality observed in Experiment 1 at the larger scale. Energy-Conserved Neural Pipelines 12 
+
+Table 5: Experiment 4a: ResNet-18 with BatchNorm. Accuracy retained (%) under Gaussian noise injected at all three inter-stage boundaries. Single seed. Noise σ Baseline Energy Penalty Conservation 
+
+0.0 100 .0 100 .0 100 .0
+
+0.1 100 .0 86 .5 100 .0
+
+0.2 99 .7 20 .7 100 .0
+
+0.5 99 .2 10 .8 98 .7
+
+1.0 95 .9 11 .0 87 .3
+
+2.0 67 .9 11 .0 18 .6
+
+Third, conservation underperforms baseline at σ = 2 .0 (18 .6% vs 67 .9% ). We address this regime in Section 5.5 as a scope limitation of Theorem 2.2. The shrinkage of the conservation advantage relative to the FC experiments is the central finding. ResNet-18 contains BatchNorm in every BasicBlock plus residual connections that route signal around any individual noisy block. BatchNorm renormalizes activations after every block, providing a form of intra-network energy regularization, while skip connections supply a parallel signal path that bypasses corrupted feature transformations. The architecture is performing internally and continuously much of the work that conservation is designed to do at boundaries. We hypothesize that this internal normalization, not the depth or scale of the architecture, is responsible for the diminished gap. 
+
+Results: Without BatchNorm. To test the hypothesis that intrinsic normalization is responsible for the shrunken gap, we strip BatchNorm from the architecture (replacing every BN layer with identity and adding biases to the convolutions) and retrain all three variants from scratch. Clean test accuracies after 40 epochs: baseline 88 .55% , penalty 88 .90% , conservation 89 .37% . Table 6 reports accuracy retained. Table 6: Experiment 4b: ResNet-18 without BatchNorm. Accuracy retained (%) under Gaussian noise injected at all three inter-stage boundaries. Single seed. Noise σ Baseline Energy Penalty Conservation 
+
+0.0 100 .0 100 .0 100 .0
+
+0.1 95 .0 35 .4 99 .7
+
+0.2 72 .3 14 .8 98 .5
+
+0.5 22 .5 12 .1 80 .5
+
+1.0 13 .9 11 .1 20 .2
+
+2.0 12 .6 11 .4 12 .2
+
+The hypothesis is confirmed. Four observations are decisive. 
+
+The conservation advantage restores at moderate noise. At σ = 0 .2, the gap between conservation and baseline widens from +0 .3 percentage points (with BN) to +26 .2 percentage points (without Energy-Conserved Neural Pipelines 13 
+
+BN). The order of magnitude matches the FC-pipeline result of Experiment 1, where no equivalent of BatchNorm exists at that scale: same operator, same noise model, comparable advantage. 
+
+The largest gap occurs at σ = 0 .5, not σ = 0 .2. Without BatchNorm, conservation retains 80 .5% 
+
+of clean accuracy at σ = 0 .5 while the baseline retains only 22 .5% , a gap of +58 .0 percentage points. This is the strongest single-noise-level result in the paper. The interpretation: at σ = 0 .5,baseline activations are dominated by noise and the network has no mechanism to recover, whereas conservation rescales the post-stage tensor back to the energy budget on every sample, preserving the trained weight transformation’s ability to extract signal. 
+
+The conservation pipeline does not pay a clean-accuracy cost. Without BatchNorm, conservation in fact achieves the highest clean test accuracy ( 89 .37% versus baseline 88 .55% ). This is consistent with conservation acting as a normalization in its own right: when BatchNorm is absent, the conservation pipeline retains a per-sample mechanism for bounding activation magnitudes, while the baseline has none. The robustness improvement is not the result of trading clean accuracy for noise tolerance. 
+
+The penalty pipeline collapses regardless of normalization. Penalty retains 35 .4% at σ = 0 .1 and 
+
+≤ 12 .1% for all σ ≥ 0.5 in the NoBN regime, and collapses similarly with BN. Conservation and penalty are not two flavors of the same idea: they produce qualitatively different and opposite effects across both architectural regimes. At σ = 2 .0 in the NoBN regime, all three variants collapse together to chance-level accuracy (≈ 11 −13% on CIFAR-10). This regime no longer distinguishes the pipelines and is included for completeness. The high-noise underperformance of conservation seen with BatchNorm (Table 5) is therefore a regime-specific phenomenon rather than a universal failure mode of the operator. Section 5.5 discusses this distinction. The implication is sharper than the original paper framing. End-to-end ResNet does not face the modular pipeline problem in the relevant sense: it has no module boundaries across which separately-trained representations meet. The case that genuinely matches the modular regime is one where modules are trained independently on different objectives, with no shared running statistics defined across the boundary. In that case, which describes robotic perception–planning–control pipelines, vision–language–action systems, and any architecture composing pre-trained components, no equivalent of BatchNorm exists at the seam, and conservation provides the per-sample replacement that does not require shared training. 
+
+4.5 Experiment 5: Validation on a Real Modular Robotic Pipeline Objective. Test the conservation operator in the regime that motivated the work: a real modular pipeline composed of separately-developed perception and motor-control modules, with no shared normalization statistics across the inter-module boundary. 
+
+Pipeline. The upstream module produces the target object’s 3D position in the world frame (an oracle perception model backed by MuJoCo ground truth, with noise injected to model perception error). The downstream module (CHIRON) consumes the position and executes a pick-and-place sequence: damped least-squares inverse kinematics, geometry-based grasp computation, scene-aware Energy-Conserved Neural Pipelines 14 
+
+Figure 1: Experiment 4: Architectural normalization ablation on ResNet-18 / CIFAR-10. 
+
+Accuracy retained as a function of Gaussian noise standard deviation injected at all three inter-stage boundaries. Left: With BatchNorm in every BasicBlock, baseline (blue) and conservation (green) track each other closely up to σ = 0 .5; penalty (red) collapses to chance at σ ≥ 0.5. Right: With BatchNorm removed, baseline robustness degrades sharply ( 72 .3% retained at σ = 0 .2), while conservation maintains 98 .5% retention at the same noise level. The conservation–baseline gap widens from +0 .3 percentage points (with BN) to +26 .2 percentage points (without BN) at σ = 0 .2,reaching +58 .0 percentage points at σ = 0 .5. This localizes the conservation mechanism as a substitute for intrinsic normalization. Penalty fails in both regimes. path planning, and a 9-phase sequencer with grasp verification and automatic retry. The full motor-control stack runs on MuJoCo 3.x [ 17 ] at approximately 500 Hz on a Franka Emika Panda with a parallel-jaw gripper whose geometry is measured directly from the model. 
+
+The seam. The interface between the two modules is the 3D position vector that the perception module sends to the controller for the target object. The conservation operator acts at this seam: every perception-produced position p is rescaled to a calibrated reference energy E0 before being passed to the controller. 
+
+Calibration. The reference energy E0 is set to the squared L2 norm of the target object’s clean position, E0 = ∥pclean ∥2. For the cube used in this experiment, with clean position pclean ≈
+
+(0 .500 , 0.000 , 0.420) m, this gives E0 = 0 .4264 .
+
+Noise model. Three noise types model distinct realistic perception failure modes: 
+
+• Gaussian: independent zero-mean Gaussian noise on every position component, modeling random sensor noise. 
+
+• Systematic bias: a single zero-mean Gaussian offset drawn per trial, applied identically to every component, modeling camera-pose drift. 
+
+• Depth drift: a single zero-mean Gaussian offset on the z-axis only, modeling the directional bias characteristic of monocular depth estimation [19]. 
+
+Conditions. Two conditions per cell: Energy-Conserved Neural Pipelines 15 
+
+• Baseline (off): the controller receives the perturbed position directly. 
+
+• Conservation (naive): the controller receives pconserved = pperturbed ·
+
+> √
+
+E0/∥pperturbed ∥2.
+
+Protocol and reproducibility. The experiment was run three times on independent machines (a desktop PC and two laptops) using the same harness and seed. Each run executed 30 trials per cell. Table 7 reports the pooled results across all three runs (90 trials per cell). Success is the boolean returned by the sequencer’s internal grasp verification (test-lift check plus post-lift verification), the same metric the controller exposes through its production API. Table 7: Experiment 5: Modular pipeline validation. Grasp success counts pooled across 3 independent runs (90 trials per cell). Bold indicates conservation outperforms baseline. Noise type σ (m) Baseline Conservation Gap (pp) Gaussian 0.02 77/90 73/90 −4.4
+
+0.04 58/90 67/90 +10 .0
+
+0.06 49/90 49/90 0.0
+
+Systematic bias 0.02 62/90 71/90 +10 .0
+
+0.04 49/90 60/90 +12 .2
+
+0.06 44/90 41/90 −3.3
+
+Depth drift 0.02 66/90 82/90 +17 .8
+
+0.04 41/90 63/90 +24 .4
+
+0.06 37/90 50/90 +14 .4
+
+Interpretation. Four observations. First, depth drift is the strongest and most consistent result: +17 .8, +24 .4, and +14 .4 pp across the three sigma levels, averaging +18 .9 pp. All three cells are positive across all three independent runs. The mechanism is direct: depth-axis perturbation changes the magnitude of the position vector, and the conservation operator rescales toward the calibrated magnitude on every sample. This is precisely the failure mode monocular depth estimators produce in deployed perception pipelines, making it the deployment-relevant result. Second, systematic bias shows a positive gap at moderate noise ( +10 .0 and +12 .2 pp) that collapses at high noise ( −3.3 pp at σ = 0 .06 ). The high-noise collapse reproduces the same SNR limitation observed at σ = 2 .0 in the ResNet experiment: when the bias dominates the position vector, conservation locks in the noise-aligned direction at the calibrated energy rather than recovering the signal. Third, Gaussian noise shows a neutral net effect: −4.4, +10 .0, and 0.0 pp. This is theoretically meaningful. In Experiments 1–4, Gaussian noise was applied to high-dimensional activation vectors, where the law of large numbers makes the noise contribution behave like a near-uniform magnitude increase that conservation can attenuate. On a 3D position vector, individual noise samples have high variance in both magnitude and direction, and conservation, which preserves magnitude but carries no directional information, neither helps nor hurts on average. Energy-Conserved Neural Pipelines 16 
+
+Fourth, the result was obtained with no retraining of either module. Conservation acts purely at the seam, applied at inference, with E0 set from a one-time calibration. The three-run reproduction across independent machines confirms the depth-drift effect is not machine-specific or seed-specific. 
+
+4.6 Comprehensive Visualization 
+
+Figure 2 presents results from the first three experiments in a unified seven-panel visualization. 
+
+## 5. Discussion 
+
+5.1 Why Conservation Works 
+
+Conservation operates through two complementary effects: 
+
+Direct attenuation. Theorem 2.2 guarantees that noise energy after conservation is strictly less than input noise energy. The attenuation factor E0/(E0 + E(ϵ)) increases with noise magnitude, providing stronger attenuation precisely when it is most needed. 
+
+Learned redistribution. During training, the network’s weights adapt to the conservation constraint. The weight matrices learn to allocate energy preferentially to neurons carrying task-relevant information. At test time, when noise distributes energy approximately uniformly across all neurons, the subsequent weight transformation and conservation rescaling suppress noise-carrying neurons while preserving signal-carrying neurons. This implicit denoising is an emergent property of training under conservation. 
+
+5.2 Simple vs. Learned Conservation 
+
+In preliminary experiments, we tested a more complex variant (“Conservation V2,” 98,698 parameters) using learned gating networks for non-uniform energy redistribution. V2 performed worse than simple conservation (82.5% vs. 85.7% retained at σ = 0 .2). A parameter-matched “BiggerBaseline” (same parameter count as V2, no conservation) retained only 69.1%, confirming that the conservation 
+
+mechanism , not additional model capacity, drives the improvement. The explanation: simple conservation preserves the learned representation’s direction exactly, changing only magnitude. Learned gates modified the direction, interfering with the representations expected by downstream modules. The conservation principle works best when it is minimally invasive. 
+
+5.3 Implications for Modular Robotics 
+
+Error compounding has been cited as the primary obstacle to modular sense-plan-act architectures in robotics [ 1, 23 ]. The strongest synthetic advantage ( +45 .1% ) was observed on systematic bias noise, which models the calibration offsets that dominate real-world robotic module interfaces. Experiment 5 confirms and refines this on a real modular pipeline: a +24 .4 pp advantage on monocular-depth-style drift at σ = 0 .04 m, pooled across three independent runs. The finding that Gaussian noise shows a neutral effect on 3D positions further refines the claim: conservation’s Energy-Conserved Neural Pipelines 17 
+
+advantage tracks the structure of the dominant noise mode, with magnitude-changing perturbations showing the largest benefit. In deployment, conservation should be paired with knowledge of which noise type dominates at each module seam. 
+
+5.4 Conservation as Inter-Module Normalization 
+
+Experiment 4 reframes the contribution of this paper. With BatchNorm fully present in ResNet-18, the conservation advantage at σ = 0 .2 is +0 .3 percentage points. With BatchNorm removed, the advantage widens to +26 .2 percentage points at σ = 0 .2 and to +58 .0 percentage points at σ = 0 .5.The shrinkage and restoration are both substantial, and they identify the conservation mechanism more precisely than Experiments 1–3 alone could. BatchNorm and conservation both regularize activation magnitudes, but at different scopes. Batch-Norm normalizes within an architecture’s blocks using batch statistics computed during a single training run, requiring shared parameters and consistent input distributions across all blocks. Conservation normalizes between modules using only per-sample input energy, requires no shared statistics across the boundary, and applies during inference. When a network is trained end-to-end with BatchNorm, the intra-network normalization absorbs much of the noise that conservation would otherwise attenuate, leaving little room for additional improvement at the boundaries. When intra-network normalization is removed, conservation steps into that role and provides comparable robustness to the BatchNorm-equipped baseline. The case where conservation is most valuable is therefore not end-to-end deep architectures, where BatchNorm and skip connections already do the relevant work. It is the modular case in the strict sense: separately-trained subsystems composed at inference, where no shared running statistics span the seam. Robotic perception-to-control, vision-language-action systems, and pre-trained module composition are the natural targets. Conservation is the per-sample, training-free replacement for normalization in the regime where conventional normalization cannot operate. The penalty result reinforces this picture across both ResNet regimes. Penalty collapses to chance accuracy ( ≈ 11% ) at σ ≥ 0.5 whether or not BatchNorm is present. Soft energy minimization shrinks signal magnitude faster than it bounds noise, and no architectural normalization recovers the lost SNR. Conservation and penalty produce qualitatively opposite effects at every scale tested. 
+
+5.5 Limitations Information-destroying noise. Conservation cannot recover information destroyed by dropout or sensor failure. This is a fundamental limitation: conservation constrains total energy but cannot create information. 
+
+High-noise SNR collapse with BatchNorm. At σ = 2 .0 on ResNet-18 with BatchNorm, conservation underperforms the baseline ( 18 .6% versus 67 .9% retained). Theorem 2.2 bounds the absolute noise energy after rescaling but does not bound the post-rescaling signal-to-noise ratio. When noise dominates the post-stage tensor ( E(ϵ) ≫ E (x)), the conserved output retains the noise-aligned direction of x + ϵ at the energy budget E0, suppressing rather than preserving Energy-Conserved Neural Pipelines 18 
+
+the residual signal component. We note that this regime is specific to the BatchNorm-equipped architecture: in the NoBN regime at σ = 2 .0 all three pipelines collapse together to chance-level accuracy ( ≈ 11 −13% ), consistent with no recoverable signal at that noise level rather than a conservation-specific failure. A precise account of how conservation interacts with BatchNorm at high noise remains open; the present results suggest that conservation is most useful in the moderate-noise regime where E(ϵ) ≲ E(x).
+
+Uniform scaling. The current operator scales all neurons uniformly. Non-uniform redistribution could theoretically provide stronger attenuation, but our preliminary experiments suggest simplicity outperforms complexity. 
+
+Architecture and dataset scope. Synthetic results are demonstrated on CNN+FC pipelines and ResNet-18 on CIFAR-10. The modular-pipeline result of Experiment 5 uses MuJoCo physics with an oracle perception model. Validation on transformer architectures [ 8 ], larger datasets (ImageNet), real-image perception (replacing the oracle with a full computer-vision pipeline such as YOLOv8 [ 18 ]+ MiDaS [19]), and physical hardware is the immediate priority for future work. 
+
+Single-seed ResNet results. Experiment 4 was run once per condition. The effect sizes ( +26 .2
+
+pp at σ = 0 .2 and +58 .0 pp at σ = 0 .5 in the NoBN regime) are far larger than the ±1% standard deviations measured in Experiment 1, but multi-seed validation on ResNet remains the natural next step. 
+
+Dimension dependence in the modular case. Experiment 5 reveals that conservation’s effectiveness depends on the dimensionality and structure of the inter-module data. On high-dimensional activation vectors (Experiments 1–4), Gaussian noise benefits from conservation because the law of large numbers makes its contribution behave like a near-uniform magnitude increase. On 3D position vectors (Experiment 5), Gaussian noise has high per-sample variance in both magnitude and direction, and conservation shows a neutral effect. The operator is most effective when the dominant noise mode is magnitude-changing (depth drift) or coherently directional (systematic bias at moderate levels). 
+
+Single-target Experiment 5. The modular pipeline result is obtained on a single target object (a 2 cm cube) with a fixed clean position and a calibrated E0 specific to that target. Multi-object scenes and per-object calibration strategies remain open. 
+
+Energy budget sensitivity. We use E0 = d throughout (per-slot density 1 for the ResNet experiments). Systematic study of sensitivity to E0 remains future work. 
+
+## 6. Related Work 
+
+Energy-based models. Hopfield networks [ 2 ], Boltzmann machines, and modern energy-based models [ 24 ] define energy functions over network states and train by minimizing the energy of correct configurations. These use energy as an optimization objective . Our work uses energy as a physical constraint : total energy is conserved, not minimized. 
+
+Physics-informed neural networks. Hamiltonian Neural Networks [ 9 ] and Lagrangian Neural Energy-Conserved Neural Pipelines 19 
+
+Networks [ 10 ] enforce conservation laws in their predictions (the modeled physical system respects energy conservation). SINDy [ 11 ] discovers governing equations from data. Our work enforces conservation on the computation itself (the internal activations obey conservation). These are orthogonal applications of the same physical principle. 
+
+Normalization techniques. BatchNorm [ 3 ], LayerNorm [ 4 ], GroupNorm [ 5 ], and weight nor-malization [ 6] constrain activation statistics but do not enforce energy conservation across module boundaries. The critical difference is causality: normalization sets output statistics independently of input; conservation ties output energy to input energy. 
+
+Robustness methods. Adversarial training [ 13 ], certified defenses, Lipschitz-constrained networks, and spectral normalization [ 12 ] improve robustness through various mechanisms. Conservation provides a complementary approach with a deterministic energy bound (Theorem 2.2). 
+
+Modular and compositional networks. Mixture-of-experts [ 14 ], routing networks, and neural module networks [ 15 ] address which modules to compose. Our work addresses how to prevent errors from propagating between composed modules, a problem that has limited the adoption of modular sense-plan-act architectures in robotics [1, 22, 23]. 
+
+Energy-aware training. Per-neuron energy costs and penalties have been explored for model efficiency on constrained hardware [ 25 ]. These works minimize energy for efficiency. We conserve 
+
+energy for robustness: an opposite mechanism producing an opposite effect, as demonstrated experimentally. 
+
+## 7. Conclusion 
+
+We have introduced energy conservation as a hard physical constraint for modular neural network pipelines. The mechanism adds zero learnable parameters, requires a single scaling operation per module boundary, and provides substantial, statistically significant noise attenuation. Three experimental findings establish the approach, with a fourth localizing its mechanism and a fifth validating it on a real modular pipeline: 1. Statistical robustness: +42 .3% accuracy retention at σ = 0 .2 over 5 random seeds ( p < 
+
+0.001 ). Energy penalty produces the opposite effect ( −5.8% ). These are fundamentally different mechanisms despite involving the same quantity. 2. Depth invariance: 93.3% retained at depth 2, 93.3% at depth 5, with noise at every boundary. Modular pipelines can be deepened without robustness cost. 3. Noise generalization: +40 –45% advantage on Gaussian and systematic bias noise, +4 .8% on adversarial noise, −0.3% on dropout. The dropout limitation follows from physics: conservation attenuates energy-additive noise, not information-destroying noise. 4. Mechanism localization: On ResNet-18, the conservation advantage scales inversely with the architecture’s intrinsic normalization. With BatchNorm, the gap at σ = 0 .2 is +0 .3 pp. Without BatchNorm, it widens to +26 .2 pp at σ = 0 .2 and +58 .0 pp at σ = 0 .5. Conservation Energy-Conserved Neural Pipelines 20 
+
+is the per-sample, training-free analogue of the regularization that BatchNorm provides intra-architecturally. 5. Modular pipeline validation: On a perception-to-control pipeline (MuJoCo physics, Franka Panda), reproduced across three independent machines (90 trials per cell), conservation provides a +18 .9 pp average advantage on monocular-depth-style noise and a neutral effect on isotropic Gaussian noise in 3D. The noise-type specificity is itself a finding: conservation’s advantage tracks the structure of the dominant noise mode. The consistency of the depth-drift result across machines, the principled nature of both the limitations (information-destroying noise, high-noise SNR collapse) and the noise-type specificity, and the simplicity of the mechanism suggest that energy conservation is a targeted tool for robust modular neural computation. Future work will replace the oracle perception model with a full computer-vision pipeline, port the experiment to physical hardware, and extend the validation to transformer architectures and larger datasets. 
+
+## References 
+
+[1] R. Murphy, Introduction to AI Robotics , 2nd ed. MIT Press, 2019. [2] J. J. Hopfield, “Neural networks and physical systems with emergent collective computational abilities,” Proc. National Academy of Sciences , vol. 79, no. 8, pp. 2554–2558, 1982. [3] S. Ioffe and C. Szegedy, “Batch normalization: Accelerating deep network training by reducing internal covariate shift,” in Proc. ICML , 2015. [4] J. L. Ba, J. R. Kiros, and G. E. Hinton, “Layer normalization,” arXiv preprint arXiv:1607.06450 ,2016. [5] Y. Wu and K. He, “Group normalization,” in Proc. ECCV , 2018. [6] T. Salimans and D. P. Kingma, “Weight normalization: A simple reparameterization to accelerate training of deep neural networks,” in Proc. NeurIPS , 2016. [7] K. He, X. Zhang, S. Ren, and J. Sun, “Deep residual learning for image recognition,” in Proc. CVPR , 2016. [8] A. Dosovitskiy et al., “An image is worth 16x16 words: Transformers for image recognition at scale,” in Proc. ICLR , 2021. [9] S. Greydanus, M. Dzamba, and J. Spellings, “Hamiltonian neural networks,” in Proc. NeurIPS ,2019. [10] M. Cranmer et al., “Lagrangian neural networks,” in ICLR Workshop on Integration of Deep Neural Models and Differential Equations , 2020. Energy-Conserved Neural Pipelines 21 
+
+[11] S. L. Brunton, J. L. Proctor, and J. N. Kutz, “Discovering governing equations from data by sparse identification of nonlinear dynamical systems,” Proc. National Academy of Sciences ,vol. 113, no. 15, pp. 3932–3937, 2016. [12] T. Miyato, T. Kataoka, M. Koyama, and Y. Yoshida, “Spectral normalization for generative adversarial networks,” in Proc. ICLR , 2018. [13] A. Madry, A. Makelov, L. Schmidt, D. Tsipras, and A. Vladu, “Towards deep learning models resistant to adversarial attacks,” in Proc. ICLR , 2018. [14] N. Shazeer et al., “Outrageously large neural networks: The sparsely-gated mixture-of-experts layer,” in Proc. ICLR , 2017. [15] J. Andreas, M. Rohrbach, T. Darrell, and D. Klein, “Neural module networks,” in Proc. CVPR ,2016. [16] N. Srivastava, G. Hinton, A. Krizhevsky, I. Sutskever, and R. Salakhutdinov, “Dropout: A simple way to prevent neural networks from overfitting,” JMLR , vol. 15, no. 1, pp. 1929–1958, 2014. [17] E. Todorov, T. Erez, and Y. Tassa, “MuJoCo: A physics engine for model-based control,” in 
+
+Proc. IEEE/RSJ IROS , 2012. [18] G. Jocher, A. Chaurasia, and J. Qiu, “Ultralytics YOLOv8,” 2023. [Online]. Available: https: //github.com/ultralytics/ultralytics 
+
+[19] R. Ranftl, K. Lasinger, D. Hafner, K. Schindler, and V. Koltun, “Towards robust monocular depth estimation: Mixing datasets for zero-shot cross-dataset transfer,” IEEE Trans. PAMI ,vol. 44, no. 3, pp. 1623–1637, 2022. [20] A. Krizhevsky, “Learning multiple layers of features from tiny images,” Technical Report, University of Toronto, 2009. [21] D. P. Kingma and J. Ba, “Adam: A method for stochastic optimization,” in Proc. ICLR , 2015. [22] R. A. Brooks, “A robust layered control system for a mobile robot,” IEEE Journal on Robotics and Automation , vol. 2, no. 1, pp. 14–23, 1986. [23] J. Luo et al., “Multi-task learning for robust autonomous driving perception: A comprehensive survey,” IEEE Trans. Intelligent Transportation Systems , 2024. [24] Y. LeCun, S. Chopra, R. Hadsell, M. Ranzato, and F. J. Huang, “A tutorial on energy-based learning,” in Predicting Structured Data , MIT Press, 2006. [25] R. Schwartz, J. Dodge, N. A. Smith, and O. Etzioni, “Green AI,” Communications of the ACM ,vol. 63, no. 12, pp. 54–63, 2020. Energy-Conserved Neural Pipelines 22 
+
+Figure 2: Complete experimental results across three experiments. Top left: Accuracy retained versus noise level with 95% confidence bands over 5 seeds. Conservation (green) maintains 
+
+>75% retention at σ = 0 .2 where baseline (red) and penalty (orange) fall below 35%. Top right: 
+
+Bar comparison at σ = 0 .2 with error bars. Middle left: Depth invariance under noise at every boundary: conservation forms a flat band at >90% across depths 2–5. Middle right: Conservation advantage by depth, showing consistent +14 to +43% improvement. Bottom left: Generalization across noise types. Bottom right: Advantage by error type: systematic bias +45 .1% , Gaussian 
+
++40 .4% , adversarial +4 .8% , dropout −0.3% .
