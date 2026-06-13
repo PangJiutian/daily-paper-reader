@@ -6,37 +6,38 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-06-12
-- 运行时间：2026-06-12 22:03:55 UTC
+- 最新运行日期：2026-06-13
+- 运行时间：2026-06-13 21:25:14 UTC
 - 运行状态：成功
-- 本次总论文数：5
+- 本次总论文数：6
 - 精读区：1
-- 速读区：4
+- 速读区：5
 
 ### 今日简报（AI）
-今日精读AI驱动的地下成像基准CIG-Bench（8.0分），速读生成式3D地球模型与连续动力学可解释性等4篇。  
-最值得关注的方向是**地下成像理解的综合基准评估**，其次是**生成式3D地球建模**与**扩散模型复杂度平衡**。  
-建议优先精读CIG-Bench以把握该领域评估标准，再快速浏览ABot-Earth了解最新3D地球生成进展。
-- 详情：[/202606/12/README](/202606/12/README)
+今日推荐6篇论文，精读1篇聚焦声波模拟校正算子评估，速读涵盖PDE反问题、扩散ODE稳定性及全球水凝物预测。最值得关注声波模拟校正（9.0分）及PDE约束反问题中伴随方法与PINN的对比。建议后续优先精读声波算子评估论文，并关注基于物理的校正方法在实际模拟中的适用性。
+- 详情：[/202606/13/README](/202606/13/README)
 
 ### 精读区论文标签
-1. [CIG-Bench: A Comprehensive Survey and Benchmark for AI-Driven Subsurface Imaging Understanding](/202606/12/2606.09094v1-cig-bench-a-comprehensive-survey-and-benchmark-for-ai-driven-subsurface-imaging-understanding)  
-   标签：评分：8.0/10、query:geo-phys-ai
-   evidence：人工智能驱动的地下成像综合调查与基准
+1. [Evaluating Operators for Acoustic Wave Simulation Correction](/202606/13/2606.08711v1-evaluating-operators-for-acoustic-wave-simulation-correction)  
+   标签：评分：9.0/10、query:geo-phys-ai
+   evidence：评估了包括FNO在内的12种架构用于声波模拟校正，使用地下速度场
 
 ### 速读区论文标签
-1. [ABot-Earth 0.5: Generative 3D Earth Model](/202606/12/2606.09967v1-abot-earth-05-generative-3d-earth-model)  
+1. [Adjoint Method versus Physics-Informed Neural Networks in PDE-Constrained Inverse Problems](/202606/13/2606.12337v1-adjoint-method-versus-physics-informed-neural-networks-in-pde-constrained-inverse-problems)  
    标签：评分：7.0/10、query:geo-phys-ai
-   evidence：从卫星影像生成3D地球模型，可应用于地质建模
-2. [Sparse probes and murky physics: a case study of interpretability challenges in a foundation model for continuum dynamics](/202606/12/2606.11657v1-sparse-probes-and-murky-physics-a-case-study-of-interpretability-challenges-in-a-foundation-model-for-continuum-dynamics)  
-   标签：评分：7.0/10、query:geo-phys-ai
-   evidence：连续介质动力学基础模型的可解释性研究，与稀少数据学习相关
-3. [Complexity-Balanced Diffusion Splitting](/202606/12/2606.06477v1-complexity-balanced-diffusion-splitting)  
+   evidence：物理信息神经网络将PDE约束作为归纳偏置
+2. [Mitigating the Contractivity Trap in Diffusion ODEs via Stein Stabilization](/202606/13/2606.07835v1-mitigating-the-contractivity-trap-in-diffusion-odes-via-stein-stabilization)  
    标签：评分：6.0/10、query:geo-phys-ai
-   evidence：扩散生成模型的时间容量分配方法
-4. [Constraint residuals, graph posteriors, and determinant-corrected full-space targets in Bayesian inverse problems](/202606/12/2606.09594v1-constraint-residuals-graph-posteriors-and-determinant-corrected-full-space-targets-in-bayesian-inverse-problems)  
+   evidence：扩散ODE的Stein稳定化方法改进了后验采样
+3. [Physics-Guided Dual Decoding and Spectral Supervision for Global 3D Hydrometeor Prediction](/202606/13/2606.08563v1-physics-guided-dual-decoding-and-spectral-supervision-for-global-3d-hydrometeor-prediction)  
    标签：评分：6.0/10、query:geo-phys-ai
-   evidence：带残差惩罚的贝叶斯逆问题方法论
+   evidence：物理引导的全球3D水凝物预测与频谱监督
+4. [A Theory on Flow Matching with Neural Networks](/202606/13/2606.10089v1-a-theory-on-flow-matching-with-neural-networks)  
+   标签：评分：6.0/10、query:geo-phys-ai
+   evidence：流匹配生成模型的理论基础
+5. [AI4Land: Scalable Deep Learning for Global High-Resolution Land Use Reconstruction](/202606/13/2606.11793v1-ai4land-scalable-deep-learning-for-global-high-resolution-land-use-reconstruction)  
+   标签：评分：6.0/10、query:geo-phys-ai
+   evidence：深度学习框架用于高分辨率土地利用重建，融合地球物理特征
 
 
 <div class="dpr-home-promo-card">
