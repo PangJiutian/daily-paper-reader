@@ -1,0 +1,1231 @@
+Title: Reliability of Probabilistic Emulation of Physical Systems
+
+URL Source: https://arxiv.org/pdf/2606.12997v1
+
+Published Time: Fri, 12 Jun 2026 00:42:18 GMT
+
+Number of Pages: 28
+
+Markdown Content:
+# Reliability of Probabilistic Emulation of Physical Systems 
+
+Sam F. Greenbury ∗
+
+The Alan Turing Institute 
+
+sgreenbury@turing.ac.uk 
+
+Radka Jersakova ∗
+
+The Alan Turing Institute 
+
+rjersakova@turing.ac.uk 
+
+Paolo Conti 
+
+The Alan Turing Institute Autodesk Research 
+
+Marjan Famili 
+
+The Alan Turing Institute PhysicsX 
+
+Christopher Iliffe Sprague 
+
+The Alan Turing Institute Orbital 
+
+Edwin Brown 
+
+The Alan Turing Institute University of Sheffield 
+
+Jason D. McEwen 
+
+The Alan Turing Institute University College London 
+
+jmcewen@turing.ac.uk 
+
+## Abstract 
+
+Two dominant approaches have emerged for generating probabilistic forecasts of physical systems: generative models, such as diffusion or flow matching; and ensembles of deterministic models with stochasticity injected, trained using the continuous ranked probability score (CRPS) loss. While both approaches have demonstrated strong predictive accuracy, the reliability of their uncertainties has not been systematically assessed. We address this gap by developing a framework to evaluate both approaches across diverse 2D spatiotemporal physical systems, under matched model size and computational budget. We assess the reliability of probabilistic emulation by inspecting the empirical coverage of predictive intervals, while also considering accuracy and computational efficiency metrics. CRPS-trained ensembles typically achieve more reliable uncertainties on both single-step prediction and autoregressive rollouts, demonstrating better coverage than the standard alternative of training generative models in a latent space. Moreover, the CRPS approach offers significantly faster inference. When generative models are trained in ambient rather than a compressed latent space, which is often infeasible for high-dimensional problems, they exhibit comparable coverage to CRPS-trained ensembles, though with substantially larger inference latency. In contrast, when CRPS-trained ensembles are trained in latent space they do not show a marked degradation in coverage with respect to ambient space. Both generative models and CRPS-trained ensembles demonstrate good predictive accuracy. To facilitate future research and application, we release AutoCast , a modular framework implement-ing both generative models and CRPS-trained ensembles, alongside AutoSim , a flexible dataset generation package for rapid prototyping. 
+
+## 1 Introduction 
+
+The modelling of physical systems underpins discovery across diverse domains from climate to materials science. While computational simulations are often used for modelling these systems, 
+
+> ∗Equal contribution. Preprint.
+> arXiv:2606.12997v1 [cs.LG] 11 Jun 2026
+
+their computational expense bottlenecks their practical deployment. Data-driven emulators offer a fast and accurate alternative. Current benchmarks predominantly focus on deterministic training and point-prediction accuracy (Ohana et al., 2024; Takamoto et al., 2022; Gupta and Brandstetter, 2023; Wyder et al., 2025). However, this overlooks a critical requirement for reliable uncertainty quantification (UQ) estimates in real-world deployment. Emulators must contend with both epistemic uncertainty (arising from the model’s incomplete representation of the underlying physics and limited training data) and aleatoric uncertainty (arising from inherent stochasticity in the system or noisy observations). Consequently, reliable probabilistic forecasts can be more valuable than marginal improvements in mean prediction error, especially when they inform risk assessment and planning. Two dominant probabilistic modelling approaches have emerged for physical system emulation: (i) generative models; and (ii) ensembles of deterministic models with stochasticity injected through noise, trained using continuous ranked probability score (CRPS) loss. Generative models, such as denoising diffusion (Ho et al., 2020) and flow matching (FM) (Lipman et al., 2023), have demonstrated strong performance, especially for long-term rollouts, but are computationally expensive at inference. To address this, recent work has shown that training in lower-resolution latent spaces can improve efficiency without degrading performance (Rozet et al., 2025a). Conversely, CRPS-trained ensembles offer a computationally efficient alternative, even when forecasting directly in ambient space, that has gained significant traction, particularly in weather forecasting applications (Lang et al., 2024; Alet et al., 2025; Bonev et al., 2025). Both approaches implement losses that target learning the full conditional forecast distribution, with generative models doing so implicitly by targeting a pushforward operator from noise to the target distribution, while CRPS-trained models directly optimise a proper scoring rule through the CRPS loss (Gneiting and Raftery, 2007). While both approaches have demonstrated strong predictive accuracy, the reliability of their predictive intervals has not been systematically assessed or compared. In practice, miscalibrated uncertainties can result in catastrophic failure of downstream tasks, e.g. suboptimal decision making. This motivates a focus on empirical coverage, the empirical proportion (1 − ˆα) of cases in which a (1 − α)
+
+prediction interval contains the underlying true value. Ideally, the empirical coverage (1 − ˆα) should closely approximate the nominal coverage (1 − α). However, achieving well-calibrated uncertainty in probabilistic emulators remains challenging. Recent empirical evaluations indicate that traditional probabilistic methods, such as quantile regression, can exhibit miscalibration in practice (Gopakumar et al., 2026), motivating the need for rigorous assessment of the probabilistic reliability of generative and CRPS-trained models. No work has systematically compared generative models and CRPS-trained ensembles using empirical coverage across diverse physical systems under controlled experimental conditions. Because both approaches target the full conditional forecast distribution, one might expect them to yield reliable predictive uncertainties. In practice, however, each approach relies on approximations, so empirical study is needed to determine how reliable their probabilistic forecasts are. We address this gap by assessing UQ reliability via empirical coverage across a number of 2D spatiotemporal physical systems. Our findings highlight promising future research directions to ensure reliable UQ for complex physical emulation, a necessary requirement for real-world deployment. The remainder of this article is structured as follows. Section 2 introduces AutoSim , a lightweight dataset generation package for flexible benchmarking, and the studied 2D spatiotemporal systems. Section 3 presents our methodology, describing the two probabilistic frameworks (generative mod-elling and CRPS-trained ensembles) alongside AutoCast , a modular modelling and benchmarking framework. Numerical experiments and results are outlined in Section 4, comparing probabilistic reliability, accuracy, and computational cost of the two frameworks. Concluding remarks and future research directions motivated by this work are discussed in Section 5. 
+
+## 2 Simulations 
+
+2.1 AutoSim 
+
+Existing datasets, such as The Well (Ohana et al., 2024), are essential for benchmarking but their high-resolution nature often hinders rapid experimentation under constrained compute budgets. To bridge this gap, we develop AutoSim 2, an open-source Python package for flexible dataset generation. 
+
+> 2https://github.com/alan-turing-institute/autosim
+
+2AutoSim aims to complement the existing benchmarking ecosystem. Whereas prior work focuses on releasing large, high-resolution datasets to save others the effort and cost of producing it, AutoSim 
+
+provides multiple simulators through a consistent API interface, enabling easy dataset generation at user-specified resolution, trajectory count, and parameter ranges. This enables rapid exploration and prototyping before scaling to established benchmarks such as The Well .
+
+2.2 Datasets 
+
+We focus on 2D spatiotemporal problems simulated on a regular 64 × 64 spatial grid with uniform time-step. For this paper, we selected a subset of the simulations available in AutoSim , chosen to demonstrate applicability across different dynamical regimes and levels of complexity. We give a short description of each physical system alongside a visualisation (see Figure 1). Detailed specifications of each dataset, including governing equations and numerical methods, are provided in Appendix A. i = 0 i = 12 i = 30 i = 99 
+
+AD CNS GS GPE        
+
+> i= 0 i= 12 i= 30 i= 99
+
+Figure 1: Snapshots at i = {0, 12 , 30 , 99 } of the Advection-Diffusion (AD) and Conditioned Navier Stokes (CNS) datasets (left) and the Gray-Scott (GS) and Gross-Pitaevskii Equation (GPE) datasets (right); within each dataset, columns are ordered left-to-right by increasing index i.
+
+Advection–Diffusion (AD) models the evolution of a single vorticity field under nonlinear advection and diffusion. We use it as a simple baseline: it provides a controlled single-channel transport problem that isolates the need to preserve coherent structures while tracking dissipative smoothing. 
+
+Gray–Scott (GS) is a two-species reaction–diffusion system whose behaviour varies markedly with the feed and kill rates, producing qualitatively different regimes such as spots, worms, spirals, and maze-like patterns. It tests whether models can represent qualitatively different morphologies within a single partial differential equation (PDE) family. 
+
+Conditioned Navier–Stokes (CNS) couples passive-scalar transport to an incompressible buoyancy-driven flow. We include it to represent turbulence-like classical fluid behaviour with controllable forcing and boundary-condition variants. 
+
+Gross–Pitaevskii Equation (GPE) is a nonlinear quantum-fluid model of a Bose–Einstein condensate driven by a moving laser obstacle, spanning diverse superfluid phenomena including quantum turbulence. It extends the benchmark beyond classical fluids. 
+
+## 3 Methodology 
+
+This section defines the probabilistic forecasting setup and the two modelling pipelines compared throughout the paper (see Figure 2). We first introduce the windowed single-step prediction and autoregressive rollout tasks, then describe latent space FM and ambient space CRPS-trained ensembles as alternative ways to represent forecast distributions. We then review scoring rules and coverage diagnostics used to assess probabilistic reliability before summarising the AutoCast implementation used in the experiments. 
+
+3.1 Spatiotemporal forecasting 
+
+The goal of spatiotemporal forecasting is to predict a future sequence of states xi+1: i+n given a present sequence xi−m+1: i and any additional conditioning on simulation parameters c, which we treat here as constant over the sequence. We write the input window as xin = xi−m+1: i ∈ Rm×W ×H×C and the output window as xout = xi+1: i+n ∈ Rn×W ×H×C , where m and n are, respectively, the input 3Deterministic ensemble          
+
+> ViT
+> ODE steps
+> Generative model
+> Encoder Decoder
+> ViT ViT ViT ViT ViT
+> Accuracy Coverage Training Inference Accuracy Coverage Training Inference
+
+Figure 2: Illustration of the two inference pipelines: generative model and deterministic ensemble trained with CRPS. Both processors predict an output window of n = 4 future states given an input window of m = 1 state. For illustrative purposes we show an ensemble size of M = 3 . For generative models, prediction happens in the latent rather than ambient space. Arrows indicate relative advantages and disadvantages. CRPS training is slower per epoch but it yields better coverage and faster inference than the generative model. The two approaches have comparable predictive accuracy. and output window sizes, W and H the spatial width and height, and C the number of channels. For probabilistic forecasting, we aim to learn the conditional distribution p(xout | xin , c) and train models that represent the approximation pθ (xout |xin , c), parameterised by θ, from which we can draw samples. The input window can either be the ground truth (i.e., a single-step prediction) or the model’s previous prediction (autoregressive rollout) (Bonev et al., 2025; Gupta and Brandstetter, 2023). For latent space models, an encoder eψ and decoder dφ, with parameters ψ and φ respectively, are trained to target ˆxi = dφ(eψ (xi)) , defining latent states zi = eψ (xi) and latent windows 
+
+zin = zi−m+1: i and zout = zi+1: i+n. Autoregressive rollout recursively feeds predictions back as inputs with stride n; with m = 1 , the first prediction conditions on the ground-truth initial state x0,
+
+ˆx1: n ∼ pθ (· | x0, c), ˆxi+1: i+n ∼ pθ (· | ˆxi, c) for i = n, 2n, . . . 
+
+For latent models, the initial window is encoded once, ˆz0: m−1 = eψ (x0: m−1), after which the recursion is performed entirely in latent space; predictions are decoded into ambient space with dφ.
+
+3.2 Generative models 
+
+Generative models learn to sample from the conditional forecast distribution by transforming noise from a base distribution, conditioned on the input window and simulation parameters. Diffusion (Ho et al., 2020) and flow matching (FM) (Lipman et al., 2023) are common examples. Iterative generative sampling can be computationally costly for large spatial fields, motivating generation in a learned latent space (Rombach et al., 2022; Rozet et al., 2025a). Recent work has also found latent diffusion models to improve accuracy and rollout stability of physics emulators relative to deterministic alternatives (Rozet et al., 2025a). We focus on FM because it can offer faster sampling than diffusion (Lipman et al., 2023). We apply FM in latent space: the encoder eψ is applied to each frame of xin and xout to form latent windows zin and zout , samples are generated from 
+
+pθ (zout | zin , c), and the decoder dφ is applied to each predicted latent frame to obtain ˆxout .FM defines a conditional target probability path from base noise p0 = N (0 , I) to the latent forecast distribution p1 = p(zout | zin , c). At sampling time, the learned flow map ϕθ,t converts a noise sample ϵ ∼ p0 to zt = ϕθ,t (ϵ), with model pushforward ˆpt = [ ϕθ,t ]# p0, and is represented through a velocity field vθ via the ordinary differential equation (ODE) form 
+
+dzt
+
+dt = vθ (zt, t, zin , c), z1 = ϵ +
+
+Z 10
+
+vθ (zt, t, zin , c) dt. 
+
+Following Lipman et al. (2023), for the linear interpolation path, zt = (1 − t)ϵ + tzout and 
+
+ut(zt | ϵ, zout ) = dzt/dt = zout − ϵ, the velocity field is trained with loss 
+
+LFM (θ) = Et, (zin ,c,zout ),ϵ
+
+h
+
+∥vθ (zt, t, zin , c) − ut(zt | ϵ, zout )∥2i
+
+.
+
+43.3 Deterministic ensembles with noise injection 
+
+Efficient deterministic-backbone ensembles are widely used for probabilistic weather forecasting (Lang et al., 2024; Alet et al., 2025; Bonev et al., 2025). Deterministic ensembles produce probabilistic forecasts by drawing independent noise variables η(k) ∈ Rdη with η(k) ∼ N (0 , I), where dη =
+
+nnoise _channels , and evaluating ˆx(k)out = fρ(xin , c, η(k)) for processor model fρ with parameters ρ,where ensemble members are trained jointly using a CRPS-family loss. η is typically injected into the deterministic backbone using a conditional normalisation strategy (Lang et al., 2024; Alet et al., 2025; Diaconu et al., 2026) (further implementation details are provided in Appendix B). A CRPS-family ensemble objective compares the forecast distribution with the realised outcome. For deterministic forecasts, CRPS reduces to mean absolute error; in the ensemble form below, it becomes the error term minus a pairwise member-distance term, encouraging forecasts that are both accurate and appropriately dispersed. For an ensemble { ˆx(k)out }Mk=1 and target xout , with ∥ · ∥ 1 denoting mean absolute difference over output dimensions, the loss is given by 
+
+Lλ = 1
+
+M
+
+> M
+
+X
+
+> j=1
+
+ˆx(j)out − xout 1 − λ
+
+> M
+
+X
+
+> j=1
+> M
+
+X
+
+> k=1
+
+ˆx(j)out − ˆx(k)out 1.
+
+In practice, finite-ensemble variants such as fair CRPS (fCRPS) (Alet et al., 2025) or almost fair CRPS ( αfCRPS) (Lang et al., 2024), with α = 1 recovering fCRPS, are typically used. Ensemble models trained this way are a useful alternative to generative models because each ensemble member requires a single forward pass, making inference much faster. In Lλ, λ takes the following forms for the CRPS variants: 
+
+λCRPS = 12M 2 , λfCRPS = 12M (M − 1) , λafCRPS α = M − 1 + α
+
+2M 2(M − 1) .
+
+3.4 Proper scoring rules 
+
+Scoring rules are used to evaluate the quality of probabilistic forecasts, assigning a numerical score 
+
+S(ˆ p, x) to a sample x given predictive distribution ˆp (Gneiting and Raftery, 2007). A scoring rule is proper if its expected value is minimised when the predictive distribution ˆp matches the true underlying data distribution p, i.e. 
+
+Ex∼p[S(p, x)] ≤ Ex∼p[S(ˆ p, x)] .
+
+A scoring rule is strictly proper if equality holds only for ˆp = p, i.e., only when the predictive distribution matches the true underlying data distribution. The CRPS-family losses are proper scoring rules for scalar predictive distributions. Averaged componentwise across time, space, and channels, they are proper for the marginals rather than the joint distribution. In contrast, FM implicitly optimises the predictive distribution toward the conditional data distribution by learning a flow map whose pushforward distribution [ϕθ, 1]# p0 is designed to match it. Since both CRPS-training and FM target the conditional data distribution (componentwise for CRPS, joint for FM), both approaches are theoretically expected to produce reliable learned distributions. In practice, there are approximations and sources of error introduced by each approach. For CRPS-trained models, the loss is computed from a fixed, typically small, number of ensemble members. For FM, discretisation error is introduced in the ODE solver, accumulating drift along the trajectory, and distributions are matched in the latent rather than the ambient space. Given both approaches are theoretically well-motivated, empirical studies, such as presented in this article, are necessary to assess how internal errors and approximations impact the overall reliability of probabilistic forecasts. These findings can, in turn, inform future research aimed at mitigating the limitations of current approaches. Beyond CRPS, other proper scores can target different aspects of the predictive distribution. Multi-variate scores, such as the energy score, can capture joint structure across output dimensions (Gneiting and Raftery, 2007; Pic et al., 2025). Proper scoring rules can also be constructed for cases where forecasts are summarised by intervals: the Winkler interval score, 
+
+Wα(l, u ; y) = ( u − l) + 2
+
+α (l − y)1{y < l } + 2
+
+α (y − u)1{y > u },
+
+targets both coverage and interval sharpness by penalising wide intervals and missed coverage, and so directly relates to the empirical-coverage diagnostics introduced next. 53.5 Reliability of learned distributions: coverage testing 
+
+Probabilistic emulator studies that report UQ quality metrics often use consistency metrics such as spread-skill ratio (SSR), which compares ensemble spread to prediction errors (Rozet et al., 2025a; Alet et al., 2025). Self-consistency as measured by SSR = 1 is important but not a sufficient condition for reliable forecasts (Diaconu et al., 2026; Rozet et al., 2025a). SSR is limited by the fact that it does not provide a direct measure of whether predictive intervals contain the true value across quantiles of the distribution. We focus here instead on empirical coverage, which tests whether the true output window falls inside prediction intervals at the expected rate. For an ensemble { ˆx(k)out }Mk=1 , let l(α) 
+
+> j,r
+
+and 
+
+u(α) 
+
+> j,r
+
+be the α/ 2 and 1 − α/ 2 quantiles for output component r of test case j, and let (x(j)out )r be the corresponding truth; then empirical coverage is computed by 
+
+1 − ˆα = 1
+
+N R 
+
+> N
+
+X
+
+> j=1
+> R
+
+X
+
+> r=1
+
+1
+
+n
+
+(x(j)out )r ∈ l(α) 
+
+> j,r
+
+, u (α)
+
+> j,r
+
+o
+
+.
+
+Here r indexes all output time, spatial, and channel dimensions of xout . A well calibrated model 
+
+1 − ˆα should approximate 1 − α across coverage levels. 
+
+3.6 AutoCast 
+
+As part of this work, we release AutoCast 3, a flexible Python package for spatiotemporal forecasting that supports training in both ambient and latent space through an encoder–processor–decoder architecture. Its modular design makes it easy to swap out different processors or autoencoders within the same training pipeline. The package implements state-of-the-art (SotA) generative models (diffusion, FM) alongside popular deterministic architectures (vision transformer (ViT): Dosovitskiy et al. 2021, U-Net: Ronneberger et al. 2015, Fourier neural operators: Li et al. 2021). AutoCast also enables training ensembles with CRPS loss using a variety of noise injection strategies, e.g. adaptive layer normalisation within the architecture (as presented here) or concatenating noise on the inputs. 
+
+AutoCast provides out-of-the-box support for AutoSim data, and we additionally target interoper-ability with The Well dataset (Ohana et al., 2024) given its scale, breadth, and popularity: AutoCast 
+
+provides data loaders for both AutoSim and The Well , making it easy to switch between them in the same training pipeline and go from rapid prototyping to benchmarking models at scale. Beyond these defaults, AutoCast is extendable to alternative approaches and systems through common interfaces. 
+
+## 4 Numerical experiments and results 
+
+We focus on assessing and comparing the two training pipelines; namely, generative modelling and deterministic ensembles trained with CRPS loss. We consider the reliability of probabilistic forecasts, as assessed by coverage testing, forecast accuracy and computational cost. First we describe the experimental setup, followed by the main comparison, before presenting ablation studies. 
+
+4.1 Experimental setup 
+
+All training is carried out in AutoCast . All models are trained to predict an output window of n = 4 
+
+future steps from a ground-truth input window of m = 1 , conditioned on any simulator parameters (i.e., single-step prediction). During validation and testing the models are additionally evaluated on autoregressive rollouts for 100 steps from an initial state and simulator parameters, which lets us measure how accuracy and uncertainty calibration evolve with lead time. For table summaries, we report coverage MAE as the mean absolute difference between empirical and expected coverage over the evaluated coverage levels. We consider the two pipelines outlined in Section 3.2 and Section 3.3 (Figure 2): (i) a generative pipeline in latent space, where an autoencoder is trained first and then frozen, with the FM processor trained in latent space; and (ii) an ambient space pipeline with an ensemble processor trained with the αfCRPS loss. To keep the comparison fair, we fix the processor budget: both processors use a ViT backbone, are constrained to roughly 80 M parameters and are trained under the same maximum 
+
+> 3https://github.com/alan-turing-institute/autocast
+
+6Table 1: Single-step results across datasets: predictive accuracy (VRMSE), coverage error (coverage MAE), probabilistic accuracy (CRPS), spread–skill calibration (SSR), inference latency, and epoch time. Dataset Model VRMSE 
+
+↓
+
+Coverage MAE ↓
+
+CRPS 
+
+↓
+
+SSR 
+
+→ 1
+
+Latency (ms/sample) ↓
+
+Epoch time (s) ↓
+
+AD CRPS 1.8 × 10 −4 0.04 8.8 × 10 −5 1.07 15 175 
+
+FM 2.2 × 10 −4 0.02 1.3 × 10 −4 1.31 672 24 
+
+CNS CRPS 5.6 × 10 −3 0.12 2.7 × 10 −3 1.16 15 178 
+
+FM 8.7 × 10 −3 0.28 3.9 × 10 −3 0.65 715 24 
+
+GS CRPS 1.1 × 10 −3 0.20 5.2 × 10 −4 0.67 14 213 
+
+FM 1.3 × 10 −3 0.18 5.1 × 10 −4 0.57 687 29 
+
+GPE CRPS 2.8 × 10 −2 0.04 9.7 × 10 −3 0.92 15 181 
+
+FM 3.2 × 10 −2 0.24 1.1 × 10 −2 0.44 647 24 
+
+wall-clock budget of 4 GPUs for 23 .5 hours ( 94 GPU-hours). All experiments were run on NVIDIA GH200 Grace Hopper GPUs on the Isambard-AI facility (McIntosh-Smith et al., 2024). CRPS is only strictly proper for scalar marginals, and its componentwise and finite-ensemble approximations have known limitations on multivariate spatial forecasts that have motivated both auxiliary spectral losses (Bonev et al., 2025) and finite-ensemble corrections such as αfCRPS (Lang et al., 2024), which we adopt for CRPS training. We do not add further regularisation, but observed in some runs that interval coverage degraded while validation loss kept falling, consistent with drift toward an MAE-like regime. We therefore select CRPS checkpoints using the validation Winkler score averaged across several α levels, which rewards both coverage and sharpness (Section 3.4; ablation in Appendix E.3). For FM, we report the final checkpoint from the fixed-budget training run since early stopping was not advantageous. See Appendix B for full details of the two model architectures, training pipelines and hyperparameters. 
+
+4.2 Comparison of generative and deterministic ensemble approaches 
+
+See Appendix C (Figure 5) for example rollout snapshots (mean and ensemble spread). 
+
+Overall performance. Table 1 shows that the CRPS-trained ensemble is generally stronger on single-step accuracy (variance scaled root mean squared error (VRMSE), CRPS) than the generative model pipeline, although the two methods perform comparably. Coverage MAE is comparable on AD and GS, and better for CRPS on CNS and GPE. The SSR values also consistently favour CRPS training, indicating that its predictive spread is more stable relative to its errors. The compute trade-off goes in opposite directions for training and inference. At inference time, CRPS training is substantially cheaper because each ensemble sample requires only a single forward pass (the factor difference is approximately the number of ODE steps used in FM). By contrast, the generative model FM trains faster per epoch because CRPS training must evaluate multiple ensemble members, so the observed gap is broadly consistent with the ensemble-size overhead. See Appendix D for performance on the autoregressive rollout task, showing the two training approaches remain broadly comparable in predictive accuracy, consistent with the overall metrics. 
+
+UQ reliability on single-step prediction. We first assess calibration, i.e. probabilistic reliability, by coverage testing for the single-step prediction task. For each model and dataset, we sweep nominal coverage levels (1 − α) from 0.05 to 0.95 and plot empirical coverage 1 − ˆα against the nominal coverage 1 − α. Perfectly calibrated forecasts would lie on the diagonal. Figure 3 shows strong single-step calibration on AD for both approaches, with curves close to the ideal diagonal. The difference between the methods is more visible on the harder datasets. On GPE, CRPS training remains reasonably well calibrated whereas the generative model clearly underestimates uncertainty. On CNS, both methods under-cover, but CRPS stays noticeably closer to the target calibration line. GS is difficult for both model classes, with both similarly under-covering. 70.0 0.5 1.0        
+
+> 0.0
+> 0.5
+> 1.0
+> Empirical Coverage (1  − ˆα)
+> AD
+> 0.00.51.0
+> CNS
+> 0.00.51.0
+> GS
+> 0.00.51.0
+> GPE Nominal coverage (1 -α)
+> CRPS FM
+
+Figure 3: Coverage on the single step prediction task by dataset (AD, CNS, GS, GPE) and model (CRPS, FM). Ideal coverage is denoted by a diagonal grey dotted line. The CRPS-trained ensembles perform better than, or on par with, the generative models. 0.0                    
+
+> 0.5
+> 1.0
+> [0:4)
+> AD CNS GS GPE
+> 0.0
+> 0.5
+> 1.0
+> [6:12)
+> 0.0
+> 0.5
+> 1.0
+> [13:30)
+> 01
+> 0.0
+> 0.5
+> 1.0
+> [31:99)
+> 010101
+> Nominal coverage (1 -α)Empirical Coverage (1  − ˆα)
+> a)
+> −0.5
+> 0.0
+> 0.5
+> 1 − α = 0.9
+> AD CNS GS GPE
+> −0.5
+> 0.0
+> 0.5
+> 1 − α = 0.5
+> 0100
+> −0.5
+> 0.0
+> 0.5
+> 1 − α = 0.1
+> 0100 0100 0100
+> Relative  ∆ Empirical Coverage Lead time
+> b)
+> CRPS FM
+
+Figure 4: UQ reliability over lead time by dataset (AD, CNS, GS, GPE) and model (CRPS, FM). (a) Coverage for different lead time windows (averaging across rollout windows: [0:4) , [6:12) , [13:30) ,and [31:99) ). (b) Relative ∆ empirical coverage by lead time for 1 − α = 0 .9 (top row), 1 − α = 0 .5
+
+(middle row) and 1 − α = 0 .1 (bottom row). Ideal coverage, given by zero difference, is denoted by a horizontal grey dotted line. Overall, CRPS training is more reliable than the generative model approach across lead times. 
+
+UQ reliability by lead time. We next turn to UQ reliability over 100-step autoregressive rollouts. This task repeatedly feeds predictions back into the model and measures how calibration evolves over longer horizons. We report coverage averaged within rollout windows [0:4) , [6:12) , [13:30) ,and [31:99) and also show the relative ∆ empirical coverage (1 − ˆα)/(1 − α) − 1 as a function of lead time. Figure 4 shows that calibration typically degrades with lead time for both model classes, with uncertainty increasingly underestimated as the rollout progresses. The main qualitative pattern from the single-step results persists, but the advantage of CRPS training over the generative model approach becomes more consistent across datasets when we consider long horizon forecasts. 
+
+4.3 Ablations 
+
+We highlight the main findings from our ablations here with further detail reported in Appendix E. 
+
+Ambient vs. latent space training : CRPS training in latent space does not worsen coverage, while generative training in ambient space exhibits comparable coverage to CRPS training (Ap-pendix E.1). Increasing autoencoder compression further degrades generative training performance (Appendix E.2). 8CRPS training : Using the Winkler score as a checkpoint selection criterion leads to comparable or better coverage than using the validation loss (Appendix E.3). Training with fCRPS loss leads to better coverage relative to αfCRPS loss, with both outperforming CRPS loss (Appendix E.4). 
+
+CRPS hyperparameters : Changing ensemble size from M = 8 to M = 4 or M = 16 does not affect coverage (Appendix E.5). Reducing the number of noise channels used in noise injection slightly worsens coverage at small lead times, though performance is otherwise similar (Appendix E.6). Changing how global simulation constants are injected into the model (from concatenation with the input channels to injecting through backbone modulation) results in worse coverage over lead time (Appendix E.7). 
+
+Flow matching ODE steps : Reducing the number of ODE steps speeds up FM inference with only a marginal reduction in VRMSE but it can negatively impact coverage performance (Appendix E.8). 
+
+Alternative processor architectures : While diffusion exhibits comparable coverage to FM, changing the ensemble backbone from ViT to a U-Net leads to worse coverage on our datasets (Appendix E.9). 
+
+## 5 Conclusions 
+
+CRPS-trained ensembles generally deliver more reliable uncertainty estimates than latent space generative models, with the clearest advantage appearing in autoregressive rollouts. While ambient space generative modelling is often too expensive to be practical for high-dimensional problems, we found it can recover coverage comparable to CRPS-trained ensembles without loss of accuracy. In contrast, CRPS-trained ensembles had reliable coverage when trained in both ambient or latent space. Both approaches tended to underestimate uncertainty and this typically worsened over long horizons, but the gap to ideal coverage was usually smaller for CRPS training. Conformal prediction (An-gelopoulos and Bates, 2021; Angelopoulos et al., 2026) offers a powerful, distribution-free framework to calibrate uncertainties post-hoc, using an exchangeable calibration dataset (Gopakumar et al., 2026). Nevertheless, accurate initial UQ remains essential since otherwise conformal calibration will result in large and uninformative error bars (Angelopoulos and Bates, 2021). Thus, accurate initial uncertainty estimation remains vital for producing tight, adaptive, and scientifically useful UQ. Our findings suggest interesting directions for future research. Since generative models are commonly trained in latent space, a natural research direction is to develop methods to improve the latent representation itself so that it preserves calibration as well as reconstruction accuracy. In particular, the current autoencoder is trained to reconstruct individual spatial fields, whereas a distributional objective would treat the decoder as a pushforward of the full conditional forecast distribution, 
+
+[dφ]#p(zout | zin , c) = p(xout | xin , c), and incorporate that distributional target directly into autoencoder training. We intend to explore this in future work. Our study is limited to modest resolution and to a small but diverse set of physical problems due to computational constraints (a 10,000 GH200 GPU-hour allocation). While we expect the main conclusions to persist at high resolution and across more diverse problems, additional experiments are required to probe this further. To facilitate further experimentation, we release two software packages. AutoSim provides a lightweight data-generation workflow for controlled PDE experiments, making it easy to gener-ate datasets at different resolutions and simulator parameters. AutoCast provides the corresponding modelling framework, with support for both generative and deterministic processors, ambient and latent space training, and ensemble training with CRPS-family objectives. AutoCast is also interop-erable with The Well (Ohana et al., 2024), so models prototyped on smaller controlled simulations can be carried over to larger, diverse benchmark data with the same training pipeline. 
+
+## Acknowledgements 
+
+This work was supported by the UKRI [grant number UKRI2702]. The authors acknowledge the use of resources provided by the Isambard-AI National AI Research Resource (AIRR). Isambard-AI is operated by the University of Bristol and is funded by the UK Government’s Department for Science, Innovation and Technology (DSIT) via UK Research and Innovation; and the Science and Technology Facilities Council [ST/AIRR/I-A-I/1023]. 9References 
+
+Ferran Alet, Ilan Price, Andrew El-Kadi, Dominic Masters, Stratis Markou, Tom R. Andersson, Jacklynn Stott, Remi Lam, Matthew Willson, Alvaro Sanchez-Gonzalez, and Peter Battaglia. Skillful joint probabilistic weather forecasting from marginals, 2025. URL https://arxiv.org/ abs/2506.10772 .Anastasios N Angelopoulos and Stephen Bates. A gentle introduction to conformal prediction and distribution-free uncertainty quantification. 2021. URL https://arxiv.org/abs/2107.07511 .Anastasios N. Angelopoulos, Rina Foygel Barber, and Stephen Bates. Theoretical foundations of conformal prediction, 2026. URL https://arxiv.org/abs/2411.11824 .Weizhu Bao, Qiang Du, and Yanzhi Zhang. Dynamics of rotating Bose–Einstein condensates and its efficient and accurate numerical computation. SIAM Journal on Applied Mathematics , 66(3): 758–786, January 2006. ISSN 1095-712X. doi: 10.1137/050629392. URL http://dx.doi. org/10.1137/050629392 .Boris Bonev, Thorsten Kurth, Ankur Mahesh, Mauro Bisson, Jean Kossaifi, Karthik Kashinath, Anima Anandkumar, William D. Collins, Michael S. Pritchard, and Alexander Keller. FourCastNet 3: A geometric approach to probabilistic machine-learning weather forecasting at scale, 2025. URL https://arxiv.org/abs/2507.12144 .Cristiana Diaconu, Miles Cranmer, Richard E. Turner, Tanya Marwah, and Payel Mukhopadhyay. Probabilistic retrofitting of learned simulators. In AI&PDE: ICLR 2026 Workshop on AI and Partial Differential Equations , 2026. URL https://openreview.net/forum?id=MUuOz8LtNb .Alexey Dosovitskiy, Lucas Beyer, Alexander Kolesnikov, Dirk Weissenborn, Xiaohua Zhai, Thomas Unterthiner, Mostafa Dehghani, Matthias Minderer, Georg Heigold, Sylvain Gelly, Jakob Uszkoreit, and Neil Houlsby. An image is worth 16x16 words: Transformers for image recognition at scale. In International Conference on Learning Representations , 2021. URL https://openreview. net/forum?id=YicbFdNTTy .Tilmann Gneiting and Adrian E Raftery. Strictly proper scoring rules, prediction, and esti-mation. Journal of the American Statistical Association , 102(477):359–378, 2007. doi: 10.1198/016214506000001437. URL https://doi.org/10.1198/016214506000001437 .Vignesh Gopakumar, Ander Gray, Joel Oskarsson, Lorenzo Zanisi, Daniel Giles, Matt J Kusner, Stanislas Pamela, and Marc Peter Deisenroth. Uncertainty quantification of surrogate models using conformal prediction. Machine Learning: Science and Technology , 7(1):015025, feb 2026. doi: 10.1088/2632-2153/ae2e7b. URL https://doi.org/10.1088/2632-2153/ae2e7b .Jayesh K Gupta and Johannes Brandstetter. Towards multi-spatiotemporal-scale generalized PDE modeling. Transactions on Machine Learning Research , 2023. ISSN 2835-8856. URL https: //openreview.net/forum?id=dPSTDbGtBY .Jonathan Ho, Ajay Jain, and Pieter Abbeel. Denoising diffusion probabilistic models. In H. Larochelle, M. Ranzato, R. Hadsell, M.F. Balcan, and H. Lin, editors, Advances in Neural Information Processing Systems , volume 33, pages 6840–6851. Curran Associates, Inc., 2020. URL https://proceedings.neurips.cc/paper_files/paper/2020/file/ 4c5bcfec8584af0d967f1ab10179ca4b-Paper.pdf .Woo Jin Kwon, Joon Hyun Kim, Sang Won Seo, and Y. Shin. Observation of von Kármán vortex street in an atomic superfluid gas. Physical Review Letters , 117(24), December 2016. ISSN 1079-7114. doi: 10.1103/physrevlett.117.245301. URL http://dx.doi.org/10.1103/ PhysRevLett.117.245301 .Simon Lang, Mihai Alexe, Mariana C. A. Clare, Christopher Roberts, Rilwan Adewoyin, Zied Ben Bouallègue, Matthew Chantry, Jesper Dramsch, Peter D. Dueben, Sara Hahner, Pedro Maciel, Ana Prieto-Nemesio, Cathal O’Brien, Florian Pinault, Jan Polster, Baudouin Raoult, Steffen Tietsche, and Martin Leutbecher. AIFS-CRPS: Ensemble forecasting using a model trained with a loss function based on the continuous ranked probability score, 2024. URL https: //arxiv.org/abs/2412.15832 .10 Zongyi Li, Nikola Kovachki, Kamyar Azizzadenesheli, Burigede Liu, Kaushik Bhattacharya, Andrew Stuart, and Anima Anandkumar. Fourier neural operator for parametric partial differential equations, 2021. URL https://arxiv.org/abs/2010.08895 .Yaron Lipman, Ricky T. Q. Chen, Heli Ben-Hamu, Maximilian Nickel, and Matthew Le. Flow matching for generative modeling. In The Eleventh International Conference on Learning Repre-sentations , 2023. URL https://openreview.net/forum?id=PqvMRDCJT9t .Simon McIntosh-Smith, Sadaf R Alam, and Christopher Woods. Isambard-AI: A leadership class supercomputer optimised specifically for artificial intelligence, 2024. URL https://arxiv.org/ abs/2410.11199 .Ruben Ohana, Michael McCabe, Lucas Thibaut Meyer, Rudy Morel, Fruzsina Julia Agocs, Miguel Beneitez, Marsha Berger, Blakesley Burkhart, Stuart B. Dalziel, Drummond Buschman Fielding, Daniel Fortunato, Jared A. Goldberg, Keiya Hirashima, Yan-Fei Jiang, Rich Kerswell, Surya-narayana Maddu, Jonah M. Miller, Payel Mukhopadhyay, Stefan S. Nixon, Jeff Shen, Romain Watteaux, Bruno Régaldo-Saint Blancard, François Rozet, Liam Holden Parker, Miles Cranmer, and Shirley Ho. The Well: a large-scale collection of diverse physics simulations for machine learning. In The Thirty-eight Conference on Neural Information Processing Systems Datasets and Benchmarks Track , 2024. URL https://openreview.net/forum?id=00Sx577BT3 .William Peebles and Saining Xie. Scalable diffusion models with transformers. In 2023 IEEE/CVF International Conference on Computer Vision (ICCV) , pages 4172–4182, 2023. doi: 10.1109/ ICCV51070.2023.00387. R. Pic, C. Dombry, P. Naveau, and M. Taillardat. Proper scoring rules for multivariate proba-bilistic forecasts based on aggregation and transformation. Advances in Statistical Climatology, Meteorology and Oceanography , 11(1):23–58, 2025. doi: 10.5194/ascmo-11-23-2025. URL 
+
+https://ascmo.copernicus.org/articles/11/23/2025/ .C. Raman, M. Köhl, R. Onofrio, D. S. Durfee, C. E. Kuklewicz, Z. Hadzibabic, and W. Ketterle. Evidence for a critical velocity in a Bose-Einstein condensed gas. Physical Review Letters , 83 (13):2502–2505, September 1999. ISSN 1079-7114. doi: 10.1103/physrevlett.83.2502. URL 
+
+http://dx.doi.org/10.1103/PhysRevLett.83.2502 .M. T. Reeves, T. P. Billam, B. P. Anderson, and A. S. Bradley. Identifying a superfluid Reynolds number via dynamical similarity. Physical Review Letters , 114(15), April 2015. ISSN 1079-7114. doi: 10.1103/physrevlett.114.155302. URL http://dx.doi.org/10.1103/PhysRevLett. 114.155302 .Robin Rombach, Andreas Blattmann, Dominik Lorenz, Patrick Esser, and Björn Ommer. High-resolution image synthesis with latent diffusion models. In Proceedings of the IEEE/CVF Confer-ence on Computer Vision and Pattern Recognition (CVPR) , pages 10684–10695, 2022. Olaf Ronneberger, Philipp Fischer, and Thomas Brox. U-Net: Convolutional networks for biomedical image segmentation. In Medical Image Computing and Computer-Assisted Intervention – MICCAI 2015 , pages 234–241. Springer, 2015. doi: 10.1007/978-3-319-24574-4_28. François Rozet, Ruben Ohana, Michael McCabe, Gilles Louppe, Francois Lanusse, and Shirley Ho. Lost in latent space: An empirical study of latent diffusion models for physics emulation. In 
+
+The Thirty-ninth Annual Conference on Neural Information Processing Systems , 2025a. URL 
+
+https://openreview.net/forum?id=xoNrbfbekM .François Rozet et al. Azula: Diffusion models in PyTorch. Software, 2025b. URL https://github. com/probabilists/azula . Version 0.7.0. Kazuki Sasaki, Naoya Suzuki, and Hiroki Saito. Bénard–von Kármán vortex street in a Bose-Einstein condensate. Physical Review Letters , 104(15), April 2010. ISSN 1079-7114. doi: 10.1103/ physrevlett.104.150404. URL http://dx.doi.org/10.1103/PhysRevLett.104.150404 .Makoto Takamoto, Timothy Praditia, Raphael Leiteritz, Dan MacKinlay, Francesco Alesiani, Dirk Pflüger, and Mathias Niepert. PDEBench: An extensive benchmark for scientific machine learning. In Thirty-sixth Conference on Neural Information Processing Systems Datasets and Benchmarks Track , 2022. URL https://openreview.net/forum?id=dh_MkX0QfrK .11 Philippe Martin Wyder, Judah A Goldfeder, Alexey Yermakov, Yue Zhao, Stefano Riva, Jan P. Williams, David Zoro, Amy Sara Rude, Matteo Tomasetto, Joe Germany, Joseph Bakarji, Georg Maierhofer, Miles Cranmer, and J. Nathan Kutz. Common task framework for a criti-cal evaluation of scientific machine learning algorithms. In The Thirty-ninth Annual Confer-ence on Neural Information Processing Systems Datasets and Benchmarks Track , 2025. URL 
+
+https://openreview.net/forum?id=pkFKjmUE3L .
+
+## A Simulation details 
+
+All datasets were generated using the AutoSim package. Each uses a 64 × 64 spatial resolution with 200 training trajectories per dataset, except Gray-Scott which has 240 training trajectories to capture all six pattern types equally, and 20 validation and 20 test trajectories (24 of each for Gray-Scott). Every trajectory has length 321 (initial state plus 320 time-steps) and is generated by randomly sampling simulation parameters from pre-defined ranges. 
+
+A.1 Advection–Diffusion 
+
+We consider an advection–diffusion problem describing a fluid motion in the shallow water limit given by 
+
+∂ω ∂t + μ
+
+ ∂ψ ∂x ∂ω ∂y − ∂ψ ∂y ∂ω ∂x 
+
+
+
+= d∇2ω, (1a) 
+
+∇2ψ = ω, (1b) defined over a spatial domain (x, y ) ∈ [−L/ 2, L/ 2] 2 and a time span t ∈ [0 , T ], where L = 10 
+
+and T = 80 . Here ω(x, y, t ) and ψ(x, y, t ) represent the vorticity and stream function, respectively, 
+
+∇2 = ∂2 
+
+> x
+
++ ∂2 
+
+> y
+
+is the two-dimensional Laplacian. The parameter d is the diffusion (viscosity-like) coefficient governing the dissipative smoothing of vorticity, while μ is a dimensionless coefficient that scales the nonlinear self-advection. We assume periodic boundary conditions and a stretched Gaussian function as the initial condition of vorticity: 
+
+ω(x, y, 0) = exp 
+
+
+
+−x2 − y2
+
+20 
+
+
+
+, (x, y ) ∈ [−L/ 2, L/ 2] 2 . (2) We are interested in approximating the time-dependent vorticity field ω as the parameters (d, μ ) vary over the ranges in Table 2. The vorticity equation is integrated with a finite-difference discretisation of the Laplacian and advection terms, while the Poisson equation (1b) for the stream function is solved spectrally via fast Fourier transform (FFT); time stepping is performed with an adaptive RK45 solver and a snapshot stride ∆t = 0 .25 .Table 2: Parameter ranges used to sample AD trajectories. Each parameter is drawn independently from a uniform distribution over the given interval. Parameter Symbol Range Diffusion coefficient d [10 −4, 10 −2]
+
+Advection strength μ [0 .5, 2.0] 
+
+A.2 Conditioned Navier–Stokes 
+
+We consider an incompressible, buoyancy-driven “smoke-flow” system in two dimensions, in which a passive scalar s(r, t ) is advected by a velocity field u(r, t ) = ( u, v ) and exerts a vertical buoyancy force whose strength is controlled by a conditioning parameter β. The governing equations are 
+
+∂s ∂t + u · ∇ s = κ ∇2s, (3a) 
+
+∂u
+
+∂t + ( u · ∇ )u = −∇ p + ν ∇2u +  0, β s , (3b) 
+
+∇ · u = 0 , (3c) 12 where ν is the kinematic viscosity, κ the smoke diffusivity, and p the pressure. The buoyancy coefficient β (named buoyancy_y in the simulator) is the conditioning variable: each trajectory is generated at a fixed β drawn from the range below, mirroring the conditioned external-force setup of PDEArena (Gupta and Brandstetter, 2023), in which the velocity field is driven by a body force 
+
+(0 , f )⊤ with f varied across trajectories. The initial smoke field is a smoothed Gaussian random field constructed in Fourier space following the phiflow Noise class used by PDEArena: independent complex Gaussian coefficients are scaled by |k|−2σ with a low-frequency cut-off (where σ is the smoothness exponent), transformed back to real space, standardised, and finally rectified ( s0 7 → | s0|) so that the initial scalar is non-negative. The velocity is initialised to zero and is spun up purely by the buoyancy forcing acting on the smoke field. The simulation is performed on a uniform 64 × 64 grid over [0 , L ]2 with L = 32 (so ∆x = 0 .5), using zero-gradient (Neumann) boundary conditions for the smoke and no-slip walls for the velocity, in a bounded-domain setup inspired by PDEArena (which uses 128 × 128 at the same L). Time integration uses an operator-splitting scheme: (i) semi-Lagrangian advection of s, u, and v via bilinear back-tracing along the local velocity, (ii) an explicit diffusion update for smoke and viscosity, with a vertical buoyancy term β s added to the v-equation, and (iii) a spectral Hodge projection onto the divergence-free subspace, which simultaneously yields the pressure p; in the bounded mode the projected velocity has its mean drift removed and is then explicitly zeroed at the four boundary rows/columns to enforce no-slip. The step size is adaptively limited by an advective CFL condition with CFL = 0 .35 and the explicit-diffusion stability bound. We record roughly one snapshot per integration step over a total horizon T ≈ 85 .87 , yielding nt = 321 frames after discarding the first skip nt = 8 so that buoyancy-driven structure has emerged before the rollout horizon. This corresponds to PDEArena’s 84 -time-unit window [18 , 102] but at ∼ 6× the temporal resolution (PDEArena uses ∆t = 1 .5, 56 frames). The kinematic viscosity is fixed at ν = 0 .01 and the smoke diffusivity at κ = 0 , isolating the influence of β and the random initial condition on the resulting flow. Simulator output channels are (s, u, v ).Each trajectory is parameterised by an independent uniform draw from the ranges in Table 3, where 
+
+σ (smoothness ) controls the spectral decay of the initial smoke field and η (noise_scale ) sets its spectral scale. Table 3: Parameter values and ranges used to sample CNS trajectories. Ranges are sampled indepen-dently from a uniform distribution; fixed values are shown as scalars. Parameter Symbol Value/range Buoyancy coefficient β [0 .2, 0.8] 
+
+Initial-field smoothness σ 6.0
+
+Initial-field noise scale η [8 .0, 18 .0] 
+
+A.3 Gray–Scott 
+
+The Gray–Scott equations are a set of coupled reaction–diffusion equations describing two chemical species, u and v, whose scalar concentrations vary in space and time: 
+
+∂u ∂t = Du∇2u − uv 2 + F (1 − u), (4a) 
+
+∂v ∂t = Dv ∇2v + uv 2 − (F + k)v. (4b) The parameter F controls the rate at which species u is added to the system and k controls the rate at which species v is removed (referred to as the “feed” and “kill” rates). Qualitatively different patterns emerge in the solutions depending on the two parameters F and k (see Table 4 for the F and k values used in our simulations for each of the six pattern types, these are the same as those used in The Well , Ohana et al., 2024). The two constants Du and Dv govern the rate of diffusion of each species. All simulations used diffusion coefficients Du = 2 × 10 −5 and Dv = 1 × 10 −5.13 Table 4: Feed and kill parameters used to simulate each pattern type. 
+
+F k
+
+Gliders 0.014 0.054 Bubbles 0.098 0.057 Maze 0.029 0.057 Worms 0.058 0.065 Spirals 0.018 0.051 Spots 0.030 0.062 The simulation domain is the square [−L/ 2, L/ 2] 2 with L = 1 , discretised on a uniform 64 × 64 grid with periodic boundary conditions. The initial condition uses independent sums of randomly placed and weighted Gaussian bumps for the two species (with periodic image copies for consistency with the boundary), each normalised to [0 , 1] , with u0 = 1 − bumps u and v0 = bumps v . The system is integrated with a pseudospectral exponential time-differencing Runge–Kutta scheme of order four (ETDRK4), using FFTs for the linear diffusion operator and 2/3-rule dealiasing for the nonlinear terms. We used a simulation time step ∆t = 1 .0 over a horizon T = 1280 and recorded a snapshot every 4 steps, yielding 321 frames per trajectory. Trajectories are stratified equally across the six pattern types (40 train, 4 validation, and 4 test trajectories per pattern). Some patterns occasionally produce trajectories in which a channel becomes spatially uniform at one or more frames, which destabilises normalization-based metrics during training; we therefore reject any trajectory whose per-timestep spatial standard deviation falls below 10 −2 in either channel at any frame and resample with a fresh initial condition until this criterion is met. 
+
+A.4 Gross–Pitaevskii Equation 
+
+The GPE is the mean-field equation for a dilute-gas Bose–Einstein condensate (BEC), describing the dynamics of the macroscopic complex wavefunction ψ(r, t ) of ultracold bosons in an external potential. We consider the two-dimensional GPE with a moving obstacle, 
+
+i ∂ψ ∂t =
+
+
+
+− 12 ∇2 + Vbox (r) + Vobs (r, t ) + g |ψ|2
+
+
+
+ψ, (5) in dimensionless harmonic-oscillator units, where g controls the strength of the contact (mean-field) interaction. The condensate is confined in a flat-bottomed Woods–Saxon box trap, 
+
+Vbox (r) = V0
+
+1 + exp   − (|r| − Rw)/a  , (6) with wall height V0 = 200 , wall steepness a = 0 .15 , and effective radius Rw = (box _param) −1/4 ≈
+
+4.73 (corresponding to box _param = 0 .002 ). A focused laser beam, modelled as a Gaussian repulsive obstacle, sweeps sinusoidally back and forth along the y-axis, 
+
+Vobs (r, t ) = U exp 
+
+
+
+− x2 + ( y − R sin( ωt )) 2
+
+w2
+
+
+
+, (7) with peak speed vmax = R ω . Above a critical obstacle velocity vc the superfluid response transitions from dissipationless laminar flow (Raman et al., 1999) to periodic vortex–antivortex pair shedding (a quantum von Kármán street; Sasaki et al., 2010; Kwon et al., 2016) and on to increasingly disordered wakes that follow a superfluid-Reynolds-number scaling (Reeves et al., 2015). The parameter ranges below are chosen so that vmax straddles vc. Because the obstacle motion is sinusoidal, a single sweep can pass through slower and faster phases of the forcing. The simulation is performed on a uniform 64 × 64 periodic Fourier grid over the spatial domain 
+
+[−L/ 2, L/ 2] 2 with L = 10 , with physical confinement provided by the Woods–Saxon box potential. We use a Strang split-step Fourier scheme (Bao et al., 2006) that alternates combined potential and nonlinear half-steps in real space with a kinetic full-step in Fourier space with 2/3-rule dealiasing. Each trajectory consists of two phases: (i) imaginary-time relaxation for 4000 steps at ∆timag =0.0025 from a broad Gaussian seed centred at the origin, which produces a clean vortex-free ground state inside the box; followed by (ii) real-time evolution for T = 17 .55 time units at ∆t = 0 .005 ,14 with snapshots recorded every ∆tsnap = 0 .05 and the first 30 frames discarded so that the obstacle is well into its first sweep. Simulator output channels are the ℜ(ψ), and ℑ(ψ) fields enabling both density and phase to be captured by the emulator indirectly. ℜ(ψ) and ℑ(ψ) are jointly normalised so that phase is unaffected. Each trajectory is parameterised by an independent uniform draw from the ranges in Table 5, chosen so that the resulting trajectories span a range of dynamical complexity, from largely laminar response with linear density excitations, through periodic vortex–antivortex pair shedding, to disordered wakes populated by many vortex cores. Table 5: Parameter ranges used to sample GPE trajectories. Each parameter is drawn independently from a uniform distribution over the given interval. Parameter Symbol Range Interaction strength g [80 , 200] 
+
+Obstacle strength U [3 , 8] 
+
+Obstacle angular frequency ω [0 .5, 2.0] 
+
+Obstacle Gaussian 1/e radius w [0 .8, 2.5] 
+
+Obstacle sweep amplitude R [2 .0, 3.0] 
+
+Initial Gaussian width w0 [1 .5, 2.0] 
+
+## B Model architectures and hyperparameters 
+
+In this section we provide further detail on training and model architectures. 
+
+Training 
+
+We keep the CRPS and FM training as aligned as possible. The nominal batch size is fixed at 1024 .For CRPS training, the input batch is replicated across ensemble members, so the effective number of distinct training examples scales as 1024 /M for ensemble size M ; for example, with M = 4 ,the effective batch size is 256 . We use a cosine learning-rate schedule decaying to zero over the precomputed number of epochs allowed by the time budget, with learning rate 2 × 10 −4 for CRPS training and 10 −4 for FM. 
+
+Autoencoder 
+
+For latent space experiments, we follow the deep compression autoencoder design used in Rozet et al. (2025a). Each dataset has its own 49 M parameter autoencoder trained for 512 epochs with learning rate 10 −5, a cosine schedule, and a variance-scaled mean-squared reconstruction loss. The encoder has three resolution levels with three residual blocks per level, 3 × 3 convolutions, layer normalisation, and dropout 0.05 . Hidden widths follow the standard convention of doubling at each downsample, giving [128 , 256 , 512] channels at successive levels, which keeps per-level compute balanced and provides more channel capacity at coarser spatial scales. Stride-2 pixel-shuffle downsampling is applied between consecutive levels, so the two downsamples (between levels 1–2 and 2–3) reduce the spatial resolution by a factor of 4 and take the input from 64 × 64 at level 1 to 16 × 16 at level 3. The decoder mirrors this with widths [512 , 256 , 128] and pixel-shuffle upsampling; the latent bottleneck is softly clipped with scale 5 to avoid unbounded latent amplitudes. Overall the encoder compresses states from 64 × 64 × Cin to 16 × 16 × Clatent with Clatent = 8 . This corresponds to a relatively mild compression rate compared with some recent latent-emulation settings, but is appropriate for our 64 × 64 resolution regime and allows us to isolate the effect of latent space forecasting without introducing an aggressively lossy bottleneck. 
+
+Processors 
+
+Our main comparison is between two model classes with matched ViT backbones. The first is a stochastic generative model trained in latent space with a FM objective (Lipman et al., 2023). The second is a deterministic backbone trained probabilistically using noise injection and αfCRPS loss (Lang et al., 2024) in ambient space. By default, the CRPS model uses M = 8 ensemble members, with additional ensemble sizes considered in the ablations. For the CRPS ensemble, stochasticity is introduced through conditional layer-normalisation with AdaLN-Zero-style modulation. Because the injected noise channels add parameters, we reduce the hidden width of the CRPS processor slightly so 15 Table 6: Processor architectures used in the main comparison and architecture ablations. The first two columns are the main comparison; the remaining four columns are the architecture ablations. The right-most column is the only CRPS variant that uses a U-Net backbone instead of a ViT. Dashes mark settings that do not apply. Parameter counts are for the processor and exclude the autoencoder; reported values are for CNS ( C = 3 ) and vary by less than 0.3M across the C ∈ { 1, 2, 3} datasets, since state-channel count only enters the patch embedding and output head. Latent processors operate on the autoencoder latent ( Clatent = 8 ) and are identical across datasets.                                                                               
+
+> Main Ablations FM CRPS FM CRPS Diffusion CRPS (latent) (ambient) (ambient) (latent) (latent) (ambient) Backbone ViT ViT ViT ViT ViT U-Net Width / channels 704 568 704 568 704 62, 124, 248, 496 Blocks 12 12 12 12 12 3, 3, 3, 3 Heads 88888—Patch size 14411—MLP expansion 444441
+> Noise channels —1024 —1024 —1024
+> Ensemble M—8—8—8
+> Sampler / steps Euler / 50 —Euler / 50 —Euler / 50 —Loss FM αfCRPS FM αfCRPS Karras DM αfCRPS Parameters 80 .0M80 .9M80 .2M81 .8M80 .0M81 .3M
+
+that its size remains comparable to the flow-matching processor. FM sampling uses Euler integration; the step count is ablated in Appendix E.8. Table 6 summarises the processor architectures used in the main comparison and architecture ablations. The ViT processors share the same backbone hyperparameters ( 12 transformer blocks, 8 attention heads) and operate on a 16 × 16 token grid in both spaces, using patch size 4 on 64 × 64 ambient states and patch size 1 on 16 × 16 autoencoder latents. The autoencoder compression ablation (Appendix E.2) is the one exception, where an 8 × 8 × 8 latent yields an 8 × 8 token grid; all other rows of Table 6 use the 16 × 16 grid. In both the FM/diffusion and CRPS pipelines, the single input frame and four output frames are folded into the channel dimension at the processor boundary, so the backbone always runs with a single time token; temporal mixing is therefore mediated entirely through the channel axis. The FM and diffusion ViTs use width 704 ; the CRPS-trained ViT uses width 568 to keep the parameter count near 80 M after adding the 1024 -dimensional noise modulation path. Reported counts are processor-only and exclude the autoencoder. 
+
+Simulation constants and conditioning 
+
+For each trajectory, the simulator parameters c ∈ RCc are sampled once and held fixed for the entire rollout, including under autoregressive prediction. The state is normalised, and (for latent processors) passed through the autoencoder; c is not encoded and is used only for conditioning. We inject c into the processor in one of two ways. 
+
+Channel concatenation (used in the main ambient CRPS baseline). Each scalar in c is broadcast across the W × H grid and concatenated to the current state xi along the channel axis, giving the processor input 
+
+˜x = xi ∥ c ∈ RW ×H×(C+Cc), (8) where ∥ denotes concatenation along the channel axis (the spatial broadcast of c is implicit in the shape). Backbone modulation by c is then disabled so that c is not injected twice. 
+
+Backbone modulation (used in latent FM, latent CRPS, and diffusion). The vector c is embedded by a small MLP and added to the timestep/noise modulation vector that drives the per-block modulation in the backbone (see equations below). The state itself is not channel-augmented with c.The global-conditioning ablation in Appendix E.7 is the only run where the ambient CRPS model is switched from channel concatenation to backbone modulation, with all other settings of Table 6 unchanged. 
+
+Backbone modulation 
+
+16 We use the ViT and U-Net backbones implemented in Azula (Rozet et al., 2025b). They both use a single shared adaptive layer normalisation per block. Letting F denote the block branch (self-attention followed by an MLP in the ViT; optional spatial attention followed by a convolutional feed-forward block in the U-Net), the per-block computation mapping input h to output h+ is 
+
+˜h = (1 + a(η)) ⊙ LN( h) + b(η),
+
+h+ =  h + g(η) ⊙ F (˜h)  1 + g(η)2−1/2,
+
+[a, b, g ] = A(η),
+
+with LN a non-affine layer normalisation, A a two-layer MLP (Linear–SiLU–Linear) whose final-layer weights are multiplied by 10 −2 at initialisation, and (a, b, g ) shared across the attention and MLP sub-layers within a block (rather than the two-modulation variant of the canonical adaLN-Zero (Peebles and Xie, 2023)). The variance-preserving factor (1 + g(η)2)−1/2 keeps the residual norm bounded as g grows during training. 
+
+## C Example rollouts Ground Truth  i = 0 i = 4 i = 12 i = 30 i = 99 
+
+> Prediction Difference Std Dev
+> 0.0
+> 0.5
+> 0.0
+> 0.5
+> 0.002
+> 0.000
+> 0.002
+> 0.001
+> 0.002
+> Rollout snapshots - vorticity (channel 0)
+
+(a) Advection–Diffusion Ground Truth  i = 0 i = 4 i = 12 i = 30 i = 99  
+
+> Prediction Difference Std Dev
+> 0.0
+> 0.5
+> 1.0
+> 1.5
+> 0.0
+> 0.5
+> 1.0
+> 1.5
+> 0.2
+> 0.0
+> 0.2
+> 0.05
+> 0.10
+> Rollout snapshots - smoke (channel 0)
+
+(b) CNS Ground Truth  i = 0 i = 4 i = 12 i = 30 i = 99 
+
+> Prediction Difference Std Dev
+> 0.25
+> 0.50
+> 0.75
+> 0.25
+> 0.50
+> 0.75
+> 0.05
+> 0.00
+> 0.05
+> 0.005
+> 0.010
+> 0.015
+> Rollout snapshots - u (channel 0)
+
+(c) Gray–Scott Ground Truth           
+
+> i= 0 i= 4 i= 12 i= 30 i= 99
+> Prediction Difference Std Dev
+> 0.2
+> 0.0
+> 0.2
+> 0.2
+> 0.0
+> 0.2
+> 0.05
+> 0.00
+> 0.05
+> 0.05
+> 0.10
+> Rollout snapshots - real (channel 0)
+
+(d) GPE 
+
+Figure 5: Example rollout snapshots (channel 0) for one test case per dataset. Top to bottom row: the ground-truth trajectory, ensemble mean, difference between ground truth and ensemble mean, and ensemble standard deviation. 17 10 −3              
+
+> 10 −1
+> VRMSE
+> AD CNS GS GPE
+> 10 −4
+> 10 −2
+> CRPS
+> 0.5
+> 1.0
+> 1.5
+> SSR
+> 10 −2
+> 10 −1
+> 10 0
+> Energy
+> 10 −2
+> 10 −1
+> 10 0
+> PSRMSE-H
+> 10 −2
+> 10 −1
+> 10 0
+> PSRMSE-M
+> 050 100
+> 10 −2
+> PSRMSE-L
+> 050 100 050 100 050 100
+> Lead time
+> CRPS FM
+
+Figure 6: Top to bottom: VRMSE, CRPS, SSR, Energy score, power spectrum RMSE (high), power spectrum RMSE (medium), power spectrum RMSE (low) over lead time by dataset (AD, CNS, GS, GPE) and model (CRPS, FM). The two approaches have comparable accuracy across metrics while the CRPS training approach tends to have better SSR except on the AD dataset. 
+
+## D Other rollout metrics 
+
+Figure 6 shows a number of accuracy and calibration metrics measuring performance over 100-step autoregressive rollouts. We report the same metrics as those used for single-step performance evaluation in the main text (SSR, CRPS and VRMSE) as well as the Energy score (a multivariate generalisation of the CRPS) and power spectrum RMSE (PSRMSE) at different spatial frequencies (following Rozet et al., 2025a). The results indicate that the two training approaches remain broadly comparable in predictive accuracy across a range of metrics. As expected, error increases with lead time for both methods. AD is the clearest separation in favour of CRPS, where both models remain accurate but the CRPS rollout error is about an order of magnitude lower. On CNS and GS, CRPS also retains a modest accuracy advantage at larger lead times. The CRPS training approach also tends to have better SSR over long lead times, except on the AD dataset. 18 0.0                      
+
+> 0.5
+> 1.0
+> [0:4)
+> AD CNS GS GPE
+> 0.0
+> 0.5
+> 1.0
+> [6:12)
+> 0.0
+> 0.5
+> 1.0
+> [13:30)
+> 01
+> 0.0
+> 0.5
+> 1.0
+> [31:99)
+> 010101
+> Empirical Coverage (1  − ˆα)Nominal coverage (1 -α)
+> a)
+> −0.5
+> 0.0
+> 0.5
+> 1 − α = 0.9
+> AD CNS GS GPE
+> −0.5
+> 0.0
+> 0.5
+> 1 − α = 0.5
+> −0.5
+> 0.0
+> 0.5
+> 1 − α = 0.1
+> 0100
+> 10 −5
+> 10 −3
+> 10 −1
+> VRMSE
+> 0100 0100 0100
+> Relative  ∆ Empirical Coverage Lead time
+> b) c)
+> CRPS (ambient) CRPS (latent) FM (ambient) FM (latent)
+
+Figure 7: Latent vs. ambient training: FM (ambient vs. latent) and CRPS training (ambient vs. latent), 
+
+M = 8 , across datasets (AD, CNS, GS, GPE). (a) Empirical vs. nominal coverage averaged over rollout windows. (b) Relative ∆ empirical coverage by lead time over 100 -step rollouts. (c) VRMSE by lead time. The latent FM model has consistently worse coverage while all the other approaches perform comparably. No result is reported for CRPS model trained in latent space on the GPE dataset because the ensemble collapsed. 
+
+## E Ablations 
+
+Unless noted otherwise, each ablation below varies a single setting (named by its subsection title) from the corresponding column of Table 6; all other architectural choices, training schedule, and evaluation protocol follow the main runs (Section 4.1). 
+
+E.1 Latent vs. ambient space training 
+
+We consider FM training in ambient space and CRPS training in latent space, providing counterparts to the results in the main comparison. Applying FM directly in ambient space follows by substituting 
+
+xin , xout , and xt for zin , zout , and zt as outlined in Section 3.2, without the need for encoding and decoding. Applying CRPS in latent space uses the same latent representation as FM, with the CRPS loss calculated directly on the latent space predictions pθ (zout |zin , c).Figure 7 shows that moving FM from latent space back to ambient space substantially improves its coverage and makes it broadly comparable to CRPS training. The corresponding shift for CRPS is much smaller: training CRPS in latent space causes only a limited degradation in coverage, although it does reduce VRMSE for CNS and GS. For GPE, the latent space CRPS run collapsed entirely, so in that case latent training is not a viable substitute for the ambient space model. All variants perform well on AD, although the CRPS-trained models are still more stable at large lead times. 
+
+E.2 Increased autoencoder compression 
+
+The compression rate of the autoencoder reported in the main results is between 2x and 6x due to the original resolution being 64 × 64 (the rate varies due to the variation in the number of channels per dataset). While this compression rate is fairly small, it already had a detrimental effect on 19 0.0            
+
+> 0.5
+> 1.0
+> [0:4)
+> CNS
+> 0.0
+> 0.5
+> 1.0
+> [6:12)
+> 0.0
+> 0.5
+> 1.0
+> [13:30)
+> 0.00.20.40.60.81.0
+> 0.0
+> 0.5
+> 1.0
+> [31:99)
+> Empirical Coverage (1  − ˆα)Nominal coverage (1 -α)
+> a)
+> −0.5
+> 0.0
+> 0.5
+> 1 − α = 0.9
+> CNS
+> −0.5
+> 0.0
+> 0.5
+> 1 − α = 0.5
+> −0.5
+> 0.0
+> 0.5
+> 1 − α = 0.1
+> 020 40 60 80 100
+> 10 −5
+> 10 −3
+> 10 −1
+> VRMSE
+> Relative  ∆ Empirical Coverage Lead time
+> b) c)
+> FM (6x) FM (24x)
+
+Figure 8: FM performance on CNS at increased autoencoder compression ( 8 × 8 × 8 latent, 24x compression) vs. the 6x compression used in the main results. (a) Empirical vs. nominal coverage averaged over rollout windows. (b) Relative ∆ empirical coverage by lead time over 100 -step rollouts. (c) VRMSE by lead time. Increasing the autoencoder compression rate further degrades FM coverage and accuracy performance. performance (coverage for FM and accuracy for CRPS trained models). In this ablation, we trained an autoencoder for a latent space at lower resolution of 8 × 8 × 8 for CNS, increasing compression to 24x, while keeping the number of parameters roughly constant at 50 M. Figure 8 shows the effect on FM where coverage and accuracy degrade further at 24x compression, confirming that the latent space size is a limiting factor for performance in latent space models. 
+
+E.3 Winkler-based monitoring 
+
+As discussed in Section 4.1, during CRPS training we used the validation Winkler score to select the best model checkpoint. Figure 9 compares this against choosing a checkpoint based on the best validation loss. In most cases, the two checkpoints selection strategies have comparable coverage but the Winkler score checkpoint performs better on the GPE dataset. 
+
+E.4 CRPS loss variant 
+
+We compared the αfCRPS loss, used in our main results, against the standard CRPS loss and the fCRPS variant on the CNS dataset. Figure 10 shows that fCRPS maintained better coverage than 
+
+αfCRPS but both maintained their coverage for longer than the CRPS trained model. 
+
+E.5 Ensemble size 
+
+We compared the effect of ensemble size on coverage by comparing M ∈ { 4, 8, 16 } on all datasets. As shown in Figure 11, while there is some slight variability, we did not observe a consistent effect of ensemble size on coverage across datasets. 20 0.0                    
+
+> 0.5
+> 1.0
+> [0:4)
+> AD CNS GS GPE
+> 0.0
+> 0.5
+> 1.0
+> [6:12)
+> 0.0
+> 0.5
+> 1.0
+> [13:30)
+> 01
+> 0.0
+> 0.5
+> 1.0
+> [31:99)
+> 010101
+> Empirical Coverage (1  − ˆα)Nominal coverage (1 -α)
+> a)
+> −0.5
+> 0.0
+> 0.5
+> 1 − α = 0.9
+> AD CNS GS GPE
+> −0.5
+> 0.0
+> 0.5
+> 1 − α = 0.5
+> −0.5
+> 0.0
+> 0.5
+> 1 − α = 0.1
+> 0100
+> 10 −5
+> 10 −3
+> 10 −1
+> VRMSE
+> 0100 0100 0100
+> Relative  ∆ Empirical Coverage Lead time
+> b) c)
+> CRPS (best val loss) CRPS (multiwinkler)
+
+Figure 9: Checkpoint selection driven by Winkler score (default) compared with best validation loss (M = 8 ) across datasets (AD, CNS, GS, GPE). (a) Empirical vs. nominal coverage averaged over rollout windows. (b) Relative ∆ empirical coverage by lead time over 100 -step rollouts. (c) VRMSE by lead time. The two checkpoint selection strategies have comparable coverage in most cases, but the Winkler score-driven strategy performs better on the GPE dataset. 
+
+E.6 Noise channels 
+
+To create an ensemble for CRPS training, we have to specify the number of noise channels used in the noise injection mechanism. As this increases the parameters in the model, we reduced the hidden dimension of the ViT backbone to maintain the same model size as used in FM. In this ablation we evaluate the trade-offs between noise channel size and hidden dimension size by reducing the noise channels to 256 instead of the original 1024 and increasing the hidden dimension (from 568 to 704) to maintain the same model size. Figure 12 shows that the model accuracy did not suffer from the reduced hidden dimension in the backbone, which is not surprising given the difference is fairly mild. Additionally, there might be a slight benefit from having larger noise channel size in terms of coverage. 
+
+E.7 Alternative global conditioning strategies 
+
+For the CRPS-trained ViT ensemble on CNS ( M = 8 ), we ablate how global simulator parameters are injected into the model. We compare (i) channel concatenation , where a broadcast embedding of the conditioning variables is concatenated to the input channels, against (ii) backbone modulation ,where conditioning drives feature-wise modulation within the network (analogous to the conditioning mechanism used in our FM backbone). Figure 13 shows that our strategy of channel concatenation outperforms backbone modulation in terms of coverage performance. 
+
+E.8 Flow matching ODE steps 
+
+FM sampling integrates a learned velocity field along a chosen number of ODE steps; more steps trade compute for sample quality. We swept the number of integration steps to explore performance 21 0.0              
+
+> 0.5
+> 1.0
+> [0:4)
+> CNS
+> 0.0
+> 0.5
+> 1.0
+> [6:12)
+> 0.0
+> 0.5
+> 1.0
+> [13:30)
+> 0.0 0.2 0.4 0.6 0.8 1.0
+> 0.0
+> 0.5
+> 1.0
+> [31:99)
+> Empirical Coverage ( 1 −̂  α)
+> Nominal coverage (1 -α)
+> a)
+> −0.5
+> 0.0
+> 0.5
+> 1 −  α = 0.9
+> CNS
+> −0.5
+> 0.0
+> 0.5
+> 1 −  α = 0.5
+> −0.5
+> 0.0
+> 0.5
+> 1 −  α = 0.1
+> 020 40 60 80 100
+> 10 −5
+> 10 −3
+> 10 −1
+> VRMSE
+> Relative  Δ Empirical Coverage
+> Lead time
+> b)
+> c)
+> CRPS ( αfCRPS loss) CRPS (CRPS loss) CRPS (fCRPS loss)
+
+Figure 10: CRPS vs. fCRPS vs. αfCRPS loss variants for the noise-injected ensemble ( M = 8 ) on the CNS dataset. (a) Empirical vs. nominal coverage averaged over rollout windows. (b) Relative 
+
+∆ empirical coverage by lead time over 100 -step rollouts. (c) VRMSE by lead time. The fCRPS variant maintains better coverage than αfCRPS, but both maintain their coverage for longer than the CRPS-trained model. sensitivity to this choice. Figure 14 shows that coverage typically improves with increased ODE steps, while VRMSE remains similar. 
+
+E.9 Alternative processor architectures 
+
+We tested whether the results generalise across different architectures. Specifically, we compared the FM model against denoising diffusion (Ho et al., 2020) using the same ViT backbone. We also compared a CRPS-trained ensemble of U-Net models against the ViT ensemble. We used a U-Net implemented in Azula (Rozet et al., 2025b). This is an adaptation of the classic architecture from (Ronneberger et al., 2015) to work as a backbone in generative models. Using this variant allowed us to use a similar noise injection strategy as that used in the ViT ensemble (see Appendix B). All models were matched on size and followed the same training procedure as described in Section 4.1. Figures 15 and 16 show performance of all models on the CNS dataset. Diffusion and FM performed comparably, while the U-Net ensemble performed worse than the ViT ensemble in terms of both VRMSE and coverage (Figure 16). 22 0.0
+
+> 0.5
+> 1.0
+> [0:4)
+
+AD CNS GS GPE       
+
+> 0.0
+> 0.5
+> 1.0
+> [6:12)
+> 0.0
+> 0.5
+> 1.0
+> [13:30)
+> 01
+> 0.0
+> 0.5
+> 1.0
+> [31:99)
+> 010101
+> Empirical Coverage (1  − ˆα)
+
+Nominal coverage (1 - α)
+
+a) 
+
+> −0.5
+> 0.0
+> 0.5
+> 1 − α = 0.9
+
+AD CNS GS GPE       
+
+> −0.5
+> 0.0
+> 0.5
+> 1 − α = 0.5
+> −0.5
+> 0.0
+> 0.5
+> 1 − α = 0.1
+> 0100
+> 10 −5
+> 10 −3
+> 10 −1
+> VRMSE
+> 0100 0100 0100
+> Relative  ∆ Empirical Coverage
+
+Lead time 
+
+b) c)   
+
+> M=4 M=8 M=16
+
+Figure 11: Effect of ensemble size on CRPS training for M ∈ { 4, 8, 16 } across datasets (AD, CNS, GS, GPE). (a) Empirical vs. nominal coverage averaged over rollout windows. (b) Relative ∆
+
+empirical coverage vs. lead time over 100 -step rollouts. (c) VRMSE vs. lead time. Ensemble size does not have a consistent effect on coverage across datasets. 23 0.0
+
+> 0.5
+> 1.0
+> [0:4)
+
+CNS      
+
+> 0.0
+> 0.5
+> 1.0
+> [6:12)
+> 0.0
+> 0.5
+> 1.0
+> [13:30)
+> 0.00.20.40.60.81.0
+> 0.0
+> 0.5
+> 1.0
+> [31:99)
+> Empirical Coverage (1  − ˆα)
+
+Nominal coverage (1 - α)
+
+a) 
+
+> −0.5
+> 0.0
+> 0.5
+> 1 − α = 0.9
+
+CNS      
+
+> −0.5
+> 0.0
+> 0.5
+> 1 − α = 0.5
+> −0.5
+> 0.0
+> 0.5
+> 1 − α = 0.1
+> 020 40 60 80 100
+> 10 −5
+> 10 −3
+> 10 −1
+> VRMSE
+> Relative  ∆ Empirical Coverage
+
+Lead time 
+
+b) c)  
+
+> noise=1024, h=568 noise=256, h=704
+
+Figure 12: Effect of noise injection width (256 vs. 1024 noise channels) with adjusted hidden width to keep parameter count comparable on the CNS dataset. (a) Empirical vs. nominal coverage averaged over rollout windows. (b) Relative ∆ empirical coverage by lead time over 100 -step rollouts. (c) VRMSE by lead time. The models perform comparably, although there may be a slight benefit from having larger noise channel size in terms of coverage. 24 0.0
+
+> 0.5
+> 1.0
+> [0:4)
+
+CNS      
+
+> 0.0
+> 0.5
+> 1.0
+> [6:12)
+> 0.0
+> 0.5
+> 1.0
+> [13:30)
+> 0.00.20.40.60.81.0
+> 0.0
+> 0.5
+> 1.0
+> [31:99)
+> Empirical Coverage (1  − ˆα)
+
+Nominal coverage (1 - α)
+
+a) 
+
+> −0.5
+> 0.0
+> 0.5
+> 1 − α = 0.9
+
+CNS      
+
+> −0.5
+> 0.0
+> 0.5
+> 1 − α = 0.5
+> −0.5
+> 0.0
+> 0.5
+> 1 − α = 0.1
+> 020 40 60 80 100
+> 10 −5
+> 10 −3
+> 10 −1
+> VRMSE
+> Relative  ∆ Empirical Coverage
+
+Lead time 
+
+b) c)  
+
+> CRPS (channel concatenation) CRPS (backbone modulation)
+
+Figure 13: Global conditioning ablation for the CRPS-trained ViT ensemble ( M = 8 ) on the CNS dataset. We compare conditioning via channel concatenation against backbone modulation. (a) Empirical vs. nominal coverage averaged over rollout windows. (b) Relative ∆ empirical coverage by lead time over 100 -step rollouts. (c) VRMSE by lead time. Channel concatenation outperforms backbone modulation in terms of coverage performance. 25 0.0
+
+> 0.5
+> 1.0
+> [0:4)
+
+AD CNS GS GPE       
+
+> 0.0
+> 0.5
+> 1.0
+> [6:12)
+> 0.0
+> 0.5
+> 1.0
+> [13:30)
+> 01
+> 0.0
+> 0.5
+> 1.0
+> [31:99)
+> 010101
+> Empirical Coverage (1  − ˆα)
+
+Nominal coverage (1 - α)
+
+a) 
+
+> −0.5
+> 0.0
+> 0.5
+> 1 − α = 0.9
+
+AD CNS GS GPE       
+
+> −0.5
+> 0.0
+> 0.5
+> 1 − α = 0.5
+> −0.5
+> 0.0
+> 0.5
+> 1 − α = 0.1
+> 0100
+> 10 −5
+> 10 −3
+> 10 −1
+> VRMSE
+> 0100 0100 0100
+> Relative  ∆ Empirical Coverage
+
+Lead time 
+
+b) c)      
+
+> ODE=1 ODE=5 ODE=10 ODE=25 ODE=50 ODE=100
+
+Figure 14: FM performance as a function of the number of ODE integration steps used at sampling time across datasets (AD, CNS, GS, GPE). (a) Empirical vs. nominal coverage averaged over rollout windows. (b) Relative ∆ empirical coverage by lead time over 100 -step rollouts. (c) VRMSE by lead time. Coverage typically improves with increased ODE steps, while VRMSE remains similar. 26 0.0
+
+> 0.5
+> 1.0
+> [0:4)
+
+CNS      
+
+> 0.0
+> 0.5
+> 1.0
+> [6:12)
+> 0.0
+> 0.5
+> 1.0
+> [13:30)
+> 0.00.20.40.60.81.0
+> 0.0
+> 0.5
+> 1.0
+> [31:99)
+> Empirical Coverage (1  − ˆα)
+
+Nominal coverage (1 - α)
+
+a) 
+
+> −0.5
+> 0.0
+> 0.5
+> 1 − α = 0.9
+
+CNS      
+
+> −0.5
+> 0.0
+> 0.5
+> 1 − α = 0.5
+> −0.5
+> 0.0
+> 0.5
+> 1 − α = 0.1
+> 020 40 60 80 100
+> 10 −5
+> 10 −3
+> 10 −1
+> VRMSE
+> Relative  ∆ Empirical Coverage
+
+Lead time 
+
+b) c)  
+
+> FM (latent) DM (latent)
+
+Figure 15: FM vs. denoising diffusion in latent space (matched backbones) on the CNS dataset. (a) Empirical vs. nominal coverage averaged over rollout windows. (b) Relative ∆ empirical coverage by lead time over 100 -step rollouts. (c) VRMSE by lead time. The two models perform comparably across metrics. 27 0.0
+
+> 0.5
+> 1.0
+> [0:4)
+
+CNS      
+
+> 0.0
+> 0.5
+> 1.0
+> [6:12)
+> 0.0
+> 0.5
+> 1.0
+> [13:30)
+> 0.00.20.40.60.81.0
+> 0.0
+> 0.5
+> 1.0
+> [31:99)
+> Empirical Coverage (1  − ˆα)
+
+Nominal coverage (1 - α)
+
+a) 
+
+> −0.5
+> 0.0
+> 0.5
+> 1 − α = 0.9
+
+CNS      
+
+> −0.5
+> 0.0
+> 0.5
+> 1 − α = 0.5
+> −0.5
+> 0.0
+> 0.5
+> 1 − α = 0.1
+> 020 40 60 80 100
+> 10 −5
+> 10 −3
+> 10 −1
+> VRMSE
+> Relative  ∆ Empirical Coverage
+
+Lead time 
+
+b) c)  
+
+> ViT U-Net
+
+Figure 16: ViT vs. U-Net CRPS-trained ensemble ( M = 8 ) performance on the CNS dataset. (a) Empirical vs. nominal coverage averaged over rollout windows. (b) Relative ∆ empirical coverage vs. lead time over 100 -step rollouts. (c) VRMSE vs. lead time. The ViT ensemble outperforms the U-Net ensemble in terms of both VRMSE and coverage. 28

@@ -1,0 +1,2108 @@
+Title: A Stabilized Path-Space Approach to Diffusion-Based Posterior Sampling
+
+URL Source: https://arxiv.org/pdf/2606.12710v1
+
+Published Time: Fri, 12 Jun 2026 00:20:47 GMT
+
+Number of Pages: 40
+
+Markdown Content:
+A STABILIZED PATH-SPACE APPROACH TO DIFFUSION-BASED POSTERIOR SAMPLING 
+
+EVAN SCOPE CRAFTS ∗, UMBERTO VILLA ∗† , SAVIZ MOWLAVI ‡ , YANTING MA ‡ ,HASSAN MANSOUR ‡ , AND WAEL H. ALI ‡
+
+Abstract. Diffusion models provide expressive data-driven priors for Bayesian inverse prob-lems, but many diffusion posterior samplers rely on heuristic guidance approximations that can fail for nonlinear operators and multimodal posteriors. In this work, we develop a stabilized path-space framework for diffusion-based posterior sampling. Starting from a base diffusion process whose terminal marginal represents the prior, we define a likelihood-weighted target measure on trajec-tories and cast posterior sampling as learning a controlled stochastic process whose path measure matches this target. This formulation connects diffusion posterior sampling to stochastic optimal control while preserving the Bayesian structure needed for uncertainty quantification. We introduce a time reparameterization that makes the path-space control problem well posed by removing the bias induced by the unknown initial value function, without auxiliary training. We then learn the control via a trust-region path-space optimization method with log-variance objectives. The path-space perspective also unifies our learned control approach with existing guidance-based samplers, quantifies the sampling error induced by approximate controls, and yields importance sampling cor-rections for asymptotically exact posterior expectations. We evaluate the proposed framework on a suite of benchmark inverse problems with analytically characterized or high-quality reference pos-teriors, enabling principled assessment of sampling accuracy and uncertainty quantification. These experiments provide insight into the behavior of diffusion-based posterior samplers and demonstrate improved accuracy and robustness over leading approaches. 
+
+Key words. diffusion models, posterior sampling, stochastic optimal control, inverse problems, uncertainty quantification 
+
+MSC codes. 60J60, 93E20, 62F15, 65C30, 68T07 
+
+1. Introduction. Bayesian inverse problems (BIPs) arise in a wide range of scientific and engineering applications, where the goal is to infer an unknown quantity from indirect and noisy observations. In many fields, such as fluid dynamics [12], geophysics [7], medical imaging [53], and computational biology [28], the resulting posterior distribution is high-dimensional and often multi-modal. In such regimes, posterior sampling, rather than point estimation, is essential for reliable uncertainty quantification and downstream decision-making. A central challenge in BIPs is the specification of informative prior distributions. Classical priors, such as Gaussian or sparsity-based models, are often too restrictive to capture the complex structure of realistic signals. Recent advances in deep generative models have provided powerful data-driven alternatives [40, 6], enabling the use of expressive priors trained on representative datasets. When incorporated into Bayesian inference, these models have significantly improved performance on challenging inverse problems by encoding rich prior information unavailable to traditional approaches. Among learned priors, diffusion models [26, 49, 51] have become the predominant paradigm for modeling complex, high-dimensional distributions, particularly in image and video domains. These models define a time-indexed transport process that grad-
+
+> ∗
+
+Oden Institute for Computational Engineering and Sciences, The University of Texas at Austin, Austin, TX (escopec@utexas.edu). ESC partially completed this work during an internship at Mit-subishi Electric Research Laboratories (MERL). 
+
+> †
+
+Department of Biomedical Engineering, The University of Texas at Austin, Austin, TX (uvilla@austin.utexas.edu). 
+
+> ‡
+
+Mitsubishi Electric Research Laboratories, Cambridge, MA (mowlavi@merl.com, yma@merl.com, mansour@merl.com, wali@merl.com). 1
+
+> arXiv:2606.12710v1 [cs.LG] 10 Jun 2026
+
+ually transforms a simple reference distribution (typically Gaussian) into the complex data distribution [49, 51], and can be viewed as part of a broader measure-transport perspective on sampling [36]. While more recent variants such as flow matching [33] and stochastic interpolants [1] have emerged with different theoretical foundations [42], we refer to all these dynamics-based generative models as diffusion-based models throughout this work, as they share the same fundamental principle of dynamical measure transport between distributions, as detailed in Section 2 and highlighted in [22, 18]. When a trained diffusion model is used to approximate the prior distribution, posterior sampling amounts to modifying the dynamics to incorporate likelihood in-formation, giving rise to a broad class of diffusion-based posterior sampling methods. 
+
+1.1. Diffusion-Based Posterior Sampling. Existing diffusion-based posterior samplers can be broadly categorized into two paradigms. The first modifies the reverse diffusion dynamics directly using likelihood guidance [10, 50, 48, 11, 2, 29]. The second class decouples the prior and data consistency steps. For instance, Decoupled Annealing Posterior Sampling (DAPS) [59] alternates between using the base diffusion process to enforce prior consistency and using Markov Chain Monte Carlo (MCMC) algorithms to enforce data consistency. This decoupling strategy can improve stability in challenging image reconstruction problems. Despite their widespread adoption, both coupled and decoupled heuristic meth-ods suffer from fundamental limitations. Recent studies [13, 59] have shown that both classes of approaches often fail catastrophically in challenging regimes, such as strongly non-linear inverse problems or even linear inverse problems with multi-modal posteriors. Here the core issue is that all these methods rely on the approximation of certain conditional distributions associated with the pre-trained diffusion model (in particular, the denoising distribution , see, e.g., [13] for a definition) as Gaussian or Dirac distributions. When the true conditionals are complex or multi-modal, these approximations can lead to substantial posterior bias. These limitations have motivated the development of methods that learn con-ditional corrections to a pretrained diffusion model rather than relying solely on sampling-time approximations. In this class of approaches, conditional score or drift models can be trained from paired data consisting of prior samples and correspond-ing measurements [16, 17, 15]. While effective when such data are available, these approaches are typically amortized over a prescribed training distribution and may require substantial data and computation for each class of inverse problems. 
+
+1.2. The Path-Space Formulation. A more flexible approach, which we de-velop in this work for Bayesian inverse problems, formulates posterior sampling as a measure-matching problem in the path space of the diffusion model. Starting from a base diffusion process whose terminal marginal represents the prior πpr (x), and given an observation y with likelihood πlike (y|x), we define a target path measure by reweighting trajectories according to the likelihood of their terminal state. Posterior sampling is then cast as the problem of finding a controlled diffusion, obtained by adding a drift control, whose path measure matches this likelihood-weighted target. When this matching holds, the terminal marginal of the controlled process is the Bayesian posterior. This path-space formulation replaces local heuristic score corrections with a vari-ational problem over trajectory measures. One may optimize divergences between the controlled path measure and the likelihood-weighted target, such as Kullback— Leibler (KL) or cross-entropy (CE) divergences, or related proximal divergences over probability measures [38, 44, 27, 3]. This variational perspective treats posterior sam-
+
+> 2
+
+pling as a global optimization problem over trajectory measures, connects naturally to stochastic optimal control and Schr¨ odinger bridge formulations [14, 8, 41, 60, 4], and provides a principled foundation for incorporating importance sampling corrections that recover asymptotically exact posterior expectations even when the controlled dynamics are only approximately optimized [61]. The path-space perspective has gained traction in recent work on diffusion-based sampling and fine-tuning. Key algorithmic advances include off-policy log-variance objectives [44, 38], connections to reinforcement learning through reward-weighted path measures [54], and the use of lean adjoint estimators for efficient gradient com-putation [18]. These tools have led to strong results in image diffusion fine-tuning [18] and sampling from multi-particle energy functions [25, 34]. Our work specializes this path-space viewpoint to Bayesian inverse problems, where the target measure is induced by a likelihood and must have the Bayesian posterior as its terminal marginal. A fundamental challenge in this path-space formulation is the initial value func-tion bias problem. When the base diffusion couples its initial and terminal states, the likelihood-weighted target path measure generally has an initial marginal that is incompatible with controlled processes initialized from the original reference distribu-tion. Previous work addresses related issues using auxiliary value-function learning [54, 52, 34] or memoryless noise schedules that remove the mismatch asymptotically [18]. In this work, we introduce a simple time reparameterization of the base process that exactly ensures the statistical independence between initial and terminal states. This non-intrusive modification preserves the terminal prior distribution and requires no additional neural network training, enabling posterior sampling to be formulated as a well-posed optimization problem in path space. Beyond ensuring well-posedness, optimizing divergences between path measures remains challenging in practice. Recent work has shown that unconstrained optimiza-tion in path space can lead to unstable updates, particularly in high-dimensional or multi-modal settings [5, 24]. To address this, we adopt the optimization approach introduced in [5], which uses KL divergence-based trust regions to ensure controlled exploration during optimization. This geometric constraint is complemented by the use of log-variance objectives [38, 44], which provide an off-policy optimization frame-work that reduces gradient variance and improves numerical robustness. While trust-region constraints and log-variance objectives address the practical challenges of optimization, a key contribution of this work is to show that the path-space formulation itself enables a broader interpretation of diffusion-based posterior sampling. In particular, methods based on local score guidance or other heuristic drift modifications can be viewed as implicitly defining approximate path measures through controlled modifications of a common reference diffusion. Within this frame-work, importance sampling weights arise naturally as Radon–Nikodym derivatives between trajectory measures. This enables asymptotically exact posterior expecta-tions even from approximate samplers, providing a unifying correction mechanism for both learned and heuristic diffusion-based posterior sampling methods. Finally, to complement the theoretical and algorithmic developments described above, we conduct a systematic empirical evaluation using benchmark inverse prob-lems from [13]. Across all problem settings, we evaluate sampling performance using a consistent set of complementary criteria, including direct comparisons of generated samples as well as statistical measures that assess each method’s ability to capture both local and global structure of the posterior distribution. The results demonstrate that the path space approach consistently provides state-of-the-art performance, sig-nificantly surpassing the performance of leading heuristic approaches. 
+
+> 3
+
+1.3. Contributions. Our key contributions are summarized as follows: 
+
+A well-posed path-space formulation for posterior sampling. We develop a path-space formulation of diffusion-based posterior sampling for Bayesian inverse problems. Starting from a base diffusion process whose terminal marginal repre-sents the prior, we define a likelihood-weighted target path measure whose terminal marginal is the Bayesian posterior. Matching this target measure yields an optimal control, i.e., an additive drift correction to the base process. We identify the initial-value-function bias that can make this target incompatible with controlled processes initialized from the original reference distribution, and introduce a simple time repa-rameterization that restores the required separability condition while preserving the terminal distributions. 
+
+Path-space learning and correction of posterior samplers. To approxi-mate the optimal control in practice, we adopt a trust-region path-space optimization strategy together with log-variance objectives. Within the path-space posterior sam-pling framework, learned and heuristic diffusion posterior samplers are interpreted as approximate controls. This perspective allows us to quantify the posterior sampling error induced by control error and to derive Radon–Nikodym importance weights that yield asymptotically exact posterior expectations even when the underlying sampler is approximate. 
+
+Systematic empirical evaluation. We conduct a comprehensive benchmark study of diffusion-based posterior samplers on a suite of linear and nonlinear inverse problems, including stylized versions of Gaussian random sensing, inpainting, x-ray tomography, and phase retrieval. Our evaluation leverages the path-space perspec-tive to provide rigorous and interpretable comparisons across problems of varying complexity. 
+
+1.4. Outline. The remainder of the paper is organized as follows. Section 2 reviews SDE-based generative modeling and presents diffusion models, flow-based models, and stochastic interpolants in a common framework. Section 3 formulates diffusion-based posterior sampling as a path-space measure-matching problem. Sec-tion 4 presents the proposed approach, including the time reparameterization tech-nique for ensuring well-posedness. Section 5 analyzes control-induced sampling error and derives path-space importance weights for posterior expectations. Sections 6 and 7 describe the numerical setup and report the experimental results. Section 8 concludes the paper. 
+
+2. Background: Generative Models as SDEs. In this section, we briefly de-scribe conditions under which three commonly-used generative modeling frameworks —diffusion models, flow models, and stochastic interpolants—can be written in the common language of stochastic differential equations (SDEs). The relationship between diffusion models and SDEs is well established. In [51], Song et al. showed that the early discrete-time variants of diffusion models introduced in [49] and [26] could be written as discretizations of a time-reversed SDE. The original SDE, which gradually adds noise to samples from the target data distribution, can be written as (2.1) dxt = g(xt, t ) dt + h(t) d ˜wt, t ∈ [0 , T ].
+
+Here d ˜wt is a Wiener process moving backwards in time, xt ∈ RD is the state variable, 
+
+xT is sampled from the data distribution, 1 g(x, t ) : RD ×[0 , T ] → RD is a time-indexed 
+
+> 1Note that we are using the opposite time convention from what is typically employed in diffusion 4
+
+drift term, and h(t) : [0 , T ] → R+ controls the diffusion rate. The time-reversed SDE, which maps a fixed noise distribution to samples from the target data distribution, can be written as (2.2) dxt = [ g(xt, t ) − h2(t) ∇x log pt(xt)] dt + h(t) dwt.
+
+Here ∇x log pt(xt) is the score of the time-t marginal distribution of xt, which can be learned from data [55]. Unlike diffusion models, flow models are inherently deterministic. However, they can be cast into the SDE framework by considering the evolution of their marginal densities. For a flow defined by (2.3) dxt = v(xt, t ) dt, t ∈ [0 , T ],
+
+with x0 ∼ p0 sampled from the noise distribution, the marginal densities pt(xt) in-duced by the above process satisfy the Fokker-Planck equation (2.4) ∂p t(xt)
+
+∂t = −∇ x · [v(xt, t ) pt(xt)] .
+
+For some function gs(t) : [0 , T ] → R, Nelson’s identity [37] (2.5) 12 gs(t)2∆xpt(xt) = 12 gs(t)2∇x · (pt(xt)∇x log pt(xt)) can therefore be used to rewrite (2.4) as 
+
+∂p t(xt)
+
+∂t = −∇ x ·
+
+
+
+(v(xt, t ) + 12 gs(t)2 ∇x log pt(xt)) pt(xt)
+
+
+
++ 12 gs(t)2∆xpt(xt).
+
+By construction this new Fokker-Planck equation has the same time-t marginals as (2.3), but corresponds to the SDE 
+
+dxt =
+
+
+
+v(xt, t ) + 12 gs(t)2 ∇x log pt(xt)
+
+
+
+dt + gs(t) dwt,
+
+where here dwt is Brownian motion. Note that for many commonly used flow models, 
+
+∇x log pt(xt) can be obtained analytically given knowledge of v(xt, t ). The above construction thus enables a pre-trained flow model to admit SDE-based solvers. Since SDE solvers may be more robust to error in the learned flow than their deterministic counterparts (see, e.g., Section 2.4 of [1]), the use of SDE solvers for flow models has garnered significant research interest in recent years [47]. Stochastic interpolants [1] can be viewed as a generalization of both diffusion and flow models. They are based on the following equation: 
+
+xt = I(x0, xT , t ) + γ(t) z,
+
+where z ∼ N (0, I), γ(0) = γ(T ) = 0, and the interpolation function I satisfies 
+
+I(x0, xT , 0) = x0 and I(x0, xT , T ) = xT . In the generative modeling setting, x0 is sampled from a fixed noise distribution and xT is a sample from the data distribution. If γ(t) > 0 for all t ∈ (0 , T ), then the above equation describes a process that can be   
+
+> modeling, with t= 0 here representing the noise distribution. This choice was made for the sake of consistency with the path-space and stochastic control literature. 5
+
+modeled as an SDE with drift and diffusion coefficients obtained by taking the limit 
+
+xt − xt+ϵ as ϵ → 0. If γ(t) = 0 (e.g., in a rectified flow model [35], which uses the linear interpolation strategy I(x0, xT , t ) = (1 − t) x0 + t xT ), then the interpolation process is deterministic over part or all of the trajectory space. However, an SDE can still be obtained using Nelson’s identity as described above. 
+
+3. The Path-Space Formulation of Diffusion-Based Posterior Sampling. 
+
+In this section, we introduce the diffusion-based posterior sampling problem consid-ered in this work. We then show how this problem can be reformulated as a search for a particular measure over the path space of the diffusion model. 
+
+3.1. Problem Formulation. We assume we have access to a diffusion-type gen-erative model that approximately samples from the prior distribution πpr (x) of a Bayesian inference problem with unknown parameter x ∈ RD . This generative model can be written as the following SDE: (3.1) dxt = Ab(xt, t ) dt + Bb(t) dwt, x0 ∼ N (0, ID ), t ∈ [0 , T ].
+
+In the above expression xt ∈ RD is the SDE state, Ab(·, ·) : RD × [0 , T ] → RD is the drift term, Bb(·) : [0 , T ] → RD×D is the diffusion term, and dwt is standard Brownian motion. We assume that Bb(t) is an invertible matrix for all t ∈ [0 , T ], and that Ab(xt, t ) satisfies the “standard” Lipschitz and linear growth conditions required for (3.1) to have a t-continuous strong solution (see, e.g., Theorem 5.2.1 of [39]). 2 Further, if the generative model is trained exactly, we have that pT (·) = πpr (·), where pT is the time-T marginal distribution of the above diffusion process. In what follows, we refer to this process as the base process .Our goal, given the base diffusion process and a measurement y from a known likelihood function πlike (y | x), is to obtain samples from the posterior distribution 
+
+πpost (x | y), which can be written via Bayes’ Theorem as (3.2) πpost (x | y) ∝ πlike (y | x) πpr (x).
+
+In particular, we formulate the problem as seeking a measurable function ub(·, ·) : 
+
+RD × [0 , T ) → RD such that the modified process (3.3) 
+
+dxub 
+
+> t
+
+= [ Ab(xub 
+
+> t
+
+, t ) + Bb(t) ub (xub 
+
+> t
+
+, t )] dt + Bb(t) dwt, xub 
+
+> 0
+
+∼ N (0, ID ), t ∈ [0 , T ],
+
+has the same time-T marginal distribution pub 
+
+> T
+
+as the posterior distribution, i.e., xub 
+
+> T
+
+∼
+
+πpost (x | y). Note that the Bb(t) term in front of the control can be dropped without loss of generality, as we have assumed Bb(t) is invertible; however it is standard to incorporate it as it simplifies the resulting mathematics. Also note that here we assume ub ∈ U ([0 , T )), where U(·) is the space of measurable functions over the given interval satisfying the same growth conditions as required for Ab. Note that ub can be interpreted as the control term in a stochastic optimal control problem. In what follows, we therefore refer to ub as the control, and (3.3) as the controlled process .The above problem is formalized in the following problem statement. 
+
+Problem 3.1 (Diffusion Posterior Sampling). Consider a Bayesian inverse prob-lem with prior distribution πpr (x), x ∈ RD and likelihood function πlike (y | x), y ∈
+
+RK . Given the likelihood, a diffusion-type model of the form (3.1) that samples from the prior distribution, and a measurement y, find a feedback control ub ∈ U ([0 , T )) such that xub 
+
+> T
+
+∼ πpost (x | y).        
+
+> 2Flow models correspond to Bb(t)≡0for all tand thus violate this assumption. However, as detailed in Section 2, any flow model can be converted into a non-trivial SDE using Nelson’s identity. 6
+
+3.2. Reformulation in Path Space. Problem 3.1 above is not well-posed in the sense that there is an infinite number of controls that solve the problem. For example, if A ≡ 0, it is straightforward to see that there are an infinite number of time-dependent scalings of ub that leave pub 
+
+> T
+
+unchanged. In this work, we overcome this ill-posedness by reformulating the posterior sampling problem in path space .Formally, we define the path space as (3.4) C(s) ≜ {x(t) : [ s, T ] → RD | x(t) continuous },
+
+where here s < T , and equip it with the supremum norm and the corresponding Borel-
+
+σ-algebra generated by the open sets under this norm. This leads to the following problem formulation. 
+
+Problem 3.2 (Path-Space Posterior Sampling). Let C(s) be the path space de-fined in (3.4) and let P be the measure induced by a diffusion-type process of the form given in (3.1) over the space. The target path measure Q∗ is defined as the path measure over C(s) whose Radon-Nikodym derivative with respect to P (see Appendix A for a definition) is proportional to the likelihood function, i.e., (3.5) dQ ∗
+
+dP (x0: T ) ≜ πlike (y | xT )
+
+Z , Z ≜ EP [πlike (y | xT )] .
+
+Note that this definition ensures that the marginal distribution of Q∗ at time T is the posterior distribution under the assumption that pT = πpr . We seek a control 
+
+ub ∈ U ([ s, T )) with corresponding path measure P ub such that dP ub /dQ ∗ is constant, i.e., P ub = Q∗.The above problem formulation resolves the ill-posedness of Problem 3.1 in the sense that if there is a ub that solves Problem 3.2, it is necessarily unique. 3 However, in general Problem 3.2 does not have a solution. The reason for this is that Q∗ will not have the same Gaussian initial distribution as P ub . In particular, as demonstrated in [18, 34], we obtain from (3.5) that the joint distribution of ( x0, xT ) under Q∗ is (3.6) q∗ 
+
+> 0,T
+
+(x0, xT ) = p0,T (x0, xT ) πlike (y | xT )
+
+Z ,
+
+where p0,T (x0, xT ) denotes the corresponding joint distribution under the base process 
+
+P given by (3.1). Marginalizing (3.6) over xT gives the initial marginal of the target path measure: (3.7) q∗ 
+
+> 0
+
+(x0) = p0(x0) EP [πlike (y | xT ) | x0]
+
+Z .
+
+Equivalently, defining the initial value function (3.8) V (x) ≜ − log EP [πlike (y | xT ) | x0 = x] ,
+
+we may write (3.9) q∗ 
+
+> 0
+
+(x0) = p0(x0) exp( −V (x0)) 
+
+Z .         
+
+> 3This follows from Girsanov’s theorem [39]: since any u′
+> b∈ U can be written as u′
+> b=ub+δ, if δ
+> is non-zero on a measurable set, this change in drift leads to a non-trivial change in the corresponding path measure. 7
+
+Equation (3.9) shows that, in general, the initial marginal of Q∗ differs from the initial marginal p0 of the base process. The two coincide only when V (x) is constant. A sufficient condition for this to hold is the separability of the initial and terminal states under the base process, p0,T (x0, xT ) = p0(x0)pT (xT ). In that case, (3.10) V (x) = − log EP [πlike (y | xT ) | x0 = x] = − log EP [πlike (y | xT )] = − log Z, 
+
+and q∗ 
+
+> 0
+
+(x0) = p0(x0). However, many diffusion-type generative models have non-trivial coupling be-tween the time-0 and time-T states. In these settings, Problem 3.2 does not have an exact solution. The lack of exact solutions to Problem 3.2 when p0,T (x0, xT ) is not separable is referred to as the initial value function bias problem in the literature [18], and two main approaches have been proposed to address it. In [54] and [52], the authors use an auxiliary neural network to learn V (x) and the corresponding initial distribution 
+
+q∗ 
+
+> 0
+
+. In [18], Domingo-Enrich et al. address the problem by using Nelson’s identity, as described in Section 2, to inject more stochasticity into the base process. The resulting base process solves the bias problem since the correlation between x0 and xT decreases exponentially as T → ∞ ; however, p0,T (x0, xT ) is never exactly separable. 
+
+4. Solution Approach. In this section, we propose a novel technique, referred to here as the time reparameterization trick (TRT), that requires only a minor mod-ification to the base process but ensures the separability condition p0,T (x0, xT ) = 
+
+p0(x0) pT (xT ) introduced in the previous section is exactly satisfied. We then de-scribe the approach used to solve the time-reparameterized problem. 
+
+4.1. The Time Reparameterization Trick. The proposed time reparameter-ization trick is based on the observation that both the base process defined in (3.1) and the controlled process defined in (3.3) can be trivially extended to one with a de-terministic initial condition. In particular, we consider the following extended version of the base process: (4.1) dxt = A(xt, t ) dt + B(t) dwt, x−1 = 0, t ∈ [−1, T ],
+
+where here A and B are defined in terms of the original base process as (4.2) A(xt, t ) ≜
+
+(
+
+Ab(xt, t ) if t ≥ 0,
+
+0 if t < 0, B(t) ≜
+
+(
+
+Bb(t) if t ≥ 0,
+
+ID if t < 0.
+
+Note that the drift and diffusion coefficients above trivially satisfy the standard regu-larity conditions required for (4.1) to admit t-continuous strong solutions, and there-fore the SDE induces a measure over the path space C(s) defined in (3.4), where here s = −1. Further, the above process satisfies x0 ∼ N (0, ID ), and therefore the time-t marginals of the above process are the same as the time-t marginals of the base process in (3.1) for t ≥ 0. In particular, we have that xT ∼ πpr (x) if the base generative model is well-trained. As with the original base process, we define the corresponding controlled version of (4.1) as (4.3) dxu 
+
+> t
+
+= [ A(xu 
+
+> t
+
+, t ) + B(t) u(xu 
+
+> t
+
+, t )] dt + B(t) dwt, xu 
+
+> −1
+
+= 0, t ∈ [−1, T ],
+
+where here u(·, ·) : RD × [−1, T ) → RD satisfies u ∈ U ([ −1, T )). Note that the modified base and controlled processes both have time discontinuities in their drift 
+
+> 8
+
+and diffusion coefficients at t = 0. However, this poses no issue in our problem context, as shown by the following theorem. 
+
+Theorem 4.1. Consider the path-space posterior sampling problem given in Prob-lem (3.2) with base path measure P corresponding to the SDE in (4.1) . Assume that the likelihood πlike (y | xT ) is strictly positive and bounded, with a score func-tion ∇x log πlike (y | xT ) that is globally Lipschitz. Then there exists a control u ∈U([ −1, T )) that solves Problem (3.2) , i.e., the corresponding controlled path measure 
+
+P u induced by (4.3) coincides with the target posterior measure Q∗.Proof. We first note that by definition, Q∗ is absolutely continuous with respect to P , and its Radon-Nikodym derivative corresponds to the density process 
+
+zt ≜ EP
+
+ dQ ∗
+
+dP | M t
+
+
+
+, t ∈ [−1, T ],
+
+where Mt is the filtration induced by the Brownian motion in (4.1). By the tower property of conditional expectations, zt is a martingale with respect to the filtration 
+
+Mt. Since P and Q∗ share a fixed initial condition at t = −1, we have that z−1 =
+
+EP [dQ ∗/dP ] = 1, and since by assumption πlike (y | xT ) > 0, zt is a strictly positive martingale. Now by the martingale representation theorem (MRT) [39], the fact that zt is a martingale implies that there exists an Mt adapted, square-integrable process ϕt
+
+such that the dynamics of zt are given by: 
+
+dz t = ⟨ϕt, d wt⟩.
+
+Further, since zt is strictly positive, the transformation dt = ϕt/z t is well-defined and we can write (4.4) dz t = zt ⟨dt, d wt⟩,
+
+where dt is also Mt adapted and square integrable. By applying Itˆ o’s lemma [39] to log zt, we obtain that the solution to this SDE is the exponential 
+
+zt = z−1 exp 
+
+Z t
+
+> −1
+
+⟨ds, d ws⟩ − 12
+
+Z t
+
+> −1
+
+∥ds∥22 ds 
+
+
+
+= exp 
+
+Z t
+
+> −1
+
+⟨ds, d ws⟩ − 12
+
+Z t
+
+> −1
+
+∥ds∥22 ds 
+
+
+
+,
+
+where the second equality follows from z−1 = 1 due to the deterministic initial con-dition. Next, note that since the base SDE (4.1) is Markovian and dQ ∗/dP is a functional only of the terminal state xT , the density process can be represented as zt = g(xt, t ), where g(xt, t ) ≜ EP [dQ ∗/dP | xt]. This Markovian structure implies that the in-tegrand dt from the martingale representation theorem must be a function of the current state and time. Specifically, by applying Itˆ o’s lemma to g(xt, t ) and using the fact that g is a martingale and therefore must have a corresponding SDE with zero drift term, we obtain 
+
+dz t = B(t)T ∇x g(xt, t ), d wt ,
+
+and therefore 
+
+dz t = g(xt, t ) B(t)T ∇x log g(xt, t ), d wt .
+
+> 9
+
+Comparing the above equation with (4.4), we can therefore identify the integrand as 
+
+dt = B(t)T ∇x log g(xt, t ). Now consider the path measure P u induced by the controlled SDE (4.3) with a given control u. By Girsanov’s theorem [39], the Radon-Nikodym derivative of P u
+
+with respect to P restricted to the filtration Mt, denoted zu 
+
+> t
+
+, is (4.5) zu 
+
+> t
+
+≜ exp 
+
+Z t
+
+> −1
+
+⟨u(xs, s ), d ws⟩ − 12
+
+Z t
+
+> −1
+
+∥u(xs, s )∥22 ds 
+
+
+
+.
+
+By setting u(xt, t ) = dt = B(t)T ∇x log g(xt, t ), the density process zu 
+
+> T
+
+matches zT =
+
+dQ ∗/dP exactly. Thus, P u and Q∗ are identical almost everywhere with respect to 
+
+P .What remains to show is that ∇x log g(xt, t ), t ∈ [−1, T ), is well-defined and that 
+
+u = B(t)T ∇x log g(xt, t ) is in U([ −1, T )). Here we first note that by the Kolmogorov backward equation [39], g satisfies a parabolic PDE. This, together with the assump-tion that πlike (y | xT ) is strictly positive and bounded, ensures that the conditional expectation g(t, x) is bounded away from zero and smooth in x for all t < T , despite the time discontinuity in the base process coefficients. Consequently, ∇x log g(xt, t )is well-defined. Further, since we have assumed that ∇x log πlike is globally Lipschitz, the spatial regularity of the terminal condition is propagated backward by the heat kernel of the base SDE. Thus, both the gradient ∇x log g(t, x) and the correspond-ing control u inherit the Lipschitz and linear growth properties required for u ∈ U ,completing the proof. 
+
+Remark 4.2. The proof techniques (MRT, Itˆ o’s Lemma, and Girsanov’s Theorem) and general strategy used in the above proof are well-established; see Appendix A for a review. However, the probabilistic approach used to form the density process corre-sponding to dQ ∗/dP , which avoids explicit construction of a corresponding stochastic optimal control problem or invocation of the Hamilton-Jacobi-Bellman equation (see, e.g., the proof of Theorem 2.2 in [38]), is somewhat non-standard. 
+
+Remark 4.3. The above proof actually gives the optimal control (4.6) u∗(xt, t ) = B(t)T ∇x log g(xt, t ) = B(t)T ∇x log EP [dQ ∗/dP | xt],
+
+a formula which is well known in the diffusion posterior sampling literature (see, e.g., [13]). However, dQ ∗/dP is defined in terms of πlike (y | xT ), with xT obtained from the prior-sampling base process. The conditional expectation in the above formula can therefore have very high variance if the KL divergence between the posterior and prior is large, making its direct use for posterior sampling impractical. Fur-ther, the computation of the gradient in the above expression requires differentiating through the sampling trajectory, which can be expensive to compute. In practice, many leading diffusion posterior sampling approaches replace the conditional distri-bution underlying the optimal control with a tractable approximation. Although these approximations lead to computationally efficient guidance rules, they collapse the full conditional structure of the terminal state and can therefore introduce significant bias; see Section 5 for an extended discussion. We demonstrate the use of the time-reparameterization trick (TRT) on a toy example problem with one-dimensional Gaussian mixture prior and linear-Gaussian likelihood. In particular, we constructed an analytically defined flow model, with stochasticity injected using Nelson’s identity as in Section 2. We then solved Problem 3.2 analytically for both the modified and unmodified processes using the control given 
+
+> 10
+
+Fig. 1: Illustration of Theorem 4.1. (a-b) Trajectories from the base process with and without the time reparameterization trick (TRT). Note that both base processes sample from the prior distribution of the given inverse problem. (c-d) Trajectories from the corresponding controlled process, which are intended to sample from the posterior. A comparison of the time-zero marginal distributions of the two processes is also shown. As can be seen, the controlled process with TRT has non-Gaussian time-zero marginals and correct posterior samples, while using the path-sampling approach without the TRT leads to significant sampling error. by (4.6); see Appendix B for details regarding the construction of the base process and computation of the optimal control. Figure 1 shows the base and controlled processes before and after applying the TRT. As can be seen, the TRT resolves the value function bias problem, with the controlled process with TRT correctly sampling from the posterior distribution of the example problem. 
+
+4.2. Solving the Reparameterized Problem. The time reparameterization trick ensures that the path-space posterior sampling problem is well-posed. To solve the reparameterized problem, we consider an iterative diffusion optimization (IDO) approach [38, 19]. In IDO approaches, iterative gradient-based algorithms are used to minimize objectives of the form (4.7) L(u) ≜ D(P u, Q ∗),
+
+where D is a statistical divergence. Here the computation of the divergence relies on the Radon-Nikodym derivative of Q∗ with respect to P u evaluated along trajectories 
+
+x−1: T :
+
+dQ ∗
+
+dP u (x−1: T ) = dQ ∗
+
+dP (x−1: T ) dP dP u (x−1: T )= πlike (y | xT )
+
+Z exp −
+
+Z T
+
+> −1
+
+⟨u(xs, s ), d wu 
+
+> s
+
+⟩ − 12
+
+Z T
+
+> −1
+
+∥u(xs, s )∥22 ds 
+
+!
+
+,(4.8) where here have used the definition of Q∗ in (3.5), the Girsanov density from (4.5), and the identity dws = dwu 
+
+> s
+
++ u(xs, s ) ds , where dwu 
+
+> s
+
+is Brownian motion under P u
+
+(see Appendix A for details). In this work we use the trust-region IDO approach introduced in [5]. This method employs the KL divergence DKL and enforces a trust region constraint for stability; see Appendix I for an ablation study regarding the impact of the trust region on optimization stability. 
+
+> 11
+
+Specifically, the trust region approach solves the sequence of sub-problems (4.9) ui+1 = arg min 
+
+> u∈U
+
+DKL (P u ∥ Q∗) subject to DKL (P u ∥ P ui ) ≤ ϵ, 
+
+where here i = 0 , . . . , I − 1, ϵ > 0 is the size of the trust region, u0 is the control initialization, and DKL (P u ∥ P ui ) denotes the KL divergence between P u and P ui ,which by Girsanov’s theorem (see Appendix A) can be written as a quadratic penalty, i.e., (4.10) DKL (P u ∥ P ui ) = EP u
+
+"
+
+12
+
+Z T
+
+> −1
+
+∥u(xt, t ) − ui(xt, t )∥22 dt 
+
+#
+
+.
+
+The subproblem in (4.9) is solved by first forming the corresponding Lagrangian 
+
+Li(u, λ ) ≜ DKL (P u ∥ Q∗) + λ(DKL (P u ∥ P ui ) − ϵ),
+
+where λ ≥ 0 is the Lagrange multiplier. A series of saddle point problems max  
+
+> λ≥0
+
+min  
+
+> u∈U
+
+Li(u, λ )is then solved. Since Li is convex in u and concave in λ (see Section 2 in [5]), this problem admits unique solutions in both variables, denoted by ui+1 and λi,respectively. A key insight of [5] is that, for fixed λ, the inner minimization admits a dual representation that depends only on expectations under P ui . In particular, the dual objective can be written as (4.11) Ldual  
+
+> i
+
+(λ) = −(1 + λ) log EP ui
+
+" dQ ∗
+
+dP ui (x−1: T )
+
+ 11+ λ
+
+#
+
+− λϵ. 
+
+We compute λi = arg max λ≥0 Ldual  
+
+> i
+
+(λ) with a one-dimensional numerical optimization routine, where the expectation is approximated using samples from P ui .Having determined λi, the next step is to characterize the updated path measure. By Proposition 2.2 in [5], (4.12) dP ui+1 
+
+dP ui ∝
+
+ dQ ∗
+
+dP ui
+
+ 11+ λi
+
+,
+
+which, together with (4.8) and knowledge of λi, gives an expression for the trajectory measure P ui+1 but does not give direct access to ui+1 . What remains is therefore to estimate ui+1 given this expression for the trajectory measure, together with the set of samples from P ui previously used to estimate λi. This can be done by solving (4.13) arg min 
+
+> u∈U
+
+D(P u, P ui+1 ),
+
+where D is any statistical divergence measure; the sub-problem of computing ui+1 
+
+therefore has the same form as the original problem in (4.7). In this work, we use the log-variance divergence measure introduced in [38] as the divergence measure in (4.13). This divergence has a number of appealing theoretical properties, including robustness to Monte-Carlo gradient errors when u is close to the 
+
+> 12
+
+solution and stability in high-dimensional settings [38]. For some v ∈ U ([ −1, T )), the log-variance divergence Dv 
+
+> logvar
+
+between P u and P ui+1 is defined as follows: (4.14) Dv
+
+> logvar
+
+(P u, P ui+1 ) ≜ Var P v
+
+
+
+log dP ui+1 
+
+dP u
+
+
+
+= Var P v
+
+
+
+log dP ui+1 
+
+dP ui
+
+dP ui
+
+dP u
+
+
+
+.
+
+Here Var P v [·] denotes the variance of the given quantity under the measure P v,
+
+dP ui /dP u can be computed using Girsanov’s theorem, and dP ui+1 /dP ui is given by (4.12). While in principle v can be any control, we set v = ui to straightforwardly take advantage of the set of samples from P ui used to compute λi. This leads to a finite sample approximation of (4.14). Finally, u is approximated as a neural network, and gradient descent algorithms are used to solve the finite-sample approximation of (4.14). To summarize, the trust region approach introduced in [5] induces a series of subproblems, as given in (4.9). Solving the sub-problem involves three stages. First, a set of trajectory samples corresponding to the previous iterate ui is computed. Then, the multiplier λi is computed from (4.11) using a non-linear solver. Finally, the set of trajectory samples, together with λi, are used to estimate ui+1 in an IDO framework using the log-variance objective (4.14). This procedure is closely related to the Proximal Diffusion Neural Sampler (PDNS) of [24], which also replaces a one-shot path-space optimization with a sequence of local KL-regularized updates. The distinction is that PDNS formulates locality through an explicit proximal penalty and develops proximal relative-entropy and cross-entropy formulations, whereas our approach based on [5] uses a KL trust-region constraint and recovers the intermediate control with a log-variance objective. 
+
+5. Error Bounds and Importance Sampling. Problem 3.2 formulates poste-rior sampling as the search for an optimal control in an infinite-dimensional function space. In practice, it is necessary to consider finite-dimensional approximations, which introduces error in the learned control. Additional error can also arise if the resulting optimization problem is not solved exactly. This section characterizes how control approximation error affects posterior sam-pling error and shows how the resulting bias can be corrected at the level of posterior expectations using path-space importance weights. Throughout, we assume that the base process (3.1) samples exactly from the prior, i.e., xT ∼ πpr .
+
+5.1. Sampling Error Bounds. The following theorem characterizes the impact of error in the path-space control on the error in the corresponding posterior samples. Here, the path-space control may be obtained either by learning (as in the trust-region approach) or via guidance-based constructions such as DPS and ΠGDM. The proof follows directly from Girsanov’s theorem and the data-processing inequality. This proof strategy is well established in the literature (see, e.g., [9]). 
+
+Theorem 5.1. Let u∗ be the solution to Problem 3.2, i.e., u∗ samples trajectories from the target measure Q∗ through the SDE 
+
+dxu∗ 
+
+> t
+
+=
+
+h
+
+A(xu∗ 
+
+> t
+
+, t ) + B(t) u(xu∗ 
+
+> t
+
+, t )
+
+i
+
+dt + B(t) dwt, xu∗ 
+
+> −1
+
+= 0, t ∈ [−1, T ].
+
+Let u ∈ U be a suboptimal control for the same process. Then the KL divergence between their time-T distributions satisfies 
+
+DKL (pu 
+
+> T
+
+∥ pu∗ 
+
+> T
+
+) = DKL (pu 
+
+> T
+
+∥ πpost ) ≤ EP u
+
+"Z T
+
+> −1
+
+12 ∥u(xu 
+
+> t
+
+, t ) − u∗(xu 
+
+> t
+
+, t )∥22 dt 
+
+#
+
+.
+
+> 13
+
+Proof. The Girsanov theorem implies that the Radon-Nikodym derivative of P u
+
+with respect to P u∗
+
+is given by 
+
+dP u
+
+dP u∗ = exp 
+
+Z T
+
+> −1
+
+⟨u(xt, t ) − u∗(xt, t ), d wu 
+
+> t
+
+⟩ + 12 ∥u(xt, t ) − u∗(xt, t )∥22 dt 
+
+!
+
+,
+
+where dwu 
+
+> t
+
+= dwt − u(xt, t )dt is Brownian motion under P u. So it follows that 
+
+DKL (P u ∥ P u∗
+
+) = EP u
+
+h Z T
+
+> −1
+
+⟨u(xu 
+
+> t
+
+, t ) − u∗(xu 
+
+> t
+
+, t ), d wu 
+
+> t
+
+⟩
+
++
+
+Z T
+
+> −1
+
+12 ∥u(xu 
+
+> t
+
+, t ) − u∗(xu 
+
+> t
+
+, t )∥22 dt 
+
+i
+
+= EP u
+
+"Z T
+
+> −1
+
+12 ∥u(xu 
+
+> t
+
+, t ) − u∗(xu 
+
+> t
+
+, t )∥22 dt 
+
+#
+
+,
+
+where we have used the fact that R t
+
+> −1
+
+⟨u − u∗, d wu 
+
+> s
+
+⟩ is an Itˆ o integral and therefore has expectation zero. An application of the data processing inequality then gives the desired result. 
+
+5.2. Posterior Expectations via Path-Space Importance Sampling. Fi-nite dimensional control parametrizations and inexact optimization lead to errors in the samples obtained via the controlled SDE in (4.3). If left uncorrected, these errors can cause bias in downstream Monte-Carlo estimators of posterior expectations. The path-space formulation yields a natural importance reweighting strategy that corrects this bias. In particular, the following theorem shows that posterior expectations can be expressed as weighted expectations under the controlled path measure P u, with weights given by the corresponding Radon–Nikodym derivative. 
+
+Theorem 5.2. Let u be a suboptimal control for the controlled SDE given by 
+
+(4.3) . Define the path-space importance weight 
+
+(5.1) w(xu 
+
+> −1: T
+
+) ≜ πlike (y | xu 
+
+> T
+
+) exp −
+
+Z T
+
+> −1
+
+⟨u(xu 
+
+> t
+
+, t ), d wu 
+
+> t
+
+⟩ − 12
+
+Z T
+
+> −1
+
+∥u(xu 
+
+> t
+
+, t )∥22 dt 
+
+!
+
+,
+
+where dwu 
+
+> t
+
+= dwt − u(xu 
+
+> t
+
+, t ) dt is Brownian motion under P u. Then for any measur-able function h, it holds that 
+
+(5.2) Eπpost (x|y)[h(x)] = Z−1 EP u
+
+h(xu 
+
+> T
+
+) w(xu 
+
+> −1: T
+
+),
+
+where 
+
+Z ≜ EP [πlike (y | xT )] = Ex∼πpr [πlike (y | x)] = EP u
+
+w(xu 
+
+> −1: T
+
+).(5.3) 
+
+Proof. By definition of the posterior, 
+
+Eπpost (x|y)[h(x)] = Z−1Eπpr (x)
+
+h(x)πlike (y | x),
+
+where 
+
+Z = Ex∼πpr 
+
+πlike (y | x)
+
+is the posterior normalizing constant. Since xT ∼ πpr (·) under the base process, this can be rewritten as 
+
+Eπpost (x|y)[h(x)] = Z−1EP
+
+h(xT )πlike (y | xT ).
+
+> 14
+
+Applying Girsanov’s theorem to change measure from P to P u yields 
+
+Eπpost (x|y)[h(x)] = Z−1EP u
+
+h(xu 
+
+> T
+
+) w(xu 
+
+> −1: T
+
+),
+
+which proves (5.2). Setting h ≡ 1 gives 
+
+Z = EP u
+
+w(xu 
+
+> −1: T
+
+),
+
+completing the proof. 
+
+Remark 5.3. The above theorem implies that asymptotically exact posterior ex-pectations can be computed using the trivial control u ≡ 0. However, the importance weights, which in this setting are given by πlike (y | xu 
+
+> T
+
+), can have incredibly high variance. This makes this approach impractical for many problems and illustrates the practical necessity of using a control that approximates the true optimal control. A practical advantage of the optimization strategy adopted in this work is that it promotes stable path-space importance weights. The log-variance objective directly targets the variability of the Radon–Nikodym weights, while the KL trust-region con-straint regularizes the change of measure between successive controlled processes [5]. In our setting, this combination serves both purposes: it provides a stable mechanism for learning approximate posterior controls and yields path-space importance weights that remain sufficiently well behaved for reweighting posterior expectations. Theorem 5.2 also applies beyond samplers explicitly derived from path-space op-timization. Any diffusion posterior sampler that can be written as a controlled SDE of the form (4.3) admits the corresponding path-space weights. This includes common guidance-based methods, which can be interpreted as using approximate controls ob-tained by simplifying the intractable optimal-control formula in (4.6). For example, the Diffusion Posterior Sampling (DPS) algorithm [10] uses the following control to obtain posterior samples: (5.4) u(xt, t ) = B(t)T ∇x log πlike (y | ¯xT (xt)) ,
+
+with ¯ xT (xt) ≜ EP [xT | xt] computed using Tweedie’s formula [20]. This corresponds to replacing pT |t(xT | xt) in (4.6) by a Dirac mass at its conditional mean. Sim-ilarly, ΠGDM [48] uses a Gaussian approximation with white-noise covariance for linear-Gaussian likelihoods. Although this approximation often improves over the DPS control for linear inverse problems, it remains unimodal and can therefore be inaccurate when the prior-induced conditional distribution is multimodal, particularly for t ≪ T . From the path-space viewpoint, both DPS and ΠGDM define approxi-mate controls, and Theorem 5.2 provides a principled mechanism for correcting the resulting bias in posterior expectations. 
+
+6. Numerical Studies. We evaluate the proposed path-space posterior sam-pling framework on a suite of diagnostic BIPs with reliable reference posteriors. In contrast to much of the existing literature on diffusion-based posterior sampling, where evaluation often relies on perceptual metrics or qualitative sample diversity, our exper-iments enable principled quantitative validation against exact posterior distributions in the linear–Gaussian settings and against high-quality long-run MCMC reference samples in the nonlinear settings. We follow the benchmark design of [13] and compare our framework against three leading diffusion-based posterior sampling methods: diffusion posterior sam-pling (DPS) [10], pseudo-inverse guided diffusion models (ΠGDM) [48], and decoupled 
+
+> 15
+
+annealing posterior sampling (DAPS) [59]. Note that throughout all experiments, we deliberately construct the prior-sampling base SDE so that the initial value function bias problem is minimal. The focus of this section is therefore restricted to rigorously assessing whether path-space control learning can outperform leading approaches that don’t require additional training beyond what is required to obtain the base SDE. 
+
+6.1. Benchmark Inverse Problems. All benchmarks infer an unknown pa-rameter x ∈ RD from observations y ∈ RK generated by a forward model and noise process. Throughout, we use a canonical Gaussian mixture prior (6.1) πpr (x) = 
+
+> Nm
+
+X
+
+> i=1
+
+wi N (x; μi, Σi), wi ≥ 0,
+
+> Nm
+
+X
+
+> i=1
+
+wi = 1 ,
+
+with Nm = 3. The mixture parameters {wi, μi, Σi}Nm 
+
+> i=1
+
+are chosen to induce multi-modal posteriors. We consider four benchmark inverse problems spanning linear and nonlinear for-ward models, partial observations, and ill-posed measurement operators. 
+
+Forming the prior-sampling SDE. In our formulation, we assume access to a pre-trained SDE that samples from the prior distribution. For the Gaussian mixture priors used in our benchmarks, this SDE can be specified in closed form: under common Gaussian transition kernels, the Gaussian-mixture structure is preserved, so the time-dependent scores ∇x log pt(xt) in (2.2) admit exact evaluation. As a result, these experiments isolate algorithmic error in posterior sampling from approximation error in prior learning. Explicit formulas for the noisy prior marginals and their scores are given in Appendix D. Because DPS, ΠGDM, and DAPS do not use the TRT introduced in this work, we choose benchmark priors for which the initial value function bias is minimal. In particular, we use long time horizons so that p0,T (x0, xT ) ≈ p0(x0) pT (xT ), making the base process approximately memoryless and enabling a fair comparison between path-space control learning and existing diffusion-based posterior samplers. Imple-mentation details regarding the SDEs are given in Appendix C. 
+
+Reference posteriors and optimal controls. For the two linear–Gaussian bench-marks (Sections 6.1.1–6.1.2), the posterior πpost (x | y) is available in closed form as a Gaussian mixture, and we additionally derive the optimal path-space control in closed form. These expressions provide exact reference solutions for validating both sampled posteriors and learned controls; details are deferred to Appendix E. For the nonlinear benchmarks (Sections 6.1.3–6.1.4), we use the high-quality MCMC reference samples released with [13]. We now describe the four benchmark inverse problems considered in this work. Their main features are summarized in Table 1, and full parameter specifications are given in Appendix C. 
+
+6.1.1. Random linear sensing problem. We consider the linear-Gaussian observation model (6.2) y = Hx + η, η ∼ N (0, Γ),
+
+where H ∈ RK×D is a fixed realization with i.i.d. N (0 , 1) entries and Γ ∈ RK×K is a diagonal (heteroscedastic) noise covariance. We set D = K = 20. With the Gaussian mixture prior (6.1), the posterior remains a Gaussian mixture, so both exact reference samples and the optimal path-space control are available in closed form; see Appendices D and E. 
+
+> 16
+
+Table 1: Summary of benchmark inverse problems. Complete parameter choices are provided in Appendix C. Problem (D, K ) Forward model F(x) Likelihood Random linear sensing (20 , 20) Hx N (Hx , Γ)Inpainting (10 , 8) Mx N (Mx , σ 2I)X-ray tomography (10 , 15) I0 exp( −Cx ) Poi( I0 exp( −Cx )) Phase retrieval (10 , 5) (Nx )⊙2 N (( Nx )⊙2, σ 2I)
+
+6.1.2. Inpainting problem. This benchmark models partial observations with additive Gaussian noise, (6.3) y = Mx + η, η ∼ N (0, σ 2IK ),
+
+where M ∈ { 0, 1}K×D is a selection matrix that extracts a subset of coordinates of 
+
+x. We set D = 10 and observe K = 8 coordinates; the observed index set and the noise level σ are specified in Appendix C. As in the random linear sensing problem, the posterior and optimal control are available in closed form; see Appendix E. In contrast to the random sensing benchmark, this problem probes the ability of a sampler to recover posterior uncertainty along unobserved directions of the parameter space. 
+
+6.1.3. X-ray tomography problem. We next consider a nonlinear transmis-sion tomography model with Poisson noise. Following [13], the forward intensity map is (6.4) f (x) = I0 exp( −Cx ),
+
+with exponential applied componentwise, and the likelihood is (6.5) πlike (y | x) = Poi( f (x)) .
+
+Here C ∈ RK×D and I0 are fixed problem parameters (Appendix C). We set ( D, K ) = (10 , 15) and use the same Gaussian mixture prior as in the inpainting benchmark. Since the resulting posterior is non-Gaussian and analytically intractable, we validate against the high-quality MCMC reference samples from [13], generated using MT-DREAM(ZS) [32]. 
+
+6.1.4. Phase retrieval problem. Finally, we consider a nonlinear and under-determined phase retrieval model with additive Gaussian noise, (6.6) y = ( Nx )⊙2 + η, η ∼ N (0, σ 2IK ),
+
+where ( ·)⊙2 denotes elementwise squaring and N ∈ RK×D has i.i.d. N (0 , 1) entries. We set ( D, K ) = (10 , 5) with a noise level σ chosen to yield a challenging low-SNR regime (Appendix C). As in the tomography case, we evaluate against the reference MCMC posterior samples from [13]. 
+
+6.2. Algorithm Implementations. In this subsection, we provide details re-garding the implementation of the trust-region approach. The implementation of the DPS, ΠGDM, and DAPS algorithms used for comparison is detailed in Appendix F. We implement the trust-region optimization (TR) method described in Section 4, with the log-variance divergence Dlogvar in (4.14) together with the Radon–Nikodym representation (4.8) used to solve the sub-problem given by (4.13). 
+
+> 17
+
+The control u ∈ U ([ −1, T )) is parameterized using a time-dependent function 
+
+uθ (x, t ) represented by a feedforward neural network. The network takes as input the state x ∈ RD and time t. Time is encoded using a fixed sinusoidal embedding of dimension D followed by a learned linear projection [26]. The encoded timestep is concatenated with x and mapped to a hidden dimension of Dwidth = 100, with a Softplus activation function, denoted ϕ(·), applied. This is followed by four linear layers with Softplus activations. We then apply an intermediate mixing layer that concatenates the network state with the time embedding, uses a linear layer to map back to the hidden dimension, and applies a gated nonlinearity of the form ϕ(h) ⊙ h,which is structurally similar to self-gated activations like Swish [43]. Next, four addi-tional linear layers are applied, with each one again followed by a Softplus activation. Finally, the network state is again concatenated with the time embedding and mapped back to RD using another linear layer. At each outer iteration, a replay buffer is constructed containing Nbuffer full tra-jectories, Brownian noise increments, the control values used during sampling, and the corresponding importance-weight functionals w appearing in (5.1). All buffer quanti-ties are detached from the computational graph, enabling off-policy optimization. For a fixed trust-region multiplier λi, the control parameters θ are updated by minimizing a discrete-time Monte Carlo approximation of the trust-region log-variance objective in (4.14). The trust-region multiplier λi is updated at each outer iteration by solving the associated one-dimensional dual problem (4.11) for the KL constraint using scalar line search. We consider two trust-region radii, ϵ ∈ { 0.1, 0.01 }, in order to compare more aggressive and more conservative control updates; an interesting direction for future work is the use of adaptive trust-region strategies [56]. The maximum number of outer-loop iterations in (4.9) is set to I = 300. Optimization is terminated early when λi < 0.1. In the experiments below, we record the number of completed outer iterations and report the frequency of early termination in Appendix G. The network parameters are optimized using Adam [31] with learning rate 5 ×10 −4
+
+and gradient clipping with a value of 1. Training is performed for a maximum of 1.2 × 10 5 gradient steps, using mini-batches of size 2000 drawn from the replay buffer. The size of the replay buffer is set as Nbuffer = 50 , 000. 
+
+6.3. Evaluation Methods. We evaluate posterior sampling accuracy and un-certainty quantification across the benchmark inverse problems described above. We consider the trust-region (TR) path-space sampler alongside DPS, ΠGDM, and DAPS. Since in general ΠGDM is applicable only to linear inverse problems, we report it only for the random linear sensing and inpainting benchmarks. For the linear–Gaussian benchmarks, reference samples are drawn from the exact posterior distribution, and the closed-form optimal control is available, enabling direct assessment of both poste-rior accuracy and control approximation error. For the nonlinear benchmarks, we use the high-quality MCMC reference samples released in [13]. Computational efficiency is analyzed separately in Section 6.4. Each experiment consists of 10 independent trials. In the ith trial, the mea-surement yi is sampled independently from the measurement distribution, and each method generates 10 ,000 samples from the corresponding posterior πpost (x | yi). Met-rics are computed per trial and reported as mean ± standard deviation across trials. We assess posterior accuracy using posterior mean error, covariance error, max-imum mean discrepancy (MMD), and central moment discrepancy (CMD). For the linear–Gaussian benchmarks, we also report control approximation error, comparing 
+
+> 18
+
+each method’s induced control with the analytically available optimal control. This diagnostic is motivated by Theorem 5.1, which relates posterior sampling error to path-integrated control mismatch. In our experiments, all controls are evaluated on common reference trajectories generated under the optimal control. Detailed metric definitions are given in Appendix H. For samplers with tractable path-space change-of-measure representations, we additionally report importance-weighted diagnostics: normalized effective sample size (NESS), self-normalized importance-sampled posterior mean error, and the percentage reduction in posterior mean error due to reweighting. These diagnostics are reported for DPS, ΠGDM, and the proposed trust-region method, but not for DAPS, which does not define a single controlled diffusion path measure with tractable Radon– Nikodym weights of the form in Theorem 5.2. Finally, we include qualitative diagnostics based on two-dimensional projections of generated and reference samples onto the eigenvectors of the reference posterior covariance associated with its smallest and largest eigenvalues. These projections visualize posterior geometry along the most concentrated and most diffuse directions. 
+
+6.4. Computational efficiency analysis. To analyze the computational effi-ciency of the proposed approach, we focus on two dominant costs: the evaluation of the likelihood function and its score, and the evaluation of the base diffusion drift. Here the distinct training and inference stages of the proposed approach naturally suggest an amortized analysis framework. We therefore report the number of evalua-tions of the likelihood function and/or its score, and the number of evaluations of the drift term of the base diffusion model, in three different regimes: training, per-sample inference, and the total cost required to obtain 10 4 posterior samples. We compare all implemented posterior samplers using these metrics. Only the proposed method requires additional neural-network training beyond the base SDE, so the training cost of DPS, ΠGDM, and DAPS is zero. The reported costs are implementation-dependent; for example, the number of drift evaluations in DPS and ΠGDM depends on the SDE discretization. For DAPS, we report the more compu-tationally efficient variant used for the linear inverse problems. Table 2 displays the results of the computational efficiency analysis. In contrast to the posterior sampling results reported in Section 7, these quantities are not specific to any one benchmark problem, but instead reflect the algorithmic and implementation-level costs of the methods considered in this work. The proposed method incurs a substantial upfront training cost and, even amor-tized over 10 4 posterior samples, requires substantially more diffusion drift evaluations than DPS, ΠGDM, and DAPS. However, its amortized number of likelihood evalua-tions is smaller than that of DAPS. This cost profile is most favorable when likelihood evaluations dominate the computational budget or when a very large number (e.g., 
+
+> 10 6) of posterior samples is required. 
+
+7. Results. We report quantitative and qualitative results across the four bench-mark inverse problems. We also examine the role of the trust-region formulation in stabilizing optimization of the path-space objective; the corresponding ablation study is reported in Appendix I. 
+
+7.1. Random Linear Sensing Problem. Tables 3 and 4 report the results for the random linear sensing benchmark. The trust-region method outperforms DPS, ΠGDM, and DAPS across all posterior accuracy metrics, reducing mean error by more than an order of magnitude relative to DAPS and ΠGDM and by nearly two 
+
+> 19
+
+Diffusion Drift Evaluations Likelihood Evaluations Method Train Per-Sample Total * Train Per-Sample Total *
+
+DAPS 0 1000 10 7 0 2 × 10 4 2 × 10 8
+
+DPS 0 100 10 6 0 100 10 6
+
+ΠGDM 0 100 10 6 0 100 10 6
+
+TR 1.5 × 10 9 100 ≈ 1.5 × 10 9 1.5 × 10 7 0 1.5 × 10 7*‘Total’ = total training and sampling costs to obtain 10 4 posterior samples. 
+
+Table 2: The number of evaluations of the likelihood function πlike (y | x) and drift term A of the base SDE for different diffusion posterior sampling algorithms. Note that results are specific to the particular implementation of the base process and algorithms used in this paper.                                                                                                                                     
+
+> Problem Method Mean Error ↓
+> Cov Error ↓MMD ↓CMD ↓
+> Random linear sensing DPS 11 .9±1.84.74 ±0.55 0.525 ±0.094 1.57 ±0.23 ΠGDM 2.57 ±1.35 1.55 ±0.92 0.016 ±0.008 0.694 ±0.252 DAPS 5.01 ±1.49 4.96 ±0.44 0.127 ±0.040 1.42 ±0.22 TR ( ϵ= 0 .01) 0.248 ±0.110 0.647 ±0.050 0.0037 ±0.0007 0.074 ±0.025 TR ( ϵ= 0 .1) 0.239 ±0.091 0.644 ±0.050 0.0037 ±0.0006 0.074 ±0.021
+> Inpainting DPS 2.77 ±0.72 1.71 ±0.95 0.266 ±0.058 0.463 ±0.159 ΠGDM 2.51 ±1.88 1.35 ±1.09 0.055 ±0.038 0.708 ±0.320 DAPS 7.77 ±5.18 3.95 ±1.01 0.415 ±0.188 1.94 ±0.61 TR ( ϵ= 0 .01) 0.585 ±0.381 0.661 ±0.684 0.0078 ±0.0028 0.121 ±0.064 TR ( ϵ= 0 .1) 0.513 ±0.431 0.436 ±0.067 0.0070 ±0.0036 0.091 ±0.061
+
+Table 3: Quantitative posterior sampling results for the two linear–Gaussian bench-mark problems. Entries report mean ± standard deviation across trials. Lower values are better for all metrics. The best result within each benchmark and metric is bolded. orders of magnitude relative to DPS. The diagnostics show that TR also attains the lowest control error and highest NESS, indicating more accurate approximation of the optimal path-space control and more stable importance weights. Importance reweighting improves posterior mean estimates for all methods with tractable weights, with the largest improvement observed for ΠGDM. The qualitative results in Figure 2 are consistent with the quantitative metrics. The figure shows two-dimensional projections of the generated samples for a rep-resentative trial, together with contour lines of the projected ground-truth posterior density, exact posterior samples, and the corresponding prior distribution. In this ran-dom linear sensing benchmark, the posterior is available in closed form as a Gaussian mixture. Relative to DPS, ΠGDM, and DAPS, the trust-region method yields samples that more closely follow the geometry of the target posterior, with improved recovery of the dominant modes and their anisotropic spread. By contrast, DPS exhibits mode collapse, ΠGDM remains overdispersed, and DAPS is overly diffuse. 
+
+7.2. Inpainting problem. The corresponding results for the inpainting bench-mark are shown in Tables 3 and 4. This problem tests posterior recovery in directions that are not directly constrained by the observations, requiring accurate modeling of the conditional structure induced by partial observation. Both trust-region configu-                                                                                                                    
+
+> 20 Problem Method Control Error ↓NESS ↑Reweighted Mean Error ↓
+> Percent Reduction in Mean Error ↑
+> Random linear sensing DPS 0.926 ±0.489 0.0002 ±0.0001 11 .1±2.37.4±11 .1ΠGDM 0.015 ±0.005 0.596 ±0.154 0.184 ±0.054 82 .8±29 .2
+> DAPS ––––TR ( ϵ= 0 .01) 0.0046 ±0.0013 0.811 ±0.038 0.187 ±0.070 11 .0±48 .9TR ( ϵ= 0 .1) 0.0044 ±0.0012 0.812 ±0.040 0.183 ±0.067 13 .1±47 .9Inpainting DPS 0.335 ±0.102 0.0022 ±0.0018 3.53 ±1.98 −27 .5±65 .3ΠGDM 0.021 ±0.005 0.535 ±0.157 0.206 ±0.145 80 .9±26 .3
+> DAPS ––––TR ( ϵ= 0 .01) 0.0055 ±0.0028 0.804 ±0.072 0.191 ±0.143 56 .8±38 .0TR ( ϵ= 0 .1) 0.0052 ±0.0013 0.807 ±0.070 0.162 ±0.125 42 .9±39 .6
+
+Table 4: Control and importance sampling diagnostics for the two linear–Gaussian benchmark problems. Entries report mean ± standard deviation across trials. Lower values are better for control error and reweighted mean error; higher values are better for NESS and percent reduction in mean error. The best result within each benchmark and metric is bolded. rations outperform DPS, DAPS, and ΠGDM across all reported metrics. The importance-sampling diagnostics in Table 4 show the same pattern: TR has the smallest control error and largest NESS, while DPS exhibits severe weight degeneracy. Reweighting substantially improves posterior mean estimates for ΠGDM and TR, but not for DPS. The qualitative projections in Figure 3 show that TR best captures both the concentration and spread of the reference posterior, whereas competing methods either distort the posterior geometry or remain overly diffuse. 
+
+7.3. X-ray tomography problem. Table 5 reports results for the x-ray to-mography benchmark, which is nonlinear and has no closed-form posterior or optimal control. ΠGDM and control error diagnostics are therefore omitted. Both trust-region configurations outperform DPS and DAPS across all posterior accuracy met-rics. In this benchmark, the more conservative trust-region radius ϵ = 0 .01 gives the best overall performance. The importance-sampling diagnostics in Table 6 show the same trend: TR with ϵ = 0 .01 attains the largest NESS and the lowest reweighted mean error, indicating more stable path-space weights and more accurate importance-corrected posterior estimates. The qualitative results in Figure 4 are consistent with the quantitative metrics. Since the posterior density is not available analytically in this nonlinear benchmark, the reference contours are obtained from a kernel density estimate of the MCMC samples. The trust-region samples are in the closest agreement with the reference posterior, whereas DPS exhibits a structural mismatch and DAPS remains compara-tively diffuse. 
+
+7.4. Phase retrieval problem. Table 5 reports results for the nonlinear and underdetermined phase retrieval benchmark. This is the most challenging problem considered and is more sensitive to the trust-region radius. The larger radius, ϵ = 0 .1, substantially outperforms ϵ = 0 .01 and achieves the best results across all posterior accuracy metrics, indicating that less conservative updates are beneficial in this set-ting. The importance-sampling diagnostics in Table 6 show that TR also yields higher NESS than DPS, although reweighting is not beneficial for this difficult posterior. Fig-   
+
+> 21 10 010
+> PC 1
+> 6
+> 4
+> 2
+> 0
+> 2
+> 4
+> PC 20
+> PCA Projection (PC 1vs PC 20 ) (Prior)
+
+(a) Prior 10 0 10   
+
+> PC 1
+> 6
+> 4
+> 2
+> 0
+> 2
+> 4
+> PC 20
+> PCA Projection (PC 1vs PC 20 ) (GT)
+
+(b) GT posterior 10 0 10  
+
+> PC 1
+> 6
+> 4
+> 2
+> 0
+> 2
+> 4
+> PC 20
+> PCA Projection (PC 1vs PC 20 )
+
+(c) DPS 10 0 10   
+
+> PC 1
+> 6
+> 4
+> 2
+> 0
+> 2
+> 4
+> PC 20
+> PCA Projection (PC 1vs PC 20 )
+
+(d) ΠGDM 10 0 10 20   
+
+> PC 1
+> 4
+> 2
+> 0
+> 2
+> 4
+> PC 20
+> PCA Projection (PC 1vs PC 20 )
+
+(e) DAPS 10 0 10   
+
+> PC 1
+> 6
+> 4
+> 2
+> 0
+> 2
+> 4
+> PC 20
+> PCA Projection (PC 1vs PC 20 )
+
+(f) TR ( ϵ = 0 .1) 
+
+Fig. 2: Qualitative comparison of posterior samples for the random linear sensing 
+
+benchmark. Top row: projections of the prior and ground-truth posterior, with con-tour lines showing the projected densities. Bottom row: projected samples from each method, shown against the same ground-truth posterior contours. All samples are projected onto the two-dimensional subspace spanned by the eigenvectors of the ref-erence posterior covariance corresponding to its smallest and largest eigenvalues. 
+
+Problem Method Mean Error ↓
+
+Cov Error ↓ MMD ↓ CMD ↓
+
+X-ray tomography DPS 9.03 ± 6.66 4.09 ± 1.95 0.453 ± 0.323 2.82 ± 1.80 DAPS 0.402 ± 0.119 3.36 ± 0.51 0.167 ± 0.031 0.443 ± 0.073 TR ( ϵ = 0 .01) 0.171 ± 0.144 0.709 ± 0.275 0.013 ± 0.018 0.076 ± 0.032 
+
+TR ( ϵ = 0 .1) 0.173 ± 0.145 0.715 ± 0.291 0.014 ± 0.019 0.077 ± 0.034 Phase retrieval DPS 3.13 ± 0.839 3.88 ± 0.741 0.199 ± 0.109 0.572 ± 0.041 DAPS 2.25 ± 2.61 5.73 ± 1.39 0.383 ± 0.072 0.453 ± 0.218 TR ( ϵ = 0 .01) 2.513 ± 7.030 1.203 ± 2.28 0.159 ± 0.482 0.299 ± 0.809 TR ( ϵ = 0 .1) 0.504 ± 0.641 0.446 ± 0.373 0.007 ± 0.007 0.071 ± 0.087 
+
+Table 5: Quantitative posterior sampling results for the two nonlinear benchmark problems ure 5 shows that TR with ϵ = 0 .1 best matches the reference posterior projection, while DPS and DAPS deviate more strongly from the MCMC reference. 
+
+8. Conclusion. The path-space perspective has rich origins in Schr¨ odinger’s pio-neering work on the Schr¨ odinger Bridge Problem [45, 46] and Feynman’s path-integral formalism of quantum mechanics [21]. In recent years, it has garnered significant inter-est from practitioners in stochastic optimal control, generative modeling, and optimal 
+
+22 10 0 10 20 
+
+PC 1
+
+> 4
+> 2
+> 0
+> 2
+> 4
+> PC 10
+
+PCA Projection (PC 1 vs PC 10 ) (Prior) (a) Prior 10 0 10 20 
+
+PC 1
+
+> 2
+> 0
+> 2
+> PC 10
+
+PCA Projection (PC 1 vs PC 10 ) (GT) (b) GT posterior 10 0 10 20 
+
+PC 1
+
+> 4
+> 2
+> 0
+> 2
+> 4
+> PC 10
+
+PCA Projection (PC 1 vs PC 10 )
+
+(c) DPS 20 10 0 10 20 
+
+PC 1
+
+> 2
+> 0
+> 2
+> PC 10
+
+PCA Projection (PC 1 vs PC 10 ) (d) ΠGDM 20 10 0 10 20 
+
+PC 1
+
+> 2
+> 0
+> 2
+> 4
+> PC 10
+
+PCA Projection (PC 1 vs PC 10 ) (e) DAPS 10 0 10 20 
+
+PC 1
+
+> 2
+> 0
+> 2
+> PC 10
+
+PCA Projection (PC 1 vs PC 10 ) (f) TR ( ϵ = 0 .1) 
+
+Fig. 3: Qualitative comparison for the inpainting benchmark problem. Samples are shown in the two-dimensional subspace spanned by the eigenvectors of the reference posterior covariance associated with its smallest and largest eigenvalues. 4 2 0 2 4
+
+PC 1
+
+> 20
+> 10
+> 0
+> 10
+> 20
+> PC 10
+
+PCA Projection (PC 1 vs PC 10 ) (Prior) 
+
+(a) Prior 5.0 2.5 0.0 2.5 5.0 
+
+PC 1
+
+> 15.0
+> 14.5
+> 14.0
+> 13.5
+> 13.0
+> 12.5
+> PC 10
+
+PCA Projection (PC 1 vs PC 10 ) (GT) (b) GT posterior 4 2 0 2 4
+
+PC 1
+
+> 20
+> 10
+> 0
+> 10
+> 20
+> PC 10
+
+PCA Projection (PC 1 vs PC 10 )
+
+(c) DPS 5.0 2.5 0.0 2.5 5.0 
+
+PC 1
+
+> 15.0
+> 14.5
+> 14.0
+> 13.5
+> 13.0
+> 12.5
+> PC 10
+
+PCA Projection (PC 1 vs PC 10 ) (d) DAPS 5.0 2.5 0.0 2.5 5.0 
+
+PC 1
+
+> 15.0
+> 14.5
+> 14.0
+> 13.5
+> 13.0
+> 12.5
+> PC 10
+
+PCA Projection (PC 1 vs PC 10 ) (e) TR ( ϵ = 0 .01) 
+
+Fig. 4: Qualitative comparison for the x-ray tomography benchmark problem. Refer-ence contours are obtained from a kernel density estimate of the MCMC samples. 
+
+23 Problem Method NESS ↑ Reweighted Mean Error ↓
+
+Percent Reduction in Mean Error ↑
+
+X-ray tomography DPS 0.0006 ± 0.0008 2.84 ± 1.25 57 .8 ± 25 .0
+
+DAPS – – –TR ( ϵ = 0 .01) 0.607 ± 0.213 0.143 ± 0.074 4.79 ± 18 .1TR ( ϵ = 0 .1) 0.607 ± 0.214 0.146 ± 0.079 5.14 ± 16 .8Phase retrieval DPS 0.0001 ± 0.0000 7.11 ± 5.04 −106 ± 91 .7DAPS – – –TR ( ϵ = 0 .01) 0.552 ± 0.167 2.51 ± 7.03 −7.08 ± 68 .1
+
+TR ( ϵ = 0 .1) 0.581 ± 0.205 0.534 ± 0.873 −47 .6 ± 181 
+
+Table 6: Importance sampling diagnostics for the nonlinear benchmark problems. 5 0 5 
+
+> PC 1
+> 5
+> 0
+> 5
+> PC 10
+> PCA Projection (PC 1vs PC 10 ) (Prior)
+
+(a) Prior 5 0 5  
+
+> PC 1
+> 5
+> 0
+> 5
+> PC 10
+> PCA Projection (PC 1vs PC 10 ) (GT)
+
+(b) GT posterior 5 0 5 
+
+> PC 1
+> 5
+> 0
+> 5
+> PC 10
+> PCA Projection (PC 1vs PC 10 )
+
+(c) DPS 5 0 5  
+
+> PC 1
+> 5
+> 0
+> 5
+> PC 10
+> PCA Projection (PC 1vs PC 10 )
+
+(d) DAPS 5 0 5  
+
+> PC 1
+> 5
+> 0
+> 5
+> PC 10
+> PCA Projection (PC 1vs PC 10 )
+
+(e) TR ( ϵ = 0 .1) 
+
+Fig. 5: Qualitative comparison for the phase retrieval benchmark problem. Reference contours are obtained from a kernel density estimate of the MCMC samples. transport, where advances such as the log-variance divergence [38], combined with neural network parameterizations, have led to state-of-the-art results in statistical physics and chemistry [25]. Building on this foundation, we have developed a path-space formulation of diffusion-based posterior sampling. We introduced a time reparameterization tech-nique that ensures well-posedness by removing the bias associated with the unknown initial value function, without requiring auxiliary training. Within this framework, posterior sampling is cast as a stochastic control problem, enabling the use of trust-region path-space optimization to learn approximate controls. Empirically, we demon-strated that this approach achieves state-of-the-art performance across a suite of rig-orously characterized benchmark inverse problems. Beyond algorithmic performance, the path-space perspective provides a unified 
+
+24 framework for analyzing both learned and guidance-based samplers. In particular, it yields importance sampling weights as Radon–Nikodym derivatives between trajectory measures, enabling asymptotically unbiased estimation of posterior expectations. Our experiments further show that these weights can effectively correct errors in samples generated by existing diffusion-based posterior sampling methods. Our numerical studies, based on the benchmark problems introduced in [13], enable rigorous evaluation of posterior sampling accuracy and uncertainty quantifica-tion. However, these problems involve latent dimensions of at most 20, and therefore remain far smaller than the high-dimensional settings (e.g., image reconstruction) that motivate diffusion-based approaches. Developing high-dimensional benchmark problems that retain analytical tractability remains an important open challenge [57]. Another important direction is to reduce the computational cost of the proposed ap-proach by amortizing the learned posterior control across observations. Instead of learning a separate control for each measurement y, one could train a conditional control uθ (x, t, y), or more generally uθ (x, t, y, F), over a distribution of observations and forward operators. Such an amortized control could provide a fast initialization, or even a reusable posterior sampler, for new inverse problem instances, while the path-space importance weights developed here could be used to diagnose and correct residual bias. A complementary direction is to combine the proposed posterior path space framework with recent approaches for prior training. For scientific inverse problems with equality-constrained or manifold-supported priors, manifold-aware perturbation methods [30] provide a promising strategy for constructing stable full-dimensional prior-generating diffusions. Such priors could then serve as the base processes trans-formed into posterior samplers by the path-space control framework developed in this work. Other directions for future work include investigating discretization er-ror and developing tests for comparing the time reparameterization trick with other approaches for addressing the initial value function bias problem. 
+
+Acknowledgments. The authors are grateful to Youssef Mroueh and Rapha¨ el Pestourie for helpful discussions which helped motivate the questions explored in this paper.                  
+
+> REFERENCES [1] M. Albergo, N. M. Boffi, and E. Vanden-Eijnden ,Stochastic Interpolants: A Unifying Framework for Flows and Diffusions , Journal of Machine Learning Research, 26 (2025), pp. 1–80. [2] A. Bansal, H.-M. Chu, A. Schwarzschild, S. Sengupta, M. Goldblum, J. Geiping, and T. Goldstein ,Universal guidance for diffusion models , in Proceedings of the IEEE/CVF conference on computer vision and pattern recognition, 2023, pp. 843–852. [3] R. Baptista, P. Birmpa, M. A. Katsoulakis, L. Rey-Bellet, and B. J. Zhang ,Proximal optimal transport divergences , arXiv preprint arXiv:2505.12097, (2025). [4] J. Berner, L. Richter, and K. Ullrich ,An optimal control perspective on diffusion-based generative modeling , Transactions on Machine Learning Research, (2024). [5] D. Blessing, J. Berner, L. Richter, C. Domingo-Enrich, Y. Du, A. Vahdat, and G. Neu-mann ,Trust region constrained measure transport in path space for stochastic optimal control and inference , arXiv preprint arXiv:2508.12511, (2025). [6] A. Bora, A. Jalal, E. Price, and A. G. Dimakis ,Compressed sensing using generative models , in International conference on machine learning, PMLR, 2017, pp. 537–546. [7] D. Calvetti and E. Somersalo ,Inverse problems: From regularization to Bayesian inference ,Wiley Interdisciplinary Reviews: Computational Statistics, 10 (2018), p. e1427. [8] Y. Chen, T. T. Georgiou, and M. Pavon ,On the relation between optimal transport and Schr¨ odinger bridges: A stochastic control viewpoint , Journal of Optimization Theory and 25
+
+Applications, 169 (2016), pp. 671–691. [9] Y. Chen, M. Goldstein, M. Hua, M. S. Albergo, N. M. Boffi, and E. Vanden-Eijnden ,
+
+Probabilistic forecasting with stochastic interpolants and F¨ ollmer processes , arXiv preprint arXiv:2403.13724, (2024). [10] H. Chung, J. Kim, M. T. Mccann, M. L. Klasky, and J. C. Ye , Diffusion posterior sampling for general noisy inverse problems , in The Eleventh International Conference on Learning Representations, 2023. [11] H. Chung, B. Sim, D. Ryu, and J. C. Ye , Improving diffusion models for inverse problems using manifold constraints , in Advances in Neural Information Processing Systems, A. H. Oh, A. Agarwal, D. Belgrave, and K. Cho, eds., 2022. [12] S. L. Cotter, M. Dashti, J. C. Robinson, and A. M. Stuart , Bayesian inverse problems for functions and applications to fluid mechanics , Inverse problems, 25 (2009), p. 115008. [13] E. S. Crafts and U. Villa , Benchmarking diffusion annealing-based Bayesian inverse problem solvers , IEEE Open Journal of Signal Processing, 6 (2025), pp. 975–991. [14] V. De Bortoli, J. Thornton, J. Heng, and A. Doucet , Diffusion Schr¨ odinger bridge with applications to score-based generative modeling , Advances in neural information processing systems, 34 (2021), pp. 17695–17709. [15] A. Denker, F. Vargas, S. Padhy, K. Didi, S. V. Mathis, R. Barbano, V. Dutordoir, E. Mathieu, U. J. Komorowska, and P. Lio , DEFT: Efficient fine-tuning of diffusion models by learning the generalised h-transform , in The Thirty-eighth Annual Conference on Neural Information Processing Systems, 2024. [16] P. Dhariwal and A. Q. Nichol , Diffusion models beat GANs on image synthesis , in Advances in Neural Information Processing Systems, A. Beygelzimer, Y. Dauphin, P. Liang, and J. W. Vaughan, eds., 2021. [17] K. Didi, F. Vargas, S. V. Mathis, V. Dutordoir, E. Mathieu, U. J. Komorowska, and P. Lio , A framework for conditional diffusion modelling with applications in motif scaf-folding for protein design , arXiv preprint arXiv:2312.09236, (2023). [18] C. Domingo-Enrich, M. Drozdzal, B. Karrer, and R. T. Chen , Adjoint matching: Fine-tuning flow and diffusion generative models with memoryless stochastic optimal control ,in ICLR, 2025. [19] C. Domingo i Enrich, J. Han, B. Amos, J. Bruna, and R. T. Chen , Stochastic optimal con-trol matching , Advances in Neural Information Processing Systems, 37 (2024), pp. 112459– 112504. [20] B. Efron , Tweedie’s formula and selection bias , Journal of the American Statistical Associa-tion, 106 (2011), pp. 1602–1614. [21] R. P. Feynman , Space-time approach to non-relativistic quantum mechanics , Reviews of Mod-ern Physics, 20 (1948), p. 367. [22] R. Gao, E. Hoogeboom, J. Heek, V. D. Bortoli, K. P. Murphy, and T. Salimans , Diffusion models and gaussian flow matching: Two sides of the same coin , in The Fourth Blogpost Track at ICLR 2025, 2025. [23] A. Gretton, K. M. Borgwardt, M. J. Rasch, B. Sch¨ olkopf, and A. Smola , A kernel two-sample test , Journal of Machine Learning Research, 13 (2012), pp. 723–773. [24] W. Guo, J. Choi, Y. Zhu, M. Tao, and Y. Chen , Proximal diffusion neural sampler , arXiv preprint arXiv:2510.03824, (2025). [25] A. Havens, B. K. Miller, B. Yan, C. Domingo-Enrich, A. Sriram, B. Wood, D. Levine, B. Hu, B. Amos, B. Karrer, et al. , Adjoint sampling: Highly scalable diffusion samplers via adjoint matching , arXiv preprint arXiv:2504.11713, (2025). [26] J. Ho, A. Jain, and P. Abbeel , Denoising diffusion probabilistic models , in Adv. Neural Inf. Process. Syst., 2020, pp. 6840–6851. [27] L. Holdijk, Y. Du, F. Hooft, P. Jaini, B. Ensing, and M. Welling , Stochastic optimal control for collective variable free sampling of molecular transition paths , Advances in Neural Information Processing Systems, 36 (2023), pp. 79540–79556. [28] J. B. Ingraham, M. Baranov, Z. Costello, K. W. Barber, W. Wang, A. Ismail, V. Frap-pier, D. M. Lord, C. Ng-Thow-Hing, E. R. Van Vlack, et al. , Illuminating protein space with a programmable generative model , Nature, 623 (2023), pp. 1070–1078. [29] Y. Janati, E. Moulines, J. Olsson, and A. Oliviero-Durmus , Bridging diffusion posterior sampling and Monte Carlo methods: A survey , Philosophical Transactions of the Royal Society A: Mathematical, Physical and Engineering Sciences, 383 (2025). [30] K. Keegan and L. Ruthotto , Manifold-aware perturbations for constrained generative mod-eling , arXiv preprint arXiv:2601.23151, (2026). [31] D. P. Kingma and J. Ba , Adam: A method for stochastic optimization , arXiv preprint arXiv:1412.6980, (2014). 26 [32] E. Laloy and J. A. Vrugt , High-dimensional posterior exploration of hydrologic models using multiple-try dream (zs) and high-performance computing , Water Resources Research, 48 (2012). [33] Y. Lipman, R. T. Q. Chen, H. Ben-Hamu, M. Nickel, and M. Le , Flow matching for gen-erative modeling , in The Eleventh International Conference on Learning Representations, 2023. [34] G.-H. Liu, J. Choi, Y. Chen, B. K. Miller, and R. T. Q. Chen , Adjoint Schr¨ odinger bridge sampler , in The Thirty-ninth Annual Conference on Neural Information Processing Systems, 2025. [35] X. Liu, C. Gong, and Q. Liu , Flow straight and fast: Learning to generate and transfer data with rectified flow , arXiv preprint arXiv:2209.03003, (2022). [36] Y. Marzouk, T. Moselhy, M. Parno, and A. Spantini , Sampling via Measure Transport: An Introduction , Springer International Publishing, Cham, 2016, pp. 1–41. [37] E. Nelson , Derivation of the Schr¨ odinger equation from Newtonian mechanics , Physical re-view, 150 (1966), p. 1079. [38] N. N¨ usken and L. Richter , Solving high-dimensional Hamilton–Jacobi–Bellman PDEs using neural networks: Perspectives from the theory of controlled diffusions and measures on path space , Partial differential equations and applications, 2 (2021), p. 48. [39] B. Øksendal , Stochastic differential equations: An introduction with applications , Springer, 2003. [40] A. Oliviero-Durmus, Y. Janati, E. Moulines, M. Pereyra, and S. Reich , Generative modeling meets Bayesian inference: A new paradigm for inverse problems , 2025. [41] M. Pavon , On local entropy, stochastic control, and deep neural networks , IEEE Control Sys-tems Letters, 7 (2023), pp. 437–441. [42] S. Peluchetti , Non-denoising forward-time diffusions , arXiv preprint arXiv:2312.14589, (2023). [43] P. Ramachandran, B. Zoph, and Q. V. Le , Searching for activation functions , arXiv preprint arXiv:1710.05941, (2017). [44] L. Richter and J. Berner , Improved sampling via learned diffusions , in The Twelfth Inter-national Conference on Learning Representations, 2024. [45] E. Schr¨ odinger , ¨Uber die umkehrung der naturgesetze , Sitzungsberichte der Preussischen Akademie der Wissenschaften, Physikalisch-mathematische Klasse, 144 (1931), p. 153. [46] E. Schr¨ odinger , Sur l’inversion des lois de la nature , Annales de l’Institut Henri Poincar´ e, 2 (1932), pp. 269–310. [47] S. Singh and I. Fischer , Stochastic sampling from deterministic flow models , arXiv preprint arXiv:2410.02217, (2024). [48] J. Song, A. Vahdat, M. Mardani, and J. Kautz , Pseudoinverse-guided diffusion models for inverse problems , in International Conference on Learning Representations, 2023. [49] Y. Song and S. Ermon , Generative modeling by estimating gradients of the data distribution ,in Advances in neural information processing systems, vol. 32, 2019. [50] Y. Song, L. Shen, L. Xing, and S. Ermon , Solving inverse problems in medical imaging with score-based generative models , in International Conference on Learning Representations, 2022. [51] Y. Song, J. Sohl-Dickstein, D. P. Kingma, A. Kumar, S. Ermon, and B. Poole , Score-based generative modeling through stochastic differential equations , in International Con-ference on Learning Representations, 2021. [52] W. Tang and F. Zhou , Fine-tuning of diffusion models via stochastic control: Entropy regu-larization and beyond , arXiv preprint arXiv:2403.06279, (2024). [53] T. Tarvainen, A. Pulkkinen, B. T. Cox, J. P. Kaipio, and S. R. Arridge , Bayesian image reconstruction in quantitative photoacoustic tomography , IEEE transactions on medical imaging, 32 (2013), pp. 2287–2298. [54] M. Uehara, Y. Zhao, K. Black, E. Hajiramezanali, G. Scalia, N. L. Diamant, A. M. Tseng, T. Biancalani, and S. Levine , Fine-tuning of continuous-time diffusion models as entropy-regularized control , arXiv preprint arXiv:2402.15194, (2024). [55] P. Vincent , A connection between score matching and denoising autoencoders , Neural Com-putation, 23 (2011), pp. 1661–1674. [56] S. Wright, J. Nocedal, et al. , Numerical optimization , Springer Science, 35 (1999), p. 7. [57] M. Zach, Y. Haouchat, and M. Unser , A statistical benchmark for diffusion posterior sam-pling algorithms , arXiv preprint arXiv:2509.12821, (2025). [58] W. Zellinger, T. Grubinger, E. Lughofer, T. Natschl¨ ager, and S. Saminger-Platz ,
+
+Central moment discrepancy (CMD) for domain-invariant representation learning , in In-ternational Conference on Learning Representations, 2017. 27 [59] B. Zhang, W. Chu, J. Berner, C. Meng, A. Anandkumar, and Y. Song , Improving diffusion inverse problem solving with decoupled noise annealing , in Proceedings of the Computer Vision and Pattern Recognition Conference, 2025, pp. 20895–20905. [60] B. J. Zhang and M. A. Katsoulakis , A mean-field games laboratory for generative modeling ,arXiv preprint arXiv:2304.13534, (2023). [61] Q. Zhang and Y. Chen , Path integral sampler: A stochastic control approach for sampling ,in ICLR, 2022. 
+
+Appendix A. Background on Measures in Path Space. 
+
+In this appendix we provide a brief review of the mathematical theory rele-vant to our measure-theoretic path space formulation. Our presentation is based on Øksendal’s Stochastic Differential Equations [39]. 
+
+Path space. Throughout this work we consider path spaces given by sets of con-tinuous functions, as is standard with diffusion processes. In particular, as described in Section 3, we consider path spaces of the form 
+
+C(s) ≜ {x(t) : [ s, T ] → RD | x(t) continuous },
+
+where here s < T . For ease of presentation, in this appendix we consider the setting after the time reparameterization described in Section 4; we therefore take s = −1and define C ≜ C(−1). Equipping C with the supremum norm induces a topology over the set. We define B as the corresponding Borel σ-algebra generated over C, with (C, B) forming a measurable space. 
+
+Measures in path space. A stochastic process over the path space is a collection of random variables {xt} indexed by t ∈ [−1, T ], with the law of xt assumed to be absolutely continuous with respect to the Lebesgue measure in RD . A stochastic process induces a measure over the path space ( C, B). Two measures P and Q over the space are equivalent if for every measurable set B ∈ B , P (B) = 0 if and only if 
+
+Q(B) = 0. Equivalence of measures implies the Radon-Nikodym derivative between P
+
+and Q is well defined; the notation dP/dQ = f is used to denote the Radon-Nikodym derivative of P with respect to Q, with f the (unique almost everywhere) function satisfying 
+
+P (B) = 
+
+Z
+
+> B
+
+f dQ. 
+
+In this context the Kullback–Leibler (KL) divergence between the two measures, de-noted DKL in this work, is well defined and satisfies 
+
+DKL (P ∥ Q) = EP [log f ] .
+
+Brownian motion and martingales. We use dwt to denote canonical Brownian motion in RD with corresponding Wiener measure W. The Brownian motion induces an (augmented) filtration, i.e., a family of σ-algebras {M t}Tt=−1, with MT satisfying 
+
+MT = B due to the equivalence of cylinder and Borel σ-algebras. A stochastic process 
+
+gt(wt) is said to be Mt-adapted if for each t ∈ [−1, T ] the function w → gt(wt) is Mt-measurable. The process is said to be a martingale with respect to the filtration if it is 
+
+Ft-adapted and satisfies E[|gt(wt)|] < ∞ and E[gs(ws)|M t] = gt for all s ∈ (t, T ] and all t ∈ [−1, T ). The martingale representation theorem states that every martingale with respect to the Brownian motion filtration can be written in terms of a stochastic process. This is formalized in the following theorem, which is used in the main text in the proof of Theorem 4.1. See, e.g., Theorem 4.3.4 in [39] for a proof. 
+
+Theorem A.1 (Martingale Representation Theorem). Suppose gt ∈ R is a scalar-valued Mt martingale and that E[gt(wt)2] < ∞ for t ∈ [−1, T ]. Then there exists a 
+
+> 28
+
+unique stochastic process ft(wt) such that 
+
+gt(wt) = g−1 +
+
+Z t
+
+> −1
+
+⟨fs(ws), d ws⟩
+
+almost surely for all t ∈ [−1, T ], where the integral in the above expression is to be interpreted in the Itˆ o sense (see Chapter 3 of [39]). Itˆ o processes. In this work we are interested in measures over this space induced by diffusion-type SDEs (Itˆ o processes) of the form given in (4.1), i.e., (A.1) dxt = A(xt, t ) dt + B(t) dwt, x−1 = 0, t ∈ [−1, T ].
+
+Under the assumptions given by Theorem 5.2.1 in [39] on A and B, which we assume to hold in this work, the above SDE has a strong solution and this solution is adapted to the filtration Mt, i.e., xt is a measurable stochastic process. Further, xt satisfies 
+
+E
+
+"Z T
+
+> −1
+
+∥xt∥22 dt 
+
+#
+
+< ∞.
+
+Given a C2 (twice continuously differentiable) map g : RD × [−1, T ] → RP , the dynamics of yt = g(xt, t ) are characterizable via Itˆ o’s formula. This formula is used in our proof of Theorem 4.1 in the special case where D = P = 1, and is stated below in this form. See Theorem 4.1.2 of [39] for a proof. 
+
+Theorem A.2 (One-Dimensional Itˆ o’s Formula). Consider the diffusion process 
+
+dx t = A(t) dt + B(t) dw t,
+
+where xt ∈ R and dw t is one dimensional Brownian motion, and let g : R × [−1, T ] →
+
+R be a C2 function. Then yt = g(t, x t) satisfies 
+
+dy t =
+
+ ∂g ∂t + A(t) ∂g ∂x + B(t)2
+
+2
+
+∂2g∂x 2
+
+
+
+dt + B(t) ∂g ∂x dw t.
+
+Girsanov’s theorem. The process xt in (A.1) induces a measure P over ( C, B), referred to as the base process throughout this work. We are interested in constructing controlled versions of the base process—in particular, processes with additive Markov controls. Girsanov’s theorem characterizes the change of measure between the base process and the controlled process. The following theorem gives Girsanov’s theorem in the form used in this work; see Theorem 8.6.5 in [39] for a proof. 
+
+Theorem A.3 (Girsanov’s Theorem for SDEs). Consider the base process 
+
+dxt = A(xt, t ) dt + B(t) dwt, x−1 = 0, t ∈ [−1, T ],
+
+and let u(xt, t ) be a control that satisfies the Novikov condition 
+
+EP
+
+"
+
+exp 12
+
+Z T
+
+> −1
+
+∥u(xt, t )∥22 dt 
+
+!# 
+
+< ∞.
+
+Define the measure P u through 
+
+dP u
+
+dP = exp 
+
+Z T
+
+> −1
+
+⟨u(xs, s ), d ws⟩ − 12
+
+Z T
+
+> −1
+
+∥u(xs, s )∥22 dt 
+
+!
+
+.
+
+> 29
+
+Then 
+
+dwu 
+
+> t
+
+= dwt − u(xu 
+
+> t
+
+, t ) dt 
+
+is a Brownian motion with respect to P u, and under P u the process satisfies the controlled dynamics 
+
+dxu 
+
+> t
+
+= [ A(xu 
+
+> t
+
+, t ) + B(t) u(xu 
+
+> t
+
+, t )] dt + B(t) dwt, xu 
+
+> −1
+
+= 0, t ∈ [−1, T ].
+
+Appendix B. Implementation of Analytic Flow Model. 
+
+In this appendix, we provide details regarding the construction of the toy problem used to demonstrate the time reparameterization trick in Figure 1. 
+
+Inverse problem. We consider a one-dimensional Bayesian inverse problem with prior 
+
+πpr (x) = 
+
+> Nm
+
+X
+
+> i=1
+
+wi N (mi, σ 2 
+
+> i
+
+),
+
+where here we set Nm = 2, w1 = w2 = .5, m1 = −2 and m2 = 2, and σ21 = σ22 = .3. The likelihood was a denoising likelihood, i.e., πlike (y | x) = N (y; x, τ 2), with τ 2 = 2 .5. 
+
+Base process. We consider a base process inspired by flow matching [33]. In particular, we first construct a deterministic ODE that samples from the prior, i.e., we seek a velocity field such that the solution to (2.3) satisfies p0(x0) = N (x0; 0 , 1) and pT (xT ) = PNm 
+
+> i
+
+wi N (xT ; mi, σ 2 
+
+> i
+
+), where T = 1. A velocity field satisfying this condition can be written in terms of the following decomposition (see Eq. 8 in [33]): (B.1) vt(xt) = 1
+
+P pi,t (xt)
+
+> Nm
+
+X
+
+> i=1
+
+vi(xt)pi,t (xt),
+
+where vi(xt) is a velocity field that drives p0 to N (xt; mi, σ 2 
+
+> i
+
+), and pi,t (xt) = wip(xt |
+
+xT ∼ N (xt; mi, σ 2 
+
+> i
+
+)). There are an infinite number of velocity fields that map between given Gaussian distributions; here we consider (B.2) vi(xt) = [ aixt + bi] , ai = log( σ)/T, bi = ai(σi − 1) −1mi.
+
+Under this choice we have that (B.3) p(xt | xT ∼ N (xt; mi, σ 2 
+
+> i
+
+))) = N (xt; ( σt/T i − 1)( σi − 1) −1mi, σ 2t/T i ),
+
+from which we can construct the marginals (B.4) pt(xt) = 
+
+> Nm
+
+X
+
+> i=1
+
+wi N (xt; ( σt/T i − 1)( σi − 1) −1mi, σ 2t/T i )A quick calculation shows that 
+
+p(x0) = 
+
+> Nm
+
+X
+
+> i=1
+
+wi N (x0; 0 , 1) = N (x0; 0 , 1) and 
+
+p(xT ) = 
+
+> Nm
+
+X
+
+> i=1
+
+wi N (xt; mi, σ 2 
+
+> i
+
+)
+
+> 30
+
+as desired. So plugging (B.2) and (B.3) into (B.1) gives an analytic expression for a velocity field that samples from the given mixture distribution. The above flow model is an ODE that cannot be used directly on our framework. However, as described in Section 2, stochasticity can be injected into the above process using Nelson’s identity. Here we set gs(t) in (2.5) as gs(t) ≡ .5, so that the final base process reads 
+
+dx t = ( vt(xt) + .125 ∇x log pt(xt)) dt + .5 dw t,
+
+with vt given as above and ∇x log pt(xt) computed using (B.4). 
+
+Computation of optimal control. To compute the optimal control, we use the analytic expression for the optimal control given by (4.6). This formula is intractable in general due to the high variance of the conditional distribution which appears in the definition of the optimal control. However, it is computable in the simple one-dimensional setting considered here. In particular, we estimate the control using a Monte-Carlo estimator with NM C = 25( T − t)/T samples used to compute the expectation in the optimal control expression 
+
+u(xt, t ) = B(t)T ∇x log EP [dQ ∗/dP | xt],
+
+and automatic differentiation used to compute the derivative. 
+
+Appendix C. Benchmark Specifications. 
+
+This appendix collects the complete benchmark definitions used in Section 6.1. Across all experiments, the inversion parameter is x ∈ RD and the prior is a Gaussian mixture model (GMM) with Nm = 3 components. 
+
+C.1. Gaussian mixture prior parameterization. We use the prior (C.1) πpr (x) = 
+
+> Nm
+
+X
+
+> i=1
+
+wi N (x; μi, Σi), wi ≥ 0,
+
+> Nm
+
+X
+
+> i=1
+
+wi = 1 ,
+
+with Nm = 3 in all benchmarks. For compactness, we define the linear spacing operator linspace( a, b ; D) ≜  a + j−1 
+
+> D−1
+
+(b − a)Dj=1 ∈ RD .
+
+We also use 1D ∈ RD to denote the all-ones vector. 
+
+C.2. Random linear sensing with heteroscedastic Gaussian noise. This benchmark corresponds to Section 6.1.1. We set D = K = 20 and define (C.2) y = Hx + η, η ∼ N (η; 0, Γ).
+
+The sensing matrix H ∈ R20 ×20 has i.i.d. entries Hij ∼ N (0 , 1). The noise covariance is diagonal and heteroscedastic: (C.3) Γ = diag( σ21 , . . . , σ 220 ), σ2 
+
+> j
+
+= 500 + j − 119 (1000 − 500) , j = 1 , . . . , 20 .
+
+Prior. We use w1 = 0 .4, w2 = 0 .3, w3 = 0 .3 and 
+
+μ1 = linspace( −1, −5; D), Σ1 = 2 ID ,(C.4) 
+
+μ2 = 0, Σ2 = diag(linspace(2 , 3; D)) ,(C.5) 
+
+μ3 = linspace(1 , 5; D), Σ3 = Q⊤ΛQ , Λ = diag(linspace(2 , 3; D)) ,(C.6) 
+
+> 31
+
+where Q is a random orthogonal matrix obtained via QR decomposition of a ran-dom matrix. This construction ensures Σ3 has the same eigenvalues as Σ2 but with randomly oriented eigenvectors. Under this configuration, the prior consists of three well-separated modes: two with opposing linear trends in their means (components 1 and 3) positioned in different quadrants of the parameter space, and one centered mode with anisotropic uncertainty (component 2). 
+
+Prior SDE. We implement the prior-sampling SDE as a variance-exploding (VE) SDE [51], which corresponds to g(xt, t ) ≡ 0 in (2.1). We set the diffusion term h(t) ≡ 1and the time horizon as T = 1000. An expression for ∇x log pt(xt) under this SDE and the Gaussian mixture prior used here is given in Appendix D, which completes the specification of the prior SDE. During training and inference, we discretize the SDE using Nnt = 100 timesteps, with the ith timestep given by ti = T − T (.01 /T )i/N nt .
+
+C.3. Inpainting with isotropic Gaussian noise. This benchmark problem corresponds to Section 6.1.2. We set D = 10 and K = 8 and define (C.7) y = Mx + η, η ∼ N (0, σ 2IK ),
+
+where M ∈ { 0, 1}K×D selects a subset of coordinates of x. Using one-based indexing, we observe the index set 
+
+O = {1, 2, 3, 5, 6, 7, 8, 10 }, U = {4, 9},
+
+and M has rows equal to the standard basis vectors {e⊤ 
+
+> j
+
+}j∈O . We set σ = 5, i.e. 
+
+η ∼ N (0, 25 I8). 
+
+Prior. We use w1 = 0 .4, w2 = 0 .3, w3 = 0 .3 and 
+
+μ1 = −51D , Σ1 = ID ,(C.8) 
+
+μ2 = 0, Σ2 = diag(linspace(1 , 2; D)) ,(C.9) 
+
+μ3 = 5 1D , Σ3 = QΛQ ⊤, Λ = diag(linspace(1 , 2; D)) .(C.10) In the nonlinear benchmarks below we reuse this same prior. 
+
+Prior SDE. The prior SDE used here is the same one as used in the random linear sensing benchmark problem, but with time-horizon T = 500 instead of T = 1000. The discretization scheme is unchanged. 
+
+C.4. X-ray tomography with Poisson likelihood. This benchmark corre-sponds to Section 6.1.3. We set D = 10, K = 15, and define the intensity map (C.11) f (x) = I0 exp( −Cx ),
+
+where the exponential is applied componentwise, I0 = 1000, and C ∈ R15 ×10 has entries drawn i.i.d. from Unif[0 .01 , 0.05]. The likelihood is Poisson: (C.12) πlike (y | x) = Poi  f (x).
+
+The prior and prior SDE are the same as in inpainting GMM from Appendix C.3. 
+
+C.5. Phase retrieval with additive Gaussian noise. This benchmark cor-responds to Section 6.1.4. We set D = 10, K = 5, and define (C.13) y = ( Nx )⊙2 + η, η ∼ N (0, σ 2IK ),
+
+> 32
+
+where ( ·)⊙2 denotes elementwise squaring and N ∈ R5×10 has i.i.d. entries Nij ∼N (0 , 1). We set σ = 25. The prior and prior SDE are the same as in inpainting GMM from Appendix C.3. 
+
+Appendix D. Closed-Form Noisy Prior Marginals, Scores, and Denois-ing Distributions for GMM Priors. 
+
+A central feature of the benchmarks in Section 6 is that the prior admits closed-form evaluation of the noisy marginal density, its score, and the associated denois-ing distribution under Gaussian perturbation kernels. This eliminates any need to pre-train a diffusion model and isolates algorithmic error in posterior sampling from approximation error in prior learning. To connect with the notation of Sections 2–3, recall that diffusion-type gener-ative models are described in terms of their time-t marginals pt and corresponding scores ∇x log pt(x), with x0 ∼ N (0, ID ) and terminal marginal pT = πpr for an ex-act prior-sampling base process. In the benchmark setting considered here, these intermediate marginals can be written explicitly by specifying a Gaussian perturba-tion kernel linking a terminal prior sample xT ∼ πpr to an intermediate state xt.This yields closed-form expressions for the marginal pt, its score, and the denoising distribution pT |t(xT | xt). 
+
+D.1. Gaussian perturbation kernel. Let αt ∈ R and σt > 0 define a time-indexed Gaussian perturbation kernel (D.1) xt = αtxT + σtε, ε ∼ N (0, ID ).
+
+Equivalently, (D.2) pt|T (xt | xT ) = N (xt; αtxT , σ 2 
+
+> t
+
+ID ).
+
+The expressions below hold for any choice of ( αt, σ t) consistent with the noising schedule used by the base process. In the numerical experiments of Section 6, the uncontrolled base process follows a variance-exploding (VE) SDE [51], so we use the specialization (D.3) αt ≡ 1, σt = σ(t).
+
+D.2. Noisy marginal induced by a GMM prior. Recall that the benchmark prior is the Gaussian mixture 
+
+πpr (x) = 
+
+> Nm
+
+X
+
+> i=1
+
+wi N (x; μi, Σi), wi ≥ 0,
+
+> Nm
+
+X
+
+> i=1
+
+wi = 1 ,
+
+as defined in (6.1). If xT ∼ πpr and xt is given by (D.1), then the time-t marginal remains a Gaussian mixture: (D.4) pt(x) = 
+
+> Nm
+
+X
+
+> i=1
+
+wi N (x; μt,i , Σt,i ),
+
+where (D.5) μt,i = αtμi, Σt,i = α2 
+
+> t
+
+Σi + σ2 
+
+> t
+
+ID .
+
+Thus Gaussian convolution preserves the mixture structure, with the mixture weights remaining unchanged. 
+
+> 33
+
+D.3. Closed-form noisy prior score. Define the posterior responsibility of mixture component i at time t by (D.6) rt,i (x) ≜ P(I = i | xt = x) = wi N (x; μt,i , Σt,i )
+
+PNm 
+
+> j=1
+
+wj N (x; μt,j , Σt,j ) .
+
+Differentiating (D.4) yields the score of the noisy marginal: 
+
+∇x log pt(x) = 
+
+> Nm
+
+X
+
+> i=1
+
+rt,i (x) ∇x log N (x; μt,i , Σt,i )=
+
+> Nm
+
+X
+
+> i=1
+
+rt,i (x) Σ−1 
+
+> t,i
+
+(μt,i − x).(D.7) Equation (D.7) is the closed-form score used in the benchmark experiments in place of a learned score network. 
+
+D.4. Closed-form denoising distribution p(xT | xt). We next characterize the denoising distribution of the terminal clean variable xT given the noisy state xt.Conditioned on mixture component I = i, the pair ( xT , xt) forms a linear–Gaussian model: 
+
+xT | (I = i) ∼ N (μi, Σi), xt | xT ∼ N (αtxT , σ 2 
+
+> t
+
+ID ).
+
+Therefore, (D.8) xT | (xt = x, I = i) ∼ N (mt,i (x), Pt,i ),
+
+with covariance (D.9) Pt,i =
+
+
+
+Σ−1 
+
+> i
+
++ α2
+
+> t
+
+σ2
+
+> t
+
+ID
+
+−1
+
+,
+
+and mean 
+
+mt,i (x) = Pt,i 
+
+
+
+Σ−1 
+
+> i
+
+μi + αt
+
+σ2
+
+> t
+
+x
+
+
+
+= μi + αtΣiΣ−1 
+
+> t,i
+
+(x − μt,i ).(D.10) Marginalizing over the latent component index gives the full denoising distribution (D.11) p(xT | xt = x) = 
+
+> Nm
+
+X
+
+> i=1
+
+rt,i (x) N (xT ; mt,i (x), Pt,i ),
+
+where the same responsibilities rt,i (x) from (D.6) appear. In particular, the condi-tional mean estimator of xT given xt = x is (D.12) E[xT | xt = x] = 
+
+> Nm
+
+X
+
+> i=1
+
+rt,i (x) mt,i (x).
+
+Finally, the score and conditional mean estimator are related by (D.13) E[xT | xt = x] = 1
+
+αt
+
+ x + σ2 
+
+> t
+
+∇x log pt(x) ,
+
+> 34
+
+which provides a useful consistency check on (D.7) and (D.12). 
+
+Appendix E. Closed-Form Reference Posteriors and Optimal Controls for Linear Benchmarks. 
+
+This appendix collects the closed-form posterior formulas used in the linear bench-marks of Section 6.1, together with the corresponding representation of the optimal path-space control. These formulas provide the exact reference distributions used for sampling-based evaluation in Section 6.3 and the exact control targets used to assess control learning in the linear problems. 
+
+E.1. Linear–Gaussian conditioning of a Gaussian mixture prior. Con-sider the linear observation model (E.1) y = Lx + η, η ∼ N (0, R),
+
+where x ∈ RD , y ∈ RK , L ∈ RK×D , and R ∈ RK×K is symmetric positive definite. Let the prior be the Gaussian mixture (E.2) πpr (x) = 
+
+> Nm
+
+X
+
+> i=1
+
+wi N (x; μi, Σi), wi ≥ 0,
+
+> Nm
+
+X
+
+> i=1
+
+wi = 1 ,
+
+as in (C.1). Introducing the latent mixture index I ∈ { 1, . . . , N m}, we may write 
+
+x | (I = i) ∼ N (μi, Σi), y | x ∼ N (Lx , R).
+
+Conditioned on I = i, the model is linear–Gaussian, and standard Gaussian condi-tioning gives (E.3) x | (y, I = i) ∼ N (μi|y, Σi|y),
+
+where 
+
+Si ≜ LΣ iL⊤ + R,(E.4) 
+
+μi|y = μi + ΣiL⊤S−1
+
+> i
+
+ y − Lμi
+
+,(E.5) 
+
+Σi|y = Σi − ΣiL⊤S−1 
+
+> i
+
+LΣ i.(E.6) The posterior mixture weights are (E.7) ewi(y) = wi N (y; Lμi, Si)
+
+PNm 
+
+> j=1
+
+wj N (y; Lμj , Sj ) .
+
+Hence the posterior distribution remains a Gaussian mixture: (E.8) πpost (x | y) = 
+
+> Nm
+
+X
+
+> i=1
+
+ewi(y) N (x; μi|y, Σi|y).
+
+E.2. Specialization to the linear benchmarks in Appendix C. For the random linear sensing benchmark of Appendix C.2, we identify 
+
+L = H, R = Γ,
+
+> 35
+
+with H and Γ defined in (C.1)–(E.1) and Appendix C.2. Therefore (E.5)–(E.8) give the exact posterior used to generate reference samples for that benchmark. For the inpainting benchmark of Appendix C.3, we identify 
+
+L = M, R = σ2IK ,
+
+with M and σ defined in Appendix C.3. The same formulas therefore give the exact posterior used to generate reference samples for the inpainting problem. 
+
+E.3. Optimal path-space control for the linear benchmarks. For the reparameterized base process (4.1), the optimal control solving the path-space poste-rior sampling problem is given by (E.9) u⋆(xt, t ) = B(t)⊤∇x log g(xt, t ), g(xt, t ) ≜ EP [dQ ⋆/dP | xt] ,
+
+as shown in (4.6). Since 
+
+dQ ⋆
+
+dP (x−1: T ) = πlike (y | xT )
+
+Z ,
+
+the normalizing constant Z is irrelevant after taking the gradient of the logarithm, and we may equivalently write (E.10) g(xt, t ) ∝ EP [πlike (y | xT ) | xt] .
+
+Under the Gaussian perturbation kernel and denoising formulas of Appendix D, the conditional law of xT given xt = x is a Gaussian mixture, (E.11) p(xT | xt = x) = 
+
+> Nm
+
+X
+
+> i=1
+
+rt,i (x) N  xT ; mt,i (x), Pt,i 
+
+,
+
+where rt,i (x), mt,i (x), and Pt,i are given in Appendix D. Substituting (E.11) into (E.10) and evaluating the Gaussian integral componentwise yields (E.12) g(x, t ) ∝
+
+> Nm
+
+X
+
+> i=1
+
+rt,i (x) N y; Lm t,i (x), LP t,i L⊤ + R.
+
+Therefore the optimal control can be written explicitly as (E.13) u⋆(x, t ) = B(t)⊤∇x log 
+
+"NmX
+
+> i=1
+
+rt,i (x) N y; Lm t,i (x), LP t,i L⊤ + R#
+
+.
+
+For the random linear sensing benchmark, this formula is used with 
+
+L = H, R = Γ,
+
+whereas for the inpainting benchmark it is used with 
+
+L = M, R = σ2IK .
+
+In both linear benchmarks, the exact posterior and the corresponding optimal path-space control are available as explicit finite Gaussian-mixture expressions. In practice, 
+
+> 36
+
+(E.13) can be evaluated directly, with the gradient computed either analytically or by automatic differentiation. 
+
+Appendix F. Implementation of Comparison Algorithms. 
+
+In this appendix, we discuss the implementation of the DPS, DAPS, and ΠGDM algorithms used in the numerical studies. DPS uses the control given by (5.4), with EP [xT | xt] computed analytically using Tweedie’s formula [20]. In practical implementations, this control is typically scaled by a user-specified parameter ξ > 0. The scaling parameter ξ is introduced to modulate the strength of the likelihood-based correction relative to the base diffusion dynamics, since the approximation underlying DPS does not in general determine the appropriate magnitude of the control. In our implementation, we tune ξ to achieve stable and competitive performance. The ΠGDM algorithm only applies to linear inverse problems with additive Gauss-ian noise, as well as non-linear problems where the non-linear operator admits a pseudo-inverse. We therefore only implement the ΠGDM algorithm for the random linear sensing and inpainting problems. For an inverse problem with forward operator 
+
+L and noise covariance R, the ΠGDM control is 
+
+u(xt, t ) = B(t)T ∇x log N (x; L EP [xT | xt], R + σ2 
+
+> t
+
+LL T ),
+
+where here σ2 
+
+> t
+
+is the marginal variance of pt|T (xt | xT ) and is given by the forward diffusion SDE in (2.1); see Appendix D for details. Note that this is the same as the DPS control for linear-Gaussian inverse problems, but with an additional additive covariance term given by σ2 
+
+> t
+
+LL T . There are no associated hyperparameters. In DAPS, the machinery of diffusion models is used to transform the original posterior sampling problem into a series of posterior sampling problems for an inverse problem with a Gaussian prior. In particular, given an iterate xt, a sub-problem is constructed using the ground-truth likelihood function πlike and a Gaussian prior with white noise covariance and mean given by an estimate of EP [xT | xt]. After obtaining a sample ˆ xT (xt) from this sub-problem (e.g., using Langevin dynamics), the subsequent iterate xt′ , t′ > t , is obtained by exploiting the knowledge of pt′|T (xt′ | ˆxT (xt)) available in the diffusion modeling context (see Appendix D). We implement DAPS using the hyperparameter settings in the original paper [59] as a starting point, with the number of Langevin steps tuned separately for each of the four experiments in our benchmark. For the two linear inverse problems, we adopt the setup used for the inpainting experiments in [59]; for the two nonlinear problems, we adopt the setup used for the phase retrieval experiments. Across all experiments, we set the decay rate in the Langevin step-size scheduler to zero. These adjustments were made to obtain strong DAPS performance in our problem setting. 
+
+Appendix G. Optimization Diagnostics. This section reports diagnostic statistics for the trust-region outer loop used by the TR sampler. For each independent run, we record the realized number of outer iterations, 
+
+Iused =
+
+(
+
+min {i : λi < 0.1}, if early termination occurs ,Imax , otherwise ,
+
+where Imax = 300. We report the mean and standard deviation of Iused across trials, together with the percentage of runs that terminate before reaching the iteration cap. 
+
+Appendix H. Evaluation Metrics. This appendix provides additional details on the quantitative metrics summarized in Section 6.3. 
+
+> 37
+
+Problem ϵ Iused (mean ± std) Early Terminated Random linear sensing 0.1 221 .0 ± 85 .2 60% (6 /10) Inpainting 0.1 179 .9 ± 119 .0 60% (6 /10) X-ray tomography 0.01 300 .0 ± 0.0 0% (0 /10) Phase retrieval 0.1 300 .0 ± 0.0 0% (0 /10) Table 7: Optimization statistics for the trust-region outer loop used by the TR sam-pler. 
+
+H.1. Posterior mean and covariance errors. We assess agreement in low-order statistics by comparing the posterior mean and covariance estimated from the generated samples with those obtained from the reference samples. Let ˆ μ and μref 
+
+denote the posterior means, and let ˆΣ and Σref denote the corresponding poste-rior covariance matrices. The posterior mean error is measured using the Euclid-ean two-norm ∥ ˆμ − μref ∥2. To quantify discrepancies in second-order structure, we measure covariance error using the Fisher–Rao metric between covariance matrices 
+
+dFR ( ˆΣ, Σref ) = log 
+
+
+
+Σ−1/2ref ˆΣΣ −1/2ref 
+
+
+
+> F
+
+, where ∥ · ∥ F denotes the Frobenius norm. 
+
+H.2. Maximum mean discrepancy (MMD). We also measure global distri-butional agreement using the maximum mean discrepancy (MMD) [23], which com-pares probability measures through their kernel mean embeddings in a reproducing kernel Hilbert space (RKHS). For two distributions π1 and π2, the MMD is defined by MMD( π1, π 2) = sup f ∈F (Eπ1 [f (x)] − Eπ2 [f (x)]) , where F denotes the unit ball of the RKHS associated with a positive-definite kernel k. Following [13], we use a multi-scale Gaussian kernel of the form k(x1, x2) = PNb 
+
+> i=1
+
+exp 
+
+
+
+− ∥x1−x2∥22
+
+> σi
+
+
+
+, with Nb = 5 and bandwidths σi = ¯ σ 2 i−⌈ Nb/2⌉, where ¯ σ is set to the average squared Euclidean dis-tance between reference samples. The MMD is computed using its standard empirical estimator based on the generated and reference samples. 
+
+H.3. Central moment discrepancy (CMD). To assess agreement beyond second-order structure, we employ the central moment discrepancy (CMD) metric [58], which compares distributions through their low-order central moments. For two distributions π1 and π2, the CMD is defined by CMD( π1, π 2) = 1 
+
+> α
+
+∥Eπ1 [x] − Eπ2 [x]∥2+P∞  
+
+> k=2 1
+> αk
+
+∥ck(π1) − ck(π2)∥2 , where ck(·) denotes the vector of kth-order central mo-ments and α > 0 is a decay parameter. In practice, we truncate the infinite series at order K = 5, and estimate all moments empirically from the generated and reference samples. Following [13], we set α = 4ˆ ηmax , where ˆ ηmax is an empirical estimate of 
+
+ηmax = Ey [∥η(y)∥∞] , and η(y) ∈ RD denotes the componentwise posterior standard deviation corresponding to the measurement y.
+
+H.4. Control approximation error. For the linear benchmark problems de-scribed in Sections 6.1.1 and 6.1.2, the optimal path-space control u⋆(x, t ) is available in closed form; see Appendix E. This allows us to directly compare the controls in-duced by different posterior sampling methods with the optimal feedback law. Moti-vated by the sampling error bound in Theorem 5.1, we report a finite-sample control discrepancy between each method’s induced control and u⋆. The theorem bounds posterior sampling error by a path-integrated squared control mismatch averaged un-der the approximate controlled process. The diagnostic used here differs in two ways: 
+
+> 38
+
+it uses the unsquared L2 norm and evaluates all methods on a common collection of reference trajectories generated under the optimal control. This makes the metric directly comparable across methods. Let {x(j),⋆ tn }j=1 ,...,M ; n=0 ,...,N denote reference trajectories generated under u⋆, where {tn}Nn=0 is the temporal discretization used for simulation. For a control ualg associated with a given sampling method, we define Ectrl = 
+
+> 1
+> T·M
+
+PMj=1 
+
+PN −1 
+
+> n=0
+
+ualg (x(j) 
+
+> tn
+
+, t n) − u⋆(x(j) 
+
+> tn
+
+, t n) 2
+
+∆tn, where ∆ tn ≜ tn+1 − tn. This metric measures the mean pointwise discrepancy between the control associated with a given method and the optimal control over states visited by the optimal controlled process. It is reported only for the linear-Gaussian benchmark problems, where u⋆ is available analytically. 
+
+H.5. Sampling efficiency and importance-sampled posterior expecta-tions. For methods that admit a path-space change-of-measure representation, we assess statistical efficiency using the normalized effective sample size induced by the corresponding importance weights. Let {w(j)}Nj=1 denote the path-space importance weights defined in (5.1), evaluated on a collection of N sampled trajectories. We define the effective sample size by ESS = (PNj=1 w(j))2 
+
+> PNj=1 (w(j))2
+
+, and the normalized effective sample size by NESS = ESS  
+
+> N
+
+. This quantity measures the degree of weight degener-acy and therefore serves as a diagnostic of the practical efficiency of the path-space importance correction. In addition to sampling efficiency, we report a self-normalized importance sam-pling estimate of the posterior mean. Given samples {x(j),u 
+
+> T
+
+}Nj=1 generated under a possibly suboptimal control u, we form ˆ μIS ≜
+
+PNj=1 w(j) x(j),u
+
+> T
+
+
+
+/
+
+PNj=1 w(j)
+
+
+
+where w(j) is the path-space importance weight associated with the jth sampled tra-jectory. Reporting the reweighted mean error ∥ ˆμIS − μref ∥2 therefore quantifies the extent to which path-space importance weighting can correct bias in approximate posterior samplers. To make this correction explicit, we also report the percent-age reduction in posterior mean error. For each independent trial i, we compute Red (i)mean ≜ 100 
+
+
+
+1 − ∥ ˆμ(i)IS −μ(i)ref ∥2  
+
+> ∥ˆμ(i)−μ(i)ref ∥2
+
+
+
+, where ˆ μ(i) ≜ 1
+
+> N
+
+PNj=1 x(j),u 
+
+> T,i
+
+is the unweighted sample mean for trial i. We report the sample mean and standard deviation of Red (i)mean across trials. Positive values indicate that reweighting reduces the posterior mean error, while negative values indicate that reweighting increases it. Both NESS and the importance reweighting strategy require a sampler that in-duces an absolutely continuous change of measure with respect to the reference dif-fusion. Consequently, these quantities are reported only for DPS, ΠGDM, and the proposed trust-region method, but not for DAPS, which does not define a single con-trolled diffusion path measure and therefore does not yield tractable Radon–Nikodym weights of the form in Theorem 5.2. 
+
+Appendix I. Trust-Region Algorithm Ablation Study. 
+
+In this work, the trust region approach introduced in [5] is used to solve the diffusion posterior sampling problem. In this appendix, we present the results of an ablation study designed to investigate the role of the trust region in stabilizing the optimization of the control. The trust region approach with log-variance divergence solves the series of sub-problems given by (4.14) and (4.12), with v = ui used as the off-policy control in the 
+
+> 39
+
+(a) (b) Fig. 6: (a) Normalized effective sample size (NESS) and (b) error in the posterior mean estimate as a function of the optimization iteration for the trust region approach, as well as several IDO variants that do not use trust regions. Note that the trust region approach terminates early due to the termination criteria discussed in Section 6. log-variance objective, and λi given by solving the dual problem. In our ablations, we use the log-variance divergence to directly to solve the posterior sampling problem without trust regions; this is equivalent to (4.14) and (4.12) with λi = 0 for all i. For the off-policy control v, which generates the trajectories used for control optimization, we consider three different options: v = ui, as in the trust region approach, v ≡ 0,and v = u∗, where u∗ is the optimal control for the problem and is assumed to be known analytically. We refer to these approaches as LogVar ( v = ui), LogVar (v ≡ 0), and LogVar ( v = u∗), respectively. To illustrate the effect of the trust region on optimization behavior, we conduct the ablation study on a representative posterior sampling trial of the inpainting problem. The implementations of the three ablation approaches used the same hyperparameters as used for the trust region approach. Figure 6 shows the normalized effective sample size (NESS) and posterior mean error metrics, as described in Section 6, as a function of the optimization iteration. As can be seen, the LogVar ( v ≡ 0), and LogVar ( v = u∗) approaches both lead to sub-optimal performance when compared with the trust region approach. LogVar (v = ui), which is an on-policy version of the log-variance objective, is able to provide competitive performance. However, the use of the trust region significantly improves the stability of the optimization process. We also note that the problem setting considered here is linear and relatively low-dimensional; in [5], the authors report that the trust region approach scales significantly better to high dimensional problem settings when compared with the LogVar ( v = ui).
