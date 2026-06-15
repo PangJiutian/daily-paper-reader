@@ -1,0 +1,1771 @@
+Title: 3DSTokesFlow: simulation-based inference for 3D Stokes profiles using flow matching
+
+URL Source: https://arxiv.org/pdf/2606.13004v1
+
+Published Time: Fri, 12 Jun 2026 00:37:09 GMT
+
+Number of Pages: 16
+
+Markdown Content:
+Astronomy & Astrophysics manuscript no. flow_inversion ©ESO 2026 June 12, 2026 
+
+# 3DStokesFlow : simulation-based inference for 3D Stokes profiles using flow matching 
+
+A. Asensio Ramos 1, 2, Kai E. Yang 3, M. J. Martínez González 1, 2, S. Curt Dodds 5, Xudong Sun 4 
+
+> 1
+
+Instituto de Astrofísica de Canarias (IAC), Avda Vía Láctea S /N, 38200 La Laguna, Tenerife, Spain e-mail: andres.asensio@iac.es  
+
+> 2
+
+Departamento de Astrofísica, Universidad de La Laguna, 38205 La Laguna, Tenerife, Spain  
+
+> 3
+
+SETI Institute, Mountain View, CA 94043, USA  
+
+> 4
+
+Institute for Astronomy, University of Hawai‘i at M¯ anoa, Pukalani, HI 96768, USA  
+
+> 5
+
+Institute for Astronomy, University of Hawai‘i at M¯ anoa, Honolulu, HI 96822, USA Received ; accepted 
+
+ABSTRACT 
+
+Context. The standard interpretation of observed Stokes profiles to infer the physical conditions of the solar atmosphere is inherently an ill-defined problem due to observational noise and mathematical degeneracies. Traditional pixel-by-pixel (1D) inversion codes provide point estimates with unreliable uncertainties, at the expense of significant computational time. Recent machine-learning-based Bayesian frameworks are restricted to 1D spatial configurations, ignoring crucial spatial correlations between neighboring pixels. 
+
+Aims. We aim to develop a novel multidimensional inversion framework capable of performing fast and scalable Bayesian inference across an entire 2D field-of-view (FoV). This approach seeks to provide accurate height-dependent atmospheric parameters with reliable posterior distributions while exploiting spatial correlations. 
+
+Methods. We introduce a new generative modeling strategy based on conditional flow matching. The model utilizes multi-scale spatial features extracted from observed Stokes profiles in the Fe I line pair at 630 nm, which then conditions a flow matching generative model to sample from the complex posterior distribution of the atmospheric parameters. The framework is trained using realistic 3D quiet Sun magnetohydrodynamic simulations. 
+
+Results. Validation on independent synthetic datasets demonstrates that the model accurately captures the true 3D stratification of all thermodynamic and magnetic parameters. Because the code additionally provides a geometrical height scale, it allows for the computation of 3D electric current density maps, Lorentz forces, and Ohmic and ambipolar dissipation maps in the solar photosphere. Application to real Hinode /SP quiet Sun observations yields highly localized electric currents at magnetic boundaries. We also lever-age the 3D geometrical information to trace the emergence of small-scale emerging magnetic loops across the solar atmosphere. 
+
+Key words. Methods: numerical, data analysis — techniques: polarimetric — Sun: photosphere, magnetic fields 
+
+1. Introduction 
+
+The interpretation of observed Stokes profiles to ob-tain information about the physical conditions of the solar atmosphere is routinely performed with in-version codes (del Toro Iniesta & Ruiz Cobo 2016; de la Cruz Rodríguez & van Noort 2017). These codes are based on the iterative modification of atmospheric models so that the synthetic Stokes profiles emerging from the model atmosphere match the observed ones. Di ff erent spectral lines require di ff erent levels of complexity in the forward mod-eling. The simplest codes assume a Milne-Eddington (ME) atmosphere (Auer et al. 1977; Landi Degl’Innocenti & Landolfi 2004), where gradients along the line-of-sight (LOS) are not relevant. Codes like MERLIN (Lites et al. 2007), MILOS 
+
+(Orozco Suárez & Del Toro Iniesta 2007), VFISV (Borrero et al. 2011), and pyMilne (de la Cruz Rodríguez 2019) work under this assumption and are, on average, very fast. When gradients are relevant, the inversion requires the prescription of a strat-ification of the physical parameters with height. If the lines can be safely assumed to form under the local thermodynamic equilibrium (LTE) approximation, the forward modeling is relatively simple and fast. Consequently, several codes have been developed to perform inversions under this assumption. Starting with the seminal work of Ruiz Cobo & del Toro Iniesta (1992) and the development of SIR , a handful of codes are now available, including SPINOR (Frutiger et al. 2000), 
+
+FIRTEZ (Pastor Yabar et al. 2019), and SPINOR-2D (van Noort 2012). More complex non-LTE line formation is required for the inversion of chromospheric lines. These approaches need to consistently solve the radiative transfer equation and the statistical equilibrium equations at each iteration of the inversion process. These codes are much more complex and computationally demanding, and only a few are available to the community: NICOLE (Socas-Navarro et al. 2015), STiC 
+
+(de la Cruz Rodríguez et al. 2019), SNAPI (Mili´ c & van Noort 2018), DeSIRe (Ruiz Cobo et al. 2022), and TIC (Li et al. 2022). Despite all the e ff orts carried out in recent decades, it is im-portant to note that the inversion of Stokes profiles remains an ill-defined problem. This is not just a consequence of poten-tial mathematical degeneracies in the forward modeling (such as the well-known 180° ambiguity in the azimuth of the magnetic field), in which identical Stokes profiles can be produced by dif-ferent atmospheric models. The presence of noise in observa-
+
+Article number, page 1  
+
+> arXiv:2606.13004v1 [astro-ph.SR] 11 Jun 2026 A&A proofs: manuscript no. flow_inversion
+
+tions also induces non-unique solutions, producing uncertainties in the inferred atmospheric parameters. Standard inversion codes often provide a point estimate of the final covariance matrix at the solution (e.g., see Ruiz Cobo & del Toro Iniesta 1992), but the inferred uncertainties obtained from this covariance matrix tend to be unreliable because they are calculated purely based on the goodness of the fit and the parameter sensitivity of the prob-lem. For this reason, strictly speaking, the inversion of Stokes profiles must be treated as a probabilistic inference problem. The goal is to characterize the posterior distribution of the atmo-spheric parameters given the observed Stokes profiles. This was first attempted by Asensio Ramos et al. (2007) using a Markov Chain Monte Carlo (MCMC) method under the assumption of a ME atmosphere. Given that this approach is computationally demanding, it has been di ffi cult to extend it to more complex atmospheres. Only recently, with the advent of machine learning tech-niques, has it been possible to perform Bayesian inference in more complex atmospheres. The first attempt was performed by Osborne et al. (2019), who used invertible neural networks (Ardizzone et al. 2018) to capture degeneracies and uncertain-ties when inverting Stokes profiles from flaring regions. More re-cently, Díaz Baso et al. (2022) used normalizing flows to provide extremely fast variational approximations to the posterior distri-bution in lines formed in LTE and non-LTE. Mistryukova et al. (2023) trained a neural model to provide a Gaussian varia-tional approximation to the posterior distribution, while Xu et al. (2024) trained emulators to accelerate the forward modeling and then used MCMC methods to sample the posterior distri-bution. Finally, the latest e ff ort in this direction was presented by Asensio Ramos & de la Cruz Rodríguez (2025), who treated inversions as a neural translation problem and trained a model to directly map Stokes profiles to atmospheric parameters in a gen-erative fashion, thereby providing a variational approximation to the posterior distribution. All the variational approximations mentioned above are cur-rently limited to 1D model atmospheres. However, it is becoming increasingly clear that exploiting the spatial correlation between neighboring pixels is crucial to obtaining more accurate and reli-able inferences (Asensio Ramos & Díaz Baso 2019; Yang et al. 2024). Given the dimensionality of the resulting posterior distri-bution when inverting 2D FoVs, performing Bayesian inference in this case is an extremely challenging problem. The dimen-sionality of the problem grows with the number of pixels mul-tiplied by the depth stratification of all physical parameters. For instance, a 2D map of 100 ×100 pixels with a depth stratifica-tion of 10 points for temperature, LOS velocity, and the three cartesian components of the magnetic field, results in a posterior distribution of dimension 5 × 10 × 100 × 100, i.e., half a million dimensions. In this work, we take full advantage of recent advances in generative modeling to propose a novel strategy based on flow matching to perform Bayesian inference of atmospheric param-eters from Stokes profiles. This method exploits the spatial cor-relation between neighboring pixels and can provide accurate in-ferences and uncertainties for the atmospheric parameters across the entire observed FoV. Apart from a significant improvement in terms of speed, the exploitation of spatial correlation allows us to obtain information regarding geometrical height and gas pressure. This opens up the possibility of using very simple dis-ambiguation methods for the transverse components of the mag-netic field, which allows us to calculate electric current density maps. From this information, we demonstrate that it is possible to obtain maps of the ohmic and ambipolar dissipation in the photosphere purely from observations 1.
+
+2. Bayesian Inference via Flow Matching 
+
+> 2.1. Bayesian Inference for Stokes profiles inversion
+
+The inference of the atmospheric parameters from a 2D FoV of observed Stokes profiles can be framed as a Bayesian inference problem. Let us denote by P ∈ RN×d the high-dimensional vec-tor that contains the atmospheric parameters (of dimension d)for each of the N pixels across the entire FoV. We observe the Stokes profiles of some selected spectral lines and denote them by S ∈ RN×m, where m denotes the product of all sampled wave-length points across the four Stokes parameters. The goal is to characterize the posterior distribution p(P|S ), which captures all the information about the atmospheric parameters given the ob-served data. The Bayes theorem allows us to express this poste-rior distribution as: 
+
+p(P|S ) = p(S |P)p(P)
+
+p(S ) , (1) where p(S |P) is the likelihood function that captures the forward modeling of the Stokes profiles given the atmospheric parame-ters, p(P) is the prior distribution that encodes our prior knowl-edge about the atmospheric parameters, and p(S ) is the evidence that serves as a normalization constant. From a generative modeling perspective, one can solve the Bayesian inference problem by drawing samples from the com-plex, unknown posterior distribution p(P|S ). However, having access to the posterior distribution is, in general, intractable. On one hand, the likelihood function p(S |P) is complex and com-putationally expensive to evaluate, especially when the forward modeling involves solving the radiative transfer equation under non-LTE conditions. On the other hand, the prior distribution 
+
+p(P) (models compatible with those one could find in the Sun) can also be di ffi cult to specify accurately, given the high di-mensionality of the parameter space and the potential correla-tions between parameters. However, if one has access to a finite dataset of pairs of atmospheric parameters and their correspond-ing Stokes profiles, {(Pi, S i)}Ni=1, drawn from the joint distribu-tion p(P, S ), one can leverage this dataset to learn a generative model that approximates the posterior distribution. Such dataset can simply be generated using simulations, i.e., by running a for-ward model (e.g., an LTE or non-LTE radiative transfer code) on a set of atmospheric models that are representative of the solar atmosphere. 
+
+> 2.2. Flow Matching
+
+Flow models (Lipman et al. 2024) are generative models that learn a continuous transformation (or flow) that maps a simple base multivariate distribution (e.g., a standard Gaussian N(0 , I), with I being the identity matrix) to a complex target distribution. Let us denote by x ∈ RM a random variable that follows the base distribution. One can define a time-dependent probability den-sity path pt for an auxiliary time t ∈ [0 , 1], where p0 (at t = 0) is the tractable base distribution and p1 (for t = 1) is the target posterior distribution. The flow ψt(x) is a time-dependent map-ping that transports samples X0 ∼ p0 from the base distribution to the target distribution, so that X1 ∼ p1. In general, the trajec-tory followed by a sample X0 under the flow can be expressed   
+
+> 1https://aasensio.github.io/3dstokesflow
+> Article number, page 2 Asensio Ramos et al.: 3DStokesFlow : simulation-based inference for 3D Stokes profiles using flow matching
+
+as Xt = ψt(X0). The distribution of all samples generated by the flow at any arbitrary time t are, therefore, distributed according to the distribution pt (i.e., Xt ∼ pt). Instead of directly learning the flow ψt(x), it is more common to learn the underlying vector field ut(x) that generates the flow, according to the following ordinary di ff erential equation: 
+
+ddt ψt(x) = ut(x), ψ0(x) = x. (2) The goal of flow matching is to learn a parameterized function 
+
+vθ 
+
+> t
+
+(x), typically given as a su ffi ciently capable neural network, that generates a flow that produces a probability path pt from 
+
+p0 to p1. The ideal objective would be to directly minimize the expected mean squared error between our neural vector field and the true target vector field: 
+
+LF M (θ) = Et,Xt vθ 
+
+> t
+
+(Xt) − ut(Xt) 2 , t ∼ π(t), Xt ∼ pt (3) where ut(x) is the true target vector field that generates the prob-ability path pt. The expectation is taken over the time t, which is sampled from the interval [0 , 1] with probability π(t), and over the samples Xt drawn from the distribution pt. The main problem of this approach is that we do not have direct access to the true target vector field ut(x) because it is, indeed, dependent on the intractable transformation between the base distribution and the complex posterior distribution. To bypass this intractability, Lipman et al. (2024) used a strategy based on analyzing what happens if the target distri-bution is given by a Dirac delta distribution centered at a single data point X1 (i.e., p1(x) = δx1 (x)). In other words, they analyzed the case conditional on a single data point X1. Of all the possible paths that can transport the base distribution to this Dirac delta target distribution, we choose the one that is given by the optimal transport (OT) between the two distributions. This allows us to define the simple and linear path such that Xt = (1 − t)X0 + tX 1,where X0 ∼ p0 is a sample drawn from the base distribution (from a practical point of view, we use samples from the stan-dard normal distribution, so that p0 = N(0 , I)). According to Eq. (2), the vector field that generates this path can be easily calculated as: 
+
+ut(x|X1) = X1 − X0. (4) This vector field is constant in time and points directly from the sample X0 to the target sample X1. Once trained, the flow gen-erated by this vector field is a straight line between the point 
+
+X0 and the data point X1, also known as the optimal transport path between the two distributions. The full loss function for this conditional flow matching strategy can be obtained by averaging over the data distribution p1 and all intermediate points Xt along the path, resulting in: 
+
+LCF M (θ) = Et,X1,Xt vθ 
+
+> t
+
+(Xt) − ut(Xt|X1) 2 ,
+
+t ∼ π(t), X1 ∼ p1, X0 ∼ p0, Xt ∼ pt. (5) Using Eq. (4), the conditional loss can be finally rewritten as: 
+
+LCF M (θ) = Et,X1,X0 vθ 
+
+> t
+
+(Xt) − (X1 − X0) 2 ,
+
+t ∼ π(t), X1 ∼ p1, X0 ∼ p0. (6) Lipman et al. (2024) showed that this construction via con-ditional flow matching gives a deceptively simple loss function which is equivalent to minimizing the original flow matching loss LF M (θ). Consequently, the model vθ 
+
+> t
+
+(x), trained by optimiz-ing Eq. (6), approximates the true target vector field ut(x), with-out ever having direct access to it. Training then proceeds by sampling a data point X1 from the target distribution, sampling a noise point X0 from the base distribution, and sampling a time step t from the π(t) distribution 2. The intermediate point Xt is then calculated as Xt = (1 − t)X0 + tX 1, and the loss is computed against the known vector field X1 − X0.The selection of the pair ( X0, X1) is often relevant for end-ing up with an e ffi cient model. The selection is done via a user-defined joint distribution π(X0, X1), known as the coupling. The simplest case is to select X0 and X1 independently from their respective distributions, so that the coupling factorizes as 
+
+π(X0, X1) = π(X0)π(X1). In this case, it is likely that the path be-tween X0 and X1 will intersect with the paths of other data points, which can make the learning task more di ffi cult for the neu-ral network. Although solutions to end up with non-intersecting paths have been proposed in the literature (such as using a cou-pling that enforces optimal transport), we have found great re-sults simply picking uniformly random samples from p0 and p1.In other words, we choose X0 ∼ N(0 , I) and X1 at random from the training set. 
+
+2.3. External Conditioning 
+
+The velocity model vθ 
+
+> t
+
+(x) can be easily extended to include addi-tional conditioning information. In the context of Bayesian infer-ence for Stokes profiles inversion, one can train a flow matching model to compute the posterior distribution of the atmospheric parameters conditioned on the observed Stokes profiles by opti-mizing the following loss function: 
+
+LCF M (θ) = Et,X0,(P,S ) vθ 
+
+> t
+
+(Xt, S ) − (P − X0) 2 ,
+
+t ∼ π(t), (P, S ) ∼ p(P, S ), X0 ∼ p0, (7) where the pair ( P, S ) is drawn from the joint distribution of at-mospheric parameters and Stokes profiles. 
+
+2.4. Inference 
+
+When the model is trained, inference can be performed by sam-pling from the base distribution and then integrating the learned vector field conditioned on the context S to transport the sample from the base distribution to the target distribution: 
+
+P = X0 +
+
+Z 10
+
+vθ 
+
+> t
+
+(Xt, S )dt . (8) This can be achieved by using any o ff -the-shelf ODE solver and, given that the probability paths are smooth, it can be done with a small number of function evaluations, making the inference process very e ffi cient. 
+
+3. Training 
+
+3.1. Training data 
+
+We train the model with the quiet Sun simulations presented in the SPIn4D 3 project (Yang et al. 2024; Yang et al. 2025). These simulations were performed with the MURaM code       
+
+> 2In this work, we use a uniform distribution over [0 ,1], so that π(t)=
+> U(0 ,1)
+> 3https://ifauh.github.io/SPIN4D
+> Article number, page 3
+
+A&A proofs: manuscript no. flow_inversion 0                   
+
+> 2
+> 4
+> 6
+> 8
+> 10
+> Y [arcsec]
+> 4000
+> 6000
+> 8000
+> 10000
+> T [K]
+> IQUV
+> Sim
+> 7.5
+> 5.0
+> 2.5
+> 0.0
+> 2.5
+> 5.0
+> 7.5
+> vz [km/s]
+> 150
+> 100
+> 50
+> 0
+> 50
+> 100
+> 150
+> Bz [G]
+> 0
+> 2
+> 4
+> 6
+> 8
+> 10
+> Y [arcsec]
+> 4000
+> 6000
+> 8000
+> 10000
+> T [K]
+> 7.5
+> 5.0
+> 2.5
+> 0.0
+> 2.5
+> 5.0
+> 7.5
+> vz [km/s]
+> 150
+> 100
+> 50
+> 0
+> 50
+> 100
+> 150
+> Bz [G]
+> 0.0 2.5 5.0 7.5 10.0
+> X [arcsec]
+> 0
+> 2
+> 4
+> 6
+> 8
+> 10
+> Y [arcsec]
+> 432101
+> log
+> 4000
+> 6000
+> 8000
+> 10000
+> T [K]
+> 432101
+> log
+> 7.5
+> 5.0
+> 2.5
+> 0.0
+> 2.5
+> 5.0
+> 7.5
+> vz [km/s]
+> 432101
+> log
+> 150
+> 100
+> 50
+> 0
+> 50
+> 100
+> 150
+> Bz [G]
+> 0.80
+> 0.85
+> 0.90
+> 0.95
+> 1.00
+> 1.05
+> 1.10
+> 1.15
+> 1.20
+> I/I c
+> 0.01
+> 0.02
+> 0.03
+> 0.04
+> 0.05
+> L/I c [%]
+> 2.0
+> 1.5
+> 1.0
+> 0.5
+> 0.0
+> 0.5
+> 1.0
+> 1.5
+> 2.0
+> V/I c [%]
+
+Fig. 1: Vertical cuts of the inferred atmospheric parameters (temperature, LOS velocity, and vertical magnetic field) for three columns of the validation snapshot (each row shows a di ff erent pixel). The true values from the simulation are shown in orange, while the median of the posterior distribution is shown in thin blue curves. The shaded areas correspond to the intervals between the 25th and 75th percentile (dark blue) and the 5th and 95th percentiles (light blue) of the posterior distribution. (Vögler et al. 2005; Rempel et al. 2009; Rempel 2012, 2014), taking the quiet Sun simulation of Rempel (2014) as the ini-tial condition and evolving them after adding di ff erent magnetic fields to produce snapshots from very quiet Sun to strong plages. The six initial magnetic configurations considered in this work are: i) zero magnetic field, ii) vertical field with 50 G, iii) in-clined fields with 50 G in each cartesian component, iv) vertical field with 100 G, v) vertical field with 200 G, vi) vertical fields of 200 G, −150 G and −50 G added to three quadrants of the sim-ulation box to mimic mix polarities see (see Yang et al. 2024, for more details on the simulations). The first five configurations are used for training, while the sixth one with mixed polarities is used for validation and testing. The horizontal simulation pixel is 16 km and spans 24 .6 × 24 .6 Mm horizontally. Snapshots ev-ery 12 min are considered, resulting in roughly 30 snapshots per simulation. A second set of snaphots is obtained by flipping the sign of the magnetic field vector, to avoid potential biases in the training data. The snapshots contain the vertical stratification of the atmo-spheric parameters as a function of position on the 2D grid. We consider the temperature T , LOS velocity v, the gas pressure P,and the three cartesian components of the magnetic field B =
+
+(Bx, By, Bz). The 180 ◦ ambiguity in the transverse components of the magnetic field is avoided (Asensio Ramos & Díaz Baso 2019) by transforming the Bx and By components of the mag-netic field to Bp1 = Bt cos 2 ϕ and Bp2 = Bt sin 2 ϕ, where 
+
+B2 
+
+> t
+
+= B2 
+
+> x
+
++ B2 
+
+> y
+
+= B2 
+
+> p1
+
++ B2 
+
+> p2
+
+is the square of the transverse compo-nent of the magnetic field, and ϕ = arctan( By/Bx) is the azimuth. We found this solution to be very stable and provide good results. The original simulation pixel of 16 km is rebinned to the Hinode spatial sampling of 0.16" per pixel, resulting in a pixel size of 116 km. No previous convolution with the spatial PSF of the telescope is applied to the physical parameters, so that the output of the trained model will be deconvolved (unaf-fected by the PSF) atmospheric parameters, in fashion similar to Asensio Ramos & Díaz Baso (2019). Horizontal cuts at con-stant log τ500 between -4 and 1 in steps of 0.5 are extracted. This results in 11 depth points for each of the physical parameters, so that the total dimension of the parameter space per column is 
+
+d = 77. The Stokes profiles in the Fe i 6301.5 and 6302.5 Å lines are synthesized at disk center 4 under the LTE approximation using a parallel version of SIR (Ruiz Cobo & del Toro Iniesta 1992; Asensio Ramos & Díaz Baso 2019). We convolve the emergent Stokes profiles with the measured spatial and spectral point spread functions (PSF) of Hinode /SOT (Tsuneta et al. 2008; Danilovic et al. 2008). The results are resampled to the spectral (21.5 mÅ per pixel) and spatial sampling (0.16" per pixel) of the Hinode /SP instrument. This results in 112 wavelength points for each Stokes parameters. Gaussian noise with a standard devia-tion of 10 −3 is added to the profiles, which is a typical value for Hinode /SP observations. We finally point out that the line forma-tion region of the Fe i lines almost never reaches log τ500 = −4. However we included this depth point in the training set and we caution that the information obtained at these heights is purely learned from the statistical correlations present in the training data conditioned on the observed Stokes profiles.  
+
+> 4
+
+This is a current limitation of the trained model, which can only an-alyze observations close to disk center. This can be trivially solved by using other heliocentric angles in the training set. Article number, page 4 Asensio Ramos et al.: 3DStokesFlow : simulation-based inference for 3D Stokes profiles using flow matching 0               
+
+> 2
+> 4
+> 6
+> 8
+> 0 km
+> Sample 0 Sample 1 Sample 2 Sample 3 Sample 4 Sample 5
+> 0
+> 2
+> 4
+> 6
+> 8
+> 100 km
+> 0
+> 2
+> 4
+> 6
+> 8
+> 200 km
+> 0
+> 2
+> 4
+> 6
+> 8
+> 300 km
+> 05
+> 0
+> 2
+> 4
+> 6
+> 8
+> 400 km
+> 0505050505
+> 3
+> 2
+> 1
+> 0
+> 1
+> 2
+> 3
+> vz [km/s]
+> 3
+> 2
+> 1
+> 0
+> 1
+> 2
+> 3
+> vz [km/s]
+> 3
+> 2
+> 1
+> 0
+> 1
+> 2
+> 3
+> vz [km/s]
+> 3
+> 2
+> 1
+> 0
+> 1
+> 2
+> 3
+> vz [km/s]
+> 3
+> 2
+> 1
+> 0
+> 1
+> 2
+> 3
+> vz [km/s]
+> x [arcsec]
+> y [arcsec]
+
+Fig. 2: Five samples from the posterior distribution for the vertical velocity computed with the flow matching generative model conditioned on the observed Stokes profiles. 
+
+3.2. Architecture and training details 
+
+A total of 10 5 training patches of size 64 ×64 pixels are extracted from the original snapshots, randomly choosing among the snap-shots considered for training. The location of the patches is ran-domly selected, ensuring that they are fully contained within the original simulation box. Random horizontal and vertical flips, together with random rotations in multiples of 90 ◦ are applied to the patches to augment the training data. Each patch is then a tensor C × H × W, where C = 77 is the number of channels corresponding to the physical parameters, and H = W = 64 are the height and width of the patch in pixels. The corresponding Stokes profiles are also extracted in patches of the same size, re-sulting in a tensor of shape L × H × W, where L = 448 is the con-catenation of the four Stokes parameters (112 wavelength points each). The median and standard deviation of the physical param-eters are computed for the training dataset and stored. During training, the physical parameters are normalized by subtracting the median and dividing by three times the standard deviation. The Stokes profiles are also normalized. Stokes I is normalized by dividing by 0.5 and subtracting 0.5. Stokes Q and U are nor-malized by multiplying by 100, while Stokes V is normalized by multiplying by 10. We have found this normalization to be stable during training, giving good results. We note that the normaliza-tion of the Stokes parameters Q, U and V is always problematic, given their large dynamic range. The Stokes profiles are then processed by a conditioning U-Net (Ronneberger et al. 2015) to extract a latent representation that summarizes the information contained in the Stokes pro-files. We choose to use a U-Net architecture for the conditioning model because of its ability to capture multi-scale spatial fea-tures, which are relevant for the prediction of the atmospheric parameters. This U-Net takes as input the Stokes profiles as a tensor of shape L × H × W and produces a latent representation of shape Z ×H ×W. We empirically choose Z = 64 as the number of channels in the latent representation, similar to C = 77, with the idea of preserving enough information for contidioning for 
+
+Article number, page 5 A&A proofs: manuscript no. flow_inversion 0                              
+
+> 2
+> 4
+> 6
+> 8
+> 0 km
+> Median MAD (x10) Sim
+> 0
+> 2
+> 4
+> 6
+> 8
+> 100 km
+> 0
+> 2
+> 4
+> 6
+> 8
+> 200 km
+> 0
+> 2
+> 4
+> 6
+> 8
+> 300 km
+> 02468
+> 0
+> 2
+> 4
+> 6
+> 8
+> 400 km
+> 0246802468
+> 5000
+> 6000
+> 7000
+> 8000
+> 9000
+> 10000
+> T [K]
+> 4000
+> 4500
+> 5000
+> 5500
+> 6000
+> 6500
+> T [K]
+> 4000
+> 4500
+> 5000
+> 5500
+> 6000
+> 6500
+> T [K]
+> 4000
+> 4500
+> 5000
+> 5500
+> 6000
+> 6500
+> T [K]
+> 4000
+> 4250
+> 4500
+> 4750
+> 5000
+> 5250
+> 5500
+> 5750
+> 6000
+> T [K]
+> x [arcsec]
+> y [arcsec] 0
+> 2
+> 4
+> 6
+> 8
+> 0 km
+> Median MAD (x10) Sim
+> 0
+> 2
+> 4
+> 6
+> 8
+> 100 km
+> 0
+> 2
+> 4
+> 6
+> 8
+> 200 km
+> 0
+> 2
+> 4
+> 6
+> 8
+> 300 km
+> 02468
+> 0
+> 2
+> 4
+> 6
+> 8
+> 400 km
+> 0246802468
+> 400
+> 200
+> 0
+> 200
+> 400
+> Bz [G]
+> 400
+> 200
+> 0
+> 200
+> 400
+> Bz [G]
+> 300
+> 200
+> 100
+> 0
+> 100
+> 200
+> 300
+> Bz [G]
+> 300
+> 200
+> 100
+> 0
+> 100
+> 200
+> 300
+> Bz [G]
+> 300
+> 200
+> 100
+> 0
+> 100
+> 200
+> 300
+> Bz [G]
+> x [arcsec]
+> y [arcsec]
+
+Fig. 3: Inferred height-dependent temperature (left three panels) and vertical magnetic field (right three panels). The true values from the simulation are shown in the third column of each panel, while the median and MAD of the output probability distributions are shown in the first and second columns of each panel. Note that the MAD is multiplied by a factor of 10 so that all panels share the same color bar. the velocity model. However, this is a hyperparameter that can be surely optimized. The velocity model vθ
+
+t (Xt, S ) is another U-Net which takes as input a tensor of size D × H × W, where D = 77 + 64 is the number of channels corresponding to the concatenation of the current state Xt and the learned representation of the condition-ing Stokes profiles S . The time step t is also embedded using a sinusoidal positional embedding and concatenated with the input of the velocity U-Net. The conditioning and velocity models are implemented with the PyTorch package, and trained on a single NVIDIA RTX 4090 GPU using half precision numbers. We train for 20 epochs with a batch size of 64 using the Adam optimizer (Kingma & Ba 2015) with an initial learning rate of 3 ×10 −4, which is slowly an-nealed during training using a cosine law until reaching 9 × 10 −5.The time per epoch is around 5 min for a total training time of around 1.5 hours, which is very fast for a model of this complex-ity and dimensionality. 
+
+4. Validation 
+
+4.1. Maps of atmospheric parameters 
+
+Once trained, the model is applied to the validation set, the snap-shot with mixed polarities that was not used during training. The ODE of Eq. (8) is solved with the learned velocity model to transport 25 samples from the base distribution to the target distribution. This produces 25 samples of the 3D stratification of the atmospheric parameters, evaluated at the fixed optical depth points defined in the training data. The posterior distribution of the atmospheric parameters can be characterized by analyzing the statistics of these samples. Figure 1 shows the vertical strati-fication with optical depth of three di ff erent columns in the FoV, marked with color symbols in the first panel. The first column shows the continuum intensity normalized to the average con-tinuum, together with the total linear polarization and circular polarization in the wing of the line. The thin blue curves in the rest of panels display the median (50th percentile) of the pos-terior distribution for each optical depth and physical quantity, while the shaded regions corresponds to the area between the 25th and 75th (dark blue) and the 5th and 95th percentiles (light blue). The true values from the simulation are shown in orange. 
+
+Article number, page 6 Asensio Ramos et al.: 3DStokesFlow : simulation-based inference for 3D Stokes profiles using flow matching 0                         
+
+> 2
+> 4
+> 6
+> 8
+> IQUV Median
+> Bp1[G] Bp2[G] Bx[G] By[G]
+> 0
+> 2
+> 4
+> 6
+> 8
+> IQUV MAD
+> 02468
+> 0
+> 2
+> 4
+> 6
+> 8
+> Sim
+> 024680246802468
+> 200
+> 150
+> 100
+> 50
+> 0
+> 50
+> 100
+> 150
+> 200
+> 0
+> 10
+> 20
+> 30
+> 40
+> 50
+> 60
+> 200
+> 150
+> 100
+> 50
+> 0
+> 50
+> 100
+> 150
+> 200
+> 200
+> 150
+> 100
+> 50
+> 0
+> 50
+> 100
+> 150
+> 200
+> 0
+> 10
+> 20
+> 30
+> 40
+> 50
+> 60
+> 200
+> 150
+> 100
+> 50
+> 0
+> 50
+> 100
+> 150
+> 200
+> 200
+> 150
+> 100
+> 50
+> 0
+> 50
+> 100
+> 150
+> 200
+> 0
+> 10
+> 20
+> 30
+> 40
+> 50
+> 60
+> 200
+> 150
+> 100
+> 50
+> 0
+> 50
+> 100
+> 150
+> 200
+> 200
+> 150
+> 100
+> 50
+> 0
+> 50
+> 100
+> 150
+> 200
+> 0
+> 10
+> 20
+> 30
+> 40
+> 50
+> 60
+> 200
+> 150
+> 100
+> 50
+> 0
+> 50
+> 100
+> 150
+> 200
+> x [arcsec]
+> y [arcsec]
+
+Fig. 4: Inferred ambiguous (left two panels) and disambiguated (right two panels) transverse components of the magnetic field for 100 km above the height at which the average optical depth is unity. The median of the posterior is shown in the first row, the MAD of the posterior is shown in the second row, and the true values from the simulation are shown in the third row. The results show that the model is able to capture the true values within the considered percentiles of the posterior distribution. Larger uncertainties are found in the lower and upper layers of the atmosphere, which is expected given that the lines are mostly sensitive to the region between log τ500 = −2.5 and log τ500 = 0. The code reliably produces a median value for Bz close to the true value for the most magnetized pixel (blue star), and returns something compatible with zero for the less magnetized regions (orange and green stars). Given that the model produces an estimation of the height of each optical depth surface, it is possible to use interpolation to obtain the inferred atmospheric parameters as a function of ge-ometrical height (see, e.g., Asensio Ramos & Díaz Baso 2019). Figure 2 shows five di ff erent samples from the posterior distribu-tion for the vertical velocity at five di ff erent geometrical heights. The changes in optical depth naturally occuring due to changes in the temperature and density, together with the presence of Wil-son depressions in the presence of magnetic fields, produce that each column in the FoV has a di ff erent mapping between opti-cal depth and geometrical height. This induces that the physi-cal properties of granules very deep in the atmosphere are miss-ing (marked as black regions in the panels at 0 km), while the physical properties of intergranular lanes and magnetic elements are missing in the upper geometrical layers of the atmosphere (marked as black regions in the panels at 400 km). There is a sig-nificant amount of variability among the samples, which is a con-sequence of the Bayesian nature of the simulation-based model. Those regions for which the model uncertainty is smaller vary less between samples. Note that the mapping between optical depth and geometrical height is also a random variable sampled from the posterior and, as such, di ff erent for each sample. There-fore, the interpolation needs to be carried out independently for each sample. Robust statistical summaries of the posterior distribution can be obtained directly from the samples. Figure 3 shows the in-ferred median and median absolute deviation (MAD) of the pos-terior distribution for temperatures and vertical magnetic fields as a function of geometrical height, alongside their true values in the validation snapshot. Because we crop the simulations at log τ500 = 1 and log τ500 = −4, we lack access to the tempera-ture and velocity in certain parts of the Field of View (FoV) at 0 and 400 km for the simulation. Consequently, the third column of each panel features black patches representing these miss-ing data regions 5. Interestingly, as long as at least one sample from the posterior yields a valid value for a given pixel, both the median and MAD can still be computed. In other words, the Bayesian nature of the model allows us to extract meaningful in-formation about the physical parameters even for regions close to the limits of the line formation region, so that there are fewer missing regions. This information is, however, highly uncertain, as indicated by the increased MAD. Anyway, we checked that  
+
+> 5
+
+It is always possible to extract cuts at constant vertical height from the original snapshot that are not a ff ected by the missing regions, a di-rect consequence of the corrugated constant optical depth surfaces. Article number, page 7 A&A proofs: manuscript no. flow_inversion 0
+
+> 2
+> 4
+> 6
+> 8
+
+IQUV Median      
+
+> Jx[A/m 2]Jy[A/m 2]Jz[A/m 2]
+> 0
+> 2
+> 4
+> 6
+> 8
+
+IQUV MAD     
+
+> 02468
+> 0
+> 2
+> 4
+> 6
+> 8
+
+Sim          
+
+> 0246802468
+> 0.100
+> 0.075
+> 0.050
+> 0.025
+> 0.000
+> 0.025
+> 0.050
+> 0.075
+> 0.100
+> 0.100
+> 0.075
+> 0.050
+> 0.025
+> 0.000
+> 0.025
+> 0.050
+> 0.075
+> 0.100
+> 0.04
+> 0.02
+> 0.00
+> 0.02
+> 0.04
+> 0.00
+> 0.01
+> 0.02
+> 0.03
+> 0.04
+> 0.05
+> 0.00
+> 0.01
+> 0.02
+> 0.03
+> 0.04
+> 0.05
+> 0.0000
+> 0.0025
+> 0.0050
+> 0.0075
+> 0.0100
+> 0.0125
+> 0.0150
+> 0.0175
+> 0.0200
+> 0.100
+> 0.075
+> 0.050
+> 0.025
+> 0.000
+> 0.025
+> 0.050
+> 0.075
+> 0.100
+> 0.100
+> 0.075
+> 0.050
+> 0.025
+> 0.000
+> 0.025
+> 0.050
+> 0.075
+> 0.100
+> 0.04
+> 0.02
+> 0.00
+> 0.02
+> 0.04
+> x [arcsec]
+> y [arcsec]
+
+Fig. 5: Divergence of the magnetic field (left) and the three cartesian components of the electric current density (right three panels) obtained after disambiguating the transverse components of the magnetic field at 100 km. The median and MAD of the posterior are shown in the first and second rows, respectively. The last rows shows the inference in the MHD snapshot. the estimated physical parameters are similar to those of the orig-inal snapshot at constant geometrical height. Overall, the results show that the median model is highly similar to the depth stratification of the physical quantities in the simulation. This is a remarkable finding, demonstrating that the model can reliably learn the relationship between optical depth and geometrical height by leveraging the correlations present in the training data. 
+
+4.2. Disambiguation and electric currents 
+
+Since our model allows us to infer physical quantities in a geo-metrical scale as a natural consequence of taking advantage of the inherent statistical correlations present in the training data, it is almost straightforward to disambiguate the transverse compo-nents of the magnetic field. Contrary to more standard methods, we do not need to rely on any field extrapolation method (see, e.g., Metcalf et al. 2006) or extra assumptions (Borrero et al. 2021). To this end, we use an in-house version of the minimum energy method developed by Metcalf (1994) and later modified by Metcalf et al. (2006) that is described in Appendix A. This makes it more similar to the method developed by Yang et al. (2025), which starts from an inverted stratified ambiguous field and is only based on the divergence-free nature of the magnetic field. Figure 4 displays the posterior median in the upper panel, the MAD in the middle panel, and the true values from the sim-ulation in the lower panel for the ambiguous and disambiguated transverse components of the magnetic field. Although we can compute the criterion for the disambiguation at di ff erent heights, we choose to carry out the disambiguation at a fixed height of 100 km for visualization purposes. The results demonstrate that computation of the vertical derivatives using the inferred height dependence is very precise, producing disambiguated transverse 
+
+Article number, page 8 Asensio Ramos et al.: 3DStokesFlow : simulation-based inference for 3D Stokes profiles using flow matching 0         
+
+> 2
+> 4
+> 6
+> 8
+> Sim IQUV
+> 02468
+> 0
+> 2
+> 4
+> 6
+> 8
+> 02468
+> 3.6
+> 3.8
+> 4.0
+> 4.2
+> 4.4
+> 4.6
+> 4.8
+> 5.0
+> log P g [dex]
+> x [arcsec]
+> y [arcsec]
+
+Fig. 6: Logarithm of the gas pressure (background image), Lorentz force (arrows in the upper panels) and gas pressure gra-dient (arrows in the lower panels). components of the magnetic field that are strikingly similar to the true values from the simulation. The posterior MAD for the more magnetized regions for Bp1 and Bp2 is smaller than in the rest of the FoV, a consequence of the larger Stokes Q and U
+
+signals in those regions. The uncertainty in the disambiguated transverse components of the magnetic field is, in general, larger than in the ambiguous components, which is specially relevant in the borders of the magnetized regions, where some patches show the wrong polarity. However, all in all, the inferred model can be used to correctly disambiguate the more magnetized regions of the quiet Sun, producing a solution with very low divergence and electric currents. Having access to the disambiguated magnetic field allows us to calculate electric current density maps. Electric currents are relevant for the energy balance of the solar atmosphere, since they can be dissipated by Ohmic and ambipolar di ff usion (Priest 1999; Khomenko & Collados 2012). As such, they can be considered as proxies of highly non-potential magnetic fields, which can produce explosive events in higher layers of the atmo-sphere. Since J depends on horizontal and vertical gradients of the magnetic fields, they are often obtained from observations using magnetic field extrapolation methods or a-posteriori treat-ment of standard inversion methods (Puschmann et al. 2010a,b). However, some recent e ff orts (Pastor Yabar et al. 2021) have opened up the possibility of obtaining J from observations by resorting to the use of magnetohydrostatic equilibrium (MHS). These results make use of a newly developed Stokes inver-sion code developed by Borrero et al. (2021), where the MHS condition is imposed as a regularization during the inversion process. The method allows to obtain the electric current den-sity in the photosphere with su ffi cient precision, according to Borrero & Pastor Yabar (2023). More recently, Yang et al. (2025) demonstrated a new promising strategy that is based on using physics-informed neural networks to infer J.Contrary to previous approaches, in this work we can ob-tain J directly from the inferred magnetic field without any ad-ditional assumption, apart from those encoded in the generative model. The resulting maps are displayed in Fig. 5, with a di-rect comparison to the true values obtained from the MHD snap-0                 
+
+> 2
+> 4
+> 6
+> 8
+> IQUV Median
+> Qohm [erg cm 3s1]Qamb [erg cm 3s1]
+> 0
+> 2
+> 4
+> 6
+> 8
+> IQUV MAD
+> 02468
+> 0
+> 2
+> 4
+> 6
+> 8
+> Sim
+> 02468
+> 0.000
+> 0.001
+> 0.002
+> 0.003
+> 0.004
+> 0.005
+> 0.006
+> 0.0000
+> 0.0001
+> 0.0002
+> 0.0003
+> 0.0004
+> 0.0005
+> 0.0006
+> 0.0000
+> 0.0002
+> 0.0004
+> 0.0006
+> 0.0008
+> 0.0010
+> 0.00000
+> 0.00002
+> 0.00004
+> 0.00006
+> 0.00008
+> 0.00010
+> 0.000
+> 0.001
+> 0.002
+> 0.003
+> 0.004
+> 0.005
+> 0.006
+> 0.0000
+> 0.0001
+> 0.0002
+> 0.0003
+> 0.0004
+> 0.0005
+> 0.0006
+> x [arcsec]
+> y [arcsec]
+
+Fig. 7: Ohmic (left) and ambipolar (right) dissipation maps for the validation set. shot. There is a remarkable similarity between the median value and the value of J calculated from the true values of the simula-tion, despite the increased uncertainty. It is worth noting that the value for J outside of clearly magnetized regions is compatible with zero, with an uncertainty as low as 0.0025-0.0050 A m −2.In this sense, our result compares very favorable with those of Borrero & Pastor Yabar (2023), who find a value of 0.05 A m −2
+
+for the regions where no polarimetric signal is detected. 
+
+4.3. Lorentz force 
+
+The Lorentz force FL = J × B can be computed from the in-ferred electric current density and magnetic field. We can then compare its value with the inferred gas pressure gradient ∇P to check the consistency of the MHS equilibrium. Figure 6 shows maps of the gas pressure at a geometrical height of 100 km as a background, both for the simulation (left panels) and the median value from the posterior distribution (right panels). The arrows in the upper panels show the horizontal components of the Lorentz force, computed from J and B, while those in the lower pan-els show the horizontal components of the gas pressure gradient, computed using finite di ff erences. Their similarity is remarkable. 
+
+4.4. Dissipation 
+
+Finally, we can compute the Ohmic and ambipolar dissipa-tion maps at any arbitrary height (note that the Hall dis-sipation is zero). They can be computed using (see, e.g., 
+
+Article number, page 9 A&A proofs: manuscript no. flow_inversion 0
+
+2
+
+4
+
+6
+
+8
+
+T [K] 
+
+100 km 
+
+Median MAD B [deg] Median MAD 
+
+0
+
+2
+
+4
+
+6
+
+8
+
+200 km 
+
+0
+
+2
+
+4
+
+6
+
+8
+
+300 km 
+
+0
+
+2
+
+4
+
+6
+
+8
+
+v [km/s] Median MAD Bz [G] Median MAD 
+
+0
+
+2
+
+4
+
+6
+
+8
+
+0 2 4 6 8
+
+0
+
+2
+
+4
+
+6
+
+8
+
+0 2 4 6 8 0 2 4 6 8 0 2 4 6 8
+
+4000 
+
+4500 
+
+5000 
+
+5500 
+
+6000 
+
+6500 
+
+0
+
+50 
+
+100 
+
+150 
+
+200 
+
+250 
+
+300 
+
+350 
+
+400 
+
+4000 
+
+4200 
+
+4400 
+
+4600 
+
+4800 
+
+5000 
+
+5200 
+
+5400 
+
+0
+
+50 
+
+100 
+
+150 
+
+200 
+
+250 
+
+300 
+
+350 
+
+400 
+
+4000 
+
+4200 
+
+4400 
+
+4600 
+
+4800 
+
+5000 
+
+5200 
+
+5400 
+
+0
+
+100 
+
+200 
+
+300 
+
+400 
+
+500 
+
+600 
+
+700 
+
+4
+
+2
+
+0
+
+2
+
+4
+
+0.00 
+
+0.25 
+
+0.50 
+
+0.75 
+
+1.00 
+
+1.25 
+
+1.50 
+
+1.75 
+
+2.00 
+
+4
+
+3
+
+2
+
+1
+
+0
+
+1
+
+2
+
+3
+
+4
+
+0.00 
+
+0.25 
+
+0.50 
+
+0.75 
+
+1.00 
+
+1.25 
+
+1.50 
+
+1.75 
+
+2.00 
+
+3
+
+2
+
+1
+
+0
+
+1
+
+2
+
+3
+
+0.00 
+
+0.25 
+
+0.50 
+
+0.75 
+
+1.00 
+
+1.25 
+
+1.50 
+
+1.75 
+
+2.00 
+
+0
+
+25 
+
+50 
+
+75 
+
+100 
+
+125 
+
+150 
+
+175 
+
+0
+
+10 
+
+20 
+
+30 
+
+40 
+
+50 
+
+0
+
+25 
+
+50 
+
+75 
+
+100 
+
+125 
+
+150 
+
+175 
+
+0
+
+10 
+
+20 
+
+30 
+
+40 
+
+50 
+
+0
+
+25 
+
+50 
+
+75 
+
+100 
+
+125 
+
+150 
+
+175 
+
+0
+
+10 
+
+20 
+
+30 
+
+40 
+
+50 
+
+200 
+
+150 
+
+100 
+
+50 
+
+0
+
+50 
+
+100 
+
+150 
+
+200 
+
+0
+
+5
+
+10 
+
+15 
+
+20 
+
+25 
+
+30 
+
+35 
+
+40 
+
+200 
+
+150 
+
+100 
+
+50 
+
+0
+
+50 
+
+100 
+
+150 
+
+200 
+
+0
+
+5
+
+10 
+
+15 
+
+20 
+
+25 
+
+30 
+
+35 
+
+40 
+
+200 
+
+150 
+
+100 
+
+50 
+
+0
+
+50 
+
+100 
+
+150 
+
+200 
+
+0
+
+10 
+
+20 
+
+30 
+
+40 
+
+50 
+
+60 
+
+x [arcsec] 
+
+> y [arcsec]
+
+Fig. 8: Inferred height-dependent temperature, line-of-sight velocity, inclination angle the magnetic field and line-of-sight compo-nent of the magnetic field for the quiet Sun Hinode /SP scan. Each variable is shown at three di ff erent constant geometrical heights, with the two columns showing the median and the MAD of the distribution, respectively. Khomenko & Collados 2012): 
+
+QOhm = ηJ2, Qamb = ηA |J × B|2 , (9) where 
+
+η = me (νei + νen )
+
+e2ne
+
+(10) 
+
+ηA = (ρn/ρ )2
+
+ρiνin + ρeνen 
+
+(11) 
+
+Article number, page 10 Asensio Ramos et al.: 3DStokesFlow : simulation-based inference for 3D Stokes profiles using flow matching 0                         
+
+> 2
+> 4
+> 6
+> 8
+> IQUV Median
+> Bp1[G] Bp2[G] Bx[G] By[G]
+> 02468
+> 0
+> 2
+> 4
+> 6
+> 8
+> IQUV MAD
+> 024680246802468
+> 150
+> 100
+> 50
+> 0
+> 50
+> 100
+> 150
+> 0
+> 5
+> 10
+> 15
+> 20
+> 25
+> 30
+> 35
+> 40
+> 150
+> 100
+> 50
+> 0
+> 50
+> 100
+> 150
+> 0
+> 5
+> 10
+> 15
+> 20
+> 25
+> 30
+> 35
+> 40
+> 150
+> 100
+> 50
+> 0
+> 50
+> 100
+> 150
+> 0
+> 10
+> 20
+> 30
+> 40
+> 50
+> 60
+> 150
+> 100
+> 50
+> 0
+> 50
+> 100
+> 150
+> 0
+> 10
+> 20
+> 30
+> 40
+> 50
+> 60
+> x [arcsec]
+> y [arcsec]
+
+Fig. 9: Inferred ambiguous (left two panels) and disambiguated (right two panels) transverse magnetic fields. The upper panels display the median of the posterior distribution, while the lower panels show the MAD. are the Ohmic and ambipolar di ff usivities, respectively. They de-pend on the collision frequencies between electrons, ions and neutrals, which are calculated using the formulas provided by Khomenko & Collados (2012): 
+
+νin = nn
+
+r 8kBT
+
+πmin 
+
+σin 
+
+νen = nn
+
+r 8kBT
+
+πmen 
+
+σen 
+
+νei = 43
+
+r 2π
+
+me
+
+nee4Λ
+
+(kBT )3/2 . (12) The cross sections take the values σin = 5 × 10 −15 cm 2 and 
+
+σen = 10 −15 cm 2, the Coulomb logarithm is calculated as Λ = 
+
+23 .4 − 1.15 log 10 ne + 3.45 log 10 T , where ne is measured in cm −3
+
+and T in eV and min and men are the reduced masses of the ion-neutral and electron-neutral collisions, respectively. The density of neutrals and electrons is computed by applying the LTE equa-tion of state used in SIR to the inferred temperature and gas pressure, while that of ions is obtained by applying the charge neutrality condition, so that ρi = ρe.The resulting maps of QOhm and Qamb are shown in Fig. 7, where we can see that the Ohmic dissipation is mostly localized in the borders of the magnetized regions, while the ambipolar dissipation is less extended and is only significant where there is a measurable transverse component of the magnetic field. The inferred values of the dissipation are perfectly compatible with those obtained from the true values of the simulation. Uncertain-ties are larger in the borders of the magnetized regions, but their amplitude are small, becoming only slightly larger than 10%. 
+
+5. Quiet Sun Hinode observations 
+
+Having checked the performance of the model on synthetic data, we apply it to real observations. We use the Hinode /SP scan of a quiet Sun region at disk center taken on 2007-03-10 at 11:37 UT and analyzed in Lites et al. (2008). The scan consists of a 1024 ×2048 pixels with a spatial sampling of 0.16" per pixel, of which we extract a tiny subfield of 64 ×64 pixels that contains magnetic elements of the two polarities. The Stokes profiles are normalized in the same way as the training data, and then fed into the conditioning U-Net to extract the latent representation. The flow matching model then produces 25 samples of the posterior distribution. The resulting maps at constant geometrical height for T , v,
+
+Bz, and θB are shown in Fig. 8, where we show the median and the MAD of the posterior distribution. Given that the flow match-ing model produces samples from the posterior, derived quanti-ties like θB are trivially obtained by calculating the derived quan-tity for each sample and then calculating the statistics of the re-sulting distribution. The results show that the magnetized regions contain vertical magnetic fields of both polarities at the core of the magnetic elements, with a strong horizontal gradient towards essentially undetectable magnetic fields in the granular regions. The uncertainty of the model on the inclination of the field in the magnetized regions is almost negligible. We also witness the canopy structure of the magnetic field, with broader structures at 300 km than at 100 km. Motivated by the encouraging results obtained in the vali-dation set concerning the estimation of J, we apply the mini-mum energy method to disambiguate the transverse components of the magnetic field to compute such current densities. The dis-ambiguated transverse components are shown in Fig. 9, where we show the ambiguous and disambiguated transverse compo-nents of the magnetic field, together with their MAD. Except for some very localized patches in which the MAD is sizable, the results seem to indicate a very clear disambiguated solution. The majority of the FoV is compatible with zero transverse magnetic field, which is expected in the quiet Sun, given that the Stokes Q
+
+and U signals are very weak. Despite that the only patches with significant transverse magnetic field are those corresponding to the strongest magnetic elements displayed in Fig. 8, the inferred 
+
+J, shown in Fig. 10, is very well localized. Strong currents ap-pear, with both signs, in the borders of the magnetized regions. The posterior uncertainty is su ffi ciently low to ensure that the 
+
+Article number, page 11 A&A proofs: manuscript no. flow_inversion 0
+
+> 2
+> 4
+> 6
+> 8
+
+IQUV Median          
+
+> Jx[A/m 2]Jy[A/m 2]Jz[A/m 2]
+> 02468
+> 0
+> 2
+> 4
+> 6
+> 8
+
+IQUV MAD          
+
+> 0246802468
+> 0.100
+> 0.075
+> 0.050
+> 0.025
+> 0.000
+> 0.025
+> 0.050
+> 0.075
+> 0.100
+> 0.100
+> 0.075
+> 0.050
+> 0.025
+> 0.000
+> 0.025
+> 0.050
+> 0.075
+> 0.100
+> 0.04
+> 0.02
+> 0.00
+> 0.02
+> 0.04
+> 0.00
+> 0.01
+> 0.02
+> 0.03
+> 0.04
+> 0.05
+> 0.00
+> 0.01
+> 0.02
+> 0.03
+> 0.04
+> 0.05
+> 0.0000
+> 0.0025
+> 0.0050
+> 0.0075
+> 0.0100
+> 0.0125
+> 0.0150
+> 0.0175
+> 0.0200
+> x [arcsec]
+> y [arcsec]
+
+Fig. 10: Inferred electric current density maps for the Hinode /SP quiet Sun observation of Fig. 8. 0                 
+
+> 2
+> 4
+> 6
+> 8
+> IQUV Median
+> Qohm [erg cm 3s1]Qamb [erg cm 3s1]
+> 02468
+> 0
+> 2
+> 4
+> 6
+> 8
+> IQUV MAD
+> 02468
+> 0.000
+> 0.002
+> 0.004
+> 0.006
+> 0.008
+> 0.010
+> 0.0000
+> 0.0002
+> 0.0004
+> 0.0006
+> 0.0008
+> 0.0010
+> 0.0012
+> 0.0014
+> 0.0000
+> 0.0005
+> 0.0010
+> 0.0015
+> 0.0020
+> 0.0025
+> 0.0030
+> 0.00000
+> 0.00005
+> 0.00010
+> 0.00015
+> 0.00020
+> 0.00025
+> 0.00030
+> 0.00035
+> 0.00040
+> x [arcsec]
+> y [arcsec]
+
+Fig. 11: Ohmic (left) and ambipolar (right) dissipation maps for the Hinode /SP quiet Sun observation of Fig. 8. measured currents are real and not a consequence of the noise in the data. Equipped with the inferred B and J, we can calculate the Ohmic and ambipolar dissipation maps, which are shown in Fig. 11. The results show that the both types of dissipation are com-patible with zero in the regions where we do not detect any mag-netic field. Again, Ohmic dissipation is mostly localized in the borders of the magnetized regions, while the ambipolar dissipa-tion is more important in regions with a measurable transverse component of the magnetic field, and much less spatially ex-tended. Ambipolar dissipation is also smaller in absolute value than Ohmic dissipation. This is expected in the photosphere, where the plasma is mostly neutral and the magnetic field is not strong enough to strongly decouple neutrals and ions. 
+
+6. Small-scale loop emergence 
+
+As a final application, we show a preliminary analysis of the Hin-ode /SP scans of one of the small-scale loop emergence events analyzed by Martínez González & Bellot Rubio (2009). A more detailed analysis will be presented in a future study. Small-scale magnetic loops were identified as two opposite-polarity circular polarization signals flanking a linear polariza-tion signal (Martínez González et al. 2007; Centeno et al. 2007). Their temporal coherence strongly suggested that they cor-responded to organized, connected magnetic field structures in the form of Ω- or U-loops. Their three-dimensional ge-ometry was previously inferred by Ishikawa et al. (2010) and Martínez González et al. (2010) through pixel-by-pixel inver-sions in the optical depth scale and in a non-consistent geo-metrical height, respectively. Here, we reconstruct the three-dimensional geometry in a consistent geometrical height scale and analyze the temporal evolution of the transverse and longi-tudinal components of the magnetic field as a function of geo-metrical height. In Figure 12, a three-dimensional magnetic structure in the form of a loop ascending through the photosphere can be clearly identified. During the first two snapshots, only the transverse magnetic field is visible, corresponding to the apex of the loop. This predominantly horizontal structure exhibits an approximate vertical extent of 200 km, with the transverse field reaching its maximum intensity around that height. 
+
+Article number, page 12 Asensio Ramos et al.: 3DStokesFlow : simulation-based inference for 3D Stokes profiles using flow matching 0              
+
+> 20 km 100 km 200 km 300 km
+> t=0 s
+> 0
+> 2
+> t=30 s
+> 0
+> 2
+> t=60 s
+> 0
+> 2
+> t=90 s
+> 0
+> 2
+> t=120 s
+> 0
+> 2
+> t=150 s
+> 0
+> 2
+> t=180 s
+> 0
+> 2
+> t=210 s
+> 0
+> 2
+> t=240 s
+> 0
+> 2
+> t=270 s
+> 0
+> 2
+> 0
+> 2
+> 0
+> 2
+> 0
+> 2
+> 0
+> 2
+> 0
+> 2
+> 0
+> 2
+> 0
+> 2
+> 0
+> 2
+> 012
+> 0
+> 2
+> 012012012
+> 0
+> 10
+> 20
+> 30
+> 40
+> 50
+> Bt [G]
+> 60
+> 40
+> 20
+> 0
+> 20
+> 40
+> 60
+> Bz [G]
+> x [arcsec]
+> y [arcsec]
+
+Fig. 12: Transverse (upper panels) and longitudinal (lower panels) components of the magnetic field for the emerging small-scale loop. At t =60 s, opposite-polarity regions appear at both ends of the transverse field, extending from 0 to 100 km. These regions correspond to the loop footpoints connecting to the apex. At a height of 200 km, the same polarity pattern and a slight incli-nation of the footpoints, reflected in a weaker longitudinal field component, are observed, supporting the interpretation of a sin-gle connected magnetic structure. At t =90 s, the footpoints be-come visible up to 300 km, while the linear polarization signal is strongest at the highest layers. This behavior indicates that the loop continues to rise through the photosphere. At t =120 s, the transverse field weakens and the longitudinal field at the footpoints becomes stronger at all heights. This sup-
+
+Article number, page 13 A&A proofs: manuscript no. flow_inversion 
+
+ports the hypothesis of an ascending loop, since the upper part of the loop is already leaving the line formation region and the more vertical part of the loop is penetrating this region. At this stage, the loop reaches a height of approximately 300 km and a hori-zontal extent of about 700 km, resulting in a very flattened loop. This is consistent with the results of Martínez González et al. (2010), who, for t =120 s, reported a loop height of 300 km and a horizontal extent of about 750 km (see their Figure 1). Finally, the apex of the loop leaves the formation region at t =150 s, and only the footpoints remain visible as they continue to separate with time. 
+
+7. Conclusions and future work 
+
+We have presented 3DStokesFlow , a new code for the inversion of Stokes profiles based on conditional flow matching. The code has been trained with the quiet Sun simulations of the SPIN4D project, for the pair of lines at 630 nm and for disk center ob-servations. It has been validated with a snapshot with mixed po-larities that was not used during training. The results show that the model is able to capture the true values of the atmospheric parameters, providing samples from the posterior distribution, which allows us to characterize the uncertainty and correlation of the inferred parameters. The model is able to return the phys-ical parameters as a function of geometrical depth, which allows us to disambiguate the transverse components of the magnetic field without any field extrapolation method. This opens up the possibility of calculating electric current density maps and dissi-pation with high precision. The application to Hinode /SP quiet Sun observations shows that the model can be safely applied to real data. We have pro-duced, for the first time, reliable (with uncertainties associated) maps of the electric current density and Ohmic and ambipolar dissipation in the quiet Sun. Additionally, we find unequivocal evidence of the loop-like structure in geometrical height of the magnetic field. We are perfectly aware of the limitations of this code and we have long-term ideas to address them. First, the results are de-pendent on the availability and realism of MHD simulations. For this reason, only quiet Sun simulations in the photosphere have been used for training, where the state-of-the-art MHD simula-tions are considered to be su ffi ciently realistic. For this reason, the model is expected to perform well only in quiet Sun regions in the photosphere. More active regions and higher layers of the atmosphere are not included in the training data because of the lack of consensus on how realistic these MHD simulations are. The model can be trivially extended to those regions once such simulations are available. Second, the model has been trained with disk center obser-vations at the pair of Fe i lines at 630 nm. Extending it to other lines of sight is straightforward, although we would need to add a conditional variable to the model to encode the angle of ob-servation. Additionally, alternative encoders of the Stokes pro-files (e.g., based on the transformer architecture) could be used to make the model more flexible and able to deal with di ff erent spectral lines. Third, we have limited the training to the relatively reduced spatial resolution provided by the Hinode /SP instrument. On one hand, this allows the model to be applied to the enormous amount of Hinode /SP data available in the archives. On the other hand, it limits the performance of the model for more mod-ern telescopes, such as the Daniel K. Inouye Solar Telescope (DKIST; Rimmele et al. 2020) and the future European Solar Telescope (EST; Quintero Noda et al. 2022). The extension to higher spatial resolution is feasible but not straightforward. From a computational point of view, the transfer and storage of MHD simulations at a resolution of 28 km (the DKIST di ff raction limit at 630 nm) for training is di ffi cult. On the other hand, training generative models directly in pixel space at such high resolution is probably not feasible. For this reason, we speculate that the extension to higher spatial resolution will require the use of a generative flow matching model in a latent representation. Fol-lowing Rombach et al. (2022), this latent representation can be obtained by pre-training a variational autoencoder (VAE) on the MHD simulations, and then training the flow matching model in the latent space of the VAE. Additionally, in the present implementation, the azimuthal disambiguation is performed as a separate post-processing step. Since the adopted algorithm makes use of information from neighbouring pixels, it is possible to incorporate the disambigua-tion directly into the Stokes inversion through a spatially coupled convolutional neural network-based framework. This extension is currently in preparation (Glaser et al. 2026). Finally, the current version of the code is not providing any information about the transverse velocity components, which are relevant for the energy balance of the solar atmosphere. Al-though they can be easily estimated from time series of observa-tions (Asensio Ramos et al. 2017), we want to explore whether it is possible to infer them by exploiting the correlation between the velocity and magnetic field in the training data.            
+
+> Acknowledgements. We acknowledge the critical read of an early draft pro-vided by J. de la Cruz Rodríguez. A.A.R. acknowledges funding from the Agen-cia Estatal de Investigación del Ministerio de Ciencia, Innovación y Universi-dades (MCIU /AEI) under grant “Polarimetric Inference of Magnetic Fields” and the European Regional Development Fund (ERDF) with reference PID2022-136563NB-I00 /10.13039 /501100011033. K.Y., S.C.D, and X.S. are supported by award 2008334 from the US National Science Foundation. This research has made use of NASA’s Astrophysics Data System Bibliographic Services. The code is publicly available at http://github.com/aasensio/3DStokesFlow .We acknowledge the community e ff ort devoted to the development of the fol-lowing open-source packages that were used in this work: numpy (numpy.org ,Harris et al. 2020), matplotlib (matplotlib.org , Hunter 2007), PyTorch
+> (pytorch.org , Paszke et al. 2019), scipy (scipy.org , Virtanen et al. 2020) and scikit-learn (scikit-learn.org , Pedregosa et al. 2011).
+
+References           
+
+> Ardizzone, L., Kruse, J., Wirkert, S., et al. 2018, arXiv e-prints, arXiv:1808.04730 Asensio Ramos, A. & de la Cruz Rodríguez, J. 2025, A&A, 703, A55 Asensio Ramos, A. & Díaz Baso, C. J. 2019, A&A, 626, A102 Asensio Ramos, A., Martínez González, M. J., & Rubiño-Martín, J. A. 2007, A&A, 476, 959 Asensio Ramos, A., Requerey, I. S., & Vitas, N. 2017, A&A, 604, A11 Auer, L. H., Heasley, J. N., & House, L. L. 1977, Sol. Phys., 55, 47 Borrero, J. M. & Pastor Yabar, A. 2023, A&A, 669, A122 Borrero, J. M., Pastor Yabar, A., & Ruiz Cobo, B. 2021, A&A, 647, A190 Borrero, J. M., Tomczyk, S., Kubo, M., et al. 2011, Sol. Phys., 273, 267 Centeno, R., Socas-Navarro, H., Lites, B., et al. 2007, ApJ, 666, L137 Danilovic, S., Gandorfer, A., Lagg, A., et al. 2008, A&A, 484, L17 de la Cruz Rodríguez, J. 2019, A&A, 631, A153 de la Cruz Rodríguez, J., Leenaarts, J., Danilovic, S., & Uitenbroek, H. 2019, A&A, 623, A74 de la Cruz Rodríguez, J. & van Noort, M. 2017, Space Sci. Rev., 210, 109 del Toro Iniesta, J. C. & Ruiz Cobo, B. 2016, Living Reviews in Solar Physics, 13, 4 Díaz Baso, C. J., Asensio Ramos, A., & de la Cruz Rodríguez, J. 2022, A&A, 659, A165 Frutiger, C., Solanki, S. K., Fligge, M., & Bruls, J. H. M. J. 2000, A&A, 358, 1109 Glaser, Y., Sadowski, P., Yang, K., et al. 2026, in preparation Harris, C. R., Millman, K. J., van der Walt, S. J., et al. 2020, Nature, 585, 357–362 Hunter, J. D. 2007, Computing in Science Engineering, 9, 90
+
+Article number, page 14 Asensio Ramos et al.: 3DStokesFlow : simulation-based inference for 3D Stokes profiles using flow matching 
+
+Ishikawa, R., Tsuneta, S., & Jurˇ cák, J. 2010, ApJ, 713, 1310 Khomenko, E. & Collados, M. 2012, ApJ, 747, 87 Kingma, D. P. & Ba, J. 2015, in ICLR (Poster), ed. Y. Bengio & Y. LeCun Landi Degl’Innocenti, E. & Landolfi, M., eds. 2004, Astrophysics and Space Science Library, Vol. 307, Polarization in Spectral Lines Li, H., del Pino Alemán, T., Trujillo Bueno, J., & Casini, R. 2022, ApJ, 933, 145 Lipman, Y., Havasi, M., Holderrieth, P., et al. 2024, CoRR, abs /2412.06264 Lites, B., Casini, R., Garcia, J., & Socas-Navarro, H. 2007, Mem. Soc. As-tron. Italiana, 78, 148 Lites, B. W., Kubo, M., Socas-Navarro, H., et al. 2008, ApJ, 672, 1237 Martínez González, M. J. & Bellot Rubio, L. R. 2009, ApJ, 700, 1391 Martínez González, M. J., Collados, M., Ruiz Cobo, B., & Solanki, S. K. 2007, A&A, 469, L39 Martínez González, M. J., Manso Sainz, R., Asensio Ramos, A., & Bellot Rubio, L. R. 2010, ApJ, 714, L94 Metcalf, T. R. 1994, Sol. Phys., 155, 235 Metcalf, T. R., Leka, K. D., Barnes, G., et al. 2006, Sol. Phys., 237, 267 Mili´ c, I. & van Noort, M. 2018, A&A, 617, A24 Mistryukova, L., Plotnikov, A., Khizhik, A., et al. 2023, Sol. Phys., 298, 98 Orozco Suárez, D. & Del Toro Iniesta, J. C. 2007, A&A, 462, 1137 Osborne, C. M. J., Armstrong, J. A., & Fletcher, L. 2019, ApJ, 873, 128 Pastor Yabar, A., Borrero, J. M., Quintero Noda, C., & Ruiz Cobo, B. 2021, A&A, 656, L20 Pastor Yabar, A., Borrero, J. M., & Ruiz Cobo, B. 2019, A&A, 629, A24 Paszke, A., Gross, S., Massa, F., et al. 2019, in Advances in Neural Information Processing Systems 32, ed. H. Wallach, H. Larochelle, A. Beygelzimer, F. d’é Buc, E. Fox, & R. Garnett (Curran Associates, Inc.), 8024–8035 Pedregosa, F., Varoquaux, G., Gramfort, A., et al. 2011, Journal of Machine Learning Research, 12, 2825 Priest, E. R. 1999, Ap&SS, 264, 77 Puschmann, K. G., Ruiz Cobo, B., & Martínez Pillet, V. 2010a, ApJ, 720, 1417 Puschmann, K. G., Ruiz Cobo, B., & Martínez Pillet, V. 2010b, ApJ, 721, L58 Quintero Noda, C., Schlichenmaier, R., Bellot Rubio, L. R., et al. 2022, A&A, 666, A21 Rempel, M. 2012, ApJ, 750, 62 Rempel, M. 2014, ApJ, 789, 132 Rempel, M., Schüssler, M., & Knölker, M. 2009, ApJ, 691, 640 Rimmele, T. R., Warner, M., Keil, S. L., et al. 2020, Sol. Phys., 295, 172 Rombach, R., Blattmann, A., Lorenz, D., Esser, P., & Ommer, B. 2022, in Proceedings of the IEEE /CVF Conference on Computer Vision and Pattern Recognition, 10684–10695 Ronneberger, O., Fischer, P., & Brox, T. 2015, CoRR, abs /1505.04597 Ruiz Cobo, B. & del Toro Iniesta, J. C. 1992, ApJ, 398, 375 Ruiz Cobo, B., Quintero Noda, C., Gafeira, R., et al. 2022, A&A, 660, A37 Socas-Navarro, H., de la Cruz Rodríguez, J., Asensio Ramos, A., Trujillo Bueno, J., & Ruiz Cobo, B. 2015, A&A, 577, A7 Tsuneta, S., Ichimoto, K., Katsukawa, Y., et al. 2008, Sol. Phys., 249, 167 van Noort, M. 2012, A&A, 548, A5 Virtanen, P., Gommers, R., Oliphant, T. E., et al. 2020, Nature Methods, 17, 261 Vögler, A., Shelyag, S., Schüssler, M., et al. 2005, A&A, 429, 335 Xu, C., Wang, J., Li, H., et al. 2024, ApJ, 977, 101 Yang, K. E., Sun, X., Tarr, L. A., et al. 2025, ApJ, 995, 146 Yang, K. E., Tarr, L. A., Rempel, M., et al. 2024, ApJ, 976, 204 Yang, K. E., Tarr, L. A., Rempel, M., et al. 2024, The Astrophysical Journal, 976, 204 
+
+Article number, page 15 A&A proofs: manuscript no. flow_inversion 
+
+Appendix A: Disambiguation of the transverse magnetic field 
+
+The disambiguation of the transverse components of the mag-netic field is a crucial step in the inference of the magnetic field vector, since the Zeeman e ff ect only provides information about the azimuth of the magnetic field modulo 180 ◦. We have de-veloped a smooth version of the minimum energy method of Metcalf (1994). We make use of the inferred Bp1 and Bp2 to com-pute the still ambiguous solution of Bx and By whose azimuth lines in the range [0 , π ]. The azimuth is computed as follows: 
+
+ϕ′ = 12 arctan Bp2
+
+Bp1
+
+mod π, (A.1) which can be used to calculate the transverse component of the magnetic field as Bx = S B t cos ϕ′ and By = S B t sin ϕ′, where 
+
+S = ±1 is the switch that determines the solution of the ambi-guity. Strictly speaking, the disambiguation process is a combi-natorial problem, since S at each pixel has two possible solu-tions, resulting in the two options ( Bx, By) and ( −Bx, −By). How-ever, the problem can be relaxed to a continuous optimization, which can be solved e ffi ciently with gradient-based methods. This is achieved by defining the per-pixel variable θ and using 
+
+S = tanh θ as a soft switch between the two possible solutions. The variable θ is then optimized by minimizing the following criterion: 
+
+E =
+
+X
+
+> i
+
+(|∇ · B| + λ |J|)2 , (A.2) where the summation of the criterion is carried out over all pixels in the FoV. The parameter λ is a hyperparameter that controls the relative importance of the two terms in the criterion, which we choose λ = 1. We again use the Adam optimizer with a learning rate of 10 −2 to optimize the variable θ for 5000 iterations. After several random initializations, we find that the final solution is very robust and almost insensitive to the initial conditions. During the optimization, the magnetic field divergence and the cartesian components of the electric current density J, given in A m −2, are calculated using Ampere’s law as: 
+
+∇ · B = ∂Bx
+
+∂x + ∂By
+
+∂y + ∂Bz
+
+∂z (A.3) 
+
+Jx = μ−10
+
+∂Bz
+
+∂y − ∂By
+
+∂z
+
+!
+
+Jy = μ−10
+
+∂Bx
+
+∂z − ∂Bz
+
+∂x
+
+!
+
+Jz = μ−10
+
+∂By
+
+∂x − ∂Bx
+
+∂y
+
+!
+
+(A.4) (A.5) where μ0 = 4π × 10 −7 kg m s −2 A−2 is the magnetic perme-ability of free space and the magnetic fields are measured in T. The horizontal spatial derivatives are calculated using finite di ff erences. The vertical derivatives are calculated using the in-ferred atmospheric parameters at di ff erent heights in the atmo-sphere. For this purpose, we fix 100 km as the target height for the disambiguation and then compute the vertical deriva-tives by interpolation at 90 and 100 km. The code is part of the 3DStokesFlow package and is publicly available at http: //github.com/aasensio/3DStokesFlow .

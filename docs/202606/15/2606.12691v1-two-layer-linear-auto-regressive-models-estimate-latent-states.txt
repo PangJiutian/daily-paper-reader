@@ -1,0 +1,4368 @@
+Title: Two-Layer Linear Auto-Regressive Models Estimate Latent States
+
+URL Source: https://arxiv.org/pdf/2606.12691v1
+
+Published Time: Fri, 12 Jun 2026 00:23:44 GMT
+
+Number of Pages: 32
+
+Markdown Content:
+# Two-Layer Linear Auto-Regressive Models Estimate Latent States 
+
+Yahya Sattar Sunmook Choi Leo Maynard-Zhang Cornell Cornell U Washington 
+
+ysattar@cornell.edu sc3377@cornell.edu leomayn@cs.washington.edu 
+
+Yassir Jedra Maryam Fazel Sarah Dean Imperial College London U Washington & Amazon Cornell 
+
+y.jedra@ic.ac.uk mfazel@uw.edu sdean@cornell.edu 
+
+Abstract 
+
+Auto-regressive models have emerged as powerful tools for sequential data, from language to video. Understanding how and why these models learn latent representations remains an open theoretical question. In this work, we demonstrate that when trained by empirical risk minimization on data from partially observed linear dynamical systems, two-layer linear auto-regressive models naturally learn to approximate Kalman filtering. In particular, we show that the learned hidden representation coincides, up to a similarity transformation, with the state estimates produced by the optimal (Kalman) filter, even though the model has no explicit knowledge of the underlying dynamics or state. The result follows from three main insights. First, we establish that the Kalman filter is well approximated by an auto-regressive model with bounded truncation error. Second, we show that despite non-convexity, the two-layer optimization landscape is benign, i.e., all stationary points are either strict saddles or global minima. Finally, as our main contributions, we provide finite-sample guarantees on prediction error, parameter estimation error, and latent state recovery. Numerical simulations support the theoretical results and demonstrate that the latent representations of auto-regressive models recover state estimates. 
+
+# 1 Introduction 
+
+Fueled by sequential data, auto-regressive models have emerged as powerful general purpose tools. Examples range from large language models (LLMs) trained on internet scale text data to world models trained with robot video and action streams. The prevailing approach for leveraging this data is to train models which predict the next element of a sequence given past elements. Whether these capable models also learn the deeper mechanisms underlying the data is an open research question. Empirical findings on large foundation models are mixed; there is evidence that LLMs represent the board state when given a sequence of chess moves [ LHB +23 , TWLG22 ], but also that they confuse states which have equivalent sets of legal moves [ VCRM25 ]. Of course, the goal of learning good representations predates the current moment. It has been a key challenge and motivation for deep learning since the beginning, with major successes like word2vec for modeling language [ Chu17 ] and matrix factorization for movie recommendation [Fun06, KBV09]. The connection between observables (inputs and outputs) and latent states has historically been the domain of dynamical systems and control theory [ Wil89 ], especially for time-indexed data. In particular, the field of system identification has long investigated what system properties can be distinguished from input-output data alone. Over the last decade, this classical theory has been revisited and modernized from a statistical learning perspective [ DMM +19 , SMT +18 ]. Of particular relevance is a line of work on finite-sample theory for learning models of linear dynamical systems when the latent state is only partially observed [ OO19 , BLMY23 , SRD21 ]. These works largely rely on shallow (linear) models and, to go from observables to latent states, they rely on classical approaches like the Ho-Kalman factorization [ HK66 ] or nuclear norm regularization [ RFP10 , SOF22 ]. These techniques 1
+
+> arXiv:2606.12691v1 [cs.LG] 10 Jun 2026
+
+directly search for the latent state or introduce special-purpose regularization, which stands in contrast to the end-to-end training paradigm dominant in deep learning. In this paper, we unite the perspective of dynamical systems theory with the standard end-to-end deep learning approach. We draw on a rich line of related work on finite-sample learning for linear dynamical systems and recent developments in the theory of non-convex optimization for matrix factorization, further discussed in Section 2. Our theory shows that two-layer linear auto-regressive models naturally learn to approximate Kalman filtering when trained by empirical risk minimization on data from partially observed linear dynamical systems. Our key contributions are as follows: 
+
+• We formulate a novel two-layer auto-regressive model for learning to estimate latent states of a partially observed linear dynamical system (Section 3). 
+
+• We show that despite the non-convexity of the learning objective, the optimization landscape is benign, i.e., all stationary points are either strict saddles or global minima (Section 4.2). 
+
+• We provide finite-sample guarantees (sample complexity and statistical error rates) on prediction error and parameter estimation error (Section 4.3) and then show that these imply latent state recovery (Section 4.4). We conclude with numerical simulations which demonstrate that auto-regressive models automatically represent latent state estimates (Section 5) and a discussion of broader implications and directions for future work (Section 6). 
+
+# 2 Related Work 
+
+We build on a line of work concerned with finite sample identification of linear dynamical systems. The prevalent strategy (when the state is not directly observed) is to first learn a linear auto-regressive model, and then to use a classical factorization technique [ HK66 ] to extract the state space parameters. Omyak & Ozay [ OO21 ] present a modern perturbation analysis of this approach. In contrast, we do not separate learning a model from extracting information about the latent state; we show that the latent state estimate naturally arises in the activations of a two-layer linear model. Much of the prior work is focused on estimating the linear parameters through regression: either predicting the next output from previous inputs [ OO19 , SOF22 , SRD21 ] or, in true auto-regressive fashion, predicting the next output from previous inputs and outputs. The latter allows for consistent estimation of marginally stable systems (i.e., those without decaying memory) or uncontrolled systems (i.e., those without observed inputs), but must handle more complex dependencies in the covariates. For this setting, there are a range of estimation techniques based on pre-filtering [ SBR19 , BLMY23 ], spectral filtering [ DBH25 ], or simple linear regression [ TP19 , LAHA20 , LL20 ]. The last category is most closely related to the present paper, since we also consider an auto-regressive least-squares learning objective. It is worth particularly highlighting Tsiamis et al. [ TP19 ] who presented the first non-asymptotic analysis of the simple regression approach and, similar to us, focus on Kalman filtering, rather than parameter estimation or downstream control tasks. However, while all of the aforementioned works follow the prevalent estimate-then-decompose strategy, we propose and analyze a non-convex learning procedure. For this, we leverage statistical tools developed by Ziemann et al. [ ZSM22 , ZT22 ] for characterizing system identification errors at the global optima of learning objectives, regardless of their convexity. There are a handful of results on non-convex approaches for learning linear dynamical systems, most of which do not consider auto-regressive architectures. Hardt et al. [ HMR18 ] analyzed gradient descent on a recurrent linear model whose parameters are exactly state space parameters. Tadipatri et al. [ THA +25 ] propose two nonconvex reformulations for low-order system identification in terms of both state space parameters and a factorized Hankel matrix. The latter bears similarity to our learning objective, though while we show that our optimization landscape is benign, Tadipatri et al. focus on non-convex optimization algorithms. Umenberger et al. [ USP +22 ] analyze policy gradient methods for directly learning the static gains of the Kalman filter without model identification. 2Auto-regressive policies have appeared in the literature in the context of optimal linear control. For quadratic costs, the optimal policy is the composition of a Kalman filter with a linear state feedback controller. Both classical work [ SS94 ] and more recent results [ AMKKP22 , GAMKP23 ] show how to represent Kalman filters auto-regressively for control, but do not consider statistical aspects. In policy learning, where explicit model identification is not required, auto-regressive policies exhibit a more benign optimization landscape than standard parametrization [ FTA25 , ZFY23 , XN24 ]. Like these works, we formulate an auto-regressive representation of the Kalman filter, but unlike them, we use a two-layer model and focus on state estimation rather than control. Finally, we share a similar spirit to some recent work which makes connections between linear systems and modern machine learning practice, but which is otherwise quite different in terms of goals and techniques. Inspired by “world models” and representation learning techniques in reinforcement learning, Tian et al. [ TZTS23a , TZTS23b ] use additional supervision from the cost signal to learn latent states in the context of linear quadratic optimal control. In another vein, Goel & Bartlett [ GB24 ] show that an auto-regressive Transformer can approximate a Kalman filter for any given linear dynamical system, while Du et al. [ DBOO23 ] investigate the ability of Transformers to generalize across multiple linear systems. 
+
+# 3 Setting: Linear Dynamics and Filter 
+
+Consider a partially observed linear dynamical system with the following state-space representation: for all t ≥ 0,
+
+xt+1 = Ax t + Bu t + wt,yt = Cx t + vt, (3.1) where at time t, xt ∈ Rn represents the latent state, ut ∈ Rp is the observed control input, yt ∈ Rm
+
+is the measured output, wt ∈ Rn is the unobserved process noise, and vt ∈ Rm is the unobserved measurement noise. 
+
+Assumption 1. During the training period, the noise processes {wt}t≥0, {vt}t≥0 and the excitations 
+
+{ut}t≥0 are sequences of independent, zero-mean, Gaussian random vectors with covariance Σw ≻ 0,
+
+Σv ≻ 0, and Σu ≻ 0, respectively. 
+
+Note that we do not assume knowledge of the matrices A, B, C or the noise covariances Σw, Σv.Given only a single trajectory of input-output samples {(ut, y t)}T +Ht=0 from the system (3.1) satisfying Assumption 1, our goal is to directly learn the optimal filter, without explicitly learning the system parameters A, B, C , and Σw, Σv.Before moving onto the filtering problem, we conclude this section by reviewing a classic result of linear system theory. Consider any invertible matrix S, which we term a similarity transform. Then there is an equivalence class of state space representations which cannot be distinguished from input/output data alone. 
+
+Remark 1. A system with parameters A, B, C , and Σw, Σv will produce identical input-output statistics to a system with parameters SAS −1, SB, CS −1, and SΣwS⊤, Σv for any similarity transform S. If the first system has latent state x, then the alternative representation will have latent state ˜x = Sx , and both are equally valid state space representations of the same input-output behavior. 
+
+Notation: The ℓ2-norm of a vector x is denoted by ∥x∥ℓ2 . The spectral radius, the spectral norm, and the Frobenius norm of a matrix X are denoted by ρ(X), ∥X∥, and ∥X∥F , respectively. The largest and smallest eigenvalue of a square matrix X are denoted by λmax (X) and λmin (X). σi(X) denotes the i-th singular value of a matrix X ∈ Rm×n with σ1(X) being the largest and σn(X) being the smallest (when 
+
+n ≤ m). Given a sequence of vectors {xt}Tt=1 , we denote by xt:t+k, the column-wise concatenation of 
+
+xt, . . . , x t+k. For a centered random vector z, we use Σ[ z] = E[zz ⊤] to denote its covariance matrix. ⊗
+
+denotes the Kronecker product Lastly, ˜O, ≲ and ≳ hide constants and logarithmic terms involving the problem variables. 3G1
+
+
+
+yt−1
+
+...
+
+yt−L
+
+ut−1
+
+...
+
+ut−L
+
+
+
+d¯z = ( m + p)L
+
+p G2
+
+h
+
+
+
+ˆyt
+
+...
+
+ˆyt+H−1
+
+
+
+d¯y = mH 
+
+Figure 1: Two-layer auto-regressive model architecture 
+
+3.1 Kalman Filter 
+
+For a given dynamics model, the Kalman filter is the best linear filter for predicting the latent states, and when the noise processes are Gaussian, it is the optimal filter. Given the system parameters 
+
+A, B, C, Σw, Σv, the steady-state Kalman filter in its predictor form is given by 
+
+ˆxt+1 = ¯Aˆxt + Bu t + F y t,yt = C ˆxt + et, (3.2) where ˆxt is the predicted state estimate at time t, and ¯A := A − F C is the closed-loop estimator matrix. The Kalman gain matrix F depends on Σ, the solution to a discrete-time algebraic Riccati equation [ TZTS23b ], and also the steady-state error covariance of the Kalman filter. In general, depending on the initial state covariance x0 ∼ N (0 , Σ0), the Kalman gain matrix is time varying. However, under standard conditions, it converges exponentially fast to the static gain F [Kom02 ]. We therefore consider only the steady-state Kalman filter. This is common in the literature [ TP19 , LAHA20 ]. It corresponds to assuming that the initial state covariance Σ0 = Σ is the solution to the Riccati equation. Under Assumption 1, at steady state the so-called innovation term et is distributed as 
+
+{et}T +Ht=0 
+
+> i.i.d.
+
+∼ N (0 , Σe), where Σe = CΣC⊤ + Σ v [AM05]. 
+
+3.2 Auto-regressive Model 
+
+With the objective of learning the Kalman filter directly from the data, we train a two-layer linear auto-regressive model on a single trajectory {(ut, y t)}T +Ht=0 of (3.1) . Specifically, for a selected history length L > 0, we construct the covariates {¯zt}Tt=1 as follows, 
+
+¯zt := [ y⊤ 
+
+> t−1
+
+· · · y⊤ 
+
+> t−L
+
+u⊤ 
+
+> t−1
+
+· · · u⊤
+
+> t−L
+
+]⊤ ∈ Rd¯z , (3.3) which are inputs to our auto-regressive model. Here we set d¯z := ( m + p)L, and use {ut}t≤− 1 =
+
+{yt}t≤− 1 = 0 . Similarly, for a fixed future horizon H > 0, the output prediction of the auto-regressive model is yt:t+H−1 ∈ Rd¯y , where we set d¯y := mH . These covariates and predictions define the input and output dimensions of the auto-regressive model. We furthermore consider two-layer models with hidden dimension h, as illustrated in Figure 1. Formally, the function class F := {f ( ¯z) = G2G1 ¯z :(G1, G 2) ∈ G (h)} is defined by 
+
+G(h) := (G1, G 2) : G1 ∈ Rh×d¯z , G 2 ∈ Rd¯y ×h, max {∥ G1∥2 
+
+> F
+
+, ∥G2∥2 
+
+> F
+
+} ≤ c0 . (3.4) We train this model on the constructed covariate-output pairs {(¯ zt, y t;t+H−1)}Tt=1 with a squared loss: 
+
+LR(G1, G 2) := 12T
+
+> T
+
+X
+
+> t=1
+
+∥yt:t+H−1 − G2G1 ¯zt∥2 
+
+> ℓ2
+
+(3.5) 4The training objective is the following empirical risk minimization (ERM) problem, 
+
+(ˆ n, ˆG1, ˆG2) ∈ argmin 
+
+> h≤r, (G1,G 2)∈G (h)
+
+LR(G1, G 2) (3.6) We solve the non-convex ERM problem (3.6) by performing: (i) architecture search over the hidden state dimension h, and (ii) gradient descent over G1 and G2 for each fixed h. We will discuss the optimization landscape in more detail in Section 4.2. We remark on the connections between this objective and deep learning practice. The optimization over G1 and G2 corresponds to training a two layer linear network, where the weights are bounded (due to the norm bound in the definition of G(h)). Solving an optimization problem with bounded parameters is equivalent to solving one with a regularized objective, where the regularization penalty corresponds to some c0 [HTF09]. In deep learning practice, it is common to implement regularization as “weight decay” in the optimization algorithm. Hence, in practice, the inner optimization of (3.6) can be implemented by training a two layer network with linear activations and weight decay. We will discuss the optimization landscape of (3.6) in more detail in Section 4.2. 
+
+# 4 Main Results 
+
+In this section, we state our key positive result that a two layer network trained auto-regressively learns to perform Kalman filtering. First, we introduce some conditions required for our results to hold. These conditions are very standard in subspace identification literature [Knu01]. 
+
+Definition 1. The matrix pair (A, C ) ∈ (Rn×n, Rm×n) is observable if [C⊤ (CA )⊤ · · · (CA n−1)⊤]⊤
+
+has full column rank. The matrix pair (A, B ) ∈ (Rn×n, Rn×p) is controllable if [B AB · · · An−1B] has full row rank. Lastly, the pair (A, B ) is stabilizable if there exists a matrix K such that ρ(A − BK ) < 1.
+
+Assumption 2. (a) The system (3.1) is non-explosive, i.e., ρ(A) ≤ 1; (b) The pair (A, Σ1/2 
+
+> w
+
+) is stabilizable, and the pair (A, C ) is observable. 
+
+Assumption 2(a) ensures that covariates will not become poorly conditioned due to large outputs, whereas 2(b) guarantees that a steady-state Kalman filter for the system (3.1) exists, and furthermore that the filter is stable ρ(A − F C ) < 1. Stability of the filter closed loop ¯A = A − F C plays a crucial role in our truncation argument. Recall that by Gelfand’s formula, for all ρ > ρ ( ¯A), the quantity 
+
+Cρ := sup k∈Z+ (∥ ¯Ak∥/ρ k) is finite, and it is known to be Cρ ≥ 1. Hence, if ρ( ¯A) < 1, then for all 
+
+ρ ∈ (ρ( ¯A), 1) , we can bound the powers ∥ ¯Ak∥ ≤ Cρρk for all k ∈ Z+.The following statement summarizes our main results on the auto-regressive learning of Kalman filtering from data in Theorem 4. 
+
+Theorem 1 (Main result – Informal) . Let ( ˆG1, ˆG2) be the global minimizer of the ERM problem (3.6) .Suppose Assumptions 1, 2 hold. For any new sequence of observed inputs-outputs {(uτ , y τ )}t−1 
+
+> τ=0
+
+, let ˆxt
+
+be the Kalman filter estimate, and ¯zt be the covariate. Then, there exists a similarity transform S, and a scalar β > 0, such that choosing 
+
+L ≳ β log ( T ) /(1 − ρ),
+
+and , T ≳ L (d¯z + log( T /δ )) ,
+
+with probability at least 1 − δ, we have 
+
+ˆxt − S ˆG1 ¯zt
+
+> 2
+> ℓ2
+
+≲ HT
+
+
+
+r (d¯y + d¯z ) + log 
+
+ Tδ
+
+ 
+
+∥¯zt∥2 
+
+> ℓ2
+
+.
+
+Theorem 1 shows that a two-layer auto regressive model approximately performs Kalman filtering at the hidden layer. In other words, a linear auto-regressive model trained only on input-output data automatically approximates the estimates of the best linear filter which knows the underlying model. The gap between the Kalman filter estimate ˆxt and S ˆG1 ¯zt decays with the size of training data as 
+
+˜O(1 /√T ). In the remainder of this section, we will state some intermediate results, leading to our main result on latent state recovery. 54.1 Filter Approximation Results 
+
+In this section, we show that under Assumption 2, the true Kalman filter can be approximated by a linear function of L > 0 past inputs and outputs. The approximation error depends on the history length L and the spectral radius of ¯A, i.e. the filter stability. Specifically, expanding the Kalman Filtering predictor form (3.2) , we can express the estimated state in terms of the covariate ¯zt as follows, 
+
+ˆxt = C ¯zt + ¯AL ˆxt−L, (4.1) The matrix C ∈ Rn×(m+p)L is the extended controllability matrix, defined as 
+
+Cy := F ¯AF · · · ¯AL−1F  ,
+
+Cu := B ¯AB · · · ¯AL−1B ,
+
+C := Cy Cu
+
+ .
+
+This matrix maps the effects of inputs and outputs on the estimated state. 
+
+Proposition 1. Fix a time index t ≥ L, and a failure probability δ ∈ (0 , 1) . Then, under Assumption 2, we have ∥ˆxt − C ¯zt∥2 
+
+> ℓ2
+
+≤ C2 
+
+> ρ
+
+ρ2L∥Σ[ˆ xt]∥ (n + log(1 /δ )) with probability at least 1 − δ.
+
+The proof of Proposition 1 is straightforward, and is deferred to Appendix E. Note that ∥Σ[ˆ xt]∥
+
+can grow polynomially in t due to marginal stability. However, we can show that there exists a β > 0,such that choosing L ≳ β log (T ), the upper bound in Proposition 1 can be made as small as we want [ ZTL +23 ]. Another important observation is that, while the true Kalman filter algorithm has a small number of parameters and small memory footprint, the auto-regressive approximation has a larger number of parameters and requires a large memory. Hence, the computational properties of our model differs from that of true Kalman filtering. Nonetheless, its input-output behavior is similar to that of the Kalman filter. We now further show how to write the H future outputs yt:t+H−1 in terms of the covariate ¯zt.
+
+yt:t+H−1 = Oˆxt + ξt = OC ¯zt + O ¯AL ˆxt−L + ξt, (4.2) where ξt := Tuut:t+H−2 + Teet:t+H−1 maps future inputs and future innovations to the future outputs, and is treated as a noise term when predicting yt:t+H−1 from ¯zt. The matrices Tu ∈ RmH ×p(H−1) and 
+
+Te ∈ RmH ×mH denote input Toeplitz matrix and innovation Toeplitz matrix, respectively. 
+
+Tu := 
+
+
+
+0 0 0 · · · 0
+
+CB 0 0 · · · 0
+
+CAB CB 0 · · · 0
+
+... ... ... . . . ...
+
+CA H−2B CA H−3B CA H−4B · · · CB 
+
+
+
+Te := 
+
+
+
+I 0 0 · · · 0
+
+CF I 0 · · · 0
+
+CAF CF I · · · 0
+
+... ... ... . . . ...
+
+CA H−2F CA H−3F CA H−4F · · · I
+
+
+
+.
+
+The matrix O ∈ RmH ×n is the extended observability matrix, defined as 
+
+O := 
+
+
+
+CCA 
+
+...
+
+CA H−1
+
+ . (4.3) This matrix maps the latent state to future outputs. Taken together, (4.1) and (4.2) justify the approximation ˆxt ≈ C ¯zt and yt:t+H−1 ≈ OC ¯zt, revealing an underlying structure very similar to that posited by our auto-regressive model. 64.2 Optimization Results 
+
+In this section, we establish, that for any fixed h ≤ r, the optimization problem min (G1,G 2)∈G (h) LR(G1, G 2),despite being non-convex, has a nice structure favorable for gradient descent. When the input-output samples {(ut, y t)}T +Ht=0 are generated according to (3.1) , the loss landscape of LR possesses properties that are often used to establish global convergence of gradient descent. In order to make this precise, we state the following definition. 
+
+Definition 2. X is a local minimum of L if ∇L (X) = 0 and λmin (∇2L(X)) ≥ 0. X is a critical point 
+
+of L if ∇L (X) = 0 . X is a strict-saddle point if in addition λmin (∇2L(X)) < 0.
+
+The proposition below makes this precise. 
+
+Proposition 2. Let δ ∈ (0 , 1) . Suppose Assumptions 1 and 2 hold. Additionally, suppose we choose L ≳
+
+β log  CρT ∥C∥√C¯z Cˆx
+
+ /(1 − ρ) for a scalar β > 0, where we set C¯z := d¯z (∥CΣ[ˆ xT ]C⊤ + Σ e∥ + ∥Σu∥),and Cˆx := n∥Σ[ˆ xT ]∥. Suppose the trajectory length satisfies, 
+
+T ≳ L
+
+
+
+d¯z log 
+
+ 2T ∥Σ[¯ zT ]∥
+
+3Lλ min (Σ[¯ zL]) 
+
+
+
++ log(1 /δ )
+
+
+
+.
+
+Then, the loss landscape of LR satisfies, with probability at least 1 − δ: (i) any local minimum is a global minimum; (ii) any saddle point is a strict-saddle point. 
+
+The proof of Proposition 2 can be found in Appendix F. It follows from Theorem 3 of [ ZSEW20 ], and certain persistence of excitation properties of the input-output training data {(ut, y t)}T +Ht=0 .In general, when a loss function is smooth and satisfies the properties (i) and (ii ) stated in Proposition 2, then (perturbed) gradient descent with random initialization is guaranteed to converge to a global minimum [ GHJY15 , LSJR16 , JGN +17 ]. This convergence is only shown to be guaranteed for unconstrained problems which is not the case for our problem. Extending such a result to constrained problems (e.g., via perturbed projected gradient descent) remains an open problem that we leave for future work. Nonetheless, our empirical results in Section 5 suggest that first order optimization methods perform well on our learning objective in practice. 
+
+4.3 Statistical Results 
+
+In this section, we will present our key statistical results. Recall from Section 4.1 that the covariates 
+
+¯zt can be approximately mapped to the outputs yt:t+H−1 via the Hankel matrix H := OC . Our first key result shows that the in-sample prediction error of our model is bounded at global optima of the training loss. 
+
+Theorem 2 (In-sample prediction error) . Let ( ˆG1, ˆG2) be the global minimizer of the ERM problem (3.6) .Suppose Assumptions 1, 2 hold. Let Σ[ ˆxt] := Pt−1 
+
+> k=0
+
+AkBΣuB⊤(A⊤)k + Pt−1 
+
+> k=0
+
+AkF ΣeF ⊤(A⊤)k denote the covariance of the predicted state ˆxt, and let Σ[ ξt] := Tu(Σ u ⊗ I)T ⊤ 
+
+> u
+
++ Te(Σ e ⊗ I)T ⊤ 
+
+> e
+
+denote the covariance of the offset term ξt. Suppose, max {∥O∥ 2 
+
+> F
+
+, ∥C∥ 2 
+
+> F
+
+} ≤ c0. Choose the history length L ≳ L1,where 
+
+L1 := β log  C2 
+
+> ρ
+
+T ∥O∥∥ Σ[ˆ xT ]∥/∥Σ[ ξ1]∥ /(1 − ρ),
+
+for a scalar β > 0. Define Λ := c0C¯z Cξ, where Cξ:= d¯y∥Σ[ ξ1]∥, and C¯z := d¯z (∥CΣ[ˆ xT ]C⊤+Σ e∥+∥Σu∥).Then, on the training data {(¯ zt, y t;t+H−1)}Tt=1 , with probability at least 1 − δ, we have 
+
+1
+
+T
+
+> T
+
+X
+
+> t=1
+
+ ˆG2 ˆG1 − OC 
+
+
+
+¯zt
+
+> 2
+> ℓ2
+
+≲ ∥Σ[ ξ1]∥HT
+
+
+
+r (d¯y + d¯z ) log ( T Λ) + log 
+
+ Tδ
+
+ 
+
+. (4.4) 7The proof of Theorem 2 is deferred to Appendix B. Since the solution to the ERM problem (3.6) does not have a closed form, we upper bounded the in-sample prediction error in (4.4) with the supremum of the stochastic process PTt=1 4 ⟨ξt, (G2G1 − OC )¯ zt⟩ − PTt=1 ∥(G2G1 − OC )¯ zt∥2 
+
+> ℓ2
+
+over the function class 
+
+G. This can be viewed as a self-normalized version of the Gaussian complexity of G − { (C, O)} [ ZSM22 ]. This technique is crucial for the analysis of in-sample prediction error, in particular, when dealing with the challenges of correlated data and structured function classes. Note that we get near-optimal dependence on the trajectory length T , and the dimensionality r(d¯y + d¯z ) of our function class G(h) in (3.4). Theorem 2 shows that, in the case of unknown dynamics, the prediction from our trained model 
+
+ˆyt:t+H−1 = ˆG2 ˆG1 ¯zt is close to the output prediction ˜yt:t+H−1 = OC ¯zt with known dynamics. Combining this with the filter approximation result, we get ∥ˆyt:t+H−1 − yt:t+H−1∥2 
+
+> ℓ2
+
+≤ ˜O(1 /T ). Note that Theorem 2 gives prediction error bound over the training data. In order to generalize to unseen data, we seek to bound the parameter error. To do so, we need to show that the covariates ¯zt are able to persistently excite all the modes of the Hankel matrix H = OC . In other words, we require the training data to satisfy λmin 
+
+PTt=1 ¯zt ¯z⊤
+
+> t
+
+
+
+≥ ˜O(λmin (Σ[¯ zL]) T ). Our next result states that it indeed holds under Assumptions 1, 2, and we get near-optimal generalization guarantee. 
+
+Theorem 3 (Parameter Estimation Error) . Consider the same setting of Theorem 2. Additionally, choose the history length L ≳ max {L1, L 2}, where 
+
+L2 := β log  CρT ∥C∥√C¯z Cˆx
+
+ /(1 − ρ),
+
+for a scalar β> 0. Suppose the trajectory length satisfies, 
+
+T ≳ L
+
+
+
+d¯z log 
+
+ 2T ∥Σ[¯ zT ]∥
+
+3Lλ min (Σ[¯ zL]) 
+
+
+
++ log(1 /δ )
+
+
+
+.
+
+Then, with probability at least 1 − δ, we have 
+
+ˆG2 ˆG1 − OC 2 
+
+> F
+
+≲ ∥Σ[ ξ1]∥Hλmin (Σ[¯ zL]) T
+
+
+
+r (d¯y + d¯z ) log ( T Λ) + log 
+
+ Tδ
+
+ 
+
+,
+
+The proof of Theorem 3 is deferred to Appendix D. Note that Assumptions 1, 2 also guarantee that 
+
+λmin (Σ[¯ zL]) ≻ 0 (see Theorem 5.4 in Ziemann et al. [ ZTL +23 ]), and its lower bound can be estimated in terms of λmin (Σ u) , λ min (Σ v) , Tu, Te etc. Note that the term Λ contains ∥Σ[ˆ xT ]∥, which can grow polynomially in T when the system (3.1) is marginally stable. However, this does not degrade our bound as Λ appears inside logarithm in our results. Also, note that the term ∥Σ[ ξ1]∥ is fixed and does not grow with T .
+
+4.4 Latent Recovery Result 
+
+Finally, we are ready to present the formal statement of our main result previewed in Theorem 1. So far, the parameter error bound only guarantees generalization in terms of model outputs. Now, we show that it furthermore implies latent state estimation, up to similarity transform. 
+
+Theorem 4 (Latent state recovery) . Consider the same settings of Theorems 2, and 3. Additionally, assume that the extended observability matrix O has full column rank, and the extended controllability matrix C has full row rank. Suppose the robustness condition holds, that is, we have 2 ˆG2 ˆG1 − OC F ≤
+
+min σn
+
+ OO ⊤ , σ n
+
+ CC ⊤ =: σn. For any new sequence of observed inputs and outputs {(uτ , y τ )}t−1 
+
+> τ=0
+
+,let ˆxt be the Kalman filter estimate, and construct the covariate ¯zt. Choose L ≳ max {L1, L 2, L 3}, where 
+
+L3 := 
+
+β log 
+
+
+
+λmin (Σ[¯ zL]) T C 2 
+
+> ρ
+
+∥ˆxt∥2 
+
+> ℓ2
+
+σn/ ∥¯zt∥2
+
+> ℓ2
+
+
+
+1 − ρ .
+
+8Then, there is a similarity transform S such that, with probability at least 1 − δ, we have 
+
+ˆxt − S ˆG1 ¯zt
+
+> 2
+> ℓ2
+
+≲ ∥Σ[ ξ1]∥Hλmin (Σ[¯ zL]) σnT ∥¯zt∥2
+
+> ℓ2
+
+
+
+r (d¯y + d¯z ) log ( T Λ) + log 
+
+ Tδ
+
+ 
+
+.
+
+The proof of Theorem 4 is presented in Appendix E. We remark that the rank conditions on O
+
+and C are implied by Assumption 2 as long as H ≥ n and L ≥ n, respectively. Note that, if we choose H to be smaller than n, the extended observability matrix O in (4.3) does not have full column rank, and we might not be able to recover the latent state. On the other hand, if we increase H
+
+beyond n, the error bound in Theorem 4 becomes loose due to polynomial growth of ∥Σ[ ξ1]∥ in H.This shows a trade-off between the length of the predicted outputs and the accuracy latent state recovery. Theorem 4 implies that when O and C are full rank, and the size of training data T is sufficiently large (such that 2 ˆG2 ˆG1 − OC F ≤ σn holds), the weights of our trained auto-regressive model ( ˆG1, ˆG2) are close to (C, O) up to a similarity transform. More specifically, we can combine Theorems 3 and 4 to get the robustness condition in terms of a requirement on the trajectory length 
+
+T as follows: T ≳ 4∥Σ[ ξ1]∥H(r(d¯y + d¯z ) log( T Λ) + log( T /δ )) /(λmin (Σ[¯ zL]) σ2
+
+> n
+
+). We remark that, such robustness guarantees are established for classical approaches like the Ho-Kalman factorization [ OO19 ], which involves performing an SVD of the Hankel matrix. Our auto-regressive model, on the other hand, does not require any additional procedure to guarantee robustness. 
+
+# 5 Numerical Experiments 
+
+5.1 Experimental Setup 
+
+We evaluate whether a two-layer linear neural network can learn a latent state. We consider two types of linear dynamical systems: randomly generated synthetic systems and benchmark systems from ControlGym [ZMM +24]. For the synthetic experiments, we generate data from the system (3.1) with n = 4 , p = 2 , and 
+
+m = 3 . The dynamics matrix A is constructed by sampling i.i.d. N (0 , 1) entries and rescaled so that 
+
+ρ(A) = 1 . The matrices B and C are generated with i.i.d N (0 , 1/p ) entries and i.i.d. N (0 , 1/m ) entries, respectively. We ensure that the system is observable. We set the process and measurement noise covariance to Σw = σ2
+
+> w
+
+In and Σv = σ2 
+
+> v
+
+Im, respectively, with σ2 
+
+> w
+
+= 0 .05 and σ2 
+
+> v
+
+= 0 .1.For the ControlGym experiments, we use two linear dynamical systems from ControlGym [ ZMM +24 ]: the underwater vehicle environment (ID: umv ) and the aircraft environment (ID: ac6 ). The state dimensions are n = 8 for umv and n = 10 for ac6 .For each system, a single trajectory {(ut, y t)}Ttrain +Ht=0 is sampled from the system where ut i.i.d 
+
+∼N (0 , Σu) with Σu = 1 
+
+> p
+
+Ip, and we form a training dataset {(¯ zt, y t:t+H−1)}Ttrain  
+
+> t=L
+
+from the trajectory. We train a two-layer linear network whose hidden dimension equals to some h ∈ Z+, learning the weights G1 ∈ Rh×(m+p)L and G2 ∈ RmH ×h such that 
+
+yt:t+H−1 ≈ G2G1 ¯zt. (5.1) The weights are obtained by minimizing mean-squared error over the training trajectory. We optimize this objective using Adam, a standard adaptive first-order gradient method, with learning rate ηt and weight decay 10 −3 in lieu of explicit regularization or parameter constraints. Implementation details and pseudo-code are provided in Appendix H. 
+
+5.1.1 Architecture Search on Synthetic Systems 
+
+In this experiment, we find an optimal hidden dimension h that returns the smallest training loss on the synthetic systems. We repeat the training with N = 10 independently generated trajectories and report the smallest average of training losses. We choose L = 10 , H = 5 , and Ttrain = 10 4. The learning rate ηt is initialized at 0.01 and decays exponentially by a factor γ = 0 .9 every epoch. 95.1.2 Latent State Recovery 
+
+In this experiment, we set the hidden dimension h to the state dimension n. We evaluate latent state recovery on both synthetic systems and ControlGym systems. We consider multiple values of L, H, and 
+
+Ttrain . Let ˆG1 and ˆG2 be the learned weights. We sample another trajectory {(ut, y t)}Ttest +Ht=0 applying nonrandom inputs 
+
+ut = c(t + 1) 
+
+Ttest 
+
+sin 
+
+ 2πt Tperiod 
+
+
+
+1p
+
+where 1p denotes the all-ones vector in Rp, and we set Tperiod = 50 , Ttest = 10 3, and c = 2 . From the trajectory, collect the feature vectors ¯zt and the activations { ˆG1 ¯zt}Ttest  
+
+> t=L
+
+as well as the predicted state estimates {ˆxt}Ttest +Ht=0 using the steady-state Kalman filter predictor form. To handle the non-uniqueness of the state space representation, we fit a linear map ˆS ∈ Rn×n such that 
+
+ˆS = argmin 
+
+> S∈Rn×n
+> Ttest
+
+X
+
+> t=L
+
+∥ˆxt − S ˆG1 ¯zt∥2 
+
+> ℓ2
+
+. (5.2) The learning rate ηt is initialized at 0.05 and decays exponentially by a factor γ = 0 .9 every two epochs. 
+
+5.2 Architecture Search on Synthetic Systems 
+
+Table 1 reports the results of a grid search over the hidden dimension h of the two-layer linear model. For each h ∈ { 1, . . . , 10 }, we trained the model on N = 10 independently generated training trajectories with fixed L = 10 , H = 5 , and Ttrain = 10 4. For each trajectory, we record the minimum training loss over epochs, and then report the sample mean and sample standard deviation of these N = 10 values. Table 1: Training loss for different hidden dimension of the auto-regressive model over N = 10 trials. 
+
+Hidden Dim. Training Loss (mean ± std) 1 309.5980 ± 167.9855 2 0.6661 ± 0.0473 3 0.7204 ± 0.0565 4 0.6179 ± 0.0408 
+
+5 0.6921 ± 0.0586 6 0.6525 ± 0.0482 7 0.6212 ± 0.0434 8 0.6234 ± 0.0453 9 0.6372 ± 0.0452 10 0.6456 ± 0.0518 
+
+The results show that h = 1 is under-parameterized, yielding larger loss than the others. Among the grid search values, h = 4 attains the lowest average training loss, which is equal to the true state dimension n = 4 .
+
+5.3 Latent State Recovery 
+
+We first evaluate latent state recovery on the randomly generated synthetic systems. In order to check whether the learned activations ˆS ˆG1 ¯zt are aligned with the Kalman filter-based predicted state estimates ˆxt, we plot the first coordinate of ˆxt against the corresponding coordinate of ˆS ˆG1 ¯zt across time t. Here, we use L = 10 and Ttrain = 10 4 for both H = 1 and H = 5 . The alignment between the two states is illustrated as scatter plots in Figure 2. 10 (a) H = 1 (b) H = 5 
+
+Figure 2: Alignment between the predicted state estimates and learned activations. We plot the first coordinate of the predicted state ˆxt against the first coordinate of the learned state ˆS ˆG1 ¯zt, respectively. Each point corresponds to one time index. Table 2: Latent state recovery results on the randomly generated synthetic system and ControlGym systems. We report the coordinate-wise and mean R2 statistics between the Kalman filter predicted state estimates and the linearly transformed learned activations.                                                                                      
+
+> System Hs1s2s3s4s5s6s7s8s9s10 Mean R2
+> Random 10.998 0.998 0.999 0.999 ––––––0.999 Random 50.996 0.998 1.000 0.999 ––––––0.998
+> umv 11.000 0.981 1.000 1.000 0.980 1.000 1.000 1.000 ––0.995
+> umv 51.000 0.974 1.000 1.000 0.974 1.000 1.000 1.000 ––0.994
+> ac6 11.000 0.992 0.996 0.992 0.997 0.997 0.998 0.999 0.998 0.821 0.979
+> ac6 51.000 0.991 0.996 0.991 0.996 0.995 0.997 0.998 0.997 0.836 0.980
+
+Figure 2 shows that the points concentrate tightly around the linear line which implies strong alignment between two values. Similar behavior is observed for the other coordinates (not shown), suggesting that the auto-regressive model can learn the latent states. We also evaluate latent state recovery using coordinate-wise R2 statistics. This gives a complementary measure of alignment between the Kalman filter state estimates and the linearly transformed learned activations. Table 2 reports the coordinate-wise and mean R2 statistics for the randomly generated synthetic system and the ControlGym systems. For the synthetic system, the R2 results are consistent with the scatter plots in Figure 2. The learned activations achieve very high alignment with the Kalman filter state estimates, with mean 
+
+R2 = 0 .999 for H = 1 and mean R2 = 0 .998 for H = 5 . All coordinate-wise R2 values are above 0.995 ,further supporting that the hidden representation recovers the latent state estimate up to a linear transformation. To test whether this latent state recovery phenomenon extends beyond randomly generated systems, we repeat the same procedure on the ControlGym systems described in Section 5.1. For these systems, the learned activations also remain strongly aligned with the Kalman filter state estimates. For the underwater vehicle system umv , the learned activations achieve mean R2 = 0 .995 when H = 1 and mean 
+
+R2 = 0 .994 when H = 5 . For the aircraft system ac6 , the learned activations achieve mean R2 = 0 .979 
+
+when H = 1 and mean R2 = 0 .980 when H = 5 . Most state coordinates have R2 values close to one. 11 The tenth coordinate of the aircraft system has the lowest R2 values, which are 0.821 for H = 1 and 
+
+0.836 for H = 5 , but the average alignment remains high. These results show that the learned activations remain strongly aligned with Kalman filter state estimates on both randomly generated synthetic systems and ControlGym systems. Thus, the latent state recovery phenomenon observed in the synthetic experiments is not limited to the specific random construction, but also appears in more realistic benchmark dynamical systems. 
+
+5.4 Sample Complexity of Latent State Recovery on Synthetic Systems 
+
+We next verify that the model learns better as the amount of training data increases. Figure 3 shows the average ℓ2 error between the Kalman filter predictor state ˆxt and the transformed learned activation 
+
+ˆS ˆG1 ¯zt as Ttrain increases, for different history lengths L with fixed future window length H.The recovery error decreases as Ttrain increases for both H = 1 and H = 5 . This qualitative trend is consistent with the finite-sample latent recovery guarantee in Theorem 4: as the training trajectory becomes longer, the bound on the latent recovery error decreases. While the experiment is not intended as a direct rate verification, it empirically supports the predicted sample-complexity behavior.         
+
+> (a) Sample complexity plot by varying the history length Lwith fixed future window length H= 1 .
+> (b) Sample complexity plot by varying the history length Lwith fixed future window length H= 5 .
+
+Figure 3: Sample complexity of latent state recovery. Average ℓ2 error between ˆxt and ˆS ˆG1 ¯zt from the test trajectory versus the length of training trajectory Ttrain for different history length L with fixed future window length H. The lines and the shaded regions indicate the sample mean and ±1 sample standard deviation, respectively, over 5 trials. 
+
+# 6 Conclusion & Discussion 
+
+In this work, we theoretically characterized when two-layer linear auto-regressive models naturally learn to approximate Kalman filtering. In particular, we show that the learned hidden representation coincides, up to a similarity transformation, with the state estimates produced by the optimal (Kalman) filter. This occurs simply due to training by empirical risk minimization on a single trajectory, where the model has no explicit knowledge of the underlying dynamics or state. There are several interesting direction for future work. One is to consider partially observed linear systems driven by non-Gaussian noise. Though the Kalman filter is no longer the optimal estimator, it remains the best linear filter. However, this leads to correlated filter errors, which complicates the statistical analysis. This issue appears in the “shallow” setting as well, and has been noted by [ GLS +20 ]. Another broad direction is to investigate under which deep learning paradigms latent states naturally emerge for linear systems. For example, recurrent architectures [ HMR18 ] or over-parametrized (deeper) networks. Finally, an impressive capability of LLMs is “in-context learning”, a form of meta-learning wherein the model specializes to patterns present in the model inputs. In the context of this work, this would correspond to training a high capacity model on data from many distinct linear dynamical 12 systems, and showing that the model could generalize (and predict latent states) for new systems given sufficiently long input sequences. 
+
+# Acknowledgments 
+
+The authors are grateful to the anonymous reviewers for their time and effort in reviewing this manuscript and providing thoughtful feedback. S.D. was partly supported by NSF CCF 2312774, NSF OAC-2311521, NSF IIS-2442137, a gift to the LinkedIn-Cornell Bowers CIS Strategic Partnership, and an AI2050 Early Career Fellowship program at Schmidt Sciences. M.F. was supported in part by awards NSF TRIPODS II 2023166, NSF CCF 2212261, NSF CCF 2312775, and by the Moorthy Family professorship at UW. 13 References 
+
+[AM05] Brian DO Anderson and John B Moore. Optimal filtering . Courier Corporation, 2005. 
+
+> (Cited on page 4.)
+
+[AMKKP22] Abed AlRahman Al Makdah, Vishaal Krishnan, Vaibhav Katewa, and Fabio Pasqualetti. Behavioral feedback for optimal lqg control. In 2022 IEEE 61st Conference on Decision and Control (CDC) , pages 4660–4666. IEEE, 2022. (Cited on page 3.) 
+
+[BLMY23] Ainesh Bakshi, Allen Liu, Ankur Moitra, and Morris Yau. A new approach to learning linear dynamical systems. In Proceedings of the 55th Annual ACM Symposium on Theory of Computing , pages 335–348, 2023. (Cited on pages 1 and 2.) 
+
+[Chu17] Kenneth Ward Church. Word2vec. Natural Language Engineering , 23(1):155–162, 2017. 
+
+> (Cited on page 1.)
+
+[DBH25] Evan Dogariu, Anand Brahmbhatt, and Elad Hazan. Universal learning of nonlinear dynamics. arXiv preprint arXiv:2508.11990 , 2025. (Cited on page 2.) 
+
+[DBOO23] Zhe Du, Haldun Balim, Samet Oymak, and Necmiye Ozay. Can transformers learn optimal filtering for unknown systems? IEEE Control Systems Letters , 7:3525–3530, 2023. 
+
+> (Cited on page 3.)
+
+[DMM +19] Sarah Dean, Horia Mania, Nikolai Matni, Benjamin Recht, and Stephen Tu. On the sample complexity of the linear quadratic regulator. FOCM , pages 1–47, 2019. (Cited on page 1.) 
+
+[FTA25] Kasra Fallah, Leonardo F Toso, and James Anderson. On the gradient domination of the lqg problem. arXiv preprint arXiv:2507.09026 , 2025. (Cited on page 3.) 
+
+[Fun06] Simon Funk. Netflix update: Try this at home, 2006. (Cited on page 1.) 
+
+[GAMKP23] Taosha Guo, Abed AlRahman Al Makdah, Vishaal Krishnan, and Fabio Pasqualetti. Imitation and transfer learning for lqg control. IEEE Control Systems Letters , 7:2149–2154, 2023. (Cited on page 3.) 
+
+[GB24] Gautam Goel and Peter Bartlett. Can a transformer represent a kalman filter? In 6th Annual Learning for Dynamics & Control Conference , pages 1502–1512. PMLR, 2024. 
+
+> (Cited on page 3.)
+
+[GHJY15] Rong Ge, Furong Huang, Chi Jin, and Yang Yuan. Escaping from saddle points—online stochastic gradient for tensor decomposition. In Conference on learning theory , pages 797–842. PMLR, 2015. (Cited on page 7.) 
+
+[GLS +20] Udaya Ghai, Holden Lee, Karan Singh, Cyril Zhang, and Yi Zhang. No-regret prediction in marginally stable systems. In Conference on Learning Theory , pages 1714–1757. PMLR, 2020. (Cited on page 12.) 
+
+[HK66] BL Ho and Rudolf E Kálmán. Effective construction of linear state-variable models from input/output functions. at-Automatisierungstechnik , 14(1-12):545–548, 1966. (Cited on pages 1 and 2.) 
+
+[HKZ +12] Daniel Hsu, Sham Kakade, Tong Zhang, et al. A tail inequality for quadratic forms of subgaussian random vectors. Electronic Communications in Probability , 17, 2012. (Cited on page 29.) 
+
+14 [HMR18] Moritz Hardt, Tengyu Ma, and Benjamin Recht. Gradient descent learns linear dynamical systems. The Journal of Machine Learning Research , 19(1):1025–1068, 2018. (Cited on pages 2 and 12.) 
+
+[HTF09] Trevor Hastie, Robert Tibshirani, and Jerome Friedman. The Elements of Statistical Learning: Data Mining, Inference, and Prediction . Springer Science & Business Media, New York, NY, 2nd edition, 2009. (Cited on page 5.) 
+
+[JGN +17] Chi Jin, Rong Ge, Praneeth Netrapalli, Sham M Kakade, and Michael I Jordan. How to escape saddle points efficiently. In International conference on machine learning , pages 1724–1732. PMLR, 2017. (Cited on page 7.) 
+
+[KBV09] Yehuda Koren, Robert Bell, and Chris Volinsky. Matrix factorization techniques for recommender systems. Computer , 42(8):30–37, 2009. (Cited on page 1.) 
+
+[Knu01] Torben Knudsen. Consistency analysis of subspace identification methods based on a linear regression approach. Automatica , 37(1):81–89, 2001. (Cited on page 5.) 
+
+[Kom02] N Komaroff. Iterative matrix bounds and computational solutions to the discrete algebraic riccati equation. IEEE Transactions on Automatic Control , 39(8):1676–1678, 2002. (Cited on page 4.) 
+
+[LAHA20] Sahin Lale, Kamyar Azizzadenesheli, Babak Hassibi, and Anima Anandkumar. Logarithmic regret bound in partially observable linear dynamical systems. Advances in Neural Information Processing Systems , 33:20876–20888, 2020. (Cited on pages 2 and 4.) 
+
+[LHB +23] Kenneth Li, Aspen K Hopkins, David Bau, Fernanda B Viégas, Hanspeter Pfister, and Martin Wattenberg. Emergent world representations: Exploring a sequence model trained on a synthetic task. In The Eleventh International Conference on Learning Representations ,2023. (Cited on page 1.) 
+
+[LL20] Bruce Lee and Andrew Lamperski. Non-asymptotic closed-loop system identification using autoregressive processes and hankel model reduction. In 2020 59th IEEE Conference on Decision and Control (CDC) , pages 3419–3424. IEEE, 2020. (Cited on page 2.) 
+
+[LSJR16] Jason D Lee, Max Simchowitz, Michael I Jordan, and Benjamin Recht. Gradient descent only converges to minimizers. In Conference on learning theory , pages 1246–1257. PMLR, 2016. (Cited on page 7.) 
+
+[OO19] Samet Oymak and Necmiye Ozay. Non-asymptotic identification of lti systems from a single trajectory. American Control Conference , 2019. (Cited on pages 1, 2, and 9.) 
+
+[OO21] Samet Oymak and Necmiye Ozay. Revisiting ho–kalman-based system identification: Robustness and finite-sample analysis. IEEE Transactions on Automatic Control ,67(4):1914–1928, 2021. (Cited on page 2.) 
+
+[RFP10] Benjamin Recht, Maryam Fazel, and Pablo A Parrilo. Guaranteed minimum-rank solutions of linear matrix equations via nuclear norm minimization. SIAM review , 52(3):471–501, 2010. (Cited on pages 1 and 22.) 
+
+[SBR19] Max Simchowitz, Ross Boczar, and Benjamin Recht. Learning linear dynamical systems with semi-parametric least squares. In Conference on Learning Theory , pages 2714–2802. PMLR, 2019. (Cited on page 2.) 
+
+[SMT +18] Max Simchowitz, Horia Mania, Stephen Tu, Michael I Jordan, and Benjamin Recht. Learning without mixing: Towards a sharp analysis of linear system identification. In 
+
+Conference On Learning Theory , pages 439–473. PMLR, 2018. (Cited on page 1.) 
+
+15 [SOF22] Yue Sun, Samet Oymak, and Maryam Fazel. Finite sample identification of low-order lti systems via nuclear norm regularization. IEEE Open Journal of Control Systems ,1:237–254, 2022. (Cited on pages 1 and 2.) 
+
+[SRD21] Tuhin Sarkar, Alexander Rakhlin, and Munther A Dahleh. Finite time lti system identification. Journal of Machine Learning Research , 22(26):1–61, 2021. (Cited on pages 1 and 2.) 
+
+[SS94] Robert E Skelton and Guojun Shi. The data-based lqg control problem. In Proceedings of 1994 33rd IEEE Conference on Decision and Control , volume 2, pages 1447–1452. IEEE, 1994. (Cited on page 3.) 
+
+[TBS +16] Stephen Tu, Ross Boczar, Max Simchowitz, Mahdi Soltanolkotabi, and Ben Recht. Low-rank solutions of linear matrix equations via procrustes flow. In Proceedings of The 33rd International Conference on Machine Learning , volume 48 of Proceedings of Machine Learning Research , pages 964–973, New York, New York, USA, 20–22 Jun 2016. PMLR. 
+
+> (Cited on pages 27 and 28.)
+
+[THA +25] Uday Kiran Reddy Tadipatri, Benjamin D Haeffele, Joshua Agterberg, Ingvar Ziemann, and Rene Vidal. Nonconvex linear system identification with minimal state representation. In 7th Annual Learning for Dynamics \& Control Conference , pages 1286–1299. PMLR, 2025. (Cited on page 2.) 
+
+[TP19] Anastasios Tsiamis and George J Pappas. Finite sample analysis of stochastic system identification. In 2019 IEEE 58th Conference on Decision and Control (CDC) , pages 3648–3654. IEEE, 2019. (Cited on pages 2 and 4.) 
+
+[TWLG22] Shubham Toshniwal, Sam Wiseman, Karen Livescu, and Kevin Gimpel. Chess as a testbed for language model state tracking. In Proceedings of the AAAI Conference on Artificial Intelligence , volume 36, pages 11385–11393, 2022. (Cited on page 1.) 
+
+[TZTS23a] Yi Tian, Kaiqing Zhang, Russ Tedrake, and Suvrit Sra. Can direct latent model learning solve linear quadratic gaussian control? In Proceedings of The 5th Annual Learning for Dynamics and Control Conference , volume 211 of Proceedings of Machine Learning Research , pages 51–63. PMLR, 15–16 Jun 2023. (Cited on page 3.) 
+
+[TZTS23b] Yi Tian, Kaiqing Zhang, Russ Tedrake, and Suvrit Sra. Toward understanding state representation learning in muzero: A case study in linear quadratic gaussian control. In 
+
+2023 62nd IEEE Conference on Decision and Control (CDC) , pages 6166–6171. IEEE, 2023. (Cited on pages 3 and 4.) 
+
+[USP +22] Jack Umenberger, Max Simchowitz, Juan C Perdomo, Kaiqing Zhang, and Russ Tedrake. Globally convergent policy search over dynamic filters for output estimation. arXiv preprint arXiv:2202.11659 , 2022. (Cited on page 2.) 
+
+[VCRM25] Keyon Vafa, Peter G Chang, Ashesh Rambachan, and Sendhil Mullainathan. What has a foundation model found? using inductive bias to probe for world models. In International Conference on Machine Learning , pages 60727–60747. PMLR, 2025. (Cited on page 1.) 
+
+[Wil89] Jan C Willems. Models for dynamics. In Dynamics reported: a series in dynamical systems and their applications , pages 171–269. Springer, 1989. (Cited on page 1.) 
+
+[XN24] Jun Xie and Yuan-Hua Ni. Data-driven policy gradient method for optimal output feedback control of lqr. In 2024 14th Asian Control Conference (ASCC) , pages 1039–1044. IEEE, 2024. (Cited on page 3.) 
+
+16 [ZFY23] Feiran Zhao, Xingyun Fu, and Keyou You. Globally convergent policy gradient methods for linear quadratic control of partially observed systems. IFAC-PapersOnLine ,56(2):5506–5511, 2023. (Cited on page 3.) 
+
+[ZMM +24] Xiangyuan Zhang, Weichao Mao, Saviz Mowlavi, Mouhacine Benosman, and Tamer Başar. Controlgym: Large-scale control environments for benchmarking reinforcement learning algorithms. In 6th Annual Learning for Dynamics & Control Conference , pages 181–196. PMLR, 2024. (Cited on pages 9 and 32.) 
+
+[ZSEW20] Zhihui Zhu, Daniel Soudry, Yonina C Eldar, and Michael B Wakin. The global optimization geometry of shallow linear neural networks. Journal of Mathematical Imaging and Vision ,62(3):279–292, 2020. (Cited on pages 7 and 29.) 
+
+[ZSM22] Ingvar M Ziemann, Henrik Sandberg, and Nikolai Matni. Single trajectory nonparametric learning of nonlinear dynamics. In Conference on Learning Theory , pages 3333–3364. PMLR, 2022. (Cited on pages 2, 8, and 22.) 
+
+[ZT22] Ingvar Ziemann and Stephen Tu. Learning with little mixing. Advances in Neural Information Processing Systems , 35:4626–4637, 2022. (Cited on page 2.) 
+
+[ZTL +23] Ingvar Ziemann, Anastasios Tsiamis, Bruce Lee, Yassir Jedra, Nikolai Matni, and George J Pappas. A tutorial on the non-asymptotic theory of system identification. In 2023 62nd IEEE Conference on Decision and Control (CDC) , pages 8921–8939. IEEE, 2023. (Cited on pages 6, 8, 24, 25, and 26.) 
+
+17 A Preliminaries 
+
+Expanding the Kalman Filtering predictor form (3.2) , we can express H future outputs yt:t+H−1 in terms of past inputs and output ¯zt, defined in (3.3), as follows, 
+
+yt:t+H−1 = OC ¯zt + O ¯AL ˆxt−L + Tuut:t+H−2 + Teet:t+H−1, (A.1) where O ∈ RmH ×n is the observability matrix, C ∈ Rn×(m+p)L is the closed-loop controllability matrix, 
+
+Tu ∈ RmH ×p(H−1) is a Toeplitz matrix associated with future inputs, and Te ∈ RmH ×mH is a Toeplitz matrix associated with future innovations, given by 
+
+O := 
+
+
+
+CCA 
+
+...
+
+CA H−1
+
+ , C := F ¯AF · · · ¯AL−1F B ¯AB · · · ¯AL−1B , (A.2) 
+
+Tu := 
+
+
+
+0 0 0 · · · 0
+
+CB 0 0 · · · 0
+
+CAB CB 0 · · · 0
+
+... ... ... . . . ...
+
+CA H−2B CA H−3B CA H−4B · · · CB 
+
+
+
+, (A.3) 
+
+Te := 
+
+
+
+I 0 0 · · · 0
+
+CF I 0 · · · 0
+
+CAF CF I · · · 0
+
+... ... ... . . . ...
+
+CA H−2F CA H−3F CA H−4F · · · I
+
+
+
+. (A.4) With these definitions, given the input-output samples {(ut, y t)}T +Ht=0 generated from a single trajectory of (3.1) , we want to learn an auto-regressive model by solving the following empirical risk minimization (ERM) problem, 
+
+ˆn, ˆG1, ˆG2 = arg min 
+
+> h≤r, (G1,G 2)∈G (h)
+
+12T
+
+> T
+
+X
+
+> t=1
+
+∥yt:t+H−1 − G2G1 ¯zt∥2 
+
+> ℓ2
+
+. (A.5) 
+
+# B In-Sample Prediction Error (Proof of Theorem 2) 
+
+Theorem 2 (Detailed version) . Suppose ( ˆG1, ˆG2) is the global minimizer of the ERM problem (A.5) .Suppose Assumptions 1, 2 hold. Let Σ[ ˆxt] := E ˆxt ˆx⊤
+
+> t
+
+ = Pt−1 
+
+> k=0
+
+AkBΣuB⊤(A⊤)k+Pt−1 
+
+> k=0
+
+AkF ΣeF ⊤(A⊤)k
+
+denote the covariance of the predicted state ˆxt, and let Σ[ ξt] := E[ξtξ⊤ 
+
+> t
+
+] = Tu(Σ u ⊗ I)T ⊤ 
+
+> u
+
++ Te(Σ e ⊗ I)T ⊤
+
+> e
+
+denote the covariance of the offset term ξt. Suppose, max {∥O∥ 2 
+
+> F
+
+, ∥C∥ 2 
+
+> F
+
+} ≤ c0, and choose the history length L ≥ L1 := β log  C2 
+
+> ρ
+
+T ∥O∥∥ Σ[ˆ xT ]∥/∥Σ[ ξ1]∥ /(1 − ρ). Define, 
+
+Cξ(δ) := ∥Σ[ ξ1]∥ (mH + log(2 T /δ )) ,C¯z (δ) := ( ∥CΣ[ˆ xT ]C⊤ + Σ e∥ + ∥Σu∥) (( m + p)L + log(2 T /δ )) ,
+
+Λ( δ) := 
+
+
+
+6
+
+q
+
+Cξ(δ)C¯z (δ)T + 2 c0C¯z (δ)T
+
+
+
+/(H∥Σ[ ξ1]∥).
+
+(B.1) 
+
+Then, with probability at least 1 − δ, we have 
+
+1
+
+T
+
+> T
+
+X
+
+> t=1
+
+ ˆG2 ˆG1 − OC 
+
+
+
+¯zt
+
+> 2
+> ℓ2
+
+≲ ∥Σ[ ξ1]∥HT
+
+
+
+r (mH + ( m + p)L) log ( C0Λ( δ)) + log 
+
+ Tδ
+
+ 
+
+(B.2) 18 B.1 Prediction error decomposition 
+
+To begin, using the global optimality of ˆG1, ˆG2, we have 
+
+12T
+
+> T
+
+X
+
+> t=1
+
+yt:t+H−1 − ˆG2 ˆG1 ¯zt
+
+> 2
+> ℓ2
+
+≤ 12T
+
+> T
+
+X
+
+> t=1
+
+∥yt:t+H−1 − OC ¯zt∥2 
+
+> ℓ2
+
+.
+
+Next, from (A.1), we have yt:t+H−1 = OC ¯zt + O ¯AL ˆxt−L + ξt = OC ¯zt + ζt, where, we define 
+
+ζt := O ¯AL ˆxt−L + ξt, ξt := Tuut:t+H−2 + Teet:t+H−1, (B.3) denotes the residual/error terms. Using (B.3) along-with the assumption that max {∥O∥ 2 
+
+> F
+
+, ∥C∥ 2 
+
+> F
+
+} ≤ c0,we get, 
+
+> T
+
+X
+
+> t=1
+
+
+
+OC − ˆG2 ˆG1
+
+
+
+¯zt
+
+> 2
+> ℓ2
+
+≤
+
+> T
+
+X
+
+> t=1
+
+2
+
+D
+
+ζt,
+
+ ˆG2 ˆG1 − OC 
+
+
+
+¯zt
+
+E
+
+. (B.4) Adding the positive difference to the right of (B.4), we get the following offset inequality, 
+
+> T
+
+X
+
+> t=1
+
+ ˆG2 ˆG1 − OC 
+
+
+
+¯zt
+
+> 2
+> ℓ2
+
+≤
+
+> T
+
+X
+
+> t=1
+
+4
+
+D
+
+ζt,
+
+ ˆG2 ˆG1 − OC 
+
+
+
+¯zt
+
+E
+
+−
+
+> T
+
+X
+
+> t=1
+
+
+
+OC − ˆG2 ˆG1
+
+
+
+¯zt
+
+> 2
+> ℓ2
+
+,
+
+≤
+
+> T
+
+X
+
+> t=1
+
+6
+
+D
+
+ζt,
+
+ ˆG2 ˆG1 − OC 
+
+
+
+¯zt
+
+E
+
+−
+
+> T
+
+X
+
+> t=1
+
+2
+
+
+
+OC − ˆG2 ˆG1
+
+
+
+¯zt
+
+> 2
+> ℓ2
+
+,
+
+≤ sup 
+
+> Θ∈G−{ Θ⋆}
+
+( TX
+
+> t=1
+
+6 ⟨ξt, Θ¯ zt⟩ − 
+
+> T
+
+X
+
+> t=1
+
+∥Θ¯ zt∥2
+
+> ℓ2
+
+)
+
+,
+
++ sup 
+
+> Θ∈G−{ Θ⋆}
+
+( TX
+
+> t=1
+
+6 O ¯AL ˆxt−L, Θ¯ zt −
+
+> T
+
+X
+
+> t=1
+
+∥Θ¯ zt∥2
+
+> ℓ2
+
+)
+
+,
+
+≤ sup  
+
+> Θ∈¯G
+
+( TX
+
+> t=1
+
+6 ⟨ξt, Θ¯ zt⟩ − 
+
+> T
+
+X
+
+> t=1
+
+∥Θ¯ zt∥2
+
+> ℓ2
+
+)| {z }
+
+> Martingale offset complexity
+
++ 9 
+
+> T
+
+X
+
+> t=1
+
+O ¯AL ˆxt−L ¯z⊤
+
+> t
+
+! TX
+
+> t=1
+
+¯zt ¯z⊤
+
+> t
+
+!−1/2 2
+
+> F
+
+| {z }
+
+> Truncation bias
+
+(B.5) where we get the last inequality by maximizing the second term over all Θ ∈ RmH ×(m+p)L, and we define the sets, 
+
+G − { Θ⋆} := {Θ − Θ⋆ ∈ RmH ×(m+p)L; rank(Θ) ≤ r; ∥Θ∥F ≤ c0}, (B.6) 
+
+⊆ ¯G := {Θ ∈ RmH ×(m+p)L; rank(Θ) ≤ 2r; ∥Θ∥F ≤ 2c0}, (B.7) and Θ⋆ := OC is the true Hankel matrix. In the following, we will upper bound each term in (B.5) separately to get an upper bound on (1 /T ) PTt=1 
+
+ ˆG2 ˆG1 − OC 
+
+
+
+¯zt
+
+> 2
+> ℓ2
+
+.
+
+B.2 Martingale offset complexity 
+
+Theorem 5 (Martingale offset complexity) . Under the same setup of Theorem 2, with probability at least 1 − δ, we have, 
+
+sup  
+
+> Θ∈¯G
+
+( TX
+
+> t=1
+
+6 ⟨ξt, Θ¯ zt⟩ − 
+
+> T
+
+X
+
+> t=1
+
+∥Θ¯ zt∥2
+
+> ℓ2
+
+)
+
+≤ cH ∥Σ[ ξ1]∥
+
+
+
+r (mH + ( m + p)L) log ( C0Λ( δ)) + log 
+
+ 1
+
+δ
+
+ 
+
+,
+
+(B.8) 19 where we define, Λ( δ) := 6 pCξ(δ)C¯z (δ)T + 2 c0C¯z (δ)T / (cH ∥Σ[ ξ1]∥), for some constant c0 > 0.
+
+B.2.1 Proof of Theorem 5 (Supporting Results) 
+
+We first discretion the set ¯G in (B.7), using ε-covering argument as follows. 
+
+Lemma 1 (ε-covering) . Let N := N ( ¯G, ε, ∥·∥ F ) be an ε-net of ¯G defined in (B.7) . Then, with probability at least 1 − δ, we have 
+
+sup  
+
+> Θ∈¯G
+
+( TX
+
+> t=1
+
+
+
+6 ⟨ξt, Θ¯ zt⟩ − ∥ Θ¯ zt∥2
+
+> ℓ2
+
+)
+
+≤ max 
+
+> Θ∈N
+
+( TX
+
+> t=1
+
+
+
+6 ⟨ξt, Θ¯ zt⟩ − ∥ Θ¯ zt∥2
+
+> ℓ2
+
+)
+
+,
+
++ ε
+
+
+
+6
+
+q
+
+Cξ(δ)C¯z (δ)T + 2 c0C¯z (δ)T
+
+
+
+, (B.9) 
+
+where Cξ(δ), and C¯z (δ) are as defined in (B.1) .Proof. To begin, denote for all Θ ∈ ¯G, XΘ as 
+
+XΘ := 6 
+
+> T
+
+X
+
+> t=1
+
+ξ⊤ 
+
+> t
+
+Θ¯ zt −
+
+> T
+
+X
+
+> t=1
+
+∥Θ¯ zt∥2
+
+> ℓ2
+
+Then, note that for all Θ, Θ′ ∈ ¯G, we have 
+
+|XΘ − XΘ′ | ≤ 6
+
+> T
+
+X
+
+> t=1
+
+ξ⊤
+
+> t
+
+ Θ − Θ′ ¯zt +
+
+> T
+
+X
+
+> t=1
+
+¯z⊤
+
+> t
+
+
+
+Θ⊤Θ − Θ′⊤ Θ′
+
+¯zt ,
+
+> (i)
+
+≤ Θ − Θ′
+
+> F
+
+6
+
+# √ TX
+
+> t=1
+
+∥ξt∥2
+
+> ℓ2
+
+! TX
+
+> t=1
+
+∥¯zt∥2
+
+> ℓ2
+
+!
+
++ 2 c0
+
+> T
+
+X
+
+> t=1
+
+∥¯zt∥2
+
+> ℓ2
+
+ , (B.10) where we used triangular inequality, followed by Cauchy-Schwarz inequality to obtain (B.10) . Finally combining this with Lemma 8, and observing that for every Θ ∈ ¯G, there exists Θ′ ∈ N ( ¯G, ε, ∥·∥ F ) such that ∥Θ − Θ′∥F ≤ ε, we get the statement of Lemma 1. Next, to get a high probability upper bound on the quantity max Θ∈N 
+
+nPTt=1 
+
+
+
+6 ⟨ξt, Θ¯ zt⟩ − ∥ Θ¯ zt∥2
+
+> ℓ2
+
+o 
+
+,we derive the following intermediate result. 
+
+Lemma 2 (Self-normalized offset bound) . Suppose Assumptions 2, 1 hold. Then, for any Θ ∈N ( ¯G, ε, ∥·∥ F ), and λ ∈ 0, 1/  18 H∥T u(Σ u ⊗ I)T ⊤ 
+
+> u
+
++ Te(Σ e ⊗ I)T ⊤ 
+
+> e
+
+∥ , we have 
+
+E
+
+"
+
+exp λ
+
+> T
+
+X
+
+> t=1
+
+
+
+6 ⟨ξt, Θ¯ zt⟩ − ∥ Θ¯ zt∥2
+
+> ℓ2
+
+!# 
+
+≤ 1. (B.11) 
+
+Proof. Recall from (B.3) that ξt = Tuut:t+H−2 + Teet:t+H−1. For the ease of notation, and without loss of generality suppose N := T /H is an integer. Then we have 
+
+> T
+
+X
+
+> t=1
+
+6 ⟨ξt, Θ¯ zt⟩ − ∥ Θ¯ zt∥2 
+
+> ℓ2
+
+=
+
+> H−1
+
+X  
+
+> τ=0
+> N−1
+
+X
+
+> i=0
+
+6 ⟨ξ1+ iH +τ , Θ¯ z1+ iH +τ ⟩ − ∥ Θ¯ z1+ iH +τ ∥2 
+
+> ℓ2
+
+,
+
+=: 
+
+> H−1
+
+X  
+
+> τ=0
+> N−1
+
+X
+
+> i=0
+
+6 ⟨ξτ,i , Θ¯ zτ,i ⟩ − ∥ Θ¯ zτ,i ∥2 
+
+> ℓ2
+
+, (B.12) where the subscript (τ, i ) denotes the time index t = iH + τ + 1 . Applying Hölder’s inequality, we have 
+
+E
+
+"
+
+exp λ
+
+> T
+
+X
+
+> t=1
+
+6 ⟨ξt, Θ¯ zt⟩ − ∥ Θ¯ zt∥2
+
+> ℓ2
+
+!# 
+
+= E
+
+"
+
+exp λ
+
+> H−1
+
+X  
+
+> τ=0
+> N−1
+
+X
+
+> i=0
+
+6 ⟨ξτ,i , Θ¯ zτ,i ⟩ − ∥ Θ¯ zτ,i ∥2
+
+> ℓ2
+
+!# 
+
+,
+
+20 ≤
+
+> H−1
+
+Y 
+
+> τ=0
+
+E
+
+"
+
+exp λH  
+
+> N−1
+
+X
+
+> i=0
+
+6 ⟨ξτ,i , Θ¯ zτ,i ⟩ − ∥ Θ¯ zτ,i ∥2
+
+> ℓ2
+
+!#! 1/H 
+
+.
+
+(B.13) To proceed, let {F t}t≥− 1 be an increasing filtration ( σ-algebra) with all randomness up till time t − 1.Let (τ, i ) := iH + τ + 1 denote a time index, parameterized by τ ∈ [0 , H − 1] , and i ∈ [0 , N − 1] . Then, we have 
+
+E
+
+"
+
+exp λH  
+
+> N−1
+
+X
+
+> i=0
+
+6 ⟨ξτ,i , Θ¯ zτ,i ⟩ − ∥ Θ¯ zτ,i ∥2
+
+> ℓ2
+
+!# 
+
+,
+
+= E
+
+
+
+exp λH  
+
+> N−2
+
+X
+
+> i=0
+
+6 ⟨ξτ,i , Θ¯ zτ,i ⟩ − ∥ Θ¯ zτ,i ∥2
+
+> ℓ2
+
+!
+
+E
+
+h
+
+exp 
+
+
+
+λH 
+
+
+
+6 ⟨ξτ,N −1, Θ¯ zτ,N −1⟩ − ∥ Θ¯ zτ,N −1∥2
+
+> ℓ2
+
+ 
+
+Fτ,N −1
+
+i 
+
+,
+
+≤ E
+
+"
+
+exp λH  
+
+> N−2
+
+X
+
+> i=0
+
+6 ⟨ξτ,i , Θ¯ zτ,i ⟩ − ∥ Θ¯ zτ,i ∥2
+
+> ℓ2
+
+!# 
+
+, (B.14) where we obtained (B.14) as follows, 
+
+E
+
+h
+
+exp 
+
+
+
+6λH ⟨ξτ,N −1, Θ¯ zτ,N −1⟩ − λH ∥Θ¯ zτ,N −1∥2
+
+> ℓ2
+
+
+
+Fτ,N −1
+
+i
+
+= exp 
+
+
+
+−λH ∥Θ¯ zτ,N −1∥2
+
+> ℓ2
+
+
+
+E exp (6 λH ⟨ξτ,N −1, Θ¯ zτ,N −1⟩) Fτ,N −1
+
+ ,
+
+≤ exp 
+
+
+
+−λH ∥Θ¯ zτ,N −1∥2
+
+> ℓ2
+
+
+
+exp 
+
+
+
+18 λ2H2 
+
+∥T u(Σ u ⊗ I)T ⊤ 
+
+> u
+
++ Te(Σ e ⊗ I)T ⊤ 
+
+> e
+
+∥
+
+
+
+∥Θ¯ zτ,N −1∥2
+
+> ℓ2
+
+
+
+,
+
+= exp 
+
+ 
+
+18 λ2H2 
+
+Tu(Σ u ⊗ I)T ⊤ 
+
+> u
+
++ Te(Σ e ⊗ I)T ⊤
+
+> e
+
+
+
+− λH 
+
+
+
+∥Θ¯ zτ,N −1∥2
+
+> ℓ2
+
+
+
+,
+
+≤ 1, (B.15) where we obtained the last inequality by choosing λ ∈ 0, 1/  18 H∥T u(Σ u ⊗ I)T ⊤ 
+
+> u
+
++ Te(Σ e ⊗ I)T ⊤ 
+
+> e
+
+∥ .Repeating the same argument by conditioning on the filtration Fτ,N −2, Fτ,N −3, . . . , Fτ, 0 in (B.14) , we find that 
+
+E
+
+"
+
+exp λH  
+
+> N−1
+
+X
+
+> i=0
+
+6 ⟨ξτ,i , Θ¯ zτ,i ⟩ − ∥ Θ¯ zτ,i ∥2
+
+> ℓ2
+
+!# 
+
+≤ 1, (B.16) for λ ∈ 0, 1/  18 H∥T u(Σ u ⊗ I)T ⊤ 
+
+> u
+
++ Te(Σ e ⊗ I)T ⊤ 
+
+> e
+
+∥ . Combining (B.16) with (B.13), we have 
+
+E
+
+"
+
+exp λ
+
+> T
+
+X
+
+> t=1
+
+6 ⟨ξt, Θ¯ zt⟩ − ∥ Θ¯ zt∥2
+
+> ℓ2
+
+!# 
+
+≤
+
+> H−1
+
+Y 
+
+> τ=0
+
+E
+
+"
+
+exp λH  
+
+> N−1
+
+X
+
+> i=0
+
+6 ⟨ξτ,i , Θ¯ zτ,i ⟩ − ∥ Θ¯ zτ,i ∥2
+
+> ℓ2
+
+!#! 1/H 
+
+≤ 1. (B.17) This completes the proof. The result in Lemma 2 immediately leads to the following useful result on the tail of supremum. 
+
+Lemma 3 (Maximal inequality) . Let N := N ( ¯G, ε, ∥·∥ F ) be an ε-net of ¯G defined in (B.7) . Let 
+
+Σ[ ξt] := E[ξtξ⊤ 
+
+> t
+
+] = Tu(Σ u ⊗ I)T ⊤ 
+
+> u
+
++ Te(Σ e ⊗ I)T ⊤ 
+
+> e
+
+denote the covariance of ξt. Then, there exist a universal constant c > 0, such that 
+
+P max 
+
+> Θ∈N
+
+( TX
+
+> t=1
+
+
+
+6 ⟨ξt, Θ¯ zt⟩ − ∥ Θ¯ zt∥2
+
+> ℓ2
+
+)
+
+≤ cH ∥Σ[ ξ1]∥ (log ( |N | ) + log(1 /δ )) 
+
+!
+
+≥ 1 − δ (B.18) 21 Proof. The proof of lemma 3 uses similar arguments, as used in the proof of Lemma 9 in [ ZSM22 ]. By jensen’s inequality and monotonicity of the exponential, we have 
+
+exp λ E
+
+"
+
+max 
+
+> Θ∈N
+
+( TX
+
+> t=1
+
+
+
+6 ⟨ξt, Θ¯ zt⟩ − ∥ Θ¯ zt∥2
+
+> ℓ2
+
+)#! 
+
+≤ E
+
+"
+
+exp λ max 
+
+> Θ∈N
+
+( TX
+
+> t=1
+
+
+
+6 ⟨ξt, Θ¯ zt⟩ − ∥ Θ¯ zt∥2
+
+> ℓ2
+
+)!# 
+
+,
+
+≤ E
+
+"
+
+max  
+
+> Θ∈N
+
+exp λ
+
+( TX
+
+> t=1
+
+
+
+6 ⟨ξt, Θ¯ zt⟩ − ∥ Θ¯ zt∥2
+
+> ℓ2
+
+)!# 
+
+,
+
+≤ X
+
+> Θ∈N
+
+E
+
+"
+
+exp λ
+
+( TX
+
+> t=1
+
+
+
+6 ⟨ξt, Θ¯ zt⟩ − ∥ Θ¯ zt∥2
+
+> ℓ2
+
+)!# 
+
+,
+
+≤ exp (log ( |N | )) , (B.19) where we get the last inequality by choosing λ = 1 /  18 H∥T u(Σ u ⊗ I)T ⊤ 
+
+> u
+
++ Te(Σ e ⊗ I)T ⊤ 
+
+> e
+
+∥, and applying Lemma 2. Combining this with the Chernoff bound, we get 
+
+P max 
+
+> Θ∈N
+
+( TX
+
+> t=1
+
+
+
+6 ⟨ξt, Θ¯ zt⟩ − ∥ Θ¯ zt∥2
+
+> ℓ2
+
+)
+
+− 1
+
+λ log ( |N | ) ≥ κ
+
+!
+
+≤ P exp λ max 
+
+> Θ∈N
+
+( TX
+
+> t=1
+
+
+
+6 ⟨ξt, Θ¯ zt⟩ − ∥ Θ¯ zt∥2
+
+> ℓ2
+
+)
+
+− log ( |N | )
+
+!
+
+≥ exp ( λκ )
+
+!
+
+,
+
+≤ E
+
+"
+
+exp λ max 
+
+> Θ∈N
+
+( TX
+
+> t=1
+
+
+
+6 ⟨ξt, Θ¯ zt⟩ − ∥ Θ¯ zt∥2
+
+> ℓ2
+
+)
+
+− log ( |N | )
+
+!# 
+
+exp ( −λκ ) ,
+
+≤ exp ( −λκ ) , (B.20) where we get the last inequality by choosing λ = 1 /  18 H∥T u(Σ u ⊗ I)T ⊤ 
+
+> u
+
++ Te(Σ e ⊗ I)T ⊤ 
+
+> e
+
+∥, and using (B.19). Finally, choosing κ = 1 
+
+> λ
+
+log(1 /δ ), we get the statement of the lemma. Next, to upper bound the cardinality of the ε-covering set N ( ¯G, ε, ∥·∥ F ), we use a slightly modified version of Lemma 4.5. in [RFP10], states as follows, 
+
+Lemma 4 (Cardinality of N ). Let ε ∈ (0 , 1) . Let N ( ¯G, ε, ∥·∥ F ) be an ε-net of ¯G with respect to ∥·∥ F
+
+of minimal cardinality. Then, we have 
+
+|N | ≤ 
+
+ C0
+
+ε
+
+r(mH +( m+p)L−2r)
+
+(B.21) 
+
+B.2.2 Finalizing the Proof of Theorem 5 
+
+To finalize the proof of Theorem 5, we first combine Lemma 3 with Lemma 4 to obtain, 
+
+P max 
+
+> Θ∈N
+
+( TX
+
+> t=1
+
+
+
+6 ⟨ξt, Θ¯ zt⟩ − ∥ Θ¯ zt∥2
+
+> ℓ2
+
+)
+
+≤ cH ∥Σ[ ξ1]∥
+
+
+
+r (mH + ( m + p)L) log 
+
+ C0
+
+ε
+
+
+
++ log 
+
+ 1
+
+δ
+
+ !
+
+≥ 1 − δ, 
+
+Combining this with Lemma 1, with probability at least 1 − δ, we have 
+
+sup  
+
+> Θ∈¯G
+
+( TX
+
+> t=1
+
+
+
+6 ⟨ξt, Θ¯ zt⟩ − ∥ Θ¯ zt∥2
+
+> ℓ2
+
+)
+
+≤ cH ∥Σ[ ξ1]∥
+
+
+
+r (mH + ( m + p)L) log 
+
+ C0
+
+ε
+
+
+
++ log 
+
+ 1
+
+δ
+
+ 
+
++ ε
+
+
+
+6
+
+q
+
+Cξ(δ)C¯z (δ)T + 2 c0C¯z (δ)T
+
+
+
+. (B.22) Finally choosing ε = cH ∥Σ[ ξ1]∥
+
+> 6
+
+√Cξ (δ)C¯z (δ)T +2 c0C¯z (δ)T , we get the statement of Theorem 5. 22 B.3 Truncation bias 
+
+Lemma 5 (Truncation bias) . Suppose Assumptions 1, 2 hold, and we choose the history length 
+
+L ≥ β log  C2 
+
+> ρ
+
+T ∥O∥∥ Σ[ˆ xT ]∥/∥Σ[ ξ1]∥ /(1 − ρ). Then, there exist a universal constant c > 0 such that, with probability at least 1 − δ, we have 
+
+> T
+
+X
+
+> t=1
+
+O ¯AL ˆxt−L ¯z⊤
+
+> t
+
+! TX
+
+> t=1
+
+¯zt ¯z⊤
+
+> t
+
+!−1/2 2
+
+> F
+
+≤ c∥Σ[ ξ1]∥ (n + log( T /δ )) , (B.23) 
+
+Proof. 
+
+> T
+
+X
+
+> t=1
+
+O ¯AL ˆxt−L ¯z⊤
+
+> t
+
+! TX
+
+> t=1
+
+¯zt ¯z⊤
+
+> t
+
+!−1/2 2
+
+> F
+
+≤ O ¯AL 2 TX
+
+> t=1
+
+ˆxt−L ¯z⊤
+
+> t
+
+! TX
+
+> t=1
+
+¯zt ¯z⊤
+
+> t
+
+!−1/2 2
+
+> F
+
+,
+
+≤ ∥O∥ C2 
+
+> ρ
+
+ρ2LTX
+
+> t=1
+
+∥ˆxt−L∥2 
+
+> ℓ2
+
+. (B.24) Hence, using Lemma 8, with probability at least 1 − δ, we have 
+
+> T
+
+X
+
+> t=1
+
+O ¯AL ˆxt−L ¯z⊤
+
+> t
+
+! TX
+
+> t=1
+
+¯zt ¯z⊤
+
+> t
+
+!−1/2 2
+
+> F
+
+≤ c∥O∥ C2 
+
+> ρ
+
+ρ2LT ∥Σ[ˆ xT ]∥ (n + log( T /δ )) ,
+
+> (i)
+
+≤ c∥Σ[ ξ1]∥ (n + log( T /δ )) , (B.25) where we obtained (i) by using the argument that, there exists a β > 0 such that, 
+
+C2 
+
+> ρ
+
+ρ2LT ∥O∥∥ Σ[ˆ xT ]∥ ≤ ∥ Σ[ ξ1]∥ ⇐ = L ≥ β log  C2 
+
+> ρ
+
+T ∥O∥∥ Σ[ˆ xT ]∥/∥Σ[ ξ1]∥ /(1 − ρ). (B.26) This completes the proof. 
+
+B.4 Finalizing the Proof of Theorem 2 
+
+To finalize the proof of Theorem 2, we combine Theorem 5, Lemma 5, and (B.5) to get the following result: Choosing L ≥ β log  C2 
+
+> ρ
+
+T ∥O∥∥ Σ[ˆ xT ]∥/∥Σ[ ξ1]∥ /(1 − ρ), with probability at least 1 − δ, we have 
+
+1
+
+T
+
+> T
+
+X
+
+> t=1
+
+ ˆG2 ˆG1 − OC 
+
+
+
+¯zt
+
+> 2
+> ℓ2
+
+≤ cH ∥Σ[ ξ1]∥
+
+T
+
+
+
+r (mH + ( m + p)L) log ( C0Λ( δ)) + log 
+
+ 1
+
+δ
+
+ 
+
++ c∥Σ[ ξ1]∥
+
+T (n + log( T /δ )) ,
+
+≤ cH ∥Σ[ ξ1]∥
+
+T
+
+
+
+r (mH + ( m + p)L) log ( C0Λ( δ)) + log 
+
+ Tδ
+
+ 
+
+, (B.27) where we obtained the last inequality by the choosing the regularization parameter, 
+
+λ ≤ cH ∥Σ[ ξ1]∥
+
+3c0T
+
+
+
+r (mH + ( m + p)L) log ( C0Λ( δ)) + log 
+
+ Tδ
+
+ 
+
+. (B.28) This completes the proof of Theorem 2. 23 C Persistence of excitation 
+
+Theorem 6 (Persistence of excitation) . Fix a failure probability δ ∈ (0 , 1) , and suppose Assumptions 1, 2 hold. For any t ∈ [1 , T ], let Σ[¯ zt] := E[¯ zt ¯z⊤ 
+
+> t
+
+], and Σ[ˆ xt] := E[ˆ xt ˆx⊤ 
+
+> t
+
+]. Define, 
+
+Cˆx(δ) := ∥Σ[ˆ xT ]∥ (n + log(2 T /δ )) , C¯z (δ) := ( ∥CΣ[ˆ xT ]C⊤ + Σ e∥ + ∥Σu∥) (( m + p)L + log(2 T /δ )) ,
+
+(C.1) 
+
+and choose L ≳ L2 := β log 
+
+
+
+CρT ∥C∥√C¯z (δ)Cˆx(δ)/c log( T )
+
+
+
+/(1 − ρ). Suppose the trajectory length satisfies, 
+
+T ≳ L
+
+
+
+(m + p)L log 
+
+ 2T ∥Σ[¯ zT ]∥
+
+3Lλ min (Σ[¯ zL]) 
+
+
+
++ log(1 /δ )
+
+
+
+.
+
+Then, we have 
+
+P
+
+> T
+
+X
+
+> t=1
+
+¯zt ¯z⊤ 
+
+> t
+
+⪰ T
+
+18 Σ[¯ zL]
+
+!
+
+≥ 1 − δ, and Σ[¯ zL] = E[¯ zL ¯z⊤ 
+
+> L
+
+] ≻ 0. (C.2) 
+
+Proof. The proof of Theorem 6 follows similar arguments (with certain modifications) as used in the proof of Theorem 5.2 in [ ZTL +23 ]. First, recall that ¯zt = y⊤ 
+
+> t−1
+
+· · · y⊤ 
+
+> t−L
+
+u⊤ 
+
+> t−1
+
+· · · u⊤
+
+> t−L
+
+⊤ ∈ R(m+p)L.To apply Theorem 5.2 in Ziemann et al. [ ZTL +23 ], we need to write the evolution of the covariates ¯zt
+
+for t > 1 in terms of the covariates of an ARX model (after subtracting the truncation bias at each time step). Using (3.2), we can easily show that 
+
+¯zt+1 = A¯zt + B¯vt + ¯bt, (C.3) where, we define 
+
+A := 
+
+ A11 A12 
+
+0pL ×mL A22 
+
+
+
+∈ R(m+p)L×(m+p)L
+
+A11 := 
+
+
+
+CF C ¯AF · · · C ¯AL−2F C ¯AL−1FIm 0 · · · 0 00 Im · · · 0 0
+
+... ... . . . ... ...
+
+0 0 · · · Im 0
+
+
+
+∈ RmL ×mL 
+
+A12 := 
+
+
+
+CB C ¯AB · · · C ¯AL−2B C ¯AL−1B
+
+0 0 · · · 0 00 0 · · · 0 0
+
+... ... . . . ... ...
+
+0 0 · · · 0 0
+
+
+
+∈ RmL ×pL 
+
+A22 := 
+
+
+
+0 0 · · · 0 0
+
+Ip 0 · · · 0 00 Ip · · · 0 0
+
+... ... . . . ... ...
+
+0 0 · · · Ip 0
+
+
+
+∈ RpL ×pL 
+
+B := 
+
+
+
+Σ1/2 
+
+> e
+
+00 0
+
+... ...
+
+0 Σ1/2
+
+> u
+
+... ...
+
+0 0
+
+
+
+∈ R(m+p)L×(m+p), ¯bt := 
+
+ C ¯AL ˆxt−L
+
+0(m+p)L−m
+
+
+
+∈ R(m+p)L, ¯v := 
+
+"
+
+Σ−1/2 
+
+> e
+
+et
+
+Σ−1/2 
+
+> u
+
+ut
+
+#
+
+∈ Rm+p
+
+24 For the matrix B, only the blocks at (1 , 1) and (L + 1 , 2) are Identity, and the rest is zero. Note that, Theorem 5.2 in Ziemann et al. [ ZTL +23 ] requires ρ(A11 ) ≤ 1, so that the associated ARX model is non-explosive. In our case, due to Assumption 2, we have ρ(A) ≤ 1 and ρ( ¯A) < 1. As a result our system (3.1) is non-explosive. Hence, we do not need additional assumption on A11 . Expanding (C.3) ,we have 
+
+¯zt+1 = A¯zt + B¯vt + ¯bt =⇒ ¯zt =
+
+> t−1
+
+X
+
+> k=0
+
+At−1−k(B¯vk + ¯bk). (C.4) Hence, the vector ¯z1: T of all covariates satisfies the following causal linear relation, 
+
+
+
+¯z1
+
+¯z2
+
+¯z3
+
+...
+
+¯zT
+
+
+
+=
+
+
+
+B 0 0 · · · 0
+
+AB B 0 · · · 0
+
+A2B AB B · · · 0
+
+... ... ... . . . ...
+
+AT −1B AT −2B AT −3B · · · B
+
+
+
+¯v1
+
+¯v2
+
+¯v3
+
+...
+
+¯vT −1
+
+| {z }
+
+> evolution of excitations
+
++
+
+
+
+I 0 0 · · · 0
+
+A I 0 · · · 0
+
+A2 A I · · · 0
+
+... ... ... . . . ...
+
+AT −1 AT −2 AT −3 · · · I
+
+
+
+¯b1
+
+¯b2
+
+¯b3
+
+...
+
+¯bT −1
+
+| {z }
+
+> evolution of bias
+
+(C.5) From (C.5), it is easy to see that, 
+
+¯zt ¯z⊤ 
+
+> t
+
+=
+
+> t−1
+
+X
+
+> k=0
+> t−1
+
+X
+
+> l=0
+
+At−1−k(B¯vk + ¯bk)( B¯vl + ¯bl)⊤(A⊤)t−1−l,
+
+=
+
+> t−1
+
+X
+
+> k=0
+> t−1
+
+X
+
+> l=0
+
+At−1−kB¯vk ¯v⊤ 
+
+> l
+
+B⊤(A⊤)t−1−l +
+
+> t−1
+
+X
+
+> k=0
+> t−1
+
+X
+
+> l=0
+
+At−1−kB¯vk¯b⊤ 
+
+> l
+
+(A⊤)t−1−l,
+
++
+
+> t−1
+
+X
+
+> k=0
+> t−1
+
+X
+
+> l=0
+
+At−1−k¯bk ¯v⊤ 
+
+> l
+
+B⊤(A⊤)t−1−l +
+
+> t−1
+
+X
+
+> k=0
+> t−1
+
+X
+
+> l=0
+
+At−1−k¯bk¯b⊤ 
+
+> l
+
+(A⊤)t−1−l,
+
+⪰
+
+> t−1
+
+X
+
+> k=0
+> t−1
+
+X
+
+> l=0
+
+At−1−kB¯vk ¯v⊤ 
+
+> l
+
+B⊤(A⊤)t−1−l +
+
+> t−1
+
+X
+
+> k=0
+> t−1
+
+X
+
+> l=0
+
+At−1−kB¯vk¯b⊤ 
+
+> l
+
+(A⊤)t−1−l,
+
++
+
+> t−1
+
+X
+
+> k=0
+> t−1
+
+X
+
+> l=0
+
+At−1−k¯bk ¯v⊤ 
+
+> l
+
+B⊤(A⊤)t−1−l. (C.6) Therefore, using Weyl’s inequality, we have 
+
+λmin 
+
+> T
+
+X
+
+> t=1
+
+¯zt ¯z⊤
+
+> t
+
+!
+
+⪰ λmin 
+
+> T
+
+X
+
+> t=1
+> t−1
+
+X
+
+> k=0
+> t−1
+
+X
+
+> l=0
+
+At−1−kB¯vk ¯v⊤ 
+
+> l
+
+B⊤(A⊤)t−1−l
+
+!
+
+−
+
+> T
+
+X
+
+> t=1
+> t−1
+
+X
+
+> k=0
+> t−1
+
+X
+
+> l=0
+
+2At−1−k¯bk ¯v⊤ 
+
+> l
+
+B⊤(A⊤)t−1−l ,
+
+=: λmin 
+
+> T
+
+X
+
+> t=1
+
+¯z′ 
+
+> t
+
+¯z′⊤ 
+
+> t
+
+!
+
+− 2
+
+> T
+
+X
+
+> t=1
+
+¯z′
+
+> t
+
+b′⊤  
+
+> t
+
+, (C.7) where we define, for all t ≥ 1¯z′ 
+
+> t
+
+= ¯ zt − b′ 
+
+> t
+
+= A¯z′ 
+
+> t−1
+
++ B¯vt−1, and b′ 
+
+> t
+
+= Ab′ 
+
+> t−1
+
+(C.8) The first term in (C.7) can be lower bounded by directly applying Theorem 5.2 in Ziemann et al. [ZTL +23 ] with τ = L. To upper bound the second term in (C.7) , we use a similar argument as used in 25 the proof of Lemma 5. Using Cauchy-Schwarz inequality along-with Lemma 8, with probability at least 
+
+1 − δ, we have 
+
+> T
+
+X
+
+> t=1
+
+¯z′
+
+> t
+
+b′⊤  
+
+> t
+
+≤√ TX
+
+> t=1
+
+∥¯z′
+
+> t
+
+∥2
+
+> ℓ2
+
+! TX
+
+> t=1
+
+∥b′
+
+> t
+
+∥2
+
+> ℓ2
+
+!
+
+≤ ∥ C∥CρρLT √C¯z (δ)Cˆx(δ) ≤ c log( T ). (C.9) where we define, 
+
+Cˆx(δ) := ∥Σ[ˆ xT ]∥ (n + log(2 T /δ )) , C¯z (δ) := ( ∥CΣ[ˆ xT ]C⊤ + Σ e∥ + ∥Σu∥) (( m + p)L + log(2 T /δ )) ,
+
+(C.10) and we obtained the last inequality by choosing L > 0 such that 
+
+∥C∥CρρLT √C¯z (δ)Cˆx(δ) ≤ c log( T ),
+
+⇐= L ≥ β log 
+
+
+
+CρT ∥C∥√C¯z (δ)Cˆx(δ)/c log( T )
+
+
+
+/(1 − ρ).
+
+Combining (C.9) , and the result of Theorem 5.2 in [ ZTL +23 ] applied to upper bound the first term in (C.7) , we get the first statement of Theorem 6. The second statement that Σ[ ¯zL] ≻ 0 follows readily from combing Assumptions 1, 2 with Theorem 5.4 in [ZTL +23]. This completes the proof. 
+
+# D Parameter Estimation Error (Proof of Theorem 3) 
+
+Theorem 3 (Detailed version) . Under the setting of Theorem 2, 6, with probability at least 1 − δ, we have 
+
+ˆG2 ˆG1 − OC 2 
+
+> F
+
+≲ ∥Σ[ ξ1]∥Hλmin (Σ[¯ zL]) T
+
+
+
+r (mH + ( m + p)L) log ( C0Λ( δ)) + log 
+
+ Tδ
+
+ 
+
+. (D.1) 
+
+Proof. Theorem 3 follows directly from combining Theorem 2 and 6. To begin, we observe that, 
+
+> T
+
+X
+
+> t=1
+
+ ˆG2 ˆG1 − OC 
+
+
+
+¯zt
+
+> 2
+> ℓ2
+
+=
+
+> T
+
+X
+
+> t=1
+
+tr 
+
+
+
+¯zTt
+
+ ˆG2 ˆG1 − OC 
+
+⊤  ˆG2 ˆG1 − OC 
+
+
+
+¯zt
+
+
+
+,
+
+= tr 
+
+ ˆG2 ˆG1 − OC 
+
+⊤  ˆG2 ˆG1 − OC 
+
+ TX
+
+> t=1
+
+¯zt ¯zTt
+
+!
+
+, (D.2) Combining this with Theorem 2, with probability at least 1 − δ, we have 
+
+ˆG2 ˆG1 − OC 2 
+
+> F
+
+≲ ∥Σ[ ξ1]∥Hλmin 
+
+PTt=1 ¯zt ¯zTt
+
+
+
+r (mH + ( m + p)L) log ( C0Λ( δ)) + log 
+
+ Tδ
+
+ 
+
+, (D.3) which is then combined with Theorem 6 to get the statement of Theorem 3. 
+
+# E Latent State Recovery (Proof of Theorem 4) 
+
+Theorem 4 (Detailed version) . Consider the same settings of Theorem 2, 6. Additionally, assume that the extended observability matrix O has full column rank, and the extended controllability matrix C has full row rank. Suppose the robustness condition 2∥ ˆG2 ˆG1 − OC∥ ≤ min σn
+
+ OO ⊤ , σ n
+
+ CC ⊤ =: σn
+
+holds. For any new sequence of observed inputs-outputs {(uτ , y τ )}t−1 
+
+> τ=0
+
+, let ˆxt be the Kalman filter estimate and ¯zt be the constructed covaraite. Suppose we choose L ≳ max {L1, L 2, L 3}, where 
+
+L3 := β log λmin (Σ[¯ zL]) T C 2 
+
+> ρ
+
+∥ˆxt−L∥2 
+
+> ℓ2
+
+σn
+
+∥Σ[ ξ1]∥H  r (mH + ( m + p)L) log ( C0Λ( δ)) + log   Tδ
+
+ ∥¯zt∥2
+
+> ℓ2
+
+!
+
+(1 − ρ)−1.
+
+Then, there is a similarity transform S such that, with probability at least 1 − δ, we have 
+
+ˆxt − S ˆG1 ¯zt
+
+> 2
+> ℓ2
+
+≲ ∥Σ[ ξ1]∥Hλmin (Σ[¯ zL]) σnT
+
+
+
+r (mH + ( m + p)L) log ( C0Λ( δ)) + log 
+
+ Tδ
+
+ 
+
+∥¯zt∥2 
+
+> ℓ2
+
+,
+
+26 E.1 Robustness of Parameter Estimation 
+
+Before we state a supporting lemma to prove Theorem 4, we introduce the following notation, to denote the distance between two matrices of appropriate dimensions up to a similarity transform dist 
+
+
+
+X, ˆX
+
+
+
+:= min 
+
+> S∈Rn×n:S⊤S=In
+
+X − S ˆX F (E.1) The following lemma is adapted from Tu et al. [ TBS +16 ], and is used to connect parameter estimation guarantee to the latent state recovery guarantee. 
+
+Lemma 6. Let O ∈ RmH ×n, and C ∈ Rn×(p+m)L be two rank n matrices. Given two matrices ˆG1, ˆG2
+
+of appropriate dimensions such that ∥ ˆG2 ˆG1 − OC∥ ≤ 12 min σn
+
+ OO ⊤ , σ n
+
+ CC ⊤ . Then, we have dist 2
+
+ OC⊤
+
+
+
+,
+
+ ˆG2
+
+ˆG⊤
+
+> 1
+
+ 
+
+≤ 2
+
+√2 − 1
+
+ˆG2 ˆG1 − OC 2
+
+> F
+
+min {σn (OO ⊤) , σ n (CC ⊤)} (E.2) 
+
+Proof. We have 
+
+ 0 OC C⊤O⊤ 0
+
+
+
+−
+
+ 0 ˆG2 ˆG1
+
+ˆG⊤ 
+
+> 1
+
+ˆG⊤ 
+
+> 2
+
+0
+
+
+
+= 12
+
+ O ˆG2
+
+C⊤ − ˆG⊤
+
+> 1
+
+  O ˆG2
+
+C⊤ − ˆG⊤
+
+> 1
+
+⊤
+
+− 12
+
+ O ˆG2
+
+−C ⊤ ˆG⊤
+
+> 1
+
+  O ˆG2
+
+−C ⊤ ˆG⊤
+
+> 1
+
+⊤
+
+. (E.3) Furthermore, 
+
+ O ˆG2
+
+−C ⊤ ˆG⊤
+
+> 1
+
+  O ˆG2
+
+−C ⊤ ˆG⊤
+
+> 1
+
+⊤
+
+=
+
+ OO ⊤ + ˆG2 ˆG⊤ 
+
+> 2
+
+−OC + ˆG2 ˆG1
+
+−C ⊤O⊤ + ˆG⊤ 
+
+> 1
+
+ˆG⊤ 
+
+> 2
+
+CC ⊤ + ˆG1 ˆG⊤
+
+> 1
+
+
+
+,
+
+=
+
+OO ⊤ + ˆG2 ˆG⊤ 
+
+> 2
+
+00 CC ⊤ + ˆG1 ˆG⊤
+
+> 1
+
+
+
++
+
+ 0 ˆG2 ˆG1 − OC 
+
+ˆG⊤ 
+
+> 1
+
+ˆG⊤ 
+
+> 2
+
+− C ⊤O⊤ 0
+
+
+
+. (E.4) Applying Weyl’s inequality on the matrix decomposition in (E.4), we have 
+
+σ2n
+
+ O ˆG2
+
+−C ⊤ ˆG⊤
+
+> 1
+
+  O ˆG2
+
+−C ⊤ ˆG⊤
+
+> 1
+
+⊤!
+
+= σ2n
+
+ OO ⊤ + ˆG2 ˆG⊤ 
+
+> 2
+
+00 CC ⊤ + ˆG1 ˆG⊤
+
+> 1
+
+ 
+
+−
+
+ 0 ˆG2 ˆG1 − OC 
+
+ˆG⊤ 
+
+> 1
+
+ˆG⊤ 
+
+> 2
+
+− C ⊤O⊤ 0
+
+
+
+,
+
+= σ2n
+
+ OO ⊤ + ˆG2 ˆG⊤ 
+
+> 2
+
+00 CC ⊤ + ˆG1 ˆG⊤
+
+> 1
+
+ 
+
+− ∥ ˆG2 ˆG1 − OC∥ ,
+
+≥ σ2n
+
+ OO ⊤ 00 CC ⊤
+
+ 
+
+− ∥ ˆG2 ˆG1 − OC∥ ,
+
+≥ 12 min 
+
+n
+
+σn
+
+
+
+OO ⊤
+
+, σ n
+
+
+
+CC ⊤o 
+
+(E.5) Applying Lemma 5.4 in Tu et al. [ TBS +16 ] to the matrices 
+
+ O ˆG2
+
+C⊤ − ˆG⊤
+
+> 1
+
+
+
+, and 
+
+ O ˆG2
+
+−C ⊤ ˆG⊤
+
+> 1
+
+
+
+, and utilizing (E.3) and (E.5), we have dist 2
+
+ O ˆG2
+
+C⊤ − ˆG⊤
+
+> 1
+
+
+
+,
+
+ O ˆG2
+
+−C ⊤ ˆG⊤
+
+> 1
+
+ 
+
+≤ 4
+
+√2 − 1
+
+ˆG2 ˆG1 − OC 2
+
+> F
+
+min {σn (OO ⊤) , σ n (CC ⊤)} (E.6) 27 The proof completes by following similar arguments as used by the proof of Lemma 5.14 in Tu et al. [TBS +16], to show that, dist 2
+
+ O ˆG2
+
+C⊤ − ˆG⊤
+
+> 1
+
+
+
+,
+
+ O ˆG2
+
+−C ⊤ ˆG⊤
+
+> 1
+
+ 
+
+= 2 · dist 2
+
+ OC⊤
+
+
+
+,
+
+ ˆG2
+
+ˆG⊤
+
+> 1
+
+ 
+
+(E.7) 
+
+E.2 Finalizing the Proof of Theorem 4 
+
+Under the setting of Lemma 6, there exists a similarity transform matrix S such that, 
+
+C − S ˆG1 
+
+> 2
+> F
+
+≤ 2
+
+√2 − 1
+
+ˆG2 ˆG1 − OC 2
+
+> F
+
+min {σn (OO ⊤) , σ n (CC ⊤)} , (E.8) This implies that, for any new sequence of observed inputs-outputs {(uτ , y τ )}t−1 
+
+> τ=0
+
+, let ˆxt be the Kalman filter estimate. Then there is a similarity transform S such that, with probability at least 1 − δ, we have 
+
+ˆxt − S ˆG1 ¯zt
+
+> 2
+> ℓ2
+
+≤ ˆxt − C ¯zt + C ¯zt − S ˆG1 ¯zt
+
+> 2
+> ℓ2
+
+,
+
+≤ 2 ∥ˆxt − C ¯zt∥2
+
+> ℓ2
+
+| {z }
+
+> approximation error
+
++2 
+
+
+
+C − S ˆG1
+
+
+
+¯zt
+
+> 2
+> ℓ2
+
+| {z }
+
+> estimation error
+
+, (E.9) Note that, under the assumptions made in the statement of Theorem 4, we have 
+
+∥ˆxt − C ¯zt∥2 
+
+> ℓ2
+
+= ¯AL ˆxt−L 
+
+> 2
+> ℓ2
+
+≤ ∥ ¯AL∥2 ∥ˆxt−L∥2 
+
+> ℓ2
+
+,
+
+≤ c C 2 
+
+> ρ
+
+ρ2L ∥ˆxt−L∥2 
+
+> ℓ2
+
+. (E.10) Combining this with (E.9), we have 
+
+ˆxt − S ˆG1 ¯zt
+
+> 2
+> ℓ2
+
+≤ c C 2 
+
+> ρ
+
+ρ2L ∥ˆxt−L∥2 
+
+> ℓ2
+
++ C − S ˆG1 
+
+> 2
+> F
+
+∥¯zt∥2 
+
+> ℓ2
+
+,
+
+≤ c C 2 
+
+> ρ
+
+ρ2L ∥ˆxt−L∥2 
+
+> ℓ2
+
++ 2
+
+√2 − 1
+
+ˆG2 ˆG1 − OC 2
+
+> F
+
+min {σn (OO ⊤) , σ n (CC ⊤)} ∥¯zt∥2 
+
+> ℓ2
+
+,
+
+≤ 4
+
+√2 − 1
+
+ˆG2 ˆG1 − OC 2
+
+> F
+
+min {σn (OO ⊤) , σ n (CC ⊤)} ∥¯zt∥2 
+
+> ℓ2
+
+, (E.11) where we obtained the last inequality by choosing L > 0 such that 
+
+c C 2 
+
+> ρ
+
+ρ2L ∥ˆxt−L∥2 
+
+> ℓ2
+
+≤ 2
+
+√2 − 1
+
+ˆG2 ˆG1 − OC 2
+
+> F
+
+min {σn (OO ⊤) , σ n (CC ⊤)} ∥¯zt∥2 
+
+> ℓ2
+
+,
+
+⇐= L ≥ β log 
+
+ c C 2 
+
+> ρ
+
+∥ˆxt−L∥2 
+
+> ℓ2
+
+min σn
+
+ OO ⊤ , σ n
+
+ CC ⊤
+
+ˆG2 ˆG1 − OC 2 
+
+> F
+
+∥¯zt∥2
+
+> ℓ2
+
+ (1 − ρ)−1.
+
+plugging in the upper bounds on ˆG2 ˆG1 − OC 2 
+
+> F
+
+and ∥¯zt∥2 
+
+> ℓ2
+
+from Theorem 3, and Lemma 8 gives us the statement of Theorem 4 and completes the proof. 28 Remark 2. If additionally, Assumption 1 also holds for the new sequence of observed inputs-outputs 
+
+{(uτ , y τ )}t−1 
+
+> τ=0
+
+, then from (E.10) , with probability at least 1 − δ, we have 
+
+∥ˆxt − C ¯zt∥2 
+
+> ℓ2
+
+= ¯AL ˆxt−L 
+
+> 2
+> ℓ2
+
+≤ c C 2 
+
+> ρ
+
+ρ2L∥Σ[ˆ xt]∥ (n + log( t/δ )) (E.12) 
+
+where we get the last inequality by applying Lemma 8. This gives us the statement of Proposition 1. Hence, for such a sequence we have, 
+
+ˆxt − S ˆG1 ¯zt
+
+> 2
+> ℓ2
+
+≤ c C 2 
+
+> ρ
+
+ρ2L∥Σ[ˆ xt]∥ (n + log( t/δ )) + 2
+
+√2 − 1
+
+ˆG2 ˆG1 − OC 2
+
+> F
+
+min {σn (OO ⊤) , σ n (CC ⊤)} ∥¯zt∥2 
+
+> ℓ2
+
+,
+
+≤ 4
+
+√2 − 1
+
+ˆG2 ˆG1 − OC 2
+
+> F
+
+min {σn (OO ⊤) , σ n (CC ⊤)} ∥¯zt∥2 
+
+> ℓ2
+
+, (E.13) 
+
+where we obtained the last inequality by choosing L > 0 such that 
+
+c C 2 
+
+> ρ
+
+ρ2L∥Σ[ˆ xt]∥ (n + log( t/δ )) ≤ 2
+
+√2 − 1
+
+ˆG2 ˆG1 − OC 2
+
+> F
+
+min {σn (OO ⊤) , σ n (CC ⊤)} ∥¯zt∥2 
+
+> ℓ2
+
+,
+
+⇐= L ≥ β log 
+
+ c C 2 
+
+> ρ
+
+∥Σ[ˆ xt]∥ (n + log( t/δ )) min σn
+
+ OO ⊤ , σ n
+
+ CC ⊤
+
+ˆG2 ˆG1 − OC 2 
+
+> F
+
+∥¯zt∥2
+
+> ℓ2
+
+ (1 − ρ)−1.
+
+plugging in the upper bounds on ˆG2 ˆG1 − OC 2 
+
+> F
+
+from Theorem 3, and ∥¯zt∥2 
+
+> ℓ2
+
+from Lemma 8, we obtain (a modified) statement of Theorem 4 with ∥ˆxt−L∥2 
+
+> ℓ2
+
+replaced by ∥Σ[ˆ xt]∥ (n + log( t/δ )) , and ∥¯zt∥2
+
+> ℓ2
+
+replaced by (∥CΣ[ˆ xt]C⊤ + Σ e∥ + ∥Σu∥) (( m + p)L + log(2 t/δ )) , when Assumption 1 also holds for the new sequence of observed inputs-outputs {(uτ , y τ )}t−1 
+
+> τ=0
+
+.
+
+# F Optimization Landscape (Proof of Proposition 2) 
+
+Proof. The proof of Proposition 2 relies on Theorem 3 of [ ZSEW20 ] which requires that PTt=1 ¯zt ¯z⊤ 
+
+> t
+
+has full rank. Recall that, Theorem 6 ensures that choosing L ≳ β log 
+
+
+
+CρT ∥C∥√C¯z (δ)Cˆx(δ)/c log( T )
+
+
+
+/(1 −
+
+ρ), and 
+
+T ≳ L
+
+
+
+(m + p)L log 
+
+ 2T ∥Σ[¯ zT ]∥
+
+3Lλ min (Σ[¯ zL]) 
+
+
+
++ log(1 /δ )
+
+
+
+,
+
+the event E := {PTt=1 ¯zt ¯z⊤ 
+
+> t
+
+≻ 0} holds with probability at least 1 − δ. Thus, under the event E, applying Theorem 3 of [ZSEW20] gives us immediately the desired statements of Proposition 2. 
+
+# G Supporting Lemmas 
+
+In this section, we provide a list of auxiliary lemmas that will be useful to derive our main results. 
+
+Lemma 7 (Sub-exponential tail) . Suppose x ∼ N (0 , Σx) with Σx ∈ Rdx×dx . For any ρ ≥ (3 + 2 √2)dx,we have 
+
+P(∥x∥2 
+
+> ℓ2
+
+≥ 3∥Σx∥ρ) ≤ e−ρ.
+
+Proof. From [HKZ +12, Proposition 1], we have for any ρ > 0,
+
+P(∥x∥2 
+
+> ℓ2
+
+≥ tr (Σ x) + 2 ptr (Σ 2
+
+> x
+
+)ρ + 2 ∥Σx∥ρ) ≤ e−ρ,
+
+29 which implies 
+
+P(∥x∥2 
+
+> ℓ2
+
+≥ dx∥Σx∥ + 2 pdx∥Σx∥√ρ + 2 ∥Σx∥ρ) ≤ e−ρ.
+
+We can see that when ρ ≥ (3 + 2 √2 )dx, we have dx + 2 √dx
+
+√ρ ≤ ρ, which further implies that 
+
+dx∥Σx∥ + 2 √dx∥Σx∥√ρ ≤ ∥ Σx∥ρ. Therefore, we have P(∥x∥2 
+
+> ℓ2
+
+≥ 3∥Σx∥ρ) ≤ e−ρ.
+
+Using Lemma 7, we can upper bound the squared Euclidean norm of {ˆxt}Tt=1 , {¯zt}Tt=1 , {ξt}Tt=1 , as follows. 
+
+Lemma 8 (Bounded States) . Fix a failure probability δ > 0. Suppose Assumption 1 holds, and let 
+
+Σ[ ˆxt] := E ˆxt ˆx⊤
+
+> t
+
+ = Pt−1 
+
+> k=0
+
+AkBΣuB⊤(A⊤)k + Pt−1 
+
+> k=0
+
+AkF ΣeF ⊤(A⊤)k denote the covariance of the predicted state ˆxt given by (3.2) . There exists universal constant c > 0 such that, 
+
+P
+
+> T
+
+\
+
+> t=1
+
+n
+
+∥ˆxt∥2 
+
+> ℓ2
+
+≤ c∥Σ[ˆ xT ]∥ (n + log( T /δ )) 
+
+o!
+
+≥ 1 − δ, 
+
+P
+
+> T
+
+\
+
+> t=1
+
+n
+
+∥¯zt∥2 
+
+> ℓ2
+
+≤ c(∥CΣ[ˆ xT ]C⊤ + Σ e∥ + ∥Σu∥) (( m + p)L + log(2 T /δ )) 
+
+o!
+
+≥ 1 − δ, 
+
+P
+
+> T
+
+\
+
+> t=1
+
+n
+
+∥ξt∥2 
+
+> ℓ2
+
+≤ c∥T u(Σ u ⊗ I)T ⊤ 
+
+> u
+
++ Te(Σ e ⊗ I)T ⊤ 
+
+> e
+
+∥ (mH + log(2 T /δ )) 
+
+o!
+
+≥ 1 − δ. (G.1) 
+
+Proof. Recall from (3.2) that, 
+
+ˆxt+1 = Aˆxt + Bu t + F e t =⇒ ˆxt =
+
+> t−1
+
+X
+
+> k=0
+
+At−1−k(Bu k + F e k) (G.2) Therefore, under Assumption 1, for all t ≥ 0, we have E[ˆ xt] = 0 and 
+
+Σ[ˆ xt] := E
+
+h
+
+ˆxt ˆx⊤
+
+> t
+
+i
+
+=
+
+> t−1
+
+X
+
+> k=0
+
+AkBΣuB⊤(A⊤)k +
+
+> t−1
+
+X
+
+> k=0
+
+AkF ΣeF ⊤(A⊤)k (G.3) Hence, using Lemma 7, together with union bound over all t ∈ [1 , T ], and for any ρ ≥ (3 + 2 √2)n, we have 
+
+P
+
+> T
+
+\
+
+> t=1
+
+n
+
+∥ˆxt∥2 
+
+> ℓ2
+
+≤ 3∥Σ[ˆ xt]∥ρ
+
+o!
+
+≥ 1 − T e −ρ (G.4) Choosing ρ = (3 + 2 √2) n + log( T /δ ), we have, 
+
+P
+
+> T
+
+\
+
+> t=1
+
+n
+
+∥ˆxt∥2 
+
+> ℓ2
+
+≤ 3∥Σ[ˆ xt]∥
+
+
+
+(3 + 2 √2) n + log( T /δ )
+
+o !
+
+≥ 1 − δ. (G.5) Noting that Σ[ˆ xt+1 ] ⪰ Σ[ˆ xt] for all t ≥ 0, we have 
+
+P
+
+> T
+
+\
+
+> t=1
+
+n
+
+∥ˆxt∥2 
+
+> ℓ2
+
+≤ 3∥Σ[ˆ xT ]∥
+
+
+
+(3 + 2 √2) n + log( T /δ )
+
+o !
+
+≥ 1 − δ. (G.6) Using similar argument as in (G.6), it is easy to show that, 
+
+P
+
+> T
+
+\
+
+> t=1
+
+n
+
+∥ut∥2 
+
+> ℓ2
+
+≤ 3∥Σu∥
+
+
+
+(3 + 2 √2) p + log( T /δ )
+
+o !
+
+≥ 1 − δ, (G.7) 30 P
+
+> T
+
+\
+
+> t=1
+
+n
+
+∥yt∥2 
+
+> ℓ2
+
+≤ 3∥CΣ[ˆ xT ]C⊤ + Σ e∥
+
+
+
+(3 + 2 √2) m + log( T /δ )
+
+o !
+
+≥ 1 − δ. (G.8) To upper bound the Euclidean norm of ¯zt = [ y⊤ 
+
+> t−1
+
+· · · y⊤ 
+
+> t−L
+
+u⊤ 
+
+> t−1
+
+· · · u⊤
+
+> t−L
+
+]⊤, note that, ∥¯zt∥2 
+
+> ℓ2
+
+=
+
+Pt−1  
+
+> τ=t−L
+
+∥yτ ∥2 
+
+> ℓ2
+
++ Pt−1  
+
+> τ=t−L
+
+∥uτ ∥2 
+
+> ℓ2
+
+. Combining this with (G.7) and (G.8), we get 
+
+P
+
+> T
+
+\
+
+> t=1
+
+n
+
+∥¯zt∥2 
+
+> ℓ2
+
+≤ 3( ∥CΣ[ˆ xT ]C⊤ + Σ e∥ + ∥Σu∥)
+
+
+
+(3 + 2 √2)( m + p)L + log(2 T /δ )
+
+o !
+
+≥ 1 − δ. (G.9) Using similar line of reasoning, for ξt = Tuut:t+H−2 + Teet:t+H−1, we have 
+
+P
+
+> T
+
+\
+
+> t=1
+
+n
+
+∥ξt∥2 
+
+> ℓ2
+
+≤ 3∥T u(Σ u ⊗ I)T ⊤ 
+
+> u
+
++ Te(Σ e ⊗ I)T ⊤ 
+
+> e
+
+∥
+
+
+
+(3 + 2 √2) mH + log(2 T /δ )
+
+o !
+
+≥ 1 − δ. 
+
+(G.10) This completes the proof. 
+
+# H Experimental Details 
+
+In this section, we describe the hyperparameter details and Python/PyTorch pseudocode of experiments in Section 5. The code can be found in https://github.com/sdean-group/linear-ar-kf . The following describes a pseudo-code of training the auto-regressive model. 
+
+# train model 
+
+torch.manual_seed(torch_seed) model = TwoLayerLinearAR((m+p)*L, n, m*H) criterion = nn.MSELoss() optimizer = optim.Adam(model.parameters(), lr=lr, weight_decay=weight_decay) scheduler = StepLR(optimizer, step_size=step_size, gamma=gamma) model.train() for epoch in range(epochs): for batch_inputs, batch_outputs in train_loader: outputs = model(batch_inputs) loss = criterion(outputs, batch_outputs) optimizer.zero_grad() loss.backward() optimizer.step() scheduler.step() 
+
+H.1 Architecture Search on Synthetic Systems 
+
+For architecture search over the hidden dimension, we use L = 10 , H = 5 , Ttrain = 10 4, Ttest = 10 3,
+
+epochs = 150 , batch_size = 64 , lr = 0 .01 , step_size = 1 , gamma = 0 .9, and weight_decay = 10 −3.
+
+H.2 Latent State Recovery 
+
+For training the two-layer neural network to generate the scatter plot in Figure 2, we use L = 10 , H = 5 ,
+
+Ttrain = 10 4, Ttest = 10 3, epochs = 150 , batch_size = 64 , lr = 0 .05 , step_size = 2 , gamma = 0 .9, and 
+
+weight_decay = 10 −3. Figure 2 is generated with the pairs ( x_kf , transformed_activated_states )where the variables are defined in the pseudo-code below. 31 # Check Alignment 
+
+G1 = model.linear1.weight.detach().numpy() activated_states = inputs_from_test_trajectory @ G1.T x_kf = KF_predicted_state_estimates_from_test_trajectory coeff, _, _, _ = np.linalg.lstsq(activated_states, X_kf, rcond=None) transformed_activated_states = activated_states @ coeff 
+
+We also compute R2 values coordinate-wise in Table 2. For each coordinate i ∈ { 1, . . . , n }, R2 value is computed as 
+
+R2 
+
+> i
+
+= 1 −
+
+PTtest 
+
+> t=L
+
+
+
+ˆxt,i − ˆS ˆG1 ¯zt,i 
+
+2
+
+PTtest  
+
+> t=L
+
+(ˆ xt,i − ¯xi)2 , where ¯xi = 1
+
+Ttest − L + 1 
+
+> Ttest
+
+X
+
+> t=L
+
+ˆxt,i .
+
+The mean R2 is computed as 1
+
+> n
+
+Pni=1 R2 
+
+> i
+
+.
+
+H.3 ControlGym Experiments 
+
+For the hyperparameters in this experiment, they are the same as in the synthetic experiments. We use two benchmark environments from ControlGym [ ZMM +24 ]: the underwater vehicle environment (ID: 
+
+umv ) and the aircraft environment (ID: ac6 ). Noise processes {wt}t≥0 and {vt}t≥0 are also defined in the environment. We note that, for the underwater vehicle environment (ID: umv ), the measurement-noise covariance is zero. For the aircraft environment (ID: ac6 ), both process noise and measurement noise are nonzero and independent of each other. In this experiment, the covariance is rescaled by multiplying 
+
+0.05 .32
