@@ -1,0 +1,609 @@
+Title: LUCID: Learned Undersampling-Adaptive Consistency-Guided Inference with Deterministic Flow Matching for Sparse-View CT Reconstruction
+
+URL Source: https://arxiv.org/pdf/2606.16212v1
+
+Published Time: Tue, 16 Jun 2026 02:11:09 GMT
+
+Number of Pages: 10
+
+Markdown Content:
+> JOURNAL OF L ATEX CLASS FILES, VOL. 14, NO. 8, AUGUST 2021 1
+
+# LUCID: Learned Undersampling-Adaptive 
+
+# Consistency-Guided Inference with Deterministic Flow Matching for Sparse-View CT Reconstruction 
+
+Jigang Duan, Jiayi Wang, Heran Wang, Ping Yang, Genwei Ma ⋆, and Xing Zhao ⋆
+
+Abstract —Sparse-view CT reduces radiation dose and scan-ning time by acquiring fewer projection views, but angular undersampling makes reconstruction severely ill-posed, causing streak artifacts, structural blurring, and loss of fine details. Existing supervised methods are often tied to specific sampling settings, whereas generative methods may introduce anatomically inconsistent hallucination-like structures under severe under-sampling. We propose Lucid, a sparsity-adaptive, consistency-guided reconstruction framework based on a Flow Matching generative prior for sparse-view CT. Lucid is trained only on high-quality CT images to learn a continuous transport between a Gaussian distribution and the high-quality CT image distribution, independent of view sampling. During inference, the sampling sparsity level is explicitly incorporated to adapt the generative trajectory of a single pretrained model. Specifically, Lucid constructs a degradation-matched initial state by sparsity-weighted fusion of the sparse-view FBP image and Gaussian noise, performs sparsity-modulated Flow Matching updates, and applies projection-domain data-consistency correction after each prior update. Experiments under multiple sparse-view settings show that Lucid achieves stable reconstruction performance across different sampling densities, improves image quality and structural fidelity, and reduces the risk of hallucination-like structures in generative sparse-view CT reconstruction. 
+
+Index Terms —Sparse-view CT reconstruction, flow matching, sampling-adaptive reconstruction, generative models. 
+
+I. I NTRODUCTION 
+
+# COMPUTED tomography (CT) has been widely used in medical diagnosis, industrial nondestructive testing, and security screening because of its noninvasive acquisition, high spatial resolution, and capability of depicting anatomical and material structures. Conventional high-quality CT imaging relies on dense angular sampling over a full scan range, which inevitably increases radiation exposure and acquisition time. Sparse-view CT (SVCT) reduces the number of projection 
+
+This work was supported by the National Natural Science Foundation of China (Grant No. 12426308) and the Beijing High Innovation Plan (”Capital High-End Leading Talents Aggregation and Cultivation Program”), Grant No. 202504841094. (Jigang Duan and Jiayi Wang contributed equally to this work.) (Corresponding authors: Genwei Ma and Xing Zhao.) 
+
+Jigang Duan, Jiayi Wang, Ping Yang, Heran Wang, and Xing Zhao are with the School of Mathematical Sciences, Capital Normal University, Beijing 100048, China (e-mail: hiduanji-gang@163.com; wangjy152022@126.com; q1203479069@163.com; yang ping0603@163.com; zhaoxing 1999@126.com). Genwei Ma is with the National Center for Applied Mathematics Beijing, Capital Normal University and Academy for multidisciplinary studies, Capital Normal University, Beijing, 100048, China (e-mail: magenwei@126.com). This work has been submitted to the IEEE for possible publication. Copyright may be transferred without notice, after which this version may no longer be accessible. 
+
+views to enable low-dose and accelerated imaging, and has therefore received increasing attention. However, angular un-dersampling substantially worsens the ill-posedness of CT reconstruction, leading to severe streak artifacts, structural blurring, and loss of fine details. Stable and faithful recon-struction from sparse-view projections thus remains a central challenge in CT imaging [1]–[3]. 
+
+A. Trends of Models and Algorithms 
+
+The objective of CT reconstruction is to recover the spatial distribution of the linear attenuation coefficient from X-ray projections. Let μ(r) denote the underlying image, where 
+
+r ∈ R2 is the spatial coordinate. For an ideal two-dimensional parallel-beam geometry, the projection model is given by the Radon transform 
+
+p(θ, s ) = Rμ(θ, s ) = 
+
+Z
+
+> R2
+
+μ(r)δ(s − r · nθ )dr, (1) where θ is the projection angle, s is the detector coordinate, 
+
+nθ = (cos θ, sin θ)T , and δ(·) denotes the Dirac delta function. After discretization, the CT forward model can be written as 
+
+y = Ax + ϵ, (2) where x ∈ RN is the image vector, y ∈ RM is the measured projection data, A ∈ RM ×N is the system matrix, and ϵ
+
+denotes noise and model mismatch. In SVCT, only a subset of projection views is acquired. Let 
+
+Ω denote the sampled view set and P Ω the corresponding view-selection operator. The sparse-view measurement model is 
+
+yΩ = P ΩAx + ϵΩ. (3) Since |Ω| is much smaller than the number of fully sampled views, directly solving Eq. (3) is severely ill-posed. Ana-lytic reconstruction methods such as filtered back-projection (FBP) [4] therefore often suffer from pronounced streak arti-facts, structural blurring, and loss of fine details. Model-driven methods mitigate this ill-posedness by incor-porating explicit image priors into the physical imaging model, leading to the regularized reconstruction problem 
+
+ˆx = arg min 
+
+> x
+
+12 ∥P ΩAx − yΩ∥22 + λR(x), (4) where the data-fidelity term enforces consistency with the measured projections, R(x) denotes the regularization prior, and λ balances the two terms. Total variation (TV) and  
+
+> arXiv:2606.16212v1 [cs.CV] 15 Jun 2026 JOURNAL OF L ATEX CLASS FILES, VOL. 14, NO. 8, AUGUST 2021 2
+
+its variants are representative choices [5]–[9]. They suppress streak artifacts by promoting gradient sparsity, but may cause staircase artifacts, edge degradation, and loss of fine struc-tures. More advanced priors, including nonlocal regularization, dictionary learning, adaptive weighting, anatomical sparsity, dynamic filtering, and residual-guided strategies, have been de-veloped to improve structural preservation [10]–[16]. Despite their interpretability and data consistency, these methods still rely heavily on handcrafted priors and parameter tuning, which limits their ability to represent complex anatomical structures under severe angular undersampling. Deep learning methods have achieved substantial progress by learning reconstruction mappings from data. Image-domain methods directly map artifact-contaminated reconstructions to clean images [17]–[19], whereas projection-domain methods complete or correct sparsely sampled sinograms [20], [21]. To exploit complementary information, dual-domain meth-ods jointly use projection-domain measurement constraints and image-domain structural priors [22]–[27]. Recent studies have further explored unified networks for multiple sam-pling settings to improve cross-view generalization [28], [29]. However, supervised models are often tied to the sampling patterns, geometries, noise levels, and data distributions used during training. Their performance may therefore degrade when applied to different scanners, acquisition protocols, or sampling densities. Although unsupervised and self-supervised methods reduce the dependence on paired training data [30]– [32], stable recovery of fine structures remains challenging under severe undersampling. Generative models provide another promising direction for SVCT reconstruction. Score-based generative models [33], generative adversarial networks [34], and diffusion mod-els [35] have been used to introduce learned image priors into ill-posed reconstruction problems [36]–[42]. These methods can effectively suppress sparse-view artifacts, but may also generate visually plausible yet anatomically inconsistent struc-tures under out-of-distribution conditions, such as changes in view sampling or reconstruction settings [42], [43]. In medical CT, such hallucination-like structures may mimic lesions or obscure subtle abnormalities. Therefore, an effective generative reconstruction method should not only improve image quality, but also maintain consistency with the measured projections across different sampling densities. Flow Matching (FM) is a generative modeling framework that learns a continuous transport between a source distribution and a target distribution through a time-dependent velocity field [44]. Let p0 denote the distribution of high-quality CT images and p1 denote a standard Gaussian distribution. Given 
+
+x0 ∼ p0 and x1 ∼ p1, a simple linear path can be defined as 
+
+xt = (1 − t)x0 + tx1, t ∈ [0 , 1] , (5) where t = 0 corresponds to the clean image state and t = 1 
+
+corresponds to the noise state. The associated velocity field is 
+
+ut = dxt
+
+dt = x1 − x0. (6) Previous work 
+
+𝑓𝑓 𝜃𝜃 1
+
+𝑓𝑓 𝜃𝜃 2
+
+𝑓𝑓 𝜃𝜃 3
+
+Output 
+
+Motivation 1 
+
+40 
+
+80 
+
+120 
+
+Input 
+
+40 
+
+80 
+
+120 
+
+Input 
+
+Flow Matching 
+
+𝑣𝑣 𝜃𝜃  Output 
+
+Diagnosis 
+
+Previous work 
+
+𝑥𝑥 (0) ∆𝑡𝑡 𝑘𝑘 = 𝐶𝐶 1
+
+𝐾𝐾 = 𝐶𝐶 2
+
+𝑥𝑥 (0) ~𝑁𝑁 (0, 𝐼𝐼 )
+
+Input  Output 
+
+𝑥𝑥 (0) ∆𝑡𝑡 𝑘𝑘 = 𝛾𝛾 𝑘𝑘 (𝜂𝜂 )
+
+𝐾𝐾 = 𝑓𝑓𝑓𝑓 𝑥𝑥 𝑓𝑓𝑓𝑓 
+
+𝑥𝑥 (0) = 𝜂𝜂 𝑧𝑧 + (1 − 𝜂𝜂 )𝑥𝑥 𝐹𝐹𝐹𝐹𝐹𝐹 
+
+Input  Output 
+
+Motivation 2           
+
+> Fig. 1. Motivation of the proposed Lucid framework. Motivation 1 contrasts training-stage adaptation in existing supervised methods with inference-time adaptation using aunified Flow Matching prior. Motivation 2contrasts fixed generative inference with the proposed sparsity-guided initialization and adaptive update scheduling.
+
+FM trains a neural network vθ (xt, t ) to approximate this velocity field by minimizing 
+
+min  
+
+> θ
+
+Et, x0,x1
+
+h
+
+∥vθ (xt, t ) − ut∥22
+
+i
+
+, (7) where t is sampled from [0 , 1] .After training, samples are generated by solving the deter-ministic ordinary differential equation 
+
+dxt
+
+dt = vθ (xt, t ), xt0 = xinit , t : t0 → 0. (8) A numerical discretization gives 
+
+xtk+1 = xtk +( tk+1 −tk)vθ (xtk , t k), tk+1 < t k, tK = 0 .
+
+(9) Unlike diffusion models, FM does not require repeated stochastic noise injection during sampling. Its deterministic trajectory provides a controllable inference process, making it suitable for adapting the starting state and step-size schedule according to the current sampling sparsity. This property motivates the proposed sparsity-adaptive Flow Matching re-construction framework. 
+
+B. Motivation 
+
+The degradation severity in sparse-view CT is closely re-lated to the number of acquired projection views. Let Θ denote the full-view angle set and Ω ⊂ Θ denote the sparse-view angle set. We define the sampling sparsity level as 
+
+η = 1 − |Ω||Θ| , (10) where a larger η indicates more severe missing-view infor-mation. As η increases, the sparse-view FBP reconstruction usually contains stronger streak artifacts and more pronounced structural loss. Therefore, reconstructions under different sam-pling densities should not follow the same inference trajectory. Mildly undersampled data preserve more reliable anatomi-cal structures and require conservative generative updates, JOURNAL OF L ATEX CLASS FILES, VOL. 14, NO. 8, AUGUST 2021 3
+
+whereas severely undersampled data need stronger prior guid-ance to suppress artifacts and recover missing structures. As illustrated in Fig. 1, most supervised SVCT methods adapt to different sampling conditions at the training stage, either by training view-specific models [24], [25], [27], [36] or by training a unified network on data mixed from multiple sampling rates [28], [29], [40]. Although these strategies improve applicability across predefined view settings, they do not explicitly adjust the inference trajectory according to the sparsity level of the current input. This limitation is more critical for generative reconstruction, where a mismatch between the degradation severity and the sampling trajectory may either leave severe artifacts insufficiently corrected or introduce unnecessary structural modifications for mildly de-graded images. The Flow Matching model used in this work is not trained as a supervised mapping from sparse-view artifacts to clean images. Instead, it learns a continuous transport path between a Gaussian source distribution and the distribution of high-quality CT images. Let X0 ∼ p0 denote a high-quality CT image and Z ∼ N (0, I) denote a Gaussian source sample. The linear probability path used for training is 
+
+Xt = (1 − t)X0 + tZ, t ∈ [0 , 1] . (11) Under the mean-squared error objective, the optimal velocity field is 
+
+v∗(x, t ) = E [Z − X0 | Xt = x] . (12) Thus, the pretrained network vθ (x, t ) estimates the average forward transport direction along the learned probability path. During reverse-time inference, the negative velocity direction is used to move an intermediate state toward the high-quality CT image distribution. This provides a sampling-independent image prior, but its effectiveness during reconstruction depends on whether the inference starts from a state compatible with the learned probability path. A pure Gaussian initialization is consistent with the Flow Matching source distribution but discards the structural in-formation contained in the measured projections. In con-trast, directly using the sparse-view FBP image preserves measurement-dependent structures but also introduces deter-ministic streak artifacts into the generative trajectory. To balance these two effects, we construct a sparsity-guided initial state as 
+
+x(0) = ηz + (1 − η)xFBP , z ∼ N (0, I). (13) Let x∗ denote the underlying high-quality image and eΩ
+
+denote the sparse-view FBP error: 
+
+xFBP = x∗ + eΩ. (14) Substituting Eq. (14) into Eq. (13) gives 
+
+x(0) = (1 − η)x∗ + ηz
+
+| {z }
+
+> xFM
+> η
+
++(1 − η)eΩ, (15) where xFM  
+
+> η
+
+has the same form as an intermediate state on the Flow Matching training path at t = η. Therefore, 
+
+x(0) − xFM  
+
+> η
+
+= (1 − η)eΩ. (16) This indicates that the proposed initialization does not simply perturb the FBP image with noise. Instead, it embeds the sparse-view input near the learned Flow Matching path, with a residual bias determined by the FBP artifact term. When 
+
+η is small, more reliable information from xFBP is retained. When η is large, the initialization moves closer to the Gaussian source distribution, reducing the influence of severe FBP artifacts on the subsequent generative trajectory. The same sparsity level also provides a natural way to regulate the reverse ODE integration. With a fixed number of inference steps K, we adapt the reverse update step size according to 
+
+∆tk = γk(η), k = 0 , 1, . . . , K − 1, (17) where ∆tk > 0 denotes the effective reverse update step size. Conservative updates are preferred for mildly sparse data to avoid unnecessary modification of reliable structures, whereas stronger prior-driven updates are needed for severely sparse data to suppress pronounced artifacts. In this way, the generative trajectory is adjusted according to the actual sampling density rather than being fixed for all sparse-view inputs. Finally, the generative prior should be constrained by the measured projection data. Lucid therefore alternates the sparsity-guided Flow Matching prior update with a projection-domain data-consistency correction. The prior update guides the reconstruction toward the learned high-quality CT im-age distribution, while the data-consistency step restricts the solution using the acquired sparse-view projections. Their combination allows a single pretrained Flow Matching prior to adapt to different sampling densities while reducing the risk of hallucination-like structures in generative sparse-view CT reconstruction. 
+
+C. Our Contribution 
+
+The main contributions of this work are summarized as follows:  
+
+> •
+
+We propose Lucid, a sparsity-adaptive generative recon-struction framework for sparse-view CT based on deter-ministic Flow Matching. By learning a single image prior from high-quality CT images, Lucid enables inference-time adaptation without view-specific retraining.  
+
+> •
+
+We introduce a sampling sparsity-guided inference strat-egy that explicitly incorporates the sparsity level into the generative trajectory. Specifically, the sparsity level is used to construct a degradation-matched initial state and to modulate the Flow Matching update step size, allowing the same pretrained prior to adapt to different degrees of angular undersampling.  
+
+> •
+
+We integrate projection-domain data consistency into the Flow Matching inference process. After each prior-guided update, a data-consistency correction constrains the re-construction with the measured sparse-view projections, improving structural fidelity and reducing hallucination-like local structures in generative sparse-view CT recon-struction. JOURNAL OF L ATEX CLASS FILES, VOL. 14, NO. 8, AUGUST 2021 4+ (1 − 𝜂𝜂 )
+
+Sparsity-Aware 
+
+𝜂𝜂 = 1 − |Ω||Θ|
+
+Input 
+
+𝒚𝒚 Ω
+
+Ω
+
+Initialization 
+
+FM Prior 
+
+DC Step 
+
+FM Prior 
+
+DC Step 
+
+Output 
+
+𝒙𝒙 (𝐾𝐾 )
+
+FBP 
+
+argmin  −
+
+𝑨𝑨 Ω 𝒙𝒙  𝒚𝒚 Ω
+
+12
+
+𝐿𝐿 2
+
++ 𝜆𝜆 dc 
+
+2 −
+
+𝐿𝐿 2�𝒙𝒙 (𝑘𝑘+1 )
+
+𝒙𝒙 
+
+𝒙𝒙 
+
+Data Consistency 
+
+𝜂𝜂 
+
+𝒛𝒛 ~𝒩𝒩 (0, 𝑰𝑰 )
+
+Pre-trained FM Prior 
+
+provides 𝑉𝑉 𝜃𝜃 
+
+FM-guided Prior Update 
+
+…
+
+Stage 1 
+
+Stage k 
+
+𝒙𝒙 (0)
+
+𝒙𝒙 (𝑘𝑘 ) �𝒙𝒙 (𝑘𝑘+1 )
+
+…
+
+Adaptive Initialization Module 
+
+2 2
+
+Adaptive Step 
+
+Scheduler 
+
+𝒙𝒙 FBP 
+
+𝒙𝒙 FBP  
+
+> One-step FM Prior Update
+> Fig. 2. Overview of the proposed Lucid framework for sparse-view CT reconstruction. The Flow Matching prior is pretrained using only high-quality CT images. During inference, the sampling sparsity level is computed from the current view set, and a sparsity-guided initial state is constructed by combining the sparse-view FBP reconstruction with Gaussian noise. The reconstruction is then iteratively updated by alternating an FM-guided prior update with a projection-domain data-consistency step.
+
+II. M ETHOD 
+
+This section presents Lucid, a sparsity-adaptive Flow Matching framework for sparse-view CT reconstruction. As illustrated in Fig. 2, Lucid uses the sampling sparsity level to determine both the initial state and the reverse-time step-size schedule during inference. Each Flow Matching prior update is followed by a projection-domain data-consistency step, so that the reconstruction is guided by the learned high-quality CT image prior while remaining consistent with the measured sparse-view projections. 
+
+A. Overview of the Proposed Reconstruction Framework 
+
+Let Θ denote the full-view angle set and Ω ⊂ Θ denote the sampled sparse-view angle set. Following the sparse-view CT measurement model introduced in the Introduction, the sparse-view projection data are modeled as 
+
+yΩ = AΩx + ϵΩ, AΩ = P ΩA, (18) where A is the full-view system matrix, P Ω is the view-selection operator, AΩ is the sparse-view system matrix, and 
+
+ϵΩ denotes noise and model mismatch. We use the sampling sparsity level η defined in Eq. (10) to quantify the degree of angular undersampling. Lucid employs a pretrained Flow Matching network 
+
+vθ (x, t ) as a generative prior for high-quality CT images. Instead of using a fixed inference trajectory, Lucid adapts both the initialization and the update step size according to 
+
+η. During inference, the reconstruction alternates between an FM-guided prior update and a projection-domain data-consistency correction: 
+
+x(k) FM prior 
+
+−−−−−−−→ ˜x(k+1) Data consistency 
+
+−−−−−−−−−−−−→ x(k+1) , (19) where ˜x(k+1) denotes the intermediate image after the FM prior update, and x(k+1) denotes the data-consistency-corrected image. The following subsections detail the sparsity-guided initialization, adaptive update scheduling, and data-consistency correction. 
+
+B. Flow Matching Prior for CT Image Reconstruction 
+
+We use a pretrained Flow Matching model as a generative prior for high-quality CT images. Let x0 ∼ p0 denote a high-quality CT image sample, and let x1 ∼ N (0, I) denote a Gaussian source sample. Following the definition in the Introduction, Flow Matching constructs a continuous path between the image distribution and the source distribution: 
+
+xt = (1 − t)x0 + tx1, t ∈ [0 , 1] , (20) where t = 0 corresponds to the high-quality image state and 
+
+t = 1 corresponds to the Gaussian source state. The path velocity is given by 
+
+ut = dxt
+
+dt = x1 − x0. (21) JOURNAL OF L ATEX CLASS FILES, VOL. 14, NO. 8, AUGUST 2021 5
+
+The velocity network vθ (xt, t ) is trained to approximate this velocity field by minimizing 
+
+LFM = Et, x0,x1
+
+h
+
+∥vθ (xt, t ) − ut∥22
+
+i
+
+. (22) After training, the learned velocity field can be used for reverse-time inference from a noisy or intermediate state toward the image state. Given the current estimate x(k) and the time condition tk, one Euler-type Flow Matching prior update is written as 
+
+˜x(k+1) = x(k) − ∆tkvθ
+
+
+
+x(k), t k
+
+
+
+, (23) where ∆tk > 0 denotes the effective reverse update step size. In Lucid, tk is used as the time condition of the velocity network, while ∆tk controls the strength of the reverse prior update and is adaptively modulated according to the sampling sparsity level. In Lucid, Flow Matching is not used as a standalone gen-erator or an image-domain post-processing module. Instead, it serves as a learned image-distribution prior within the iterative reconstruction process. Each FM prior update is followed by a projection-domain data-consistency step, which constrains the generative update using the measured sparse-view projections and helps suppress hallucination-like structures inconsistent with the measured data. 
+
+C. Sampling Sparsity-Guided Inference 
+
+Lucid uses the sampling sparsity level η, defined in Eq. (10), to adapt two key components of the Flow Matching inference process: the initial state and the effective reverse update step size. In this way, different sparse-view settings are handled by trajectory adaptation during inference rather than by view-specific retraining. 
+
+1) Sparsity-Guided Initialization: Given the sparse-view projection data yΩ, we first compute the corresponding FBP reconstruction: 
+
+xFBP = FBP Ω (yΩ) , (24) where FBP Ω(·) denotes the FBP operator under the cur-rent sparse-view geometry. To combine the measurement-dependent structure in xFBP with the Gaussian source prior of Flow Matching, the initial state is constructed as 
+
+x(0) = ηz + (1 − η)xFBP , z ∼ N (0, I). (25) Thus, more FBP information is retained for mildly undersam-pled data, whereas severely undersampled data are initialized closer to the Gaussian source distribution to reduce the influ-ence of strong FBP artifacts. 
+
+2) Sparsity-Guided Adaptive Step Size: The sparsity level is also used to regulate the update strength of Flow Matching inference. With K prior-update steps, we assign the time condition at the k-th step as 
+
+tk = η
+
+
+
+1 − kK
+
+
+
+, k = 0 , 1, . . . , K − 1. (26) This makes the reverse trajectory start from a sparsity-dependent time position and gradually approach the clean-image state. We further define the sparsity modulation factor as 
+
+g(η) = 1 + αη 
+
+1 + α , (27) where α > 0 controls the modulation strength. The effective reverse update step size is then given by 
+
+∆tk = ∆ tmin + (∆ tmax − ∆tmin ) tξkg(η), (28) where ∆tmin and ∆tmax are the lower and upper step-size bounds, and ξ > 0 controls the temporal decay rate. The factor 
+
+tξk encourages a coarse-to-fine evolution, while g(η) increases the update strength for more severe angular undersampling. 
+
+D. Projection-Domain Data Consistency Correction 
+
+The Flow Matching prior update guides the current estimate toward the learned high-quality CT image prior, but it does not explicitly enforce consistency with the measured sparse-view projections. To constrain the generative update by the physical imaging model, we introduce a projection-domain data-consistency correction after each prior update. Given the current estimate x(k), we first compute the adap-tive step size using Eq. (28) and perform one Flow Matching prior update: 
+
+˜x(k+1) = x(k) − ∆tkvθ
+
+
+
+x(k), t k
+
+
+
+. (29) The intermediate image ˜x(k+1) is then corrected by solving 
+
+x(k+1) = arg min 
+
+> x
+
+12 ∥AΩx − yΩ∥22 + λdc 
+
+2 x − ˜x(k+1) 22
+
+,
+
+(30) where λdc > 0 controls the trade-off between projection-domain data fidelity and proximity to the FM prior update. The corresponding normal equation is 
+
+
+
+A⊤ 
+
+> Ω
+
+AΩ + λdc I
+
+
+
+x(k+1) = A⊤ 
+
+> Ω
+
+yΩ + λdc ˜x(k+1) . (31) Equivalently, the formal solution can be written as 
+
+x(k+1) =
+
+
+
+A⊤ 
+
+> Ω
+
+AΩ + λdc I
+
+−1 
+
+A⊤ 
+
+> Ω
+
+yΩ + λdc ˜x(k+1) 
+
+.
+
+(32) In practice, Eq. (31) is approximately solved using the con-jugate gradient method without explicitly forming the matrix inverse. This data-consistency step restricts the reconstruction to the measurement-compatible solution space and mitigates projection-inconsistent structures introduced by the generative prior. The complete procedure of Lucid is summarized in Algo-rithm 1. III. E XPERIMENTS 
+
+A. Experimental Setup 1) Datasets: Experiments were conducted on the public 2016 NIH-AAPM-Mayo Clinic Low-Dose CT Grand Chal-lenge dataset [45]. We selected 1000 normal-dose CT slices from cases L067 and L096 for training and 500 slices from an independent case, L286, for testing, ensuring patient-level separation. All images have a matrix size of 512 × 512 . The JOURNAL OF L ATEX CLASS FILES, VOL. 14, NO. 8, AUGUST 2021 6                                                                                             
+
+> TABLE I QUANTITATIVE COMPARISON ON THE AAPM DATASET UNDER DIFFERENT SPARSE -VIEW SETTINGS . A VERAGE PSNR ( DB) ↑AND SSIM (%) ↑ARE REPORTED . T HE BEST AND SECOND -BEST RESULTS ARE HIGHLIGHTED IN BOLD AND UNDERLINED ,RESPECTIVELY .Method Source 40 views 60 views 80 views Average PSNR SSIM PSNR SSIM PSNR SSIM PSNR SSIM FBP Baseline 26.1467 47.6630 29.4454 62.2933 32.0325 73.1345 29.2082 61.0303 RGIRT PMB 2024 32.1878 80.7497 33.3117 84.0287 34.3364 87.1493 33.2786 83.9759 STV PMB 2025 31.2213 67.3971 33.1710 74.2128 34.7891 79.8726 33.0605 73.8274 MetaInv-Net TMI 2020 36.2784 88.1483 36.8868 88.9526 37.5799 90.0631 36.9151 89.0546 LipCT TMI 2026 37.7456 90.4377 38.7311 91.2570 39.2531 91.7659 38.5766 91.1536 DPS ICLR 2023 32.2532 80.9761 32.3100 81.0850 32.3087 81.1056 32.2906 81.0556 SWORD TMI 2024 37.6420 89.4003 38.4232 90.6348 40.0475 92.1135 38.7043 90.7162 Lucid Ours 39.6465 92.4435 40.3130 93.1746 40.7472 93.6818 40.2356 93.0999
+
+Algorithm 1 Lucid: Sparsity-Guided Adaptive Flow Matching for Sparse-View CT Reconstruction 
+
+Require: Sparse-view projection data yΩ; sparse-view system operator AΩ; sparse-view FBP operator FBP Ω; pretrained velocity network vθ ; full-view and sparse-view angle sets 
+
+Θ and Ω; number of inference steps K; parameters λdc ,
+
+∆tmin , ∆tmax , α, and ξ
+
+Ensure: Reconstructed image x(K) 
+
+> 1:
+
+Compute the sparsity level η ← 1 − | Ω|/|Θ| 
+
+> 2:
+
+Compute xFBP ← FBP Ω(yΩ) and sample z ∼ N (0, I) 
+
+> 3:
+
+Initialize x(0) ← ηz + (1 − η)xFBP  
+
+> 4:
+
+Compute the sparsity modulation factor g(η) ← (1 + 
+
+αη )/(1 + α) 
+
+> 5:
+
+for k = 0 to K − 1 do  
+
+> 6:
+
+Set the time condition tk ← η(1 − k/K ) 
+
+> 7:
+
+Compute the adaptive step size ∆tk ← ∆tmin +(∆ tmax − ∆tmin )tξkg(η) 
+
+> 8:
+
+Perform the FM prior update ˜x(k+1) ← x(k) −
+
+∆tkvθ (x(k), t k) 
+
+> 9:
+
+Update x(k+1) by approximately solving Eq. (30) using CG  
+
+> 10:
+
+end for  
+
+> 11:
+
+return x(K)
+
+training images were used only to learn the Flow Matching im-age prior, while full-view reconstructions from 720 uniformly sampled projections were used as reference images for testing. All competing methods were evaluated on the same test slices and projection data. A two-dimensional fan-beam CT geometry was simulated using the ASTRA Toolbox. The source-to-isocenter distance and source-to-detector distance were 540 mm and 950 mm ,respectively. The detector contained 900 bins with a bin size of 1.1 mm . Full-view sinograms were generated using 720 uniformly spaced views over 360 ◦, and sparse-view measure-ments were obtained by uniformly selecting 40 , 60 , or 80 
+
+views. No additional Poisson or electronic noise was added, so that the experiments focused on angular undersampling. 
+
+2) Training Details: The proposed method was imple-mented in PyTorch, and all experiments were performed on an NVIDIA GeForce RTX 4090 GPU. The Flow Matching prior used a two-dimensional U-Net to estimate the velocity field, with one input and one output channel. The network was trained only on normal-dose CT images using AdamW with an initial learning rate of 1 × 10 −4, a batch size of 1, and 200 epochs. The continuous time variable was discretized into 1000 levels during training. During inference, the same pretrained model was used for all sparse-view settings. We fixed K = 50 , ∆tmin = 0 .006 ,
+
+∆tmax = 0 .09 , α = 0 .99 , ξ = 1 , and λdc = 0 .9. The data-consistency subproblem was solved by the conjugate gradient method. 
+
+B. Comparison with Existing SVCT Methods 
+
+We compared Lucid with representative analytical, model-based iterative, learning-based, and generative prior-based SVCT methods, including FBP, RGIRT [16], STV [46], MetaInv-Net [47], LipCT [28], DPS [37], and SWORD [39]. PSNR and SSIM were used for quantitative evaluation. As shown in Table I, Lucid achieves the best performance under all three sparse-view settings, with average PSNR and SSIM values of 40 .2356 dB and 93 .0999% , respectively. Compared with the second-best methods, Lucid improves the average PSNR by 1.5313 dB over SWORD and the average SSIM by 1.9463 percentage points over LipCT. Figs. 3 and 4 present the full-image comparison, residual maps, and zoomed ROIs under 40 , 60 , and 80 views. In the full images, FBP exhibits severe streak artifacts, especially at 40 views, while model-based iterative methods reduce part of the artifacts but still suffer from residual streaks and structural blurring. Learning-based methods further improve visual quality, but they may smooth anatomical boundaries or weaken low-contrast structures. Diffusion-based methods suppress global artifacts more strongly, yet local structural fluctuations remain visible in some regions. In contrast, Lucid produces cleaner reconstructions across all view settings, with the improvement being particularly pronounced under the challenging 40 -view case. The residual maps provide a clearer comparison of recon-struction errors. FBP and iterative methods show strong global residual patterns caused by angular undersampling, whereas learning-based and diffusion-based methods reduce these er-rors but still present structured residuals near high-contrast edges and anatomical boundaries. Lucid yields weaker and JOURNAL OF L ATEX CLASS FILES, VOL. 14, NO. 8, AUGUST 2021 7Ground truth FBP MetaInv-Net RGIRT LipCT DPS SWORD Lucid(Ours) STV Views=40 Views=60 Views=80 
+
++200 -200 0+200 -200 0+200 -200 0             
+
+> Fig. 3. Visual comparison and residual maps under 40 ,60 , and 80 views. For each setting, reconstructed images are displayed with a window of [−1000 ,600]
+> HU, and residual maps computed as ˆx−xref are displayed with a window of [−200 ,200] HU. Red rectangles mark the ROIs for local comparison.
+
+more spatially localized residuals, indicating better consistency with the reference images. The zoomed ROIs further show that Lucid better preserves local anatomical details, includ-ing soft-tissue boundaries and high-contrast structures, while competing methods either leave residual artifacts or introduce excessive smoothing. These visual results are consistent with the quantitative results and demonstrate that Lucid achieves a favorable balance between artifact suppression, structural fidelity, and data consistency. 
+
+C. Generalization Across Different Sparse-View Settings 
+
+This subsection evaluates the adaptability of Lucid to con-tinuously varying sampling densities. We varied the number of projection views from 20 to 120 and compared Lucid with FBP, PromptCT [28], and MetaInv-Net [47]. For all view settings, Lucid used the same pretrained Flow Matching prior without view-dependent retraining. As shown in Fig. 5, FBP improves as more views are available but remains limited by the lack of an image prior. PromptCT generally outperforms FBP, but its performance fluctuates at intermediate view numbers, possibly because dis-crete prompt representations may not monotonically describe continuously varying sampling densities. MetaInv-Net shows a more stable trend due to its unfolding structure and explicit imaging model. Lucid achieves the highest PSNR and SSIM across the entire 
+
+20 –120 -view range and exhibits a smooth improvement as the number of views increases. These results indicate that the proposed sparsity-aware initialization, adaptive step-size control, and projection-domain data consistency enable Lucid to generalize across different sparse-view settings using a single pretrained model. 
+
+D. Analysis of Structural Fidelity and Hallucination-Related Errors                  
+
+> TABLE II ROI-BASED EVALUATION OF HALLUCINATION -RELATED LOCAL ERRORS .LOWER VALUES INDICATE BETTER AGREEMENT WITH THE REFERENCE IMAGE .Method Lung ROI Bone ROI MAE HFEN MAE HFEN DPS 0.0163 1.3246 0.0184 1.2380 SWORD 0.0079 0.6188 0.0106 0.7493 Lucid 0.0074 0.5253 0.0088 0.5817
+
+Generative priors can suppress sparse-view artifacts, but may also introduce hallucination-like local structures under JOURNAL OF L ATEX CLASS FILES, VOL. 14, NO. 8, AUGUST 2021 8Ground truth FBP MetaInv-Net LipCT DPS SWORD Lucid(Ours) Views=40 Views=60 Views=80 
+
+STV RGIRT 
+
+Fig. 4. Zoomed ROI comparison under 40 , 60 , and 80 views. The display windows are [−200 , 600] HU, [−200 , 200] HU, and [−200 , 450] HU for 40 ,
+
+60 , and 80 views, respectively. 20 40 60 80 100 120 18 23 28 33 38 43      
+
+> 20 40 60 80 100 Views PSNR (dB) SSIM (%) 20 40 60 80 100 120 Views
+> PromptCT FBP MetaInv-Net Lucid PromptCT FBP MetaInv-Net Lucid
+
+Fig. 5. Reconstruction performance under varying sampling densities from 
+
+20 to 120 views with an interval of 10 . Lucid uses the same pretrained Flow Matching prior for all settings. DPS SWORD Ground truth Lucid 
+
+Fig. 6. Visual comparison of generative reconstruction methods for structural fidelity and hallucination-related errors. The columns show the reference image, DPS, SWORD, and Lucid. The rows show the full image, lung-parenchyma ROI, and bone ROI, with display windows of [−1000 , 600] HU, 
+
+[−1000 , 120] HU, and [−200 , 410] HU, respectively. 
+
+severe angular undersampling. We therefore compare Lucid with DPS and SWORD in terms of local structural fidelity. As shown in Fig. 6, DPS introduces unstable local textures in the lung and bone regions, while SWORD reduces these pertur-bations but tends to over-smooth or distort fine structures. In contrast, Lucid better preserves lung parenchymal structures and bony contours, producing local details more consistent with the reference image. Ground truth FBP w/o SGI & AS w/o SGI w/o AS Lucid(Ours) 
+
+> +200 -200 0
+
+Fig. 7. Visual ablation comparison under the 40 -view setting. The columns show the reference image, FBP initialization, w/o SGI & AS, w/o AS, w/o SGI, and Lucid. The rows show reconstructed images, residual maps, and zoomed ROIs marked by the red rectangle, with display windows of 
+
+[−1000 , 600] HU, [−200 , 200] HU, and [−200 , 400] HU, respectively. 
+
+Table II further reports ROI-based MAE and high-frequency error norm (HFEN) [48]. MAE evaluates local intensity fidelity, while HFEN emphasizes high-frequency structural discrepancies after Laplacian-of-Gaussian filtering. Lucid achieves the lowest MAE and HFEN in both ROIs, indicat-ing fewer spurious high-frequency structures and better local agreement with the reference image. These results suggest that the combination of sparsity-aware Flow Matching inference and projection-domain data consistency reduces hallucination-like structural errors while preserving the artifact-suppression capability of generative reconstruction. 
+
+E. Ablation Studies 
+
+To evaluate the contributions of sparsity-guided initializa-tion (SGI) and adaptive step-size scheduling (AS), we com-pared four variants under 40 , 60 , and 80 views: w/o SGI & AS, w/o AS, w/o SGI, and the full Lucid model. All other settings were kept unchanged. As shown in Table III, using either SGI or AS alone provides only partial improvement. SGI mainly improves structural similarity, whereas AS provides a more stable gain in reconstruction accuracy. When both components are used, JOURNAL OF L ATEX CLASS FILES, VOL. 14, NO. 8, AUGUST 2021 9
+
+TABLE III ABLATION RESULTS OF SPARSITY -GUIDED INITIALIZATION (SGI) AND ADAPTIVE STEP -SIZE SCHEDULING (AS). A VERAGE PSNR ( DB) ↑ / SSIM (%) ↑
+
+> ARE REPORTED
+
+, WITH THE BEST RESULTS HIGHLIGHTED IN BOLD .Variant SGI AS 40 views 60 views 80 views Average w/o SGI & AS × × 30.5373 / 77.5303 31.7467 / 84.2614 31.9497 / 84.2660 31.4112 / 82.0192 w/o AS ✓ × 30.7090 / 85.6633 31.3396 / 87.7036 31.5703 / 88.0883 31.2063 / 87.1517 w/o SGI × ✓ 31.2081 / 80.6547 32.1922 / 84.5899 32.4555 / 85.0571 31.9519 / 83.4339 Lucid ✓ ✓ 39.6465 / 92.4435 40.3130 / 93.1746 40.7472 / 93.6818 40.2356 / 93.0999 0.050 0.100 39.40 39.46 92.65 92.71        
+
+> tmax PSNR (dB) SSIM (%)
+> 0.150 PSNR SSIM Chosen tmax = 0.09 92.56 39.34 39.44 SSIM (%) 0.005 0.007 0.009 0.011
+> PSNR (dB) 92.71 PSNR SSIM
+> tmin Chosen tmin = 0.006
+
+Fig. 8. Sensitivity analysis of the step-size bounds ∆tmin and ∆tmax under the 40 -view setting. 
+
+Lucid achieves the best PSNR and SSIM under all sparse-view settings, demonstrating their complementarity. Fig. 7 further confirms this observation under the challeng-ing 40 -view setting. Removing either component leaves visible residual artifacts, boundary blurring, or loss of fine details. In contrast, the full Lucid model produces weaker residuals and better preserves local high-contrast structures, indicating improved artifact suppression and structural fidelity. 
+
+F. Sensitivity Analysis of Step-Size Parameters 
+
+We evaluated the sensitivity of Lucid to the step-size bounds 
+
+∆tmin and ∆tmax under the 40 -view setting using 50 ran-domly selected test slices. As shown in Fig. 8, fixing ∆tmin =0.006 and varying ∆tmax from 0.05 to 0.15 leads to only mild changes in PSNR and SSIM, with ∆tmax = 0 .09 providing a favorable trade-off. Similarly, when fixing ∆tmax = 0 .09 and varying ∆tmin from 0.005 to 0.011 , the performance remains stable and peaks around ∆tmin = 0 .006 . We therefore set 
+
+∆tmin = 0 .006 and ∆tmax = 0 .09 in all experiments. These results indicate that Lucid is not sensitive to the precise choice of the step-size bounds and does not require delicate tuning of these parameters. IV. C ONCLUSION 
+
+In this paper, we proposed Lucid, a sparsity-adaptive and data-consistent reconstruction framework for sparse-view CT based on deterministic Flow Matching. Lucid learns a genera-tive image prior from high-quality CT images without relying on view-specific supervised training. During inference, the sampling sparsity level is explicitly incorporated to guide the initialization and step-size scheduling, while projection-domain data consistency constrains the reconstruction with the measured projections. This design enables the pretrained prior to adapt to different degrees of angular undersampling within a unified reconstruction process. Experimental results show that Lucid achieves superior quantitative and visual performance over representative model-based, learning-based, and generative reconstruction methods under multiple sparse-view settings. It also generalizes to con-tinuously varying numbers of projection views using the same pretrained model. In addition, ROI-based analyses demonstrate that Lucid better preserves lung parenchymal structures, bony edges, and low-contrast soft-tissue details, while reducing hallucination-like local structures observed in diffusion-based generative reconstruction. Ablation studies further confirm the complementary roles of sparsity-guided initialization and adaptive step-size scheduling. Overall, Lucid provides an effective and interpretable gener-ative reconstruction strategy for sparse-view CT with varying sampling densities. Future work will extend the framework to more realistic acquisition scenarios, including noisy pro-jections, cross-scanner protocols, and three-dimensional cone-beam CT, and will investigate more efficient data-consistency solvers to reduce computational cost. REFERENCES [1] G. Wang, J. C. Ye, and B. De Man, “Deep learning for tomographic image reconstruction,” Nat. Mach. Intell. , vol. 2, pp. 737–748, 2020. [2] T. Wang, W. Xia, J. Lu, and Y. Zhang, “A review of deep learning CT reconstruction from incomplete projection data,” IEEE Trans. Radiat. Plasma Med. Sci. , vol. 8, no. 2, pp. 138–152, 2024. [3] L. R. Koetzier, D. Mastrodicasa, T. P. Szczykutowicz, N. R. van der Werf, A. S. Wang, V. Sandfort, A. J. van der Molen, D. Fleischmann, and M. J. Willemink, “Deep learning image reconstruction for CT: Technical principles and clinical prospects,” Radiology , vol. 306, no. 3, p. e221257, 2023. [4] G. N. Ramachandran and A. V. Lakshminarayanan, “Three-dimensional reconstruction from radiographs and electron micrographs: Application of convolutions instead of fourier transforms,” Proc. Natl. Acad. Sci. U.S.A. , vol. 68, no. 9, pp. 2236–2240, 1971. [5] E. Y. Sidky and X. Pan, “Image reconstruction in circular cone-beam computed tomography by constrained, total-variation minimization,” 
+
+Phys. Med. Biol. , vol. 53, no. 17, pp. 4777–4807, 2008. [6] M. Lohvithee, A. Biguri, and M. Soleimani, “Parameter selection in limited data cone-beam CT reconstruction using edge-preserving total variation algorithms,” Phys. Med. Biol. , vol. 62, no. 24, pp. 9295–9321, 2017. [7] S. Niu, J. Huang, Z. Bian, D. Zeng, W. Chen, G. Yu, Z. Liang, and J. Ma, “Iterative reconstruction for sparse-view X-ray CT using alpha-divergence constrained total generalized variation minimization,” J. X-Ray Sci. Technol. , vol. 25, no. 4, pp. 673–688, 2017. [8] Y. Wang and Z. Qi, “A new adaptive-weighted total variation sparse-view computed tomography image reconstruction with local improved gradient information,” J. X-Ray Sci. Technol. , vol. 26, no. 6, pp. 957– 975, 2018. [9] Y. Xi, P. Zhou, H. Yu, T. Zhang, L. Zhang, Z. Qiao, and F. Liu, “Adaptive-weighted high order TV algorithm for sparse-view CT re-construction,” Med. Phys. , vol. 50, no. 9, pp. 5568–5584, 2023. JOURNAL OF L ATEX CLASS FILES, VOL. 14, NO. 8, AUGUST 2021 10 
+
+[10] K. Li, Z. Sang, X. Zhang, M. Zhang, C. Jiang, Q. Zhang, Y. Ge, D. Liang, Y. Yang, X. Liu, H. Zheng, and Z. Hu, “Few-view CT image reconstruction using improved total variation regularization,” J. X-Ray Sci. Technol. , vol. 27, no. 4, pp. 739–753, 2019. [11] X. Zhao, C. Jiang, Q. Zhang, Y. Ge, D. Liang, X. Liu, Y. Yang, H. Zheng, and Z. Hu, “Iterative image reconstruction for sparse-view CT via total variation regularization and dictionary learning,” J. X-Ray Sci. Technol. ,vol. 27, no. 3, pp. 573–590, 2019. [12] Y. Hu, Z. Wang, L. Xie, and L. Luo, “Ordered subsets non-local means constrained reconstruction for sparse view cone beam CT system,” 
+
+Australas. Phys. Eng. Sci. Med. , vol. 42, no. 4, pp. 1117–1128, 2019. [13] Y. Wang, G. Chen, T. Xi, Z. Bian, D. Zeng, H. Zaidi, J. He, and J. Ma, “Helical CT reconstruction from sparse-view data through exploiting the 3D anatomical structure sparsity,” IEEE Access , vol. 9, pp. 15 200– 15 211, 2021. [14] Z. Shu and A. Entezari, “A nonlocal prior in iterative CT reconstruction,” 
+
+Med. Phys. , vol. 52, no. 3, pp. 1436–1453, 2025. [15] W. Yu, C. Wang, X. Nie, and D. Zeng, “Sparsity-induced dynamic guided filtering approach for sparse-view data toward low-dose X-ray computed tomography,” Phys. Med. Biol. , vol. 63, no. 23, p. 235016, 2018. [16] J. Zhang, Z. Wang, T. Cao, G. Cao, W. Ren, and J. Jiang, “Robust residual-guided iterative reconstruction for sparse-view CT in small animal imaging,” Phys. Med. Biol. , vol. 69, no. 10, p. 105010, 2024. [17] K. H. Jin, M. T. McCann, E. Froustey, and M. Unser, “Deep convo-lutional neural network for inverse problems in imaging,” IEEE Trans. Image Process. , vol. 26, no. 9, pp. 4509–4522, 2017. [18] Z. Zhang, X. Liang, X. Dong, Y. Xie, and G. Cao, “A sparse-view CT reconstruction method based on combination of DenseNet and deconvolution,” IEEE Trans. Med. Imaging , vol. 37, no. 6, pp. 1407– 1417, 2018. [19] Y. Han and J. C. Ye, “Framing U-Net via deep convolutional framelets: Application to sparse-view CT,” IEEE Trans. Med. Imaging , vol. 37, no. 6, pp. 1418–1429, 2018. [20] X. Dong, S. Vekhande, and G. Cao, “Sinogram interpolation for sparse-view micro-CT with deep learning neural network,” in Proc. SPIE Med. Imaging 2019: Phys. Med. Imag. , vol. 10948, 2019, p. 109482O. [21] H. Lee, J. Lee, H. Kim, B. Cho, and S. Cho, “Deep-neural-network-based sinogram synthesis for sparse-view CT image reconstruction,” 
+
+IEEE Trans. Radiat. Plasma Med. Sci. , vol. 3, no. 2, pp. 109–119, 2019. [22] H. Yuan, J. Jia, and Z. Zhu, “SIPID: A deep learning framework for sino-gram interpolation and image denoising in low-dose CT reconstruction,” in Proc. IEEE Int. Symp. Biomed. Imaging (ISBI) , 2018, pp. 1521–1524. [23] D. Lee, S. Choi, and H.-J. Kim, “High quality imaging from sparsely sampled computed tomography data with deep learning and wavelet transform in various domains,” Med. Phys. , vol. 46, no. 1, pp. 104–115, 2019. [24] D. Hu, J. Liu, T. Lyu, Q. Zhao, Y. Zhang, G. Quan, J. Feng, Y. Chen, and L. Luo, “Hybrid-domain neural network processing for sparse-view CT reconstruction,” IEEE Trans. Radiat. Plasma Med. Sci. , vol. 5, no. 1, pp. 88–98, 2021. [25] W. Wu, D. Hu, C. Niu, H. Yu, V. Vardhanabhuti, and G. Wang, “DRONE: Dual-domain residual-based optimization network for sparse-view CT reconstruction,” IEEE Trans. Med. Imaging , vol. 40, no. 11, pp. 3002– 3014, 2021. [26] C. Shi, Y. Xiao, and Z. Chen, “Dual-domain sparse-view CT reconstruc-tion with transformers,” Phys. Med. , vol. 101, pp. 1–7, 2022. [27] R. Li, Q. Li, H. Wang, S. Li, J. Zhao, Q. Yan, and L. Wang, “DDPTransformer: Dual-domain with parallel transformer network for sparse view CT image reconstruction,” IEEE Trans. Comput. Imaging ,vol. 8, pp. 1101–1116, 2022. [28] B. Shi, K. Jiang, Q. Lian, X. Yu, and H. Fu, “Prompting lipschitz-constrained network for multiple-in-one sparse-view CT reconstruction,” 
+
+IEEE Trans. Med. Imaging , vol. 45, no. 4, pp. 1446–1460, 2026. [29] Y. Lin, J. Chen, H. Wang, J. Yang, J. Guo, Y. Zhang, and X. Li, “DeepSparse: A foundation model for sparse-view CBCT reconstruc-tion,” IEEE Trans. Med. Imaging , vol. 45, no. 6, pp. 3339–3351, 2026. [30] S. Kim, B. Kim, J. Lee, and J. Baek, “Sparsier2Sparse: Self-supervised convolutional neural network-based streak artifacts reduction in sparse-view CT images,” Med. Phys. , vol. 50, no. 12, pp. 7731–7747, 2023. [31] J. Wu, X. Jiang, L. Zhong, W. Zheng, X. Li, J. Lin, and Z. Li, “Linear diffusion noise boosted deep image prior for unsupervised sparse-view CT reconstruction,” Phys. Med. Biol. , vol. 69, no. 16, p. 165029, 2024. [32] E. Xie, P. Ni, R. Zhang, and X. Li, “Limited-angle CT reconstruction with generative adversarial network sinogram inpainting and unsuper-vised artifact removal,” Appl. Sci. , vol. 12, no. 12, p. 6268, 2022. [33] Y. Song and S. Ermon, “Generative modeling by estimating gradients of the data distribution,” in Adv. Neural Inf. Process. Syst. , vol. 32, 2019, pp. 11 918–11 930. [34] I. Goodfellow, J. Pouget-Abadie, M. Mirza, B. Xu, D. Warde-Farley, S. Ozair, A. Courville, and Y. Bengio, “Generative adversarial networks,” 
+
+Commun. ACM , vol. 63, no. 11, pp. 139–144, 2020. [35] J. Ho, A. Jain, and P. Abbeel, “Denoising diffusion probabilistic models,” in Adv. Neural Inf. Process. Syst. , vol. 33, 2020, pp. 6840–6851. [36] A. Lahiri, G. Maliakal, M. L. Klasky, J. A. Fessler, and S. Ravishankar, “Sparse-view cone beam CT reconstruction using data-consistent super-vised and adversarial learning from scarce training data,” IEEE Trans. Comput. Imaging , vol. 9, pp. 13–28, 2023. [37] H. Chung, J. Kim, M. T. McCann, M. L. Klasky, and J. C. Ye, “Diffusion posterior sampling for general noisy inverse problems,” in Proc. Int. Conf. Learn. Represent. (ICLR) , 2023. [38] L. He, W. Du, P. Liao, F. Fan, H. Chen, H. Yang, and Y. Zhang, “Solving zero-shot sparse-view CT reconstruction with variational score solver,” 
+
+IEEE Trans. Med. Imaging , vol. 44, no. 9, pp. 3586–3599, 2025. [39] K. Xu, S. Lu, B. Huang, W. Wu, and Q. Liu, “Stage-by-stage wavelet optimization refinement diffusion model for sparse-view CT reconstruc-tion,” IEEE Trans. Med. Imaging , vol. 43, no. 10, pp. 3412–3424, 2024. [40] L. Yang, J. Huang, G. Yang, and D. Zhang, “CT-SDM: A sampling dif-fusion model for sparse-view CT reconstruction across various sampling rates,” IEEE Trans. Med. Imaging , vol. 44, no. 6, pp. 2581–2593, 2025. [41] Y. Liu, X. Zhou, C. Wei, and Q. Xu, “Sparse-view spectral CT re-construction and material decomposition based on multi-channel SGM,” 
+
+IEEE Trans. Med. Imaging , vol. 43, no. 10, pp. 3425–3435, 2024. [42] W. Wu, J. Pan, Y. Wang, S. Wang, and J. Zhang, “Multi-channel optimization generative model for stable ultra-sparse-view CT recon-struction,” IEEE Trans. Med. Imaging , vol. 43, no. 10, pp. 3461–3475, 2024. [43] S. Bhadra, V. A. Kelkar, F. J. Brooks, and M. A. Anastasio, “On hallucinations in tomographic image reconstruction,” IEEE Trans. Med. Imaging , vol. 40, no. 11, pp. 3249–3260, 2021. [44] Y. Lipman, R. T. Q. Chen, H. Ben-Hamu, M. Nickel, and M. Le, “Flow matching for generative modeling,” in Proc. Int. Conf. Learn. Represent. (ICLR) , 2023. [45] C. H. McCollough, A. C. Bartley, R. E. Carter, B. Chen, T. A. Drees, P. Edwards, D. R. Holmes, A. E. Huang, F. Khan, S. Leng, K. L. McMillan, G. J. Michalak, K. M. Nunez, L. Yu, and J. G. Fletcher, “Low-dose CT for the detection and classification of metastatic liver lesions: Results of the 2016 low dose CT grand challenge,” Med. Phys. ,vol. 44, no. 10, pp. e339–e352, 2017. [46] Y. Yu, C. Fang, Y. Zhang, P. Liu, R. Yang, J. Xue, and Z. Qiao, “A springback TV algorithm for image reconstruction from sparse view data in CT,” Phys. Med. Biol. , vol. 70, no. 22, p. 225018, 2025. [47] H. Zhang, B. Liu, H. Yu, and B. Dong, “MetaInv-Net: Meta inversion network for sparse view CT image reconstruction,” IEEE Trans. Med. Imaging , vol. 40, no. 2, pp. 621–634, 2021. [48] S. Ravishankar and Y. Bresler, “MR image reconstruction from highly undersampled k-space data by dictionary learning,” IEEE Trans. Med. Imaging , vol. 30, no. 5, pp. 1028–1041, 2011.

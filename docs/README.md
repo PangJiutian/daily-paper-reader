@@ -6,65 +6,66 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-06-15
-- 运行时间：2026-06-15 23:01:38 UTC
+- 最新运行日期：2026-06-16
+- 运行时间：2026-06-16 23:22:18 UTC
 - 运行状态：成功
-- 本次总论文数：15
+- 本次总论文数：14
 - 精读区：5
-- 速读区：10
+- 速读区：9
 
 ### 今日简报（AI）
-今日共处理15篇论文，精读5篇，速读10篇。最值得关注的两篇9.0分精读方向：全波形反演的解耦潜在扩散优化，以及基于物理信息神经网络的非线性动力系统通用Lyapunov函数构造。建议优先精读这两篇论文，速读中可关注Transformer神经算子零样本泛化工作。
-- 详情：[/202606/15/README](/202606/15/README)
+今日14篇论文聚焦AI理论突破，精读10分双星闪耀：可分离神经架构构建物理世界模型，精确后验评分估计攻克线性逆问题。
+
+最值得关注两项10分精读：理论与应用结合的物理世界模型，以及求解线性逆问题的精确后验评分方法，均代表领域前沿。
+
+建议普通读者优先精读这两篇10分论文，理解理论创新的实际应用价值；速读中LakeFM等应用型工作可作延伸。
+- 详情：[/202606/16/README](/202606/16/README)
 
 ### 精读区论文标签
-1. [Decoupled Latent Optimization of Diffusion Models for Full Waveform Inversion](/202606/15/2606.14139v1-decoupled-latent-optimization-of-diffusion-models-for-full-waveform-inversion)  
+1. [Separable Neural Architectures as Physical World Models: from Mathematical Theory to Applications](/202606/16/2606.14934v1-separable-neural-architectures-as-physical-world-models-from-mathematical-theory-to-applications)  
+   标签：评分：10.0/10、query:geo-phys-ai
+   evidence：可分离神经架构作为物理世界模型用于PDE
+2. [Exact Posterior Score Estimation for Solving Linear Inverse Problems](/202606/16/2606.17048v1-exact-posterior-score-estimation-for-solving-linear-inverse-problems)  
+   标签：评分：10.0/10、query:geo-phys-ai
+   evidence：精确后验得分用于线性逆问题，基于扩散模型
+3. [Learning turbulent transport via Mori--Zwanzig graph neural networks](/202606/16/2606.14918v1-learning-turbulent-transport-via-mori--zwanzig-graph-neural-networks)  
    标签：评分：9.0/10、query:geo-phys-ai
-   evidence：扩散模型用于全波形反演，潜优化，地震反演后验
-2. [Universal Construction of Generalized Lyapunov Functions for Nonlinear Dynamical Systems Using Physics-Informed Neural Networks](/202606/15/2606.14174v1-universal-construction-of-generalized-lyapunov-functions-for-nonlinear-dynamical-systems-using-physics-informed-neural-networks)  
+   evidence：等变图神经网络用于湍流输运，尊重物理对称性
+4. [Phys-JEPA: Physics-Informed Latent World Models for Multivariate Time-Series Forecasting](/202606/16/2606.16076v1-phys-jepa-physics-informed-latent-world-models-for-multivariate-time-series-forecasting)  
    标签：评分：9.0/10、query:geo-phys-ai
-   evidence：使用物理信息神经网络构建Lyapunov函数，具有物理归纳偏置
-3. [Bounding the Null Space: Interval-Based Uncertainty Quantification for Non-Identifiable Groundwater Models](/202606/15/2606.10836v1-bounding-the-null-space-interval-based-uncertainty-quantification-for-non-identifiable-groundwater-models)  
+   evidence：物理信息潜在世界模型，分解物理和残差状态
+5. [Bayesian Variational System Identification with Weak-Form Residual Likelihoods](/202606/16/2606.14942v1-bayesian-variational-system-identification-with-weak-form-residual-likelihoods)  
    标签：评分：8.0/10、query:geo-phys-ai
-   evidence：基于区间的不确定性量化方法，用于非唯一性地下水模型，结合物理定律与观测数据
-4. [3DSTokesFlow: simulation-based inference for 3D Stokes profiles using flow matching](/202606/15/2606.13004v1-3dstokesflow-simulation-based-inference-for-3d-stokes-profiles-using-flow-matching)  
-   标签：评分：8.0/10、query:geo-phys-ai
-   evidence：利用流匹配对太阳物理3D Stokes轮廓进行贝叶斯推断
-5. [Environment-Aware Stable Neural Koopman Dynamics Learning for Input-Driven Systems under Environmental Constraints](/202606/15/2606.14136v1-environment-aware-stable-neural-koopman-dynamics-learning-for-input-driven-systems-under-environmental-constraints)  
-   标签：评分：8.0/10、query:geo-phys-ai
-   evidence：神经Koopman动力学学习，稳定性，输入驱动系统
+   evidence：从稀缺噪声数据中贝叶斯系统辨识PDE
 
 ### 速读区论文标签
-1. [Zero-shot generalization of transformer neural operators to larger domains](/202606/15/2606.14597v1-zero-shot-generalization-of-transformer-neural-operators-to-larger-domains)  
+1. [LakeFM: Toward a Foundation Model for Aquatic Ecosystems Using Irregular Multivariate Multi-depth Time Series Data](/202606/16/2606.11268v1-lakefm-toward-a-foundation-model-for-aquatic-ecosystems-using-irregular-multivariate-multi-depth-time-series-data)  
    标签：评分：7.0/10、query:geo-phys-ai
-   evidence：Transformer神经算子用于PDE求解，并实现零样本域扩展，推动物理世界模型发展
-2. [ND-TNN: Tensor-Neural-Network Approximation for High-Dimensional Nonlocal Diffusion Models](/202606/15/2606.08685v1-nd-tnn-tensor-neural-network-approximation-for-high-dimensional-nonlocal-diffusion-models)  
+   evidence：面向水生生态系统的基础模型，在大规模数据上预训练
+2. [Bridging data-driven priors via the score function for posterior sampling -- Comparative review and experimental study](/202606/16/2606.14800v1-bridging-data-driven-priors-via-the-score-function-for-posterior-sampling----comparative-review-and-experimental-study)  
+   标签：评分：7.0/10、query:geo-phys-ai
+   evidence：通过得分函数统一数据驱动先验进行后验采样
+3. [Bayesian 3D Steerable CNNs: Enabling Equivariance and Uncertainty Quantification Simultaneously](/202606/16/2606.15479v1-bayesian-3d-steerable-cnns-enabling-equivariance-and-uncertainty-quantification-simultaneously)  
+   标签：评分：7.0/10、query:geo-phys-ai
+   evidence：贝叶斯可转向CNN在保持SE(3)等变性的同时实现不确定性量化；直接对应等变神经网络
+4. [Domain-Guided Prompting of the Segment Anything Model for Seismic Interpretation: The Role of Attributes, Visualization, and Hybrid Prompts](/202606/16/2606.15786v1-domain-guided-prompting-of-the-segment-anything-model-for-seismic-interpretation-the-role-of-attributes-visualization-and-hybrid-prompts)  
+   标签：评分：7.0/10、query:geo-phys-ai
+   evidence：零样本适应基础模型SAM用于地震解释，实现地下表征
+5. [Amortized mean-shift interacting particles](/202606/16/2606.15871v1-amortized-mean-shift-interacting-particles)  
+   标签：评分：7.0/10、query:geo-phys-ai
+   evidence：面向贝叶斯逆问题的摊销均值漂移相互作用粒子
+6. [LUCID: Learned Undersampling-Adaptive Consistency-Guided Inference with Deterministic Flow Matching for Sparse-View CT Reconstruction](/202606/16/2606.16212v1-lucid-learned-undersampling-adaptive-consistency-guided-inference-with-deterministic-flow-matching-for-sparse-view-ct-reconstruction)  
+   标签：评分：7.0/10、query:geo-phys-ai
+   evidence：流匹配生成先验用于CT重建，类似地震反演中的生成模型
+7. [Factorized Neural Operators Decompose Dynamic and Persistent Responses](/202606/16/2606.16900v1-factorized-neural-operators-decompose-dynamic-and-persistent-responses)  
+   标签：评分：7.0/10、query:geo-phys-ai
+   evidence：因子化神经算子将响应分解为等变动态部分和不变持久部分，通过谱分解提供物理归纳偏置
+8. [Towards a Unified Generative Model for Scarce Time Series with Domain Experts](/202606/16/2606.15172v1-towards-a-unified-generative-model-for-scarce-time-series-with-domain-experts)  
    标签：评分：6.0/10、query:geo-phys-ai
-   evidence：使用张量神经网络求解高维非局部扩散模型，与从稀疏数据学习物理世界模型相关
-3. [Accelerating GMRES with Matrix-Free Multiscale Robin Preconditioners](/202606/15/2606.08883v1-accelerating-gmres-with-matrix-free-multiscale-robin-preconditioners)  
+   evidence：针对稀缺时间序列的生成模型与领域自适应
+9. [Variance Reduction for Non-Log-Concave Sampling with Applications to Inverse Problems](/202606/16/2606.16257v1-variance-reduction-for-non-log-concave-sampling-with-applications-to-inverse-problems)  
    标签：评分：6.0/10、query:geo-phys-ai
-   evidence：用于子表面流动椭圆问题的无矩阵预条件器，加速高对比度渗透率场GMRES迭代
-4. [Two-Layer Linear Auto-Regressive Models Estimate Latent States](/202606/15/2606.12691v1-two-layer-linear-auto-regressive-models-estimate-latent-states)  
-   标签：评分：6.0/10、query:geo-phys-ai
-   evidence：证明线性自回归模型在部分观测线性动力系统下逼近卡尔曼滤波，与动力系统学习相关
-5. [World Tracing: Generative Pixel-Aligned Geometry Beyond the Visible](/202606/15/2606.13652v1-world-tracing-generative-pixel-aligned-geometry-beyond-the-visible)  
-   标签：评分：6.0/10、query:geo-phys-ai
-   evidence：生成式像素对齐几何，扩散变换器，三维建模
-6. [How do Self-Supervised Remote Sensing Vision Models Transfer to Downstream Tasks?](/202606/15/2606.13896v1-how-do-self-supervised-remote-sensing-vision-models-transfer-to-downstream-tasks)  
-   标签：评分：6.0/10、query:geo-phys-ai
-   evidence：地理空间基础模型迁移分析
-7. [Deep Spectral Learning of Embedded Latent Transfer Operators for Stochastic Dynamical Systems](/202606/15/2606.14079v1-deep-spectral-learning-of-embedded-latent-transfer-operators-for-stochastic-dynamical-systems)  
-   标签：评分：6.0/10、query:geo-phys-ai
-   evidence：随机动力系统潜转移算子的谱学习方法
-8. [Clay-CNN Hybrids: Leveraging Geo-Foundational Models as Auxiliary Context for Landslide Detection](/202606/15/2606.14081v1-clay-cnn-hybrids-leveraging-geo-foundational-models-as-auxiliary-context-for-landslide-detection)  
-   标签：评分：6.0/10、query:geo-phys-ai
-   evidence：使用地球科学基础模型Clay进行滑坡检测，与地球科学基础模型应用相关
-9. [Nonlocal Bayesian Modeling of Continuous Spatio-Temporal Dynamics](/202606/15/2606.14313v1-nonlocal-bayesian-modeling-of-continuous-spatio-temporal-dynamics)  
-   标签：评分：6.0/10、query:geo-phys-ai
-   evidence：非局部贝叶斯连续时空动态模型
-10. [Improving Lunar Topography with Deep Learning Schrödinger Bridges](/202606/15/2606.14638v1-improving-lunar-topography-with-deep-learning-schrdinger-bridges)  
-   标签：评分：6.0/10、query:geo-phys-ai
-   evidence：基于扩散薛定谔桥的地形超分辨率方法，可迁移至地球物理反问题
+   evidence：针对非对数凹分布的方差缩减采样方法，应用于逆问题，支持后验采样
 
 
 <div class="dpr-home-promo-card">

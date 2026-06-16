@@ -1,0 +1,7873 @@
+Title: Variance Reduction for Non-Log-Concave Sampling with Applications to Inverse Problems
+
+URL Source: https://arxiv.org/pdf/2606.16257v1
+
+Published Time: Tue, 16 Jun 2026 02:15:21 GMT
+
+Number of Pages: 53
+
+Markdown Content:
+# Variance Reduction for Non-Log-Concave Sampling with Applications to Inverse Problems 
+
+M. Berk Sahin 1 Ahmet Ege Tanriverdi 2 Behzad Sharif 1,3 Abolfazl Hashemi 11School of Electrical and Computer Engineering, Purdue University, West Lafayette, Indiana, USA 
+
+> 2
+
+School of Electrical and Computer Engineering, University of Southern California, California, USA 
+
+> 3
+
+School of Biomedical Engineering, Purdue University, West Lafayette, Indiana, USA 
+
+## Abstract 
+
+Sampling from high-dimensional, non-log-concave distributions with unnormalized densities is a fundamental challenge in machine learning, particularly when the exact gradient of the potential is unavailable and must be approximated via stochastic gradients that exhibit high variance under a fixed budget of gradient computations per iteration. Although variance reduction techniques such as SGD with momentum, STORM, and PAGE have demonstrated improved convergence properties in non-convex optimization, their implications for sampling from non-log-concave distributions remain largely unexplored. In this work, we develop the first unified analysis of these estimators for sampling from non-log-concave dis-tributions. We establish improved non-asymptotic convergence rates in ε-relative Fisher information and, under a Poincaré inequality assumption, in squared total variation distance, and further prove weak convergence to the target distribution. We extend our analysis to solving inverse problems with score-based generative priors. We empirically validate our theory and demonstrate that, under a fixed gradient computations per iteration, variance-reduction techniques consistently improve sample quality in two standard imaging applications. 
+
+## 1 INTRODUCTION 
+
+One of the central themes in machine learning is the use of stochasticity to design procedures that are both com-putationally efficient and statistically consistent. This idea is shared by both Bayesian and frequentist perspectives. From a Bayesian perspective, posterior distributions provide a principled characterization of uncertainty in estimates, and stochasticity is used to represent those distributions through Monte Carlo (MC) samples. On the frequentist side, stochasticity is used to develop computationally efficient gradient-based optimization methods for obtaining point es-timates by replacing intractable or expensive exact gradients with unbiased stochastic estimates. Although they are two different frameworks, there are overlapping methodologi-cal challenges. In particular, MC sampling must drive an out-of-equilibrium state towards the steady-state posterior distribution, while achieving fast convergence; consequently, optimization ideas are relevant. On the other hand, frequen-tist inference often depends on sampling and resampling procedures, which makes MC methods relevant. Variance reduction has emerged as one of the key tools to address the challenges shared by the two frameworks. In the context of stochastic optimization, stochastic gradi-ent descent (SGD) replaces exact gradients with unbiased stochastic estimates to reduce the computational burden of large-scale learning problems. However, this computational advantage comes at the cost of additional variance, which can slow convergence and lead to a suboptimal stationary point. This raises the question of whether there is a princi-pled way to manage this trade-off. This question has been answered positively in a seminal line of work on stochas-tic optimization [Johnson and Zhang, 2013, Schmidt et al., 2017, Fang et al., 2018, Cutkosky and Orabona, 2019, Li et al., 2021]. These methods achieve improved convergence rates compared to SGD while relying on stochastic gradients with lower gradient complexity. In parallel, a related line of research has developed in the Bayesian framework based on MC sampling. Stochastic gradient Langevin diffusion (SGLD) has been proposed to approximate the Langevin dynamics via unbiased stochastic gradients [Welling and Teh, 2011] and several theoretical results have established mixing time bounds for both well be-haved (e.g., log-concave) distributions [Cheng and Bartlett, 2018, Dalalyan and Karagulyan, 2019, Crespo Navas et al., 2024] and general non-log-concave settings [Raginsky et al., 2017, Cheng et al., 2020, Balasubramanian et al., 2022]. These developments have in turn motivated variance re-1
+
+> arXiv:2606.16257v1 [cs.LG] 15 Jun 2026
+
+duction techniques for SGLD [Dubey et al., 2016, Zou et al., 2018, Chatterji et al., 2018, Ding and Li, 2020]. How-ever, these studies rely on the restrictive assumption that the target distribution is strongly log-concave. Although Zou et al. [2019] establish non-asymptotic convergence rates for SAGA- and SVRG-based Langevin diffusion, their analysis relies on a finite-sum structure of the log density together with a dissipativity assumption, which does not hold for non-log-concave distributions in general. In this work, we develop a unified framework that adapts variance reduction techniques from non-convex optimization to sampling from non-log-concave distribu-tions under relaxed assumptions. In particular, we propose two estimators that provide unified treatments of SGD with momentum and its probabilistic counterpart, and of STORM [Cutkosky and Orabona, 2019] and PAGE [Li et al., 2021]. We refer to these estimators as mean-Lipschitz variance-reduced Langevin diffusion (ML-VRLD) 
+
+and sample-Lipschitz variance-reduced Langevin diffusion (SL-VRLD) , respectively. This terminology reflects the un-derlying regularity conditions: ML-VRLD assumes Lips-chitz continuity of the exact gradients, whereas SL-VRLD assumes Lipschitz continuity of unbiased stochastic gra-dients in the mean-squared sense. The proposed methods improve upon the non-log-concave analysis of SGLD [Bal-asubramanian et al., 2022], which establishes ε-relative Fisher information convergence with O(Ldσ 2/ε ) stochas-tic gradient computations per iteration and a total compu-tational complexity of O(L3d3σ2/ε 3) (see Theorem B.1 in Appendix B.3). Here, d denotes the dimension, L the gradient Lipschitz constant, and σ2 an upper bound on the variance of the stochastic gradients. In contrast to SGLD, both ML-VRLD and SL-VRLD achieve the same notion of stationarity with O(1) stochastic gradient computations per iteration, providing memory-efficient algorithms under dif-ferent assumptions. Moreover, SL-VRLD improves the total computational complexity to O(L2d2σ2/ε 3). We addition-ally establish convergence rates in squared total variation distance under a Poincaré inequality assumption and prove weak convergence to the target distribution for both algo-rithms. One of the most important practical applications of sampling is solving inverse problems, where score-based generative models serve as implicit priors for modeling complex high-dimensional distributions [Song et al., 2021, Chung et al., 2023]. Recently, several works have explored high-quality image generation as a solution to inverse problems across diverse applications, including image deblurring, MRI and CT reconstruction [Chung and Ye, 2022, Rout et al., 2023, Wu et al., 2024, Chen et al., 2025]. However, most exist-ing posterior sampling methods that employ SGM priors work in a full-batch setting, where the entire set of mea-surements is used at every iteration. This effectively limits their applicability to large datasets [Bottou and Bousquet, 2007] common in three-dimensional imaging (3D) or in dynamic imaging [Kamilov et al., 2016, Ong et al., 2020]. To the best of our knowledge, existing posterior sampling methods with SGM priors do not address this limitation. Related approaches have instead been proposed in other settings [Sun et al., 2019, Tang and Davies, 2020, Liu et al., 2022]. However, these methods rely on mini-batch gradient estimates without variance-reduction mechanisms, result-ing in high-variance updates that necessitate larger batch sizes in high-noise regimes. Our second contribution is that we propose two principled, variance-reduced posterior sam-pling algorithms for inverse problems based on annealed Langevin Monte Carlo (LMC) sampling with an SGM prior. Assuming bounded SGM estimation error, we establish con-vergence in relative FI, squared TV distance under Poincaré inequality assumption, and prove weak convergence to the target distribution, with O(1) gradient computations per iter-ation. We corroborate our theoretical findings with extensive experiments. The code is provided in the project page. Our contributions are summarized as follows: • We propose a unified framework built on two estima-tors ML-VRLD and SL-VRLD for analyzing variance-reduction methods, including SGD with momentum, STORM, and PAGE, in non-log-concave sampling. • We establish convergence in ε-relative FI with O(1) 
+
+gradient computations per iteration, improving upon the O(Ldσ 2/ε ) complexity of SGLD. Moreover, SL-VRLD improves the total computational complexity from O(L3d3σ2/ε 3) to O(L2d2σ2/ε 3). We further prove weak convergence to the target distribution and, under a Poincaré inequality assumption, convergence in squared TV distance. • We extend our framework to posterior sampling via an-nealed LMC sampling with score-based generative mod-els (SGMs) and establish the same convergence guaran-tees under bounded SGM estimation error. • Through synthetic Gaussian mixture and inverse problem experiments, we verify our theoretical results, and obtain more accurate posterior statistics than SGLD. On MRI and sparse-angle CT reconstruction tasks, we achieve superior sample quality compared to the baselines using the same number of gradient computations per iteration. 
+
+## 2 PRELIMINARIES 
+
+2.1 SAMPLING ANALOGUE OF STATIONARY POINT ANALYSIS 
+
+While optimization and sampling are distinct frameworks, their theoretical analysis share deep structural connections. In particular, tools from non-convex optimization theory can be leveraged to characterize the behavior of sampling algorithms [Balasubramanian et al., 2022]. Consider the 2minimization of Kullback-Leibler (KL) divergence over the space of probability distributions equipped with the optimal transport geometry: 
+
+arg min 
+
+> μ
+
+KL( μ∥π),
+
+where KL( μ∥π) := R 
+
+> Rd
+
+μ(x) log μ(x) 
+
+> π(x)
+
+dx. Here, π denotes the target distribution, and μ denotes the sampling distri-bution induced by the generated samples. In this setting, Langevin diffusion can be interpreted as the exact gradient flow of the KL divergence [Jordan et al., 1998]. For example, the Wasserstein gradient of KL( ·∥ π) at μ is ∇ log( μ/π ),and its expected squared norm is known as the relative Fisher information (FI) 
+
+FI( μ∥π) := 
+
+Z
+
+> Rd
+
+μ(x) ∇ log μ(x)
+
+π(x)
+
+> 22
+
+dx.
+
+If μt denotes the law of the Langevin diffusion (1) at time 
+
+t, then the calculation rules for gradient flows imply that  
+
+> ddt
+
+KL( μt∥π) = −FI( μt∥π) [Villani, 2009, Ambrosio et al., 2008, Santambrogio, 2015]. From a non-convex optimiza-tion point of view, FI( μt∥π) is analogous to the ℓ-2 norm of the gradient in Rd [Balasubramanian et al., 2022]. Using this analogy, we analyze the convergence of FI( μt∥π) un-der a linear interpolation of the distributions obtained by the LMC sampling algorithms. Different than non-convex optimization, if μ and π have positive and smooth densities, 
+
+FI( μ∥π) = 0 implies μ = π, which we use to establish weak convergence guarantees. We refer to Balasubramanian et al. [2022] for further discussion on this topic. 
+
+2.2 LANGEVIN DIFFUSION 
+
+Langevin diffusion is defined as the solution to the stochastic differential equation 
+
+dxt = −∇ f (xt)dt + √2dBt, (1) and admits π ∝ e−f as its unique stationary distribution. Un-der mild conditions, the process converges to π as t → ∞ .Here, (Bt)t≥0 denotes a standard d-dimensional Brown-ian motion. Discretizing this process with step size γ > 0
+
+yields the standard Langevin Monte Carlo (LMC) sampling algorithm 
+
+x(k+1) γ = xkγ − γ∇f (xkγ ) + p2γZk, (2) where Zk ∼ N (0 , I ). In many practical settings, the exact gradient of the potential ∇f (xkγ ) is unavailable. Thus, it is replaced by its stochastic estimate ∇f (xkγ , ξ k), where ξk
+
+denotes a random variable capturing the external random-ness at iteration k and is independent of all other sources of randomness. However, as shown in prior work [Balasubra-manian et al., 2022], these iterates fail to achieve arbitrarily small ε-relative FI. A standard remedy is to replace the single-sample gradient with a mini-batch estimator, leading to the SGLD iterates 
+
+x(k+1) γ = xkγ − γb
+
+> b
+
+X
+
+> i=1
+
+∇f (xkγ , ξ ik) + p2γZk, (3) where b denotes the batch size and (ξik)bi=1 are independent and identically distributed. While this reduces the estima-tor variance, ε-relative FI is guaranteed by b = O(Ldσ 2/ε )
+
+gradient computations per iteration (see Theorem B.1), lead-ing to substantial per-iteration cost in high-dimensional and high-variance settings. Consequently, SGLD requires very large batch sizes, resulting in both high computational cost and increased memory requirements. In contrast, the proposed ML-VRLD and SL-VRLD estimators achieve ε-relative FI error with O(1) gradient computations per itera-tion. 
+
+2.3 POSTERIOR SAMPLING WITH SGM PRIOR 
+
+For the posterior sampling part of our work, we consider a general inverse problem setting modeled as 
+
+y = A(x) + n, (4) where the objective is to recover x ∈ Rd from measure-ments y ∈ Rm. The measurement operator A : Rd → Rm
+
+characterizes the imaging system’s response, and n ∈ Rm
+
+denotes the measurement noise, generally modeled as ad-ditive Gaussian noise (AWGN). The mapping x → y is not one-to-one, making the inverse problem ill-posed since x
+
+cannot be uniquely recovered from y. In Bayesian frame-work, uncertainty about x is modeled through a prior 
+
+p(x) ∝ e−h(x), and inference is performed by sampling from the posterior π(x|y) ∝ p(y|x)p(x) obtained via Bayes’ rule, where p(y|x) ∝ e−f (x) indicates the likeli-hood . Here, f and h denote the potential functions asso-ciated with the likelihood and prior, respectively, and are central to our analysis. One standard approach is to sam-ple from the posterior to solve the inverse problem. Using Bayes’ rule and the SGLD update rule in (3), we obtain 
+
+x(k+1) γ = xkγ − γ 1
+
+b
+
+> b
+
+X
+
+> i=1
+
+∇f (xkγ , ξ ik) + ∇h(xkγ )
+
+!
+
++ p2γZk.
+
+(5) Since ∇h(xkγ ) is generally intractable for complex, high-dimensional priors, score-based generative models (SGMs), parameterized by a neural network, have been proposed to provide computable approximations of this quantity. This ap-proach is commonly referred to as score matching [Hyväri-nen and Dayan, 2005, Vincent, 2011]. One elegant ap-proximation replaces the intractable score −∇ h(xkγ ) by smoothed score −∇ hσ (xkγ ), which admits a closed form 3expression by Tweedie’s formula [Efron, 2011]. In par-ticular, let z ∼ p(z) be a random sample from the prior, 
+
+e ∼ N (0 , σ 2I) the AWGN, and x = z + e the noisy image. Then, ∇hσ (x) = ( x − E[z|x]) /σ 2, where pσ (x) ∝ e−hσ (x)
+
+is the distribution of noisy image with potential function 
+
+hσ , and pσ (x) := R 
+
+> Rd
+
+p(z)N (x|z, σ 2I) dz. SGMs approx-imate the smoothed score by minimizing the denoising score matching (DSM) loss derived from Tweedie’s formula [Vin-cent, 2011]. 
+
+DSM( θ) := E
+
+"
+
+z − x
+
+σ2 − S θ (x, σ )
+
+> 22
+
+#
+
+, (6) where Sθ (x, σ ) denotes SGM parametrized by θ. Assuming enough data and model capacity, minimization of DSM loss satisfies Sθ∗ (x, σ ) = −∇ hσ (x) almost everywhere [Song and Ermon, 2019]. Thus, for sufficiently small σ > 0, we have Sθ∗ (xkγ , σ ) ≈ −∇ h(xkγ ).Standard LMC algorithms exhibit slow convergence and mode collapse when targeting high-dimensional, multi-modal distributions. To mitigate these issues, we consider a more general LMC formulation incorporating weighted an-nealing [Sun et al., 2024]. Specifically, we define a sequence of intermediate target distributions 
+
+π(αk ) 
+
+> σk
+
+(x|y) ∝ p(y|x) pαk 
+
+> σk
+
+(x),
+
+where (αk)N −1 
+
+> k=0
+
+and (σk)N −1 
+
+> k=0
+
+denote non-increasing anneal-ing and smoothing schedules, respectively. This formula-tion corresponds to sampling from a sequence of weighted posterior distributions. Early in the sampling process, the smoothed prior pσk dominates, yielding a smoother en-ergy landscape that facilitates exploration. As the iterations progress, the influence of the likelihood increases while the smoothed prior gradually approaches the true prior p, guid-ing the iterates toward the target posterior. Incorporating this weighted annealing strategy yields the following annealed SGLD iterates with an SGM prior: 
+
+x(k+1) γ = xkγ −γ
+
+ 1
+
+b
+
+> b
+
+X
+
+> i=1
+
+∇f (xkγ , ξ ik)
+
+− αkSθ (xkγ , σ k)
+
+
+
++ p2γZk.
+
+(7) 
+
+## 3 VARIANCE REDUCTION TECHNIQUES 
+
+In Balasubramanian et al. [2022], SGLD (3) achieves ε-relative FI with O(Ldσ 2/ε ) gradient computations per it-eration. Such a requirement is computationally prohibitive in high-dimensional and high-variance settings. To address this, we propose two unified estimators, ML-VRLD and Table 1: Comparison of the total and per-iteration compu-tational complexities of Langevin Monte Carlo sampling algorithms for generating samples with distributions that are 
+
+ε-close to the target distribution in relative Fisher informa-tion. Algorithm Total Computation Per-Iteration Computation SGLD O(L3d3σ2/ε 3) O(Ldσ 2/ε )
+
+ML-VRLD O(L2d2σ4/ε 4) O(1) 
+
+SL-VRLD O(L2d2σ2/ε 3) O(1) 
+
+SL-VRLD, that generalize popular variance reduction tech-niques from optimization, and establish convergence guaran-tees with O(1) gradient computations per iteration. Table 1 summarizes the computational complexities. 
+
+3.1 ML-VRLD 
+
+Our first estimator unifies SGD with momentum and its stochastic counterpart, both of which exhibit lower variance than the SGD estimator. We make the following standard assumptions on the target distribution π ∝ e−f and the stochastic gradients ∇f (x, ξ ).
+
+Assumption 1 A function f : Rd → R has L-Lipschitz continuous gradient: ∥∇ f (x1) − ∇ f (x2)∥2 ≤ L∥x1 −
+
+x2∥2, ∀x1, x2 ∈ Rd and ∃L > 0.
+
+Assumption 2 The stochastic gradient satisfies 
+
+E[∇f (x, ξ ) | x] = ∇f (x) and E[∥∇ f (x, ξ ) − ∇ f (x)∥22 |
+
+x] ≤ σ2, ∀x ∈ Rd and ∃σ > 0.
+
+We define the mean-Lipschitz variance-reduced Langevin diffusion (ML-VRLD) unified estimator as a replacement for the mini-batch SGD estimator in (3): 
+
+gk := 
+
+
+
+1
+
+b
+
+> b
+
+X
+
+> i=1
+
+∇f (xkγ , ξ ik), with prob. pβgk−1 + (1 − β)∇f (xkγ , ξ k), with prob. 1 − p
+
+(8) where (β, p ) ∈ (0 , 1] 2 \ { (1 , 1) }, k ≥ 1 is the iteration index, and g0 := 1
+
+> b
+
+Pbi=1 ∇f (x0, ξ i
+
+> 0
+
+) is the initial estimate. For the special case of p = 0 , ML-VRLD reduces to SGD with momentum. When β = 1 , we obtain its stochastic counterpart, which is equivalent to SGD with momentum in expectation and 1 − p becomes the momentum parameter. We combine these estimators to develop a unified analysis of both algorithms, while preserving the convergence guar-antees obtained by analyzing each algorithm separately. To intuitively see that ML-VRLD estimator has lower variance than the SGLD estimator (3), consider the setting when 
+
+p = 0 . The estimator is constructed as a weighted aver-age of a stochastic gradient and past gradient estimates. By 4reusing past gradients, stochastic noise is averaged across iterations and, under Assumption 1, this yields an accurate, lower-variance estimate with fixed batch size. To analyze the resulting dynamics, we consider the following interpolation of ML-VRLD: 
+
+xt = xkγ − (t − kγ )gk + √2( Bt − Bkγ ) (9) for t ∈ [kγ, (k + 1) γ]. We are now ready to state our first result. 
+
+Theorem 1 (Informal) Let π ∝ e−f be the target distribu-tion, where the potential function f satisfies Assumptions 1 and 2. Let N ≥ 1 denote the total number of iterations, and let (μt)t≥0 denote the law of continuous-time interpo-lation (9) with estimator (8). Then, for suitable choices of 
+
+γ, b, p , and β, the time-averaged law ¯μN γ = R N γ  
+
+> 0
+
+μt dt sat-isfies FI(¯ μN γ ∥π) ≤ ε with O(σ4L2d2/ε 4) iterations and 
+
+O(1) gradient computations per iteration. 
+
+Remark 1. To sample from ¯μN γ in practice, one first draws 
+
+t uniformly from [0 , N γ ] and identifies the unique integer k
+
+such that t ∈ [kγ, (k + 1) γ). The sample xt is then obtained by evaluating the interpolation (9) at time t.Theorem 1 (see Appendix B.3.1 for the formal statement and proof) establishes the first non-asymptotic convergence guarantee for LMC with stochastic gradients in the non-log-concave setting achieving O(1) gradient computations per iteration. The dependence on L and d in iteration complexity arises from the discretization error of LMC and matches that of LMC with exact gradients, whose convergence rate scales as O(L2d2/ε 2) [Balasubramanian et al., 2022]. Leveraging the result of Theorem 1, we show that if the target dis-tribution satisfies Poincaré inequality, we obtain stronger convergence guarantees in squared TV distance. 
+
+Assumption 3 A distribution π satisfies a Poincaré inequal-ity if ∃CPI > 0 such that, for all compactly supported func-tions ϕ : Rd → R, Var x∼π ϕ(x) ≤ CPI Ex∼π [∥∇ ϕ(x)∥22].
+
+Corollary 1 (Informal) Let π ∝ e−f be the target distri-bution, where the potential function f satisfies Assump-tions 1, 2, and 3. Let N ≥ 1 denote the total number of iter-ations, and let (μt)t≥0 denote the law of continuous-time in-terpolation (9) with estimator (8). Then, for suitable choices of γ, b, p , and β, the time-averaged law ¯μN γ = R N γ  
+
+> 0
+
+μt dt 
+
+satisfies ∥¯μN γ − π∥2TV ≤ ε with O(C4PI σ4L2d2/ε 4) itera-tions and O(1) gradient computations per iteration. 
+
+To the best of our knowledge, only two prior works [Balasub-ramanian et al., 2022, Chewi et al., 2024] establish sampling guarantees for smooth potentials satisfying a Poincaré in-equality, both requiring access to exact gradients. In contrast, our results accommodate stochastic gradient estimators and hold under O(1) gradient computations per iteration. More-over, Theorem 1 implies weak convergence to the target distribution under decaying γk and pk, and increasing βk
+
+and bk.
+
+Theorem 2 (Informal) Let π ∝ e−f be the target distribu-tion, where the potential function f satisfies Assumptions 1 and 2. Let (μt)t≥0 denote the law of continuous-time inter-polation (9) with estimator (8), and decreasing step size γk
+
+and probability pk, and increasing momentum βk and batch size bk. Then, the time-averaged law ¯μτn = 1
+
+> τn
+
+R τn 
+
+> 0
+
+μt dt ,where τn = Pnk=1 γk converges weakly to π.
+
+To our knowledge, existing weak convergence results for LMC either assume Lyapunov-type conditions [Lamberton and Pagès, 2002, Pagès and Panloup, 2012] or having access to exact gradient [Balasubramanian et al., 2022]. In contrast, our result holds when the gradient is replaced by a variance-reduced stochastic gradient estimator, while maintaining constant per-iteration cost. Our analysis builds on the ob-servation that the coefficient of the discrete error difference forms a nonnegative and decreasing sequence, ensuring sta-bility of the resulting error recursion. Combined with the fact that FI( μ∥π) = 0 implies μ = π, this establishes weak convergence. 
+
+3.2 SL-VRLD 
+
+To improve the σ2-dependence of the iteration complex-ity, we propose a gradient estimator that unifies PAGE [Li et al., 2021] and STORM [Cutkosky and Orabona, 2019] un-der the following assumption, standard in variance-reduced stochastic optimization. 
+
+Assumption 4 A function f : Rd → R has L-Lipschitz continuous stochastic gradients in the mean-squared sense: Eξ
+
+∥∇ f (x1, ξ ) − ∇ f (x2, ξ )∥22
+
+ ≤ L2∥x1 − x2∥22,
+
+∀x1, x2 ∈ Rd and ∃L > 0.
+
+We define the sample-Lipschitz variance-reduced Langevin diffusion (SL-VRLD) unified estimator as a replacement for the mini-batch SGD estimator in (3): 
+
+gk := 
+
+
+
+1
+
+b
+
+> b
+
+X
+
+> i=1
+
+∇f (xkγ , ξ ik), with prob. p
+
+∇f (xkγ , ξ k) + β(gk−1
+
+−∇ f (x(k−1) γ , ξ k)) , with prob. 1 − p
+
+(10) where (β, p ) ∈ (0 , 1] 2 \ { (1 , 1) }, k ≥ 1 is the iteration index, and g0 := 1
+
+> b
+
+Pbi=1 ∇f (x0, ξ i
+
+> 0
+
+) is the initial estimate. Setting β = 1 recovers PAGE, while setting p = 0 recovers STORM. Moreover, when β = 1 , taking expectation with respect to p shows that PAGE is equivalent to STORM with momentum parameter 1 − p, and p < 1 yields a lower 5per-iteration cost than mini-batch SGD. To highlight the advantage of SL-VRLD over ML-VRLD, consider the case 
+
+β = 1 . With probability 1 − p, ML-VRLD relies solely on previous estimates, whereas SL-VRLD incorporates the correction term ∇f (xkγ , ξ k) − ∇ f (x(k−1) γ , ξ k), which, under Assumption 4, improves estimation accuracy and leads to faster convergence with improved FI and squared TV rates. 
+
+Theorem 3 (Informal) Let π ∝ e−f be the target distribu-tion, where the potential function f satisfies Assumptions 2 and 4. Let N ≥ 1 denote the total number of iterations, and let (μt)t≥0 denote the law of continuous-time interpo-lation (9) with estimator (10). Then, for suitable choices of 
+
+γ, b, p , and β, the time-averaged law ¯μN γ = R N γ  
+
+> 0
+
+μt dt sat-isfies FI(¯ μN γ ∥π) ≤ ε with O(σ2L2d2/ε 3) iterations and 
+
+O(1) gradient computations per iteration. 
+
+Theorem 3 (with a formal statement and proof provided in Appendix B.3.4) establishes an improved FI convergence rate over that of ML-VRLD, reducing the iteration com-plexity from O(σ4L2d2/ε 4) to O(σ2L2d2/ε 3). A similar improvement holds for the squared TV distance, as stated in Corollary B.1 in Appendix B.3.5, with the complexity reduced from O(C4PI σ4L2d2/ε 4) to O(C3PI σ2L2d2/ε 3). In addition, our analysis of FI convergence implies weak con-vergence of SL-VRLD to the target distribution π; see The-orem B.1 in Appendix B.3.6. 
+
+## 4 VARIANCE REDUCTION WITH SGM PRIOR 
+
+Existing posterior sampling algorithms with SGM priors operate in full-batch regime by using the entire measure-ment set at each iteration. This limits their applicability to large datasets [Bottou and Bousquet, 2007, Ong et al., 2020]. While mini-batch strategies may appear computationally at-tractive, accurate sampling typically necessitates large batch sizes. To address this limitation, we develop two principled variance-reduced posterior sampling algorithms by extend-ing our theory in Section 3, and instantiating our unified ML-VRLD and SL-VRLD estimators within the SGM-prior framework. In particular, we replace the mini-batch SGD es-timator in (7) by our proposed unified estimators and define the resulting interpolation for posterior sampling 
+
+xt := xkγ − (t − kγ )
+
+
+
+gk − αkSθ (xkγ , σ k)
+
+
+
++√2( Bt − Bkγ ), (11) where gk is instantiated as either ML-VRLD (8) or SL-VRLD (10). We provide theoretical guarantees for both choices with the annealing schedule αk and smoothing schedule σk defined as follows 
+
+αk := max {α0ρk 
+
+> 1
+
+, 1} and σk := max {σ0ρk 
+
+> 2
+
+, σ min }
+
+(12) for k ≥ 0, where ρ1, ρ 2 ∈ (0 , 1) denote decay rates, σ0 ≥
+
+σmin and α0 ≥ 1 are initial values, and σmin > 0 is the minimum noise level. These parameters are selected using the principled techniques of [Song and Ermon, 2020] such that there exists indices Kα, Kσ < N −1 satisfying αk = 1 ,
+
+∀k ≥ Kα and σk = σmin , ∀k ≥ Kσ [Sun et al., 2024, Sahin et al., 2026]. Our analysis builds on these schedules together with the interpolation (11). Moreover, since the SGM estimates the true prior score, i.e., Sθ (x, σ min ) ≈−∇ h(x), it is necessary to quantify the estimation error. To this end, we adopt the following assumptions from prior work [Lee et al., 2022a,b, Sun et al., 2024, Sahin et al., 2026]. 
+
+Assumption 5 Let pσk (x) := R p(z)N (x|z, σ 2
+
+> k
+
+I) dz,where h(x) and hσk (x) denote the potential function of 
+
+p(x) and pσk (x), respectively. Then, ∃C1 > 0 such that 
+
+∥∇ hσk (x) − ∇ h(x)∥2 ≤ C1σk, ∀x ∈ Rd and ∀σk > 0.
+
+Assumption 6 The score network satisfies ∥S θ (x, σ k) + 
+
+∇hσk (x)∥2 ≤ εσk and ∥S θ (x, σ k)∥2 ≤ C2σ−1 
+
+> k
+
+for ∀x ∈
+
+Rd, ∀σk > 0, and ∃C2 > 0.
+
+Assumption 5 bounds the prior smoothing error. When p(x)
+
+is Gaussian, this error admits a closed-form expression but does not hold for general distributions. Assumption 6 bounds the SGM estimation error, thereby relaxing the ide-alized population setting in which, given sufficient model capacity and data, minimizing the DSM loss (6) recovers the exact score, i.e., Sθ∗ (x, σ k) = −∇ hσk (x) with proba-bility 1. The SGM norm bound is supported by empirical observations in Song and Ermon [2019, 2020]. Unlike prior work [Sun et al., 2024], we do not assume Lipschitz conti-nuity of the SGM. Further discussion of these assumptions is provided in Appendix A. Under these assumptions, we establish the following convergence result. 
+
+Theorem 4 (Informal) Let π(x|y) ∝ p(y|x)p(x) be the target posterior, where p(y|x) ∝ e−f (x) and p(x) ∝
+
+e−h(x). Assume the likelihood potential f satisfies As-sumption 2, the prior potential h satisfies Assumptions 1 and 5, and the SGM satisfies Assumption 6 with error 
+
+εσk = O(k−1/2). Define Lπ = Lf + Lh. Let N ≥ 1 de-note the total number of iterations, and let (μt)t≥0 denote the law of continuous-time interpolation (11) with sched-ules (12). Then, FI(¯ μN γ ∥π) ≤ ε is achieved with O(1) 
+
+gradient computations per iteration, and with the following iteration complexities: (a) (ML-VRLD) O σ4L2 
+
+> π
+
+d2/ε 4 if gk is defined as in (8) and f satisfies Assumption 1. (b) (SL-VRLD) O σ2L2 
+
+> π
+
+d2/ε 3 if gk is defined as in (10) and f satisfies Assumption 4. 
+
+Formal statements and proofs are provided in Appen-dices B.4.1 and B.4.2. To the best of our knowledge, this 6Figure 1: Results on a synthetic 2D Gaussian mixture model (GMM) sampling problem showing the relative FI conver-gence of each method, where b denotes the batch size. For a fixed batch size, SGLD converges to a suboptimal FI level, whereas ML-VRLD and SL-VRLD achieve substantially lower FI values, consistent with our theoretical results. result provides the first non-asymptotic ε-accurate conver-gence guarantee to the target posterior for inverse problems using O(1) stochastic gradient computations per iteration. Prior work [Sun et al., 2019, Tang and Davies, 2020, Liu et al., 2022] do not establish such guarantees. Our results further imply weak convergence to the target posterior. 
+
+Theorem 5 (Informal) Let π(x|y) ∝ p(y|x)p(x) be the target posterior, where p(y|x) ∝ e−f (x) and p(x) ∝
+
+e−h(x). Assume the likelihood potential f satisfies As-sumption 2, the prior potential h satisfies Assumptions 1 and 5, and the SGM satisfies Assumption 6 with error 
+
+εσk = O(k−1/2). Let (μt)t≥0 denote the law of continuous-time interpolation (11) with schedules (12), and decreasing step size γk and probability pk, and increasing momen-tum βk and batch size bk. Then, the time-averaged law 
+
+¯μτn = 1
+
+> τn
+
+R τn 
+
+> 0
+
+μt dt , where τn := Pnk=1 γk, converges weakly to π, provided that one of the following holds: (a) (ML-VRLD) gk is defined as in (8) and f satisfies Assumption 1. (b) (SL-VRLD) gk is defined as in (10) and f satisfies Assumption 4. 
+
+## 5 EXPERIMENTS 
+
+5.1 SYNTHETIC EXPERIMENTS Numerical Validation. We validate the theoretical results for ML-VRLD and SL-VRLD summarized in Table 1. To this end, we consider two synthetic problems: sampling from a Gaussian mixture model (GMM) and a compressed sensing inverse problem. For the GMM experiments, we construct an 8-mode tar-get distribution and simulate stochastic gradients by adding Gaussian noise with std. dev. of 30 to the gradient of the 
+
+Figure 2: Results on a synthetic inverse problem with known posterior mean and variance. ML-VRLD and SL-VRLD provide more accurate variance estimates than SGLD, which generates samples with significantly higher variance. potential function. We compare SGLD, ML-VRLD with 
+
+β = 0 .9, and SL-VRLD with β = 0 .999 over N = 2000 
+
+iterations using 20 different initializations with p = 0 . Fig. 1 reports the mean relative FI as a function of the total number of gradient computations. With a fixed batch size of b = 6 ,SGLD converges to a suboptimal relative FI, suggesting that a larger batch size is needed to achieve lower error. Increasing the batch size to b = 72 allows SGLD to achieve similar relative FI as ML-VRLD and SL-VRLD, albeit at the cost of substantially more gradient computations per iter-ation and memory usage. In contrast, SL-VRLD reaches the same error faster than both SGLD and ML-VRLD. These observations are consistent with the theoretical results in Ta-ble 1. Visualizations of the generated samples and additional experimental details are provided in Appendix C.1. For the compressed sensing experiment, we consider a 2D posterior distribution defined by the Gaussian likelihood in (4) and a bimodal Gaussian mixture prior. We simulate stochastic likelihood gradients by adding Gaussian noise with std. dev. of 10 to the likelihood score. We compare SGLD, ML-VRLD, and SL-VRLD with fixed batch size 
+
+b = 6 over 20 test posteriors generated using different re-alizations of A, and report the mean relative FI in Fig. 5 (Appendix C.1). Consistent with our theory, SL-VRLD con-verges faster than ML-VRLD, while both achieve lower relative FI than SGLD, which converges to a suboptimal level. 
+
+Statistical Validation. We validate ML-VRLD and SL-VRLD for sampling from a posterior distribution over im-ages. We construct a unimodal Gaussian prior obtained from female images in CelebA [Liu et al., 2018]. Each image is rescaled to 32 ×32 and normalized to [−1, 1] . The forward model A ∈ R115 ×1024 is a Gaussian matrix, and the mea-surements y are obtained according to (4), with AWGN of std. dev. 0.1. We run SGLD, ML-VRLD, and SR-VRLD with batch size b = 6 to generate 1000 samples and com-pute the sample mean and per-pixel variance of the posterior for each method. We compare these sample statistics to the exact posterior statistics, which are available in closed form, 7Figure 3: Visual comparison of ML-VRLD, SL-VRLD, and baseline methods for MRI and sparse-angle CT reconstruction. The first row shows MRI results with an acceleration factor of 8 under radial subsampling, using batch size of 32 coils out of 96 coils at each iteration. The second row shows sparse-angle CT reconstructions with a batch size of 30 out of 180 projection views. PSNR values are displayed in the top-left corner of each image. Zoomed-in regions with yellow arrows highlight reconstruction differences. In both tasks, ML-VRLD and SL-VRLD produce sharper structures and fewer artifacts than the baseline methods. as shown in Fig. 2. SGLD exhibits substantially larger sam-ple variance than ML-VRLD, SL-VRLD, and the ground truth statistics. Both ML-VRLD and SL-VRLD significantly reduce this variance, with SL-VRLD achieving the closest match to the ground truth variance. These results support our theoretical findings. Under a fixed batch size, SGLD fails to recover the correct posterior variance and therefore does not converge to the target posterior, whereas ML-VRLD and SL-VRLD achieve substantially lower estimation error in posterior statistics. Additional results and experimental details are provided in Appendix C.1. 
+
+5.2 ACCELERATED PARALLEL MRI RECONSTRUCTION 
+
+We simulate a multi-coil MRI acquisition with a radial sub-sampling pattern [Lustig et al., 2008]. The measurement operator A is constructed from K receiver coil sensitivity maps {Si}Ki=1 [Pruessmann et al., 1999], where the mea-surement operator for the i-th coil is given by Ai = P F S i.Here, F denotes the Fourier transform and P is a diag-onal matrix with radial subsampling mask. We consider two acceleration factors R ∈ { 8, 12 }, representing highly undersampled regimes used in fast and volumetric MRI ac-quisitions [Zhang et al., 2020]. To simulate a multi-coil MRI system [Lustig et al., 2008], we synthesize K = 96 coil sensitivity maps using SigPy [Ong and Lustig, 2019]. We compare SGLD, ML-VRLD, and SL-VRLD, imple-mented as annealed LMC sampling with likelihood score estimates defined as in (7), (8), and (10), respectively. The prior score is approximated using the pretrained SGM from [Sun et al., 2024]. As diffusion-based baselines, we evaluate DPS [Chung et al., 2023] and PnP-DM [Wu et al., 2024], which adopt different sampling strategies for solving inverse problems, and additionally include denoiser-based methods, namely PnP-FISTA [Kamilov et al., 2018, Sun et al., 2019] and RED [Romano et al., 2017]. We use U-Net architecture [Dhariwal and Nichol, 2021] as a denoiser. We further include classical baselines, including TV regular-ization [Rudin et al., 1992] and zero-filled reconstruction, which is obtained by setting unsampled points to zero fol-lowed by inverse Fourier transform. We use brain MRI data from the fastMRI dataset [Zbontar et al., 2019, Knoll et al., 2020] to train the denoiser and diffusion models used in the baselines, and to construct the test set. The training and test sets consist of 70,684 and 100 slices, respectively, where each slice has a shape of 256 ×256 . For the annealed LMC methods, we adopt the annealing schedule defined in (12) and set p = 0 for both ML-VRLD and SL-VRLD. The joint use of β < 1 and p > 0 is introduced for theoretical unifica-tion. In practice, one may instead set either p = 0 or β = 1 .We tune the step size γ and momentum parameter β for ML-VRLD and SL-VRLD using Optuna [Akiba et al., 2019]. All methods use a fixed batch size of b = 32 randomly se-lected coils at each iteration. Additional experimental details are provided in Appendix C.2. The first row in Fig. 3 shows representative reconstructions at an acceleration factor of R = 8 . SL-VRLD and ML-VRLD more effectively preserve fine anatomical details, particularly in the zoomed-in regions, whereas the baseline methods tend to oversmooth or introduce artifacts. Table 2 reports quantitative comparison of all methods for two dif-8MRI CT 
+
+Accel. = 8× Accel. = 12 × 360 views 180 views 
+
+Method PSNR SSIM MSE PSNR SSIM MSE PSNR SSIM MSE PSNR SSIM MSE Zero-filled/FBP 20.01 0.709 10.5e-3 17.67 0.664 17.7e-3 25.05 0.727 31.25e-4 22.31 0.598 58.94e-4 TV 25.12 0.916 32.4e-4 22.12 0.861 65.5e-4 28.58 0.938 15.33e-4 28.25 0.932 16.35e-4 RED 30.36 0.915 9.3e-4 29.09 0.908 12.5e-4 29.07 0.944 13.56e-4 28.93 0.943 13.96e-4 PnP-FISTA 30.56 0.942 9.0e-4 29.04 0.935 12.8e-4 29.97 0.954 10.81e-4 29.39 0.951 12.29e-4 DPS 33.22 0.968 5.0e-4 31.27 0.959 7.8e-4 31.8 0.961 7.17e-4 31.64 0.961 7.43e-4 PnP-DM 33.46 0.969 4.6e-4 31.53 0.961 7.3e-4 33.59 0.971 4.53e-4 31.66 0.959 7.02e-4 SGLD 33.84 0.975 4.4e-4 30.81 0.966 9.1e-4 33.12 0.976 5.36e-4 32.6 0.974 6.06e-4 ML-VRLD 34.63 0.977 3.66e-4 31.42 0.968 7.99e-4 35.02 0.98 3.41e-4 34.35 0.978 4.06e-4 SL-VRLD 35.34 0.978 3.02e-4 33.11 0.971 5.06e-4 35.52 0.981 2.97e-4 34.54 0.979 3.72e-4 
+
+Table 2: Quantitative comparison of ML-VRLD and SL-VRLD against baseline methods for MRI reconstruction on the fastMRI brain dataset [Zbontar et al., 2019] and sparse-angle CT reconstruction on the 2DeteCT dataset [Kiss et al., 2023]. The best and second-best results are highlighted. For MRI reconstruction, acceleration factors of 8 and 12 are used with a batch size of 32 coils (out of 96 total coils) across all methods. For sparse-angle CT reconstruction, batch sizes of 60 and 30 (out of 360 and 180 projection views, respectively) are used for all methods. See Table 3 (Appendix C) for memory usage. ferent acceleration factors. SL-VRLD consistently achieves the best performance across all methods, with ML-VRLD yielding the second-best results. These findings demonstrate the advantage of incorporating variance reduction into an-nealed LMC posterior sampling. 
+
+5.3 SPARSE-ANGLE CT RECONSTRUCTION 
+
+We consider a sparse-angle CT reconstruction task, which aims to recover high-quality images from a limited num-ber of projection views, resulting in an ill-posed inverse problem due to incomplete angular sampling. We simu-late parallel-beam CT measurements with 360 and 180 projection views uniformly distributed over a half circle using the implementation of the measurement operator A
+
+in DeepInverse [Tachella et al., 2025]. We adopt the same baselines as in the MRI experiments, except that zero-filled reconstruction is replaced by filtered back-projection (FBP), which is more appropriate for CT reconstruction. For all methods, we use the same batch sizes of 60 and 30 out of 360 and 180 projection views, respectively, to estimate the likelihood score. We use abdominal CT scans of size 256 × 256 from the 2DeteCT dataset [Kiss et al., 2023] to construct the training and test sets. The training set comprises 4,500 slices and is used to train the denoiser, diffusion model, and SGM for their corresponding methods described in the previous section, while the test set consists of 100 slices and is used for evaluation. Additional details are provided in Appendix C.3. The second row in Fig. 3 shows a visual comparison of reconstructions using a batch size of 30 out of 180 projec-tion views. As highlighted in the zoomed-in regions, SGLD and the baseline methods exhibit a loss of structural sharp-ness, whereas ML-VRLD and SL-VRLD better preserve fine anatomical details. We provide quantitative comparison in Table 2. ML-VRLD and SL-VRLD consistently outper-forms the baseline methods at two different projection views, demonstrating the benefit of variance reduction. 
+
+## 6 CONCLUSION 
+
+We proposed ML-VRLD and SL-VRLD, two unified estima-tors for non-log-concave Langevin sampling under different regularity conditions. These estimators encompass variance reduction techniques from non-convex optimization, includ-ing SGD with momentum, STORM, and PAGE. We showed that both methods achieve ε-relative Fisher information con-vergence with O(1) gradient computations per iteration, enabling convergence under fixed memory requirements. In contrast, SGLD requires a batch size scaling as O(Ldσ 2/ε ),making it increasingly expensive in high-dimensional and high-variance settings. Moreover, SL-VRLD reduces the total computational complexity compared to ML-VRLD and SGLD. We further established weak convergence to the target distribution and, under a Poincaré inequality as-sumption, convergence in squared total variation distance. Motivated by the limitations of existing full-batch posterior sampling methods in large-scale inverse problems, we ex-tended our framework to score-based generative priors and developed principled posterior sampling algorithms with the same convergence guarantees. Experiments on synthetic problems validated our theoretical findings, while MRI and sparse-angle CT reconstruction experiments demonstrated improved sample quality using the proposed estimators. 9Acknowledgements 
+
+This work was partially supported by National Insititutes of Health grant NIH/NHLBI R01-HL153430 (PI: Sharif), and supported in part by NSF DMS-2502560 and CNS-2313109. 
+
+References 
+
+Takuya Akiba, Shotaro Sano, Toshihiko Yanase, Takeru Ohta, and Masanori Koyama. Optuna: A next-generation hyperparameter optimization framework. In Proceedings of the 25th ACM SIGKDD international conference on knowledge discovery & data mining , pages 2623–2631, 2019. Luigi Ambrosio, Nicola Gigli, and Giuseppe Savaré. Gra-dient Flows in Metric Spaces and in the Space of Prob-ability Measures . Lectures in Mathematics ETH Zürich. Birkhäuser Verlag, Basel, 2nd edition, 2008. Krishna Balasubramanian, Sinho Chewi, Murat A Erdogdu, Adil Salim, and Shunshi Zhang. Towards a theory of non-log-concave sampling: first-order stationarity guarantees for langevin monte carlo. In Conference on Learning Theory , pages 2896–2923. PMLR, 2022. Léon Bottou and Olivier Bousquet. The tradeoffs of large scale learning. Advances in neural information processing systems , 20, 2007. Niladri Chatterji, Nicolas Flammarion, Yian Ma, Peter Bartlett, and Michael Jordan. On the theory of variance reduction for stochastic gradient monte carlo. In Interna-tional Conference on Machine Learning , pages 764–773. PMLR, 2018. Jixiang Chen, Yiqun Lin, Yi Qin, Hualiang Wang, and Xi-aomeng Li. Cross-view generalized diffusion model for sparse-view ct reconstruction. In International Con-ference on Medical Image Computing and Computer-Assisted Intervention , pages 140–150. Springer, 2025. Xiang Cheng and Peter Bartlett. Convergence of langevin mcmc in kl-divergence. In Algorithmic learning theory ,pages 186–211. PMLR, 2018. Xiang Cheng, Dong Yin, Peter Bartlett, and Michael Jor-dan. Stochastic gradient and langevin processes. In 
+
+International Conference on Machine Learning , pages 1810–1819. PMLR, 2020. Sinho Chewi, Murat A Erdogdu, Mufan Li, Ruoqi Shen, and Matthew S Zhang. Analysis of langevin monte carlo from poincare to log-sobolev. Foundations of Computational Mathematics , pages 1–51, 2024. Sinho Chewi, Murat A Erdogdu, Mufan Li, Ruoqi Shen, and Matthew S Zhang. Analysis of langevin monte carlo from poincare to log-sobolev. Foundations of Computational Mathematics , 25(4):1345–1395, 2025. Hyungjin Chung and Jong Chul Ye. Score-based diffusion models for accelerated mri. Medical image analysis , 80: 102479, 2022. Hyungjin Chung, Jeongsol Kim, Michael Thompson Mc-cann, Marc Louis Klasky, and Jong Chul Ye. Diffusion posterior sampling for general noisy inverse problems. In The Eleventh International Conference on Learning Representations , 2023. URL https://openreview. net/forum?id=OnD9zGAGT0k .Marelys Crespo Navas, Sébastien Gadat, and Xavier Gendre. Stochastic gradient langevin dynamics for (weakly) log-concave posterior distributions. Electronic Journal of Probability , 29:1–40, 2024. Ashok Cutkosky and Francesco Orabona. Momentum-based variance reduction in non-convex sgd. Advances in neural information processing systems , 32, 2019. Arnak Dalalyan. Further and stronger analogy between sampling and optimization: Langevin monte carlo and gradient descent. In Conference on Learning Theory ,pages 678–689. PMLR, 2017. Arnak S Dalalyan and Avetik Karagulyan. User-friendly guarantees for the langevin monte carlo with inaccurate gradient. Stochastic Processes and their Applications ,129(12):5278–5311, 2019. Prafulla Dhariwal and Alexander Nichol. Diffusion mod-els beat gans on image synthesis. Advances in neural information processing systems , 34:8780–8794, 2021. Zhiyan Ding and Qin Li. Variance reduction for random coordinate descent-langevin monte carlo. Advances in Neural Information Processing Systems , 33:3748–3760, 2020. Kumar Avinava Dubey, Sashank J Reddi, Sinead AWilliamson, Barnabas Poczos, Alexander J Smola, and Eric P Xing. Variance reduction in stochastic gradient langevin dynamics. Advances in neural information pro-cessing systems , 29, 2016. Bradley Efron. Tweedie’s formula and selection bias. Jour-nal of the American Statistical Association , 106(496): 1602–1614, 2011. Cong Fang, Chris Junchi Li, Zhouchen Lin, and Tong Zhang. Spider: Near-optimal non-convex optimization via stochastic path-integrated differential estimator. Ad-vances in neural information processing systems , 31, 2018. 10 Arnaud Guillin, Christian Léonard, Liming Wu, and Nian Yao. Transportation-information inequalities for markov processes. Probability theory and related fields , 144(3): 669–695, 2009. Aapo Hyvärinen and Peter Dayan. Estimation of non-normalized statistical models by score matching. Journal of Machine Learning Research , 6(4), 2005. Rie Johnson and Tong Zhang. Accelerating stochastic gradi-ent descent using predictive variance reduction. Advances in neural information processing systems , 26, 2013. Richard Jordan, David Kinderlehrer, and Felix Otto. The variational formulation of the fokker–planck equation. 
+
+SIAM journal on mathematical analysis , 29(1):1–17, 1998. U Kamilov, H Mansour, and B Wohlberg. Plug-and-play fista for solving nonlinear imaging inverse problems. 
+
+IEEE Signal Processing Letters , 2018. Ulugbek S Kamilov, Ioannis N Papadopoulos, Morteza H Shoreh, Alexandre Goy, Cedric Vonesch, Michael Unser, and Demetri Psaltis. Optical tomographic image recon-struction based on beam propagation and sparse regular-ization. IEEE Transactions on Computational Imaging , 2 (1):59–70, 2016. Maximilian B Kiss, Sophia B Coban, K Joost Batenburg, Tristan van Leeuwen, and Felix Lucka. 2detect-a large 2d expandable, trainable, experimental computed tomog-raphy dataset for machine learning. Scientific data , 10(1): 576, 2023. Florian Knoll, Jure Zbontar, Anuroop Sriram, Matthew J Muckley, Mary Bruno, Aaron Defazio, Marc Parente, Krzysztof J Geras, Joe Katsnelson, Hersh Chandarana, et al. fastmri: A publicly available raw k-space and dicom dataset of knee images for accelerated mr image recon-struction using machine learning. Radiology: Artificial Intelligence , 2(1):e190007, 2020. Damien Lamberton and Gilles Pagès. Recursive computa-tion of the invariant distribution of a diffusion. Bernoulli ,8(3):367–405, April 2002. Holden Lee, Jianfeng Lu, and Yixin Tan. Convergence for score-based generative modeling with polynomial complexity. Advances in Neural Information Processing Systems , 35:22870–22882, 2022a. Holden Lee, Jianfeng Lu, and Yixin Tan. Convergence of score-based generative modeling for general data distributions. In NeurIPS 2022 Workshop on Score-Based Methods , 2022b. URL https://openreview. net/forum?id=Sg19A8mu8sv .Zhize Li, Hongyan Bao, Xiangliang Zhang, and Peter Richtárik. Page: A simple and optimal probabilistic gra-dient estimator for nonconvex optimization. In Interna-tional conference on machine learning , pages 6286–6295. PMLR, 2021. Jiaming Liu, Xiaojian Xu, Weijie Gan, Ulugbek Kamilov, et al. Online deep equilibrium learning for regularization by denoising. Advances in Neural Information Processing Systems , 35:25363–25376, 2022. Yanli Liu, Yuan Gao, and Wotao Yin. An improved analysis of stochastic gradient descent with momentum. Advances in Neural Information Processing Systems , 33:18261– 18271, 2020. Ziwei Liu, Ping Luo, Xiaogang Wang, and Xiaoou Tang. Large-scale celebfaces attributes (celeba) dataset. Re-trieved August , 15(2018):11, 2018. Michael Lustig, David L Donoho, Juan M Santos, and John M Pauly. Compressed sensing mri. IEEE signal processing magazine , 25(2):72–82, 2008. Yurii Nesterov et al. Lectures on convex optimization , vol-ume 137. Springer, 2018. Frank Ong and Michael Lustig. Sigpy: a python package for high performance iterative reconstruction. In Proceedings of the ISMRM 27th Annual Meeting, Montreal, Quebec, Canada , volume 4819, 2019. Frank Ong, Xucheng Zhu, Joseph Y Cheng, Kevin M Johnson, Peder EZ Larson, Shreyas S Vasanawala, and Michael Lustig. Extreme mri: Large-scale volumetric dy-namic imaging from continuous non-gated acquisitions. 
+
+Magnetic resonance in medicine , 84(4):1763–1780, 2020. Gilles Pagès and Fabien Panloup. Ergodic approximation of the distribution of a stationary diffusion: Rate of con-vergence. The Annals of Applied Probability , 22(3):1059– 1100, June 2012. Jakiw Pidstrigach. Score-based generative models detect manifolds. Advances in Neural Information Processing Systems , 35:35852–35865, 2022. Klaas P Pruessmann, Markus Weiger, Markus B Scheideg-ger, and Peter Boesiger. Sense: sensitivity encoding for fast mri. Magnetic Resonance in Medicine: An Official Journal of the International Society for Magnetic Reso-nance in Medicine , 42(5):952–962, 1999. Maxim Raginsky, Alexander Rakhlin, and Matus Telgarsky. Non-convex learning via stochastic gradient langevin dy-namics: a nonasymptotic analysis. In Conference on Learning Theory , pages 1674–1703. PMLR, 2017. 11 Yaniv Romano, Michael Elad, and Peyman Milanfar. The little engine that could: Regularization by denoising (red). 
+
+SIAM journal on imaging sciences , 10(4):1804–1844, 2017. Litu Rout, Negin Raoof, Giannis Daras, Constantine Cara-manis, Alex Dimakis, and Sanjay Shakkottai. Solving linear inverse problems provably via posterior sampling with latent diffusion models. Advances in Neural Infor-mation Processing Systems , 36:49960–49990, 2023. Leonid I Rudin, Stanley Osher, and Emad Fatemi. Nonlinear total variation based noise removal algorithms. Physica D: nonlinear phenomena , 60(1-4):259–268, 1992. M. Berk Sahin, Behzad Sharif, and Abolfazl Hashemi. Zeroth-order non-log-concave sampling with variance re-duction and applications to inverse problems, 2026. URL 
+
+https://arxiv.org/abs/2605.30573 .Filippo Santambrogio. Optimal transport for applied math-ematicians . Progress in Nonlinear Differential Equations and Their Applications. Birkhauser, Basel, Switzerland, 1 edition, October 2015. Mark Schmidt, Nicolas Le Roux, and Francis Bach. Mini-mizing finite sums with the stochastic average gradient. 
+
+Mathematical Programming , 162(1):83–112, 2017. Yang Song and Stefano Ermon. Generative modeling by estimating gradients of the data distribution. Advances in neural information processing systems , 32, 2019. Yang Song and Stefano Ermon. Improved techniques for training score-based generative models. Advances in neural information processing systems , 33:12438–12448, 2020. Yang Song, Jascha Sohl-Dickstein, Diederik P Kingma, Ab-hishek Kumar, Stefano Ermon, and Ben Poole. Score-based generative modeling through stochastic differen-tial equations. In International Conference on Learning Representations , 2021. URL https://openreview. net/forum?id=PxTIG12RRHS .Yu Sun, Brendt Wohlberg, and Ulugbek S Kamilov. An online plug-and-play algorithm for regularized image reconstruction. IEEE Transactions on Computational Imaging , 5(3):395–408, 2019. Yu Sun, Zihui Wu, Yifan Chen, Berthy T Feng, and Kather-ine L Bouman. Provable probabilistic imaging using score-based generative priors. IEEE Transactions on Computational Imaging , 2024. Julián Tachella, Matthieu Terris, Samuel Hurault, Andrew Wang, Leo Davy, Jérémy Scanvic, Victor Sechaud, Ro-main Vo, Thomas Moreau, Thomas Davies, Dongdong Chen, Nils Laurent, Brayan Monroy, Jonathan Dong, Zhiyuan Hu, Minh-Hai Nguyen, Florian Sarron, Pierre Weiss, Paul Escande, Mathurin Massias, Thibaut Mod-rzyk, Brett Levac, Tobías I. Liaudat, Maxime Song, Johannes Hertrich, Sebastian Neumayer, and Georg Schramm. Deepinverse: A python package for solv-ing imaging inverse problems with deep learning. Jour-nal of Open Source Software , 10(115):8923, 2025. doi: 10.21105/joss.08923. URL https://doi.org/10. 21105/joss.08923 .Junqi Tang and Mike Davies. A fast stochastic plug-and-play admm for imaging inverse problems. arXiv preprint arXiv:2006.11630 , 2020. Santosh Vempala and Andre Wibisono. Rapid convergence of the unadjusted langevin algorithm: Isoperimetry suf-fices. Advances in neural information processing systems ,32, 2019. Cédric Villani. Optimal Transport: Old and New , volume 338 of Grundlehren der Mathematischen Wissenschaften [Fundamental Principles of Mathematical Sciences] .Springer-Verlag, Berlin, 2009. Pascal Vincent. A connection between score matching and denoising autoencoders. Neural computation , 23(7):1661– 1674, 2011. Max Welling and Yee W Teh. Bayesian learning via stochas-tic gradient langevin dynamics. In Proceedings of the 28th international conference on machine learning (ICML-11) ,pages 681–688, 2011. Zihui Wu, Yu Sun, Yifan Chen, Bingliang Zhang, Yisong Yue, and Katherine Bouman. Principled probabilistic imaging using diffusion models as plug-and-play priors. 
+
+Advances in Neural Information Processing Systems , 37: 118389–118427, 2024. Jure Zbontar, Florian Knoll, Anuroop Sriram, Tullie Mur-rell, Zhengnan Huang, Matthew J. Muckley, Aaron Defazio, Ruben Stern, Patricia Johnson, Mary Bruno, Marc Parente, Krzysztof J. Geras, Joe Katsnelson, Hersh Chandarana, Zizhao Zhang, Michal Drozdzal, Adri-ana Romero, Michael Rabbat, Pascal Vincent, Nafissa Yakubova, James Pinkerton, Duo Wang, Erich Owens, C. Lawrence Zitnick, Michael P. Recht, Daniel K. Sod-ickson, and Yvonne W. Lui. fastmri: An open dataset and benchmarks for accelerated mri, 2019. URL https: //arxiv.org/abs/1811.08839 .Chaoyi Zhang, Tanzil Mahmud Arefin, Ukash Nakarmi, Choong Heon Lee, Hongyu Li, Dong Liang, Jiangyang Zhang, and Leslie Ying. Acceleration of three-dimensional diffusion magnetic resonance imaging using a kernel low-rank compressed sensing method. Neuroim-age , 210:116584, 2020. 12 Hongkai Zheng, Wenda Chu, Bingliang Zhang, Zihui Wu, Austin Wang, Berthy Feng, Caifeng Zou, Yu Sun, Nikola Borislavov Kovachki, Zachary E Ross, Katherine Bouman, and Yisong Yue. Inversebench: Benchmark-ing plug-and-play diffusion priors for inverse problems in physical sciences. In The Thirteenth International Confer-ence on Learning Representations , 2025. URL https: //openreview.net/forum?id=U3PBITXNG6 .Difan Zou, Pan Xu, and Quanquan Gu. Subsampled stochas-tic variance-reduced gradient langevin dynamics. In 34th Conference on Uncertainty in Artificial Intelligence 2018, UAI 2018 , 2018. Difan Zou, Pan Xu, and Quanquan Gu. Sampling from non-log-concave distributions via variance-reduced gradient langevin dynamics. In The 22nd International Conference on Artificial Intelligence and Statistics , pages 2936–2945. PMLR, 2019. 13 Variance Reduction for Non-Log-Concave Sampling with Applications to Inverse Problems (Supplementary Material) 
+
+M. Berk Sahin 1 Ahmet Ege Tanriverdi 2 Behzad Sharif 1,3 Abolfazl Hashemi 11School of Electrical and Computer Engineering, Purdue University, West Lafayette, Indiana, USA 
+
+> 2
+
+School of Electrical and Computer Engineering, University of Southern California, California, USA 
+
+> 3
+
+School of Biomedical Engineering, Purdue University, West Lafayette, Indiana, USA 
+
+## APPENDIX 
+
+A DISCUSSION ON ASSUMPTIONS 15 B THEOREMS AND LEMMAS 15 
+
+B.1 Notation . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 15 B.2 Lemmas . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 16 B.3 Theorems . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 17 B.3.1 Proof of Theorem 1 (ML-VRLD: FI convergence) . . . . . . . . . . . . . . . . . . . . . . . . . 18 B.3.2 Proof of Corrolary 1 (ML-VRLD: squared TV distance convergence) . . . . . . . . . . . . . . . 22 B.3.3 Proof of Theorem 2 (ML-VRLD: weak convergence) . . . . . . . . . . . . . . . . . . . . . . . . 23 B.3.4 Proof of Theorem 3 (SL-VRLD: FI convergence) . . . . . . . . . . . . . . . . . . . . . . . . . . 27 B.3.5 Proof of Corollary B.1 (SL-VRLD: squared TV distance convergence) . . . . . . . . . . . . . . . 32 B.3.6 Proof of Theorem B.1 (SL-VRLD: weak convergence) . . . . . . . . . . . . . . . . . . . . . . . 32 B.4 Posterior Sampling with SGM Prior Proofs . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 36 B.4.1 Proof of Theorem 4 a (ML-VRLD with SGM prior: FI convergence) . . . . . . . . . . . . . . . . 36 B.4.2 Proof of Theorem 4 b (SL-VRLD with SGM prior: FI convergence) . . . . . . . . . . . . . . . . 40 B.4.3 Proof of Corollary B.2 (ML-VRLD with SGM prior: squared TV distance convergence) . . . . . 42 B.4.4 Proof of Corollary B.3 (SL-VRLD with SGM prior: squared TV distance convergence) . . . . . . 42 B.4.5 Proof of Theorem 5 a (ML-VRLD with SGM prior: weak convergence) . . . . . . . . . . . . . . 43 B.4.6 Proof of Theorem 5 b (SL-VRLD with SGM prior: weak convergence) . . . . . . . . . . . . . . . 45 
+
+C ADDITIONAL EXPERIMENTAL DETAILS 47 
+
+C.1 Synthetic Experiments . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 48 C.2 Accelerated Parallel MRI Reconstruction . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 50 C.3 Sparse-angle CT Reconstruction . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 51 14 A DISCUSSION ON ASSUMPTIONS 
+
+In this section, we explicitly list and discuss all the assumptions used for our theoretical results in Section 3 and 4. We detail in which case each assumption is verified, especially in solving inverse problems with SGM priors. • Assumption 1 is standard in both the sampling [Dalalyan, 2017, Cheng et al., 2020, Balasubramanian et al., 2022] and optimization [Nesterov et al., 2018] literature. • Assumptions 2 and 4 are standard in the analysis of stochastic gradient methods with variance reduction [Fang et al., 2018, Cutkosky and Orabona, 2019, Liu et al., 2020, Li et al., 2021], and are also commonly imposed in the Langevin sampling with stochastic gradients [Chatterji et al., 2018, Dalalyan and Karagulyan, 2019, Cheng et al., 2020, Balasubramanian et al., 2022]. • Assumption 3 is satisfied by all strongly log-concave measures, but it does not hold in general for non-log-concave distributions. This assumption enables convergence in squared total variation distance with constant per-iteration computational cost O(1) , a guarantee not established for strongly log-concave distributions in prior work on variance-reduced Langevin sampling [Chatterji et al., 2018]. • Assumption 5 bounds the score mismatch between the true score −∇ h(x) and the smoothed score −∇ hσk (x). This assumption follows prior work on annealed Langevin sampling with SGM prior [Sun et al., 2024]. In special cases, such as when the prior p(x) is Gaussian, the upper bound can be derived analytically. However, obtaining a closed-form expression for the mismatch is generally intractable for arbitrary distributions. • Assumption 6 imposes two conditions on the learned score network Sθ (x, σ k): a bounded norm and a bounded approximation error. The bounded-norm condition is consistent with the scaling behavior of diffusion processes on manifolds, where the score scales as 1/σ k to provide the restoring force [Song and Ermon, 2019, 2020]. The approximation error bound is justified by interpreting the target prior pσk as the population distribution rather than the empirical distribution. Under this interpretation, the assumption enforces a generalization condition on the score network, namely that it approximates the smooth population score with arbitrary precision ( εσk → 0) [Pidstrigach, 2022]. These assumptions align with prior theoretical analyses in [Lee et al., 2022b, Sun et al., 2024]. 
+
+## B THEOREMS AND LEMMAS 
+
+B.1 NOTATION Basic Notation. We denote by Rd the d-dimensional Euclidean space. For x ∈ Rd, ∥x∥ denotes the Euclidean norm ∥x∥2.Vectors and matrices are denoted by boldface letters. 
+
+Langevin Diffusion. We consider the Langevin diffusion defined as the solution to the stochastic differential equation (SDE) 
+
+dxt = −∇ f (xt) dt + √2 dBt,
+
+where (Bt)t≥0 is a standard d-dimensional Brownian motion. The target distribution is denoted by π, and is given by 
+
+π(x) ∝ exp( −f (x)) .
+
+Under mild conditions, this SDE admits π as its unique stationary distribution. Throughout, we assume that f is continuously differentiable and that its gradient ∇f is Lipschitz continuous (see Assumption 1). We assume access to stochastic first-order oracles ∇f (x, ξ ), where ξ denotes a random variable capturing external randomness. Note that the stochastic first-order oracles are unbiased and have bounded variance (see Assumption 2). Discretizing the above SDE with step size γ > 0 yields the Langevin Monte Carlo (LMC) update 
+
+x(k+1) γ = xkγ − γ∇f (xkγ ) + √2  B(k+1) γ − Bkγ 
+
+,
+
+where Bkγ ∈ Rd is Brownian motion. We further define gk as estimator of the gradient ∇f (xkγ ) at iteration k. Replacing the exact gradient by gk, the LMC update becomes 
+
+x(k+1) γ = xkγ − γgk + √2  B(k+1) γ − Bkγ 
+
+.
+
+The corresponding continuous-time interpolation is given by 
+
+xt = xkγ − (t − kγ )gk + √2  Bt − Bkγ 
+
+, t ∈ [kγ, (k + 1) γ],
+
+15 and we denote by μt the law of xt.
+
+Posterior Sampling. In the posterior sampling setting for ill-posed inverse problems of the form y = A(x) + n, we model the prior as p(x) ∝ exp( −h(x)) , where h(x) is the prior potential. We model the likelihood as p(y|x) ∝ exp( −f (x)) ,
+
+where f (x) is the likelihood potential. By Bayes’ rule, the posterior satisfies 
+
+p(x|y) = p(y|x) p(x)
+
+R p(y|u) p(u) du ∝ p(y|x) p(x) ∝ exp   − (f (x) + h(x)) .
+
+Sampling from the posterior can be performed via Langevin dynamics 
+
+dxt = − ∇f (xt) + ∇h(xt) dt + √2 dBt,
+
+which admits π(x|y) as its stationary distribution. For ease of notation, we omit the explicit dependence on y and write 
+
+π(x|y) simply as π(x) in the proofs. Discretizing this SDE with step size γ > 0 yields 
+
+x(k+1) γ = xkγ − γ ∇f (xkγ ) + ∇h(xkγ ) + √2  B(k+1) γ − Bkγ 
+
+.
+
+We use an estimator gk (instantiated as ML-VRLD (8) or SL-VRLD (10)) to approximate ∇f (xkγ ). Moreover, we use a score network Sθ (x, σ k) to approximate the smoothed prior score, i.e., Sθ (x, σ k) ≈ −∇ hσk (x). With annealing and smoothing schedules (αk)Nk=0 and (σk)Nk=0 , the annealed posterior update is 
+
+x(k+1) γ = xkγ − γ
+
+
+
+gk − αkSθ (xkγ , σ k)
+
+
+
++ √2  B(k+1) γ − Bkγ 
+
+.
+
+The corresponding continuous-time interpolation on t ∈ [kγ, (k + 1) γ] is 
+
+xt = xkγ − (t − kγ )
+
+
+
+gk − αkSθ (xkγ , σ k)
+
+
+
++ √2  Bt − Bkγ 
+
+, t ∈ [kγ, (k + 1) γ].
+
+KL Divergence and Fisher Information. The Kullback–Leibler divergence between two probability measures μ and π is defined as 
+
+KL( μ∥π) := 
+
+Z
+
+> Rd
+
+μ(x) log μ(x)
+
+π(x) dx.
+
+The relative Fisher information is 
+
+FI( μ∥π) := 
+
+Z
+
+> Rd
+
+μ(x) ∇ log μ(x)
+
+π(x)
+
+> 22
+
+dx.
+
+Probability Measures. Expectation with respect to a distribution μ is denoted by Ex∼μ[·]. When clear from context, we write E[·].
+
+Big-O Notation. For two positive sequences f (n) and g(n), we write f (n) = O(g(n)) if there exists C > 0 such that 
+
+f (n) ≤ Cg (n) for sufficiently large n. In particular, O(1) denotes a positive constant. 
+
+B.2 LEMMAS 
+
+We begin by presenting several technical lemmas that are used throughout the proofs of the main theorems. The following lemma provides the starting point for our analysis. 
+
+Lemma 1 (Lemma 23 in Balasubramanian et al. [2022]) Consider the stochastic process defined by 
+
+xt := x0 − tg0 + √2Bt, with g0 = g(x0), x0 ∼ μ0 (13) 
+
+where g0 is integrable and (Bt)t≥0 is a standard Brownian motion in Rd independent of (x0, g0). Then, writing μt for the law of xt, we have 
+
+ddt KL( μt∥π) ≤ − 34 FI( μt∥π) + E ∥∇ f (xt) − E[g0|xt]∥2
+
+≤ − 34 FI( μt∥π) + E ∥∇ f (xt) − g0∥2 , (14) 
+
+where π ∝ e−f .
+
+16 Lemma 2 (Lemma 20 in Chewi et al. [2024]) Assume that f (x) has an L-Lipschitz gradient, and let π ∝ e−f . Then, for any probability measure μ, it holds that 
+
+Ex∼μ
+
+∥∇ f (x)∥2 ≤ FI( μ∥π) + 2 dL. (15) We use the transportation inequality to analyze the convergence in squared total variation (TV) distance under a Poincaré inequality assumption. 
+
+Lemma 3 (Theorem 3.1 in Guillin et al. [2009]) If π ∝ e−f satisfies a Poincaré inequality, i.e. for every smooth, compactly supported f : Rd → R,
+
+Var π (f ) ≤ CPI Eπ
+
+∥∇ f ∥2,
+
+then for any probability measure μ,
+
+∥μ − π∥2TV ≤ 4CPI FI( μ∥π).
+
+B.3 THEOREMS 
+
+We first state a theorem characterizing the sufficient number of gradient computations per iteration to achieve ε-relative Fisher information for SGLD (3) algorithm. 
+
+Theorem B.1 (Theorem 15 in Balasubramanian et al. [2022]) Let (μt)t≥0 denote the law of the interpolation generated by (9) with the estimator defined as gk = 1
+
+> b
+
+Pbi=1 ∇f (xkγ , ξ ik), where b ≥ 1. Assume that the potential f defining the target distribution π ∝ e−f satisfies Assumptions 1 and 2. Then, for any step size γ ∈  0, 114 L
+
+, and for any N ≥ 1, it holds that 
+
+1
+
+N γ 
+
+Z N γ 
+
+> 0
+
+FI( μt∥π) dt ≤ 2KL( μ0∥π)
+
+N γ + 16 L2dγ + 8σ2
+
+b
+
+Furthermore, choose γ = 12L
+
+q KL( μ0∥π) 
+
+> dN
+
+and b = ⌈σ2√N ⌉. Then, the time-averaged law ¯μN γ = 1
+
+> N γ
+
+R N γ  
+
+> 0
+
+μt dt satisfies 
+
+FI(¯ μN γ ∥π) ≤ ε with O( L2d2 
+
+> ε2
+
+) iterations and O( Ldσ 2 
+
+> ε
+
+) gradient computations per iteration. Proof. We consider the following interpolation for SGLD with mini-batch estimates 
+
+xt := xkγ − (t − kγ ) 1
+
+b
+
+> b
+
+X
+
+> i=1
+
+∇f (xkγ , ξ ik) + √2( Bt − Bkγ )
+
+for t ∈ [kγ, (k + 1) γ]. Under Assumptions 1 and 2, we follow the proof of Theorem 15 in Balasubramanian et al. [2022] to obtain 
+
+1
+
+N γ 
+
+Z N γ 
+
+> 0
+
+FI( μt∥π) dt ≤ 2KL( μ0∥π)
+
+N γ + 16 L2dγ + 8σ2
+
+b (16) for all γ ∈  0, 114 L
+
+. Here, KL( μ0∥π) denotes the initial Kullback-Leibler divergence and it scales on the order of d (see, e.g., Lemma 1 in Vempala and Wibisono [2019] or Appendix A in Chewi et al. [2025]). We then choose 
+
+γ = 12L
+
+r KL( μ0∥π)
+
+dN , and b =
+
+l
+
+σ2√N
+
+m
+
+.
+
+Plugging these definitions into (16), we get 
+
+FI(¯ μN γ ∥π) ≤ 1
+
+N γ 
+
+Z N γ 
+
+> 0
+
+FI( μt∥π) dt ≤
+
+
+
+12 LpKL( μ0∥π)d + 8 
+
+
+
+√N , (17) where the first inequality follows from the convexity of the Fisher information combined with Jensen’s inequality. Since 
+
+KL( μ0∥π) = O(d), we have FI(¯ μN γ ∥π) ≤ ε if 
+
+N = O
+
+ L2d2
+
+ε2
+
+
+
+, (18) 17 which implies b = O( Ldσ 2 
+
+> ε
+
+). This concludes the proof. □
+
+In the remainder of this section, we present our theoretical results and their proofs. First, we give results for ML-VRLD and SL-VRLD sampling algorithms to sample from a target distribution π ∝ e−f (x). Then, we present the results for the application of these algorithms to inverse problems with score-based generative prior, where the goal is to sample from the posterior p(x|y) ∝ p(y|x)p(x) with prior p(x) ∝ e−h(x) and likelihood p(y|x) ∝ e−f (x). In practice, the settings of interest are often high-variance, where σ2, the upper bound on the variance of stochastic gradients in Assumption 2, satisfies 
+
+σ2 > 1. Nevertheless, to also cover the case σ2 < 1, we state our theoretical results in terms of σm := max {σ, 1}. For ease of exposition, we use σ throughout the main manuscript. 
+
+B.3.1 Proof of Theorem 1 (ML-VRLD: FI convergence) Theorem 1 (ML-VRLD: FI convergence) Let π ∝ e−f be the target distribution, where the potential function f satisfies Assumptions 1 and 2. Let (μt)t≥0 denote the law of continuous-time interpolation generated by (9) with estimator (8). Then, for any step size γ ∈
+
+
+
+0, 1
+
+> L
+
+√27 ϕ(p,β )
+
+
+
+, where ϕ(p, β ) = 1 + 4(1 −p)β2 
+
+> (1 −(1 −p)β)2
+
+, and for any N ≥ 1, it holds that 
+
+1
+
+N γ 
+
+Z N γ 
+
+> 0
+
+FI( μt|| π) dt ≤ 2C0
+
+N γ + 9 σ2
+
+ pb + (1 − p)(1 − β)2
+
+1 − (1 − p)β
+
+
+
++ 72 γL 2d
+
+(1 − (1 − p)β)2 , (19) 
+
+where 
+
+C0 = KL( μ0∥π) + 9γ
+
+(1 − (1 − p)β)2 E[∥∇ f (x0) − g0∥2]. (20) 
+
+Furthermore, choose 
+
+γ =
+
+√dσmN 3/4√L , p = 1 − β =
+
+√Ld σmN 1/4 , b =
+
+l 1
+
+> p
+
+m
+
+, where σm = max {σ, 1}.
+
+Then, the time-averaged law ¯μN γ = 1
+
+> N γ
+
+R N γ  
+
+> 0
+
+μt dt satisfies FI(¯ μN γ ∥π) ≤ ε with O( σ4 
+
+> mL2d2
+> ε4
+
+) iterations and O(1) gradient computations per iteration. Proof. Using the interpolation argument in (9), we begin the proof by recalling Lemma 1 
+
+ddt KL( μt∥π) ≤ − 34 FI( μt∥π) + E ∥∇ f (xt) − gk∥2 .
+
+We decompose the error term by introducing ∇f (xkγ ) and then apply Young’s inequality (i.e., ∥a + b∥2 ≤ 2∥a∥2 + 2 ∥b∥2), obtaining 
+
+ddt KL( μt∥π) ≤ − 34 FI( μt∥π) + 2 E ∥∇ f (xt) − ∇ f (xkγ )∥2 + 2 E ∥∇ f (xkγ ) − gk∥2 .
+
+Invoking Assumption 1, we upper bound E ∥∇ f (xt) − ∇ f (xkγ )∥2 using Lipschitz continuity of the potential ∇f , which gives 
+
+ddt KL( μt∥π) ≤ − 34 FI( μt∥π) + 2 L2E ∥xt − xkγ ∥2 + 2 e2
+
+> k
+
+, (21) where we define e2 
+
+> k
+
+:= E∥∇ f (xkγ ) − gk∥2. The next step is to bound e2
+
+> k
+
+. Using the definition of the ML-VRLD estimator (8), e2 
+
+> k+1
+
+can be expressed as follows. With probability p, a mini-batch estimator of size b is used, while with probability 
+
+1 − p a momentum-based update is applied. This yields 
+
+e2 
+
+> k+1
+
+= p E
+
+ ∇f (x(k+1) γ ) − 1
+
+b
+
+> b
+
+X
+
+> i=1
+
+∇f (x(k+1) γ , ξ ik+1 )
+
+> 2
+
+
+
++ (1 − p) E
+
+h
+
+∇f (x(k+1) γ ) −  βgk + (1 − β)∇f (x(k+1) γ , ξ k+1 ) 2i
+
+.
+
+18 Using Assumption 2, we upper bound the variance of the mini-batch estimator, which gives 
+
+e2 
+
+> k+1
+
+≤ pσ 2
+
+b + (1 − p) E
+
+h
+
+∇f (x(k+1) γ ) −  βgk + (1 − β)∇f (x(k+1) γ , ξ k+1 ) 2i
+
+.
+
+We decompose the second term by adding and subtracting ∇f (xkγ ) inside expectation, regrouping the terms and using Assumption 2 
+
+e2 
+
+> k+1
+
+≤ pσ 2
+
+b + (1 − p)E ∥β(∇f (xkγ ) − gk) + β(∇f (x(k+1) γ ) − ∇ f (xkγ )) +(1 − β)( ∇f (x(k+1) γ ) − ∇ f (x(k+1) γ , ξ k+1 )) ∥2
+
+≤ pσ 2
+
+b + (1 − p)β2E ∥(∇f (xkγ ) − gk) + ( ∇f (x(k+1) γ ) − ∇ f (xkγ )) ∥2 + (1 − β)2(1 − p)σ2.
+
+Applying Young’s inequality with parameter ρ0 > 0 (i.e., ∥a + b∥2 ≤ (1 + ρ0)∥a∥2 + (1 + 1 /ρ 0)∥b∥2), together with Assumption 1 to bound E ∥(∇f (xkγ ) − gk) + ( ∇f (x(k+1) γ ) − ∇ f (xkγ )) ∥2, we obtain 
+
+e2 
+
+> k+1
+
+≤ pσ 2
+
+b + (1 − p)β2L2 
+
+1 + 1
+
+> ρ0
+
+
+
+∆k + (1 − p)β2(1 + ρ0)e2 
+
+> k
+
++ (1 − p)(1 − β)2σ2
+
+= (1 − p)β2L2 
+
+1 + 1
+
+> ρ0
+
+
+
+∆k + (1 − p)β2(1 + ρ0)e2 
+
+> k
+
++
+
+h pb + (1 − p)(1 − β)2i
+
+σ2,
+
+where ∆k := E ∥x(k+1) γ − xkγ ∥2. Furthermore, we choose ρ0 = 1−(1 −p)β 
+
+> 2(1 −p)β
+
+. Rearranging the terms then yields 
+
+e2 
+
+> k
+
+≤ − 21 − (1 − p)β (e2 
+
+> k+1
+
+− e2
+
+> k
+
+) + 
+
+ pb + (1 − p)(1 − β)2 2σ2
+
+1 − (1 − p)β + 2(1 − p)β2L2(1 + (1 − p)β)(1 − (1 − p)β)2 ∆k
+
+≤ − 21 − (1 − p)β (e2 
+
+> k+1
+
+− e2
+
+> k
+
+) + 
+
+ pb + (1 − p)(1 − β)2 2σ2
+
+1 − (1 − p)β + 4(1 − p)β2L2
+
+(1 − (1 − p)β)2 ∆k. (22) Since p ∈ (0 , 1] and β ∈ (0 , 1] , it follows that (1 − p)β ∈ [0 , 1) , and hence 1 + (1 − p)β ≤ 2. We have used this bound to simplify the last term. We now bound ∆k by using the continuous interpolation (9) of LMC. For t ∈ [kγ, (k + 1) γ],
+
+xt − xkγ = −(t − kγ )gk + √2 Bt − Bkγ 
+
+.
+
+Taking squared norms on both sides and then taking expectations, and using the independence of gk and the Brownian increment, we obtain 
+
+E ∥xt − xkγ ∥2 = ( t − kγ )2E ∥gk∥2 + 2 E ∥Bt − Bkγ ∥2
+
+= ( t − kγ )2E∥gk∥2 + 2( t − kγ )d
+
+≤ γ2E∥gk∥2 + 2( t − kγ )d
+
+= ∆ k,
+
+where we have used the identity E∥Bt − Bkγ ∥2 = ( t − kγ )d. Writing 
+
+gk = ( gk − ∇ f (xkγ )) + ( ∇f (xkγ ) − ∇ f (xt)) + ∇f (xt),
+
+and applying the inequality ∥a + b + c∥2 ≤ 3( ∥a∥2 + ∥b∥2 + ∥c∥2), we obtain 
+
+∆k = γ2E∥gk∥2 + 2 γd 
+
+≤ 3γ2E∥gk − ∇ f (xkγ )∥2 + 3 γ2E∥∇ f (xkγ ) − ∇ f (xt)∥2 + 3 γ2E∥∇ f (xt)∥2 + 2 γd. 
+
+Using Lipschitz continuity of ∇f (Assumption 1) and the bound E∥xt − xkγ ∥2 ≤ ∆k yields 
+
+∆k ≤ 3γ2e2 
+
+> k
+
++ 3 γ2L2∆k + 3 γ2E∥∇ f (xt)∥2 + 2 γd. 
+
+19 Substituting the upper bound (22) for e2 
+
+> k
+
+and rearranging the terms yields 
+
+∆k ≤ − 6γ2
+
+1 − (1 − p)β
+
+ e2 
+
+> k+1
+
+− e2
+
+> k
+
+ + 6γ2σ2
+
+1 − (1 − p)β
+
+h pb + (1 − p)(1 − β2)
+
+i
+
++ 3 γ2L2
+
+"
+
+1 + 4(1 − p)β2
+
+ 1 − (1 − p)β2
+
+#
+
+∆k + 3 γ2E∥∇ f (xt)∥2 + 2 γd. 
+
+To simplify notation, we define ϕ(p, β ) := 1 + 4(1 −p)β2 
+
+> (1 −(1 −p)β)2
+
+. With this definition and rearranging the terms, the inequality becomes 
+
+1 − 3γ2L2ϕ(p, β )∆k ≤ − 6γ2
+
+1 − (1 − p)β
+
+ e2 
+
+> k+1
+
+− e2
+
+> k
+
+ + 6γ2σ2
+
+1 − (1 − p)β
+
+h pb + (1 − p)(1 − β)2i
+
++ 3 γ2E∥∇ f (xt)∥2 + 2 γd. 
+
+Assuming the step size satisfies γ ≤ 127 L2ϕ(p,β ) , the coefficient of ∆k on the left-hand side satisfies 1 − 3γ2L2ϕ(p, β ) ≥ 89 .Applying this bound and dividing both sides by 89 yields 
+
+∆k ≤ − 27 γ2
+
+4 1 − (1 − p)β  e2 
+
+> k+1
+
+− e2
+
+> k
+
+ + 27 γ2σ2
+
+4 1 − (1 − p)βh pb + (1 − p)(1 − β)2i
+
++ 27 γ2
+
+8 E∥∇ f (xt)∥2 + 94 γd. 
+
+(23) Now, recall from (21), we have 
+
+ddt KL( μt∥π) ≤ − 34 FI( μt∥π) + 2 L2E ∥xt − xkγ ∥2 + 2 e2
+
+> k
+
+,
+
+Applying (22) and (23) together with E∥xt − xkγ ∥2 ≤ ∆k, we obtain 
+
+ddt KL( μt∥π) ≤ − 34 FI( μt∥π) − 11 − (1 − p)β
+
+
+
+4 + 27 2 γ2L2ϕ(p, β )
+
+  e2 
+
+> k+1
+
+− e2
+
+> k
+
+
+
++ σ2
+
+1 − (1 − p)β
+
+
+
+4 + 27 2 γ2L2ϕ(p, β )
+
+ h pb + (1 − p)(1 − β)2i
+
++ 27 4 γ2L2ϕ(p, β ) E∥∇ f (xt)∥2 + 92 γL 2ϕ(p, β ) d. 
+
+Applying Lemma 2 to bound E∥∇ f (xt)∥2, and using the step size condition γ ≤ 127 L2ϕ(p,β ) , we simplify the above inequality as 
+
+ddt KL( μt∥π) ≤ − 12 FI( μt∥π) − 11 − (1 − p)β
+
+
+
+4 + 27 2 γ2L2ϕ(p, β )
+
+  e2 
+
+> k+1
+
+− e2
+
+> k
+
+
+
++ 9 σ2
+
+2 1 − (1 − p)βh pb + (1 − p)(1 − β)2i
+
++ 9 γL 2ϕ(p, β ) d. (24) We now integrate both sides over t ∈ [kγ, (k + 1) γ] and define Lk := KL( μkγ ∥π) + γ
+
+> 1−(1 −p)β
+
+4 + 27 2 γ2L2ϕ(p, β ) e2
+
+> k
+
+.
+
+This yields 
+
+Lk+1 − L k ≤ − 12
+
+Z (k+1) γkγ 
+
+FI( μt∥π) dt + 9 γσ 2
+
+2 1 − (1 − p)βh pb + (1 − p)(1 − β)2i
+
++ 9 γ2L2ϕ(p, β )d. 
+
+Iterating the inequality for k = 0 , 1, . . . , N − 1, we obtain 
+
+LN − L 0 ≤ − 12
+
+Z N γ 
+
+> 0
+
+FI( μt∥π) dt + 9N γσ 2
+
+2 1 − (1 − p)βh pb + (1 − p)(1 − β)2i
+
++ 9 N γ 2L2ϕ(p, β )d. 
+
+Rearranging the terms, we get 
+
+1
+
+N γ 
+
+Z N γ 
+
+> 0
+
+FI( μt∥π) dt ≤ 2L0
+
+N γ + 9 σ2
+
+ pb + (1 − p)(1 − β)2
+
+1 − (1 − p)β
+
+
+
++ 18 γL 2ϕ(p, β )d. 
+
+20 Note that L0 = KL( μ0∥π) + γ
+
+> 1−(1 −p)β
+
+ 4 + 27 2 γ2L2ϕ(p, β ) e20 ≤ KL( μ0∥π) + 9γe 20 
+
+> 2(1 −(1 −p)β)
+
+=: C0, then 
+
+1
+
+N γ 
+
+Z N γ 
+
+> 0
+
+FI( μt∥π) dt ≤ 2CN γ + 9 σ2
+
+ pb + (1 − p)(1 − β)2
+
+1 − (1 − p)β
+
+
+
++ 18 γL 2ϕ(p, β )d. 
+
+Also ϕ(p, β ) = 1 + 4(1 −p)β2 
+
+> (1 −(1 −p)β)2
+
+≤ 1 + 4(1 −p)β 
+
+> (1 −(1 −p)β)2
+
+=
+
+ 1+(1 −p)β
+
+> 1−(1 −p)β
+
+2
+
+≤ 4(1 −(1 −p)β)2 since 1 + (1 − p)β ≤ 2, then the inequality can be rewritten as 
+
+1
+
+N γ 
+
+Z N γ 
+
+> 0
+
+FI( μt∥π) dt ≤ 2C0
+
+N γ + 9 σ2
+
+ pb + (1 − p)(1 − β)2
+
+1 − (1 − p)β
+
+
+
++ 72 γL 2d
+
+(1 − (1 − p)β)2 . (25) This concludes the first part of the proof. Next we choose 
+
+γ =
+
+√dσmN 3/4√L , p = (1 − β) = 
+
+√Ld N 1/4σm
+
+and b =
+
+l 1
+
+> p
+
+m
+
+where σm := max {σ, 1}
+
+and define the time-averaged law ¯μN γ := 1
+
+> N γ
+
+R N γ  
+
+> 0
+
+μt dt . Since FI( ·∥ π) is convex, using Jensen’s inequality, we obtain the upper bound for FI(¯ μN γ ∥π) as 
+
+FI(¯ μN γ ∥π) ≤ 1
+
+N γ 
+
+Z N γ 
+
+> 0
+
+FI( μt∥π) dt ≤ 2C0
+
+N γ 
+
+|{z} 
+
+> (I)
+
++ 9 σ2
+
+ pb + (1 − p)(1 − β)2
+
+1 − (1 − p)β
+
+| {z }
+
+> (II)
+
++ 72 γL 2d
+
+(1 − (1 − p)β)2
+
+| {z }
+
+> (III)
+
+.
+
+Substituting the definition of γ into (I) , we have 
+
+(I) = 2C0σm
+
+√LN 1/4√d . (26) To bound (II) , we proceed as 
+
+(II) ≤ 9σ2
+
+> m
+
+ p2 + (1 − p)p2
+
+1 − (1 − p)2
+
+
+
+(27) 
+
+≤ 18 σ2
+
+> m
+
+p. (28) We use σ ≤ σm, b ≥ 1/p , and 1 − β = p to get (27). Following that, we use p ∈ (0 , 1] to get (28). Substituting the definition of p, we have 
+
+(II) ≤ 18 σm
+
+√Ld N 1/4 . (29) Similarly, to bound (III) ,
+
+(III) ≤ 72 γL 2dp2 (30) 
+
+≤ 72 σm
+
+√Ld N 1/4 , (31) where we use p = 1 − β and p ∈ (0 , 1] to obtain (30), and substitute the definitions of γ and p to get (31). Combining (26, 29, 31), we have 
+
+FI(¯ μN γ ∥π) ≤ 2C0σm
+
+√LN 1/4√d + 90 σm
+
+√Ld N 1/4
+
+≤
+
+ 2C0
+
+d + 90 
+
+ σm
+
+√Ld N 1/4 ,
+
+21 where C0 is usually taken to be of order d, see e.g. Lemma 1 in Vempala and Wibisono [2019] or Appendix A in Chewi et al. [2025]. Thus, the above bound implies that, to ensure FI(¯ μN γ ∥π) ≤ ε,
+
+N = O
+
+ σ4
+
+> m
+
+L2d2
+
+ε4
+
+
+
+iterations is sufficient. And the average number of gradient computations per iteration is 
+
+pb + (1 − p) = O(1) . (32) We next verify that the parameter constraints imposed throughout the analysis are compatible with this choice of N . First, the requirement p = (1 − β) = √dL N 1/4σm ≤ 1 imposes the lower bound N ≥ d2L2
+
+> σ4
+> m
+
+, which is satisfied by the above choice of 
+
+N . Second, we show that the step-size condition γ ≤ 1
+
+> L
+
+√27 ϕ(p,β ) is satisfied. Since ϕ(p, β ) ≤ 4(1 −(1 −p)β)2 , we have 
+
+γ ≤ 1 − (1 − p)βL√108 ≤ 1
+
+Lp27 ϕ(p, β ) .
+
+Substituting the definitions of β = 1 − p and p = √dL σmN 1/4 , we get 
+
+1 − (1 − p)βL√108 = 1 − (1 − p)2
+
+L√108 
+
+≥ pL√108 =
+
+√dσmN 1/4√108 L .
+
+Thus, the step-size condition holds provided that 
+
+γ ≤√dσmN 1/4√108 L .
+
+Using the definition of step size 
+
+γ =
+
+√dσmN 3/4√L ,
+
+this condition reduces to the following lower bound N ≥ 108 , which is satisfied by N = O
+
+ σ4
+
+> mL2d2
+> ε4
+
+
+
+. □
+
+B.3.2 Proof of Corrolary 1 (ML-VRLD: squared TV distance convergence) Corrolary 1 (ML-VRLD: squared TV distance convergence) Let π ∝ e−f be the target distribution, where the potential function f satisfies Assumptions 1, 2, and 3. Let (μt)t≥0 denote the law of continuous-time interpolation generated by (9) with estimator (8). Then, for any step size γ ∈
+
+
+
+0, 1
+
+> L
+
+√27 ϕ(p,β )
+
+
+
+, where ϕ(p, β ) = 1 + 4(1 −p)β2 
+
+> (1 −(1 −p)β)2
+
+, and for any 
+
+N ≥ 1, it holds that 
+
+∥¯μN γ − π∥2TV ≤ 8C0CPI 
+
+N γ + 36 CPI σ2
+
+ pb + (1 − p)(1 − β)2
+
+1 − (1 − p)β
+
+
+
++ 288 CPI γL 2d
+
+(1 − (1 − p)β)2 , (33) 
+
+where 
+
+C0 = KL( μ0∥π) + 9γ
+
+(1 − (1 − p)β)2 E[∥∇ f (x0) − g0∥2]. (34) 
+
+Furthermore, choose 
+
+γ =
+
+√dσmN 3/4√L , p = 1 − β =
+
+√Ld N 1/4σm
+
+, b =
+
+l 1
+
+> p
+
+m
+
+, where σm = max {σ, 1}.
+
+22 Then, the time-averaged law ¯μN γ = 1
+
+> N γ
+
+R N γ  
+
+> 0
+
+μt dt satisfies ∥¯μN γ − π∥2TV ≤ ε with O
+
+ C4PI σ4
+
+> mL2d2
+> ε4
+
+
+
+iterations and O(1) 
+
+gradient computations per iteration. Proof. Recall from the proof of Theorem 1 (Appendix B.3.1) that the Fisher information of the time-averaged law ¯μN γ 
+
+satisfies (25) 
+
+FI(¯ μN γ ∥π) ≤ 1
+
+N γ 
+
+Z N γ 
+
+> 0
+
+FI( μt∥π) dt ≤ 2C0
+
+N γ + 9 σ2
+
+> m
+
+ pb + (1 − p)(1 − β)2
+
+1 − (1 − p)β
+
+
+
++ 72 γL 2d
+
+(1 − (1 − p)β)2 ,
+
+where we use σ ≤ σm. Using Lemma 3 and Assumption 3, we get 
+
+∥¯μN γ − π∥2TV ≤ 8C0CPI 
+
+N γ + 36 CPI σ2
+
+> m
+
+ pb + (1 − p)(1 − β)2
+
+(1 − (1 − p)β)
+
+
+
++ 288 CPI γL 2d
+
+(1 − (1 − p)β)2 .
+
+Choose 
+
+γ =
+
+√dσmN 3/4√L , p = 1 − β =
+
+√Ld N 1/4σm
+
+, b =
+
+l 1
+
+> p
+
+m
+
+, where σm := max {σ, 1}.
+
+Following the same steps in (26, 29, 31), we obtain 
+
+∥¯μN γ − π∥2TV ≤
+
+ 2C0
+
+d + 90 
+
+ 4CPI σm
+
+√Ld N 1/4 ,
+
+where C0 is in the order of d. This implies that, to ensure ∥¯μN γ − π∥2TV ≤ ε, it suffices to choose N such that N 1/4 ≥ 
+
+> ˜CC PI σm
+> √Ld ε
+
+, where ˜C := 8C0 
+
+> d
+
++ 360 > 0. Equivalently, this yields iteration complexity of O
+
+ C4PI σ4
+
+> mL2d2
+> ε4
+
+
+
+with O(1) 
+
+gradient computations per iteration. Since the constraints on N in Theorem 1 remain unchanged, they continue to hold. □
+
+B.3.3 Proof of Theorem 2 (ML-VRLD: weak convergence) Theorem 2 (ML-VRLD: weak convergence) Let π ∝ e−f be the target distribution, where the potential function f
+
+satisfies Assumptions 1 and 2. Let (μt)t≥0 denote the law of continuous-time interpolation generated by (9) with estimator (8). Define the time-varying parameters as follows 
+
+γk = Cγ
+
+k3/2 , pk = 1 − βk = Cp
+
+k1/2 , bk =
+
+ 1
+
+pk
+
+
+
+, ∀k ≥ 1,
+
+where 0 < C p < 1 and Cγ > 0 are numerical constants. Then, the time-averaged law ¯μτn = 1
+
+> τn
+
+R τn 
+
+> 0
+
+μt dt , where 
+
+τn = Pnk=1 γk, converges weakly to π.Proof. Given time-varying parameters γk, b k, p k at iteration k, define the cumulative time τn and averaged law ¯μτn at iteration n as 
+
+τn := 
+
+> n
+
+X
+
+> k=1
+
+γk, ¯μτn := 1
+
+τn
+
+Z τn
+
+> 0
+
+μt dt, 
+
+where μt denotes the law of the process xt under the following continuous-time interpolation 
+
+xt := xτn − (t − τn) gn + √2  Bt − Bτn
+
+, t ∈ [τn, τ n+1 ]. (35) 
+
+gn is defined as follows 
+
+gn := 
+
+
+
+1
+
+bnbnX
+
+> i=1
+
+∇f (xτn , ξ in) w.p. pn,βngn−1 + (1 − βn)∇f (xτn , ξ n) w.p. 1 − pn,
+
+(36) for all n ≥ 1. At initialization, we choose γ0, b 0 > 0 and (β0, p 0) ∈ (0 , 1] 2 \ { (1 , 1) }, and define g0 as 
+
+g0 := 1
+
+b0
+
+> b0
+
+X
+
+> i=1
+
+∇f (x0, ξ i
+
+> 0
+
+).
+
+23 We establish weak convergence by adapting the proof of Theorem 1. To this end, we first verify the step sizes (γk)k≥1
+
+satisfy the step-size condition of Theorem 1, namely, 
+
+γk ∈ 0, 1
+
+Lp27 ϕ(pk, β k)
+
+#
+
+, where ϕ(pk, β k) = 1 + 4(1 − pk)β2
+
+> k
+
+(1 − (1 − pk)βk)2 (37) for all k ≥ 1. Using the definitions of pk and βk, we have 
+
+ϕ(pk, β k) = 1 + 4(1 − pk)β2
+
+> k
+
+(1 − (1 − pk)βk)2
+
+≤ 1 + 41 − (1 − pk)2
+
+≤ 1 + 4
+
+pk
+
+= 1 + 4k1/2
+
+Cp
+
+≤ 8k1/2
+
+Cp
+
+, (38) where we use the fact that 0 < C p < 1 to obtain (38). Then, we have 
+
+1
+
+Lp27 ϕ(pk, β k) ≥
+
+pCp
+
+L√216 k1/4 .
+
+Choosing Cγ =
+
+√Cp 
+
+> L√216
+
+, we have 
+
+γk = Cγ
+
+k3/2 ≤
+
+pCp
+
+L√216 k1/4 ≤ 1
+
+Lp27 ϕ(pk, β k)
+
+for k ≥ 1. This verifies (37). In addition, by definition of pk and βk, we have pk < 1 and βk < 1. Therefore, we can follow the same steps in Theorem 1 (Appendix B.3.1) up to (24) since the the same arguments remain valid for t ∈ [τn−1, τ n] with time-varying parameters. We obtain 
+
+ddt KL( μt∥π) ≤ − 12 FI( μt∥π) − 11 − (1 − pn)βn
+
+
+
+4 + 27 2 γ2
+
+> n
+
+L2ϕ(pn, β n)
+
+  e2 
+
+> n
+
+− e2
+
+> n−1
+
+
+
++ 9 σ2
+
+2 1 − (1 − pn)βn
+
+ pn
+
+bn
+
++ (1 − pn)(1 − βn)2
+
+
+
++ 9 γnL2ϕ(pn, β n) d (39) for t ∈ [τn−1, τ n]. Integrating both sides of the inequality over the interval [τn−1, τ n] yields 
+
+KL( μτn ∥π) − KL( μτn−1 ∥π) ≤ − 12
+
+Z τn
+
+> τn−1
+
+FI( μt∥π) dt − γn
+
+1 − (1 − pn)βn
+
+
+
+4 + 27 2 γ2
+
+> n
+
+L2ϕ(pn, β n)
+
+  e2 
+
+> n
+
+− e2
+
+> n−1
+
+
+
++ 9γn σ2
+
+2 1 − (1 − pn)βn
+
+ p2 
+
+> n
+
++ (1 − pn)(1 − βn)2 + 9 γ2
+
+> n
+
+L2ϕ(pn, β n)d, 
+
+where we use bn ≥ 1 
+
+> pn
+
+. Iterating the above bound, we obtain 
+
+KL( μτn ∥π) − KL( μ0∥π) ≤ − 12
+
+Z τn
+
+> 0
+
+FI( μt∥π) dt −
+
+> n
+
+X
+
+> k=1
+
+γk
+
+1 − (1 − pk)βk
+
+
+
+4 + 27 2 γ2 
+
+> k
+
+L2ϕ(pk, β k)
+
+  e2 
+
+> k
+
+− e2
+
+> k−1
+
+| {z }
+
+> (I)
+
++ 9σ2
+
+2
+
+> n
+
+X
+
+> k=1
+
+γk
+
+ p2 
+
+> k
+
++ (1 − pk)(1 − βk)2
+
+1 − (1 − pk)βk
+
+| {z }
+
+> (II)
+
++ 9 L2d
+
+> n
+
+X
+
+> k=1
+
+γ2 
+
+> k
+
+ϕ(pk, β k)
+
+| {z }
+
+> (III)
+
+. (40) 24 It remains to control the terms labeled (I)–(III) and show that their contribution remains uniformly bounded as k → ∞ . This will imply that the upper bound (40) stays bounded, which is a key step toward establishing weak convergence. First, analyze the term (I). Define 
+
+ck := γk
+
+1 − (1 − pk)βk
+
+
+
+4 + 27 2 γ2 
+
+> k
+
+L2ϕ(pk, β k)
+
+
+
+.
+
+If (ck)k≥1 is nonnegative and decreasing sequence, we can bound (I) as follows 
+
+(I) = −
+
+> n
+
+X
+
+> k=1
+
+ck(e2 
+
+> k
+
+− e2
+
+> k−1
+
+) = c1e20 +
+
+> n−1
+
+X
+
+> k=1
+
+(ck+1 − ck)e2 
+
+> k
+
+− cne2 
+
+> n
+
+≤ c1e20.
+
+Thus, it remains to show that (ck)k≥1 is nonnegative and decreasing sequence. Nonnegativity is obvious as all the terms are positive and pk < 1 and βk < 1. To prove that the sequence is decreasing, we substitute γk, βk, and pk. We then have 
+
+γk
+
+1 − (1 − pk)βk
+
+= γk
+
+1 − β2
+
+> k
+
+= Cγ
+
+2Cpk − C2 
+
+> p
+
+k1/2 ,
+
+which is decreasing for k ≥ 1. In addition, 
+
+27 2 γ2 
+
+> k
+
+L2ϕ(pk, β k) = 27 C2 
+
+> γ
+
+L2
+
+2k3
+
+1 + 4
+
+
+
+1 − Cp
+
+> k1/2
+
+3
+
+ 2Cp 
+
+> k1/2
+
+− C2
+
+> p
+> k
+
+2
+
+ .
+
+We can write this sequence as a continuous function 
+
+c(x) = 27 C2 
+
+> γ
+
+L2
+
+2x3
+
+1 + 4
+
+
+
+1 − Cp
+
+> x1/2
+
+3
+
+ 2Cp 
+
+> x1/2
+
+− C2
+
+> p
+> x
+
+2
+
+
+
+for x ≥ 1. We apply change of variables r = Cp 
+
+> x1/2
+
+and get 
+
+c(x) = 27 C2 
+
+> γ
+
+L2
+
+2C6
+
+> p
+
+r6
+
+
+
+1 + 4(1 − r)3
+
+r2(2 − r)2
+
+| {z }
+
+> =: h(r)
+
+. (41) Differentiating h(r) with respect to r, we have 
+
+h′(r) = 2r3
+
+(2 − r)3
+
+16 − 64 r + 114 r2 − 88 r3 + 28 r4 − 3r5
+
+= 2r3
+
+(2 − r)3
+
+16(1 − r)5 + 16 r(1 − r)4 + 18 r2(1 − r)3 + 30 r3(1 − r)2 + 30 r3(1 − r)2 + 18 r4(1 − r) + 3 r5
+
+> 0
+
+since 0 < r < 1. Hence, differentiating h(r(x)) with respect to x, we get 
+
+c′(x) = 27 C2 
+
+> γ
+
+L2
+
+2C6
+
+> p
+
+h′(r(x)) r′(x)= − 27 C2 
+
+> γ
+
+L2
+
+4C5 
+
+> p
+
+x3/2 h′(r(x)) < 0
+
+for x ≥ 1. Therefore, c(x) is decreasing on [1 , ∞), which implies (ck)k≥1 is decreasing sequence. This implies 
+
+lim sup 
+
+> n→∞
+
+(I) ≤ c1e20. (42) 25 We now analyze the term (II) 
+
+9σ2
+
+2
+
+> n
+
+X
+
+> k=1
+
+γk
+
+ p2 
+
+> k
+
++ (1 − pk)(1 − βk)2
+
+1 − (1 − pk)βk
+
+
+
+≤ 9σ2
+
+2
+
+> n
+
+X
+
+> k=1
+
+γk
+
+ p2 
+
+> k
+
++ (1 − pk)(1 − βk)2
+
+pk
+
+
+
+≤ 9σ2
+
+2
+
+> n
+
+X
+
+> k=1
+
+γk
+
+ p2 
+
+> k
+
++ (1 − βk)2
+
+pk
+
+
+
+= 9σ2
+
+2
+
+> n
+
+X
+
+> k=1
+
+γk
+
+ p2 
+
+> k
+
++ p2
+
+> k
+
+pk
+
+
+
+= 9 σ2
+
+> n
+
+X
+
+> k=1
+
+γkpk.
+
+Using the definitions of γk and pk, we obtain the following upper bound for (II): 
+
+9σ2
+
+2
+
+> n
+
+X
+
+> k=1
+
+γk
+
+ p2 
+
+> k
+
++ (1 − pk)(1 − βk)2
+
+1 − (1 − pk)βk
+
+
+
+≤ 9Cγ Cpσ2
+
+> n
+
+X
+
+> k=1
+
+1
+
+k2 .
+
+Taking the limit as n → ∞ yields 
+
+lim  
+
+> n→∞
+
+(II ) ≤ 9Cγ Cpσ2
+
+> ∞
+
+X
+
+> k=1
+
+1
+
+k2 =: S2 < ∞. (43) Finally, we analyze (III) 
+
+9L2d
+
+> n
+
+X
+
+> k=1
+
+γ2
+
+> k
+
+
+
+1 + 4(1 − pk)β2
+
+> k
+
+(1 − (1 − pk)βk)2
+
+
+
+≤ 72 L2d
+
+> n
+
+X
+
+> k=1
+
+γ2
+
+> k
+
+p2
+
+> k
+
+= 72 C2 
+
+> γ
+
+L2dC2
+
+> pn
+
+X
+
+> k=1
+
+1
+
+k2 .
+
+Taking the limit as n → ∞ yields 
+
+lim  
+
+> n→∞
+
+(III ) ≤ 36 C2 
+
+> γ
+
+L2dC2
+
+> p
+> ∞
+
+X
+
+> n=1
+
+1
+
+n2 =: S3 < ∞. (44) Now that we have shown the terms (I), (II) and (III) are uniformly bounded, we bound (40) as 
+
+KL( μτn ∥π) − KL( μ0∥π) ≤ − 12
+
+Z τn
+
+> 0
+
+FI( μt∥π) dt + c1e20 + S2 + S3. (45) Since KL divergence is nonnegative, we may discard KL( μτn ∥π) and rearrange the terms to get 
+
+12
+
+Z τn
+
+> 0
+
+FI( μt∥π) dt ≤ KL( μ0∥π) + c1e20 + S2 + S3.
+
+Dividing both sides by τn 
+
+> 2
+
+, we obtain 
+
+1
+
+τn
+
+Z τn
+
+> 0
+
+FI( μt∥π) dt ≤ 2KL( μ0∥π)
+
+τn
+
++ 2c1e20
+
+τn
+
++ 2S2
+
+τn
+
++ 2S3
+
+τn
+
+.
+
+Since FI( ·∥ π) is convex, we use Jensen’s inequality to obtain 
+
+FI(¯ μτn ∥π) ≤ 1
+
+τn
+
+Z τn
+
+> 0
+
+FI( μt∥π) dt ≤ 2KL( μ0∥π)
+
+τn
+
++ 2c1e20
+
+τn
+
++ 2S2
+
+τn
+
++ 2S3
+
+τn
+
+, (46) where μτn := 1
+
+> τn
+
+R τn 
+
+> 0
+
+μt dt . Given that KL( μ0∥π) < ∞, we have FI(¯ μτn ∥π) < ∞. On the other hand, if t ∈ [τn, τ n+1 ],considering (39) for the interval [τn, τ n+1 ], integrating both sides from τn to t, and dropping the negative integral over the 26 Fisher information gives us 
+
+KL( μt∥π) ≤ KL( μτn ∥π) − (t − τn)1 − (1 − pn+1 )βn+1 
+
+
+
+4 + 27 2 γ2
+
+> n+1
+
+L2ϕ(pn+1 , β n+1 )
+
+
+
+(e2 
+
+> n+1
+
+− e2
+
+> n
+
+)+ 9 σ2(t − τn)2 1 − (1 − pn+1 )βn+1 
+
+ pn+1 
+
+bn+1 
+
++ (1 − pn+1 )(1 − βn+1 )2
+
+
+
++ 9( t − τn)γn+1 L2ϕ(pn+1 , β n+1 ) d
+
+≤ KL( μ0∥π) + 9 σ2(t − τn)2 1 − (1 − pn+1 )βn+1 
+
+ pn+1 
+
+bn+1 
+
++ (1 − pn+1 )(1 − βn+1 )2
+
+
+
++ 9( t − τn+1 )γn+1 L2ϕ(pn+1 , β n+1 )d + c1e20 + S2 + S3
+
+≤ KL( μ0∥π) + c1e20 + 2 S2 + 2 S3 < ∞,
+
+where the second inequality follows from (40), the bounds on (II) and (III) , and the fact that 
+
+cn+1 ≥ (t − τn)1 − (1 − pn+1 )βn+1 
+
+
+
+4 + 27 2 γ2
+
+> n+1
+
+L2ϕ(pn+1 , β n+1 )
+
+
+
+(47) for t ∈ [τn, τ n+1 ]. To obtain the last inequality, we again use the bounds on (II) and (III) .This proves KL( μt∥π) is uniformly bounded for all t ≥ 0. By the convexity of the KL divergence, it implies that 
+
+{KL(¯ μτn ∥π) | n ∈ N} is uniformly bounded as well. Since the sub-level sets of KL( ·∥ π) are weakly compact, (¯ μτn )n∈N is tight. To show that ¯μτn → π weakly, it is sufficient to show that every cluster point of (¯ μτn )n∈N is equal to π.Consider a subsequence of (¯ μτn )n∈N converging to some limit ¯μ. As n → ∞ , τn → ∞ , and by inequality (46) we also have FI(¯ μτn ∥π) → 0. Therefore, this is still true along the subsequence. By the weak lower semi-continuity of the Fisher information along the subsequence, FI(¯ μτn ∥π) = 0 . That implies; for ψ := dμ dπ , we have √ψ ∈ dom( E) and E(√ψ) = 0 ,where E denotes the Dirichlet energy (i.e. the squared L2(π)-norm of the gradient; see Section 3 in Balasubramanian et al. [2022]). Since ∇f is Lipschitz by Assumption 1, then π has a continuous and strictly positive density on Rd, so E(√ψ) = 0 
+
+implies that ψ is a constant π with probability 1. Hence, ¯μ = π as n → ∞ . □
+
+B.3.4 Proof of Theorem 3 (SL-VRLD: FI convergence) Theorem 3 (SL-VRLD: FI convergence) Let π ∝ e−f be the target distribution, where the potential function f satisfies Assumptions 2 and 4. Let (μt)t≥0 denote the law of continuous-time interpolation generated by (9) with estimator (10). Then, for any step size γ ∈
+
+
+
+0, 1
+
+> L
+
+√27 ϕ(p,β )
+
+
+
+, where ϕ(p, β ) = 1 + 2(1 −p)1−(1 −p)β , and for any N ≥ 1, it holds that 
+
+1
+
+N γ 
+
+Z N γ 
+
+> 0
+
+FI( μt|| π) dt ≤ 2C0
+
+N γ + 9 σ2
+
+ pb + 2(1 − p)(1 − β)2
+
+2(1 − (1 − p)β)
+
+
+
++ 30 γL 2d
+
+1 − (1 − p)β , (48) 
+
+where 
+
+C0 = KL( μ0∥π) + 9γ
+
+4(1 − (1 − p)β) E[∥∇ f (x0) − g0∥2]. (49) 
+
+Furthermore, choose 
+
+γ =
+
+ dσ2
+
+> m
+
+N 2L2
+
+1/3
+
+, p = 1 − β =
+
+ d2L2
+
+σ4
+
+> m
+
+N
+
+1/3
+
+, b =
+
+l 1
+
+> p
+
+m
+
+, where σm = max {σ, 1}.
+
+Then, the time-averaged law ¯μN γ = 1
+
+> N γ
+
+R N γ  
+
+> 0
+
+μt dt satisfies FI(¯ μN γ ∥π) ≤ ε with O
+
+ σ2
+
+> mL2d2
+> ε3
+
+
+
+iterations and O(1) gradient computations per iteration. Proof. As in the proof of Theorem 1, we start by invoking Lemma 1 
+
+ddt KL( μt∥π) ≤ − 34 FI( μt∥π) + E ∥∇ f (xt) − gk∥2
+
+≤ − 34 FI( μt∥π) + 2 E ∥∇ f (xt) − ∇ f (xkγ )∥2 + 2 E ∥∇ f (xkγ ) − gk∥2
+
+≤ − 34 FI( μt∥π) + 2 L2E ∥xt − xkγ ∥2 + 2 e2
+
+> k
+
+. (50) 27 where e2 
+
+> k
+
+:= E∥∇ f (xkγ ) − gk∥2. We decompose the expectation by adding and subtracting ∇f (xkγ ), apply Young’s inequality, and use Assumption 1 to obtain (50). The next step is to bound e2
+
+> k
+
+. Using the definition of the SL-VRLD estimator (10), e2 
+
+> k+1
+
+can be expressed as follows. 
+
+e2 
+
+> k+1
+
+= p E
+
+ ∇f (x(k+1) γ ) − 1
+
+b
+
+> b
+
+X
+
+> i=1
+
+∇f (x(k+1) γ , ξ ik+1 )
+
+> 2
+
+
+
++ (1 − p) E
+
+h
+
+∇f (x(k+1) γ ) − ∇ f (x(k+1) γ , ξ k+1 ) − β (gk − ∇ f (xkγ , ξ k+1 )) 2i
+
+≤ pσ 2
+
+b + (1 − p) E
+
+h
+
+∇f (x(k+1) γ ) − ∇ f (x(k+1) γ , ξ k+1 ) − β (gk − ∇ f (xkγ , ξ k+1 )) 2i
+
+(51) 
+
+= pσ 2
+
+b + (1 − p) E
+
+
+
+∇f (x(k+1) γ ) − ∇ f (x(k+1) γ , ξ k+1 ) − β (gk − ∇ f (xkγ )) − β ∇f (xkγ ) (52) 
+
+− ∇ f (xkγ , ξ k+1 ) 2
+
+
+
+= pσ 2
+
+b + (1 − p) E
+
+
+
+∇f (x(k+1) γ ) − ∇ f (xkγ ) −  ∇f (x(k+1) γ , ξ k+1 ) − ∇ f (xkγ , ξ k+1 )| {z }
+
+> =: Ak
+
+−β (gk − ∇ f (xkγ )) + (1 − β) ( ∇f (xkγ ) − ∇ f (xkγ , ξ k+1 )) 
+
+| {z }
+
+> =: Bk
+> 2
+
+
+
+(53) 
+
+= pσ 2
+
+b + (1 − p) E ∥Ak + (1 − β)Bk − β(gk − ∇ f (xkγ )) ∥2
+
+= pσ 2
+
+b + (1 − p)β2e2 
+
+> k
+
++ (1 − p) E ∥Ak + (1 − β)Bk∥2 (54) 
+
+≤ pσ 2
+
+b + (1 − p)β2e2 
+
+> k
+
++ 2(1 − p) E ∥Ak∥2 + 2(1 − p)(1 − β)2 E ∥Bk∥2 (55) 
+
+≤ pσ 2
+
+b + (1 − p)βe 2 
+
+> k
+
++ 2(1 − p)L2∆k + 2(1 − p)(1 − β)2σ2, (56) where ∆k := E[∥x(k+1) γ − xkγ ∥2]. We first use Assumption 2 to bound the first term to get (51). Next, we add and subtract 
+
+β∇f (xkγ ) inside the expected squared norm to obtain (52). We then apply the decomposition −βa = (1 − β)a − a for any a ∈ R and β ∈ [0 , 1] inside the expected squared norm to derive (53). Defining Ak and Bk, and using the fact that 
+
+E[Ak − (1 − β)Bk | F k] = 0 , we obtain (54). Here, Fk denotes the filtration defined as 
+
+Fk := σ(x0, Z0, ξ 0, p 0, . . . , Zk, ξ k, p k),
+
+where ξk denotes all ξik with i ∈ { 1, . . . , b } if the batch is calculated, and Zk := Bk+1 −Bk. Following this, we use Young’s inequality  (a + b)2 ≤ 2a2 + 2 b2 to obtain (55). Lastly, we use the fact that β ≤ 1 together with the Assumptions 2 and 4, and the second-moment variance bound, to get (56). Rearranging the terms yields 
+
+e2 
+
+> k
+
+≤ pσ 2
+
+b(1 − (1 − p)β) − 11 − (1 − p)β (e2 
+
+> k+1
+
+− e2
+
+> k
+
+) + 2(1 − p)L2∆k
+
+1 − (1 − p)β + 2(1 − p)(1 − β)2σ2
+
+1 − (1 − p)β
+
+= − 11 − (1 − p)β (e2 
+
+> k+1
+
+− e2
+
+> k
+
+) + 2(1 − p)L2∆k
+
+1 − (1 − p)β +
+
+h pb + 2(1 − p)(1 − β)2i σ2
+
+1 − (1 − p)β . (57) We next bound ∆k by exploiting the interpolation in (9). For any t ∈ [kγ, (k + 1) γ], the interpolation satisfies 
+
+xt − xkγ = −(t − kγ )gk + √2 Bt − Bkγ 
+
+.
+
+Taking squared norms and expectations, and using the independence of gk and the Brownian increment, we obtain 
+
+E∥xt − xkγ ∥2 = ( t − kγ )2E∥gk∥2 + 2 E∥Bt − Bkγ ∥2
+
+= ( t − kγ )2E∥gk∥2 + 2( t − kγ )d, 
+
+28 where we use the fact that E∥Bt − Bkγ ∥2 = ( t − kγ )d. Since t ∈ [kγ, (k + 1) γ], it follows that 
+
+E∥xt − xkγ ∥2 ≤ γ2E∥gk∥2 + 2 γd = ∆ k.
+
+Then writing gk = [ gk − ∇ f (xkγ )] + [ ∇f (xkγ ) − ∇ f (xt)] + ∇f (xt), and using Assumption 2 with Young’s inequality, we obtain 
+
+∆k = γ2E∥gk∥2 + 2 γd 
+
+≤ 3γ2E∥gk − ∇ f (xkγ )∥2 + 3 γ2E∥∇ f (xkγ ) − ∇ f (xt)∥2 + 3 γ2E∥∇ f (xt)∥2 + 2 γd. 
+
+≤ 3γ2e2 
+
+> k
+
++ 3 γ2L2∆k + 3 γ2E∥∇ f (xt)∥2 + 2 γd. 
+
+We now substitute the upper bound (57) on e2 
+
+> k
+
+to obtain 
+
+∆k ≤ − 3γ2
+
+1 − (1 − p)β
+
+ e2 
+
+> k+1
+
+− e2
+
+> k
+
+ + 3 γ2L2
+
+
+
+1 + 2(1 − p)1 − (1 − p)β
+
+
+
+∆k
+
++ 3γ2σ2
+
+1 − (1 − p)β
+
+h pb + 2(1 − p)(1 − β)2i
+
++ 3 γ2 E∥∇ f (xt)∥2 + 2 γd. 
+
+Defining ϕ(p, β ) := 1 + 2(1 −p)1−(1 −p)β and rearranging the terms, we obtain 
+
+ 1 − 3γ2L2ϕ(p, β ) ∆k ≤ − 3γ2
+
+1 − (1 − p)β (e2 
+
+> k+1
+
+− e2
+
+> k
+
+) + 3γ2σ2
+
+1 − (1 − p)β
+
+h pb + 2(1 − p)(1 − β)2i
+
++ 3 γ2E[∥∇ f (xt)∥2] + 2 γd. 
+
+Setting γ such that γ ≤ 1
+
+> L
+
+√27 ϕ(p,β ) and dividing both sides by 89 , we have 
+
+∆k ≤ − 27 γ2
+
+8 1 − (1 − p)β  e2 
+
+> k+1
+
+− e2
+
+> k
+
+ + 27 γ2σ2
+
+8 1 − (1 − p)βh pb + 2(1 − p)(1 − β)2i
+
++ 27 γ2
+
+8 E∥∇ f (xt)∥2 + 94 γd. 
+
+(58) Given the upper bounds (57 , 58) on e2 
+
+> k
+
+and ∆k, respectively, we return back to the main inequality (50). Recall that 
+
+ddt KL( μt∥π) ≤ − 34 FI( μt∥π) + 2 L2∆k + 2 e2
+
+> k
+
+.
+
+Plugging in the bounds (57 , 58) for e2 
+
+> k
+
+and ∆k yields 
+
+ddt KL( μt∥π) ≤ − 34 FI( μt∥π) − 11 − (1 − p)β
+
+
+
+2 + 27 4 γ2L2ϕ(p, β )
+
+  e2 
+
+> k+1
+
+− e2
+
+> k
+
+
+
++ σ2
+
+1 − (1 − p)β
+
+
+
+2 + 27 4 γ2L2ϕ(p, β )
+
+ h pb + 2(1 − p)(1 − β)2i
+
++ 27 4 γ2L2ϕ(p, β ) E∥∇ f (xt)∥2 + 92 γL 2ϕ(p, β )d. 
+
+Applying Lemma 2 with the step-size condition γ ≤ 1
+
+> L
+
+√27 ϕ(p,β ) , we obtain 
+
+ddt KL( μt∥π) ≤ − 12 FI( μt∥π) − 11 − (1 − p)β
+
+
+
+2 + 27 4 γ2L2ϕ(p, β )
+
+  e2 
+
+> k+1
+
+− e2
+
+> k
+
+
+
++ 9σ2
+
+4 1 − (1 − p)βh pb + 2(1 − p)(1 − β)2i
+
++
+
+ 27 2 γL + 92
+
+
+
+γL 2d ϕ (p, β ).
+
+To simplify the last term, we note that since ϕ(p, β ) ≥ 1, γL ≤ 1√27 , which implies 
+
+27 2 γL + 92 ≤ 15 2 .
+
+29 Then, we have 
+
+ddt KL( μt∥π) ≤ − 12 FI( μt∥π) − 11 − (1 − p)β
+
+
+
+2 + 27 4 γ2L2ϕ(p, β )
+
+  e2 
+
+> k+1
+
+− e2
+
+> k
+
+
+
++ 9σ2
+
+4 1 − (1 − p)βh pb + 2(1 − p)(1 − β)2i
+
++ 15 2 γL 2d ϕ (p, β ). (59) We now integrate both sides over t ∈ [kγ, (k + 1) γ] and define Lk := KL( μkγ ∥π) + γ
+
+> 1−(1 −p)β
+
+2 + 27 4 γ2L2ϕ(p, β ) e2
+
+> k
+
+.
+
+This yields, 
+
+Lk+1 − L k ≤ − 12
+
+Z (k+1) γkγ 
+
+FI( μt∥π) dt + 9 γσ 2
+
+4 1 − (1 − p)βh pb + 2(1 − p)(1 − β)2i
+
++ 15 2 γ2L2ϕ(p, β ) d. 
+
+Iterating the inequality for k = 0 , 1, . . . , N − 1 we obtain 
+
+LN − L 0 ≤ − 12
+
+Z N γ 
+
+> 0
+
+FI( μt∥π) dt + 9N γσ 2
+
+4 1 − (1 − p)βh pb + 2(1 − p)(1 − β)2i
+
++ 15 2 N γ 2L2ϕ(p, β ) d. 
+
+Rearranging the terms and multiplying both sides by 2 
+
+> N γ
+
+, we get 
+
+1
+
+N γ 
+
+Z N γ 
+
+> 0
+
+FI( μt∥π) dt ≤ 2L0
+
+N γ + 9 σ2
+
+ pb + 2(1 − p)(1 − β)2
+
+2(1 − (1 − p)β)
+
+
+
++ 15 γL 2d
+
+
+
+1 + 2(1 − p)1 − (1 − p)β
+
+
+
+.
+
+Note that LN > 0 and L0 = KL( μ0∥π) + γ
+
+> 1−(1 −p)β
+
+ 2 + 27 4 γ2L2ϕ(p, β ) e20 ≤ KL( μ0∥π) + 9γe 20 
+
+> 4(1 −(1 −p)β)
+
+=: C0, then 
+
+1
+
+N γ 
+
+Z N γ 
+
+> 0
+
+FI( μt∥π) dt ≤ 2C0
+
+N γ + 9 σ2
+
+ pb + 2(1 − p)(1 − β)2
+
+2(1 − (1 − p)β)
+
+
+
++ 30 γL 2d
+
+1 − (1 − p)β (60) where we additionally used the fact that 1 + 2(1 −p)1−(1 −p)β = 1+(1 −p)β 
+
+> 1−(1 −p)β
+
+≤ 21−(1 −p)β to rewrite the last term. This completes the first part of the proof. Furthermore, choose 
+
+γ =
+
+ dσ2
+
+> m
+
+N 2L2
+
+1/3
+
+, p = 1 − β =
+
+ d2L2
+
+σ4
+
+> m
+
+N
+
+1/3
+
+, b =
+
+l 1
+
+> p
+
+m
+
+, where σm := max {σ, 1}.
+
+and define the time-averaged law ¯μN γ := 1
+
+> N γ
+
+R N γ  
+
+> 0
+
+μt dt . Since FI( ·∥ π) is convex, using Jensen’s inequality, we obtain the upper bound for FI(¯ μN γ ∥π)FI(¯ μN γ ∥π) ≤ 1
+
+N γ 
+
+Z N γ 
+
+> 0
+
+FI( μt∥π) dt ≤ 2C0
+
+N γ 
+
+|{z} 
+
+> (I)
+
++ 9 σ2
+
+ pb + 2(1 − p)(1 − β)2
+
+2(1 − (1 − p)β)
+
+| {z }
+
+> (II)
+
++ 30 γL 2d
+
+1 − (1 − p)β
+
+| {z }
+
+> (III)
+
+.
+
+Substituting the definition of γ into (I) , we have 
+
+(I) = 2C0σ2/3 
+
+> m
+
+L2/3
+
+N 1/3d1/3 . (61) To bound (II) , we 
+
+(II) ≤ 9σ2
+
+> m
+
+ p2 + (1 − p)p2
+
+1 − (1 − p)2
+
+
+
+≤ 18 σ2
+
+> m
+
+p, (62) where we use σ ≤ σm, b ≥ 1/p , and 1 − β = p ≤ 1 to get (62). Substituting the definition of p, we get 
+
+(II) ≤ 18 σ2/3 
+
+> m
+
+L2/3d2/3
+
+N 1/3 . (63) 30 Similarly, to bound (III) ,
+
+(III) = 30 γL 2d
+
+1 − (1 − p)β
+
+≤ 30 γL 2dp
+
+= 30 σ2/3 
+
+> m
+
+L2/3d2/3
+
+N 1/3 . (64) Combining the bounds for (I) , (II) , and (III) , we have 
+
+FI(¯ μN γ ∥π) ≤
+
+ 2C0
+
+d + 48 
+
+ σ2/3 
+
+> m
+
+L2/3d2/3
+
+N 1/3 ,
+
+where C0 is usually taken to be of order d, see e.g. Lemma 1 in Vempala and Wibisono [2019] or Appendix A in Chewi et al. [2025]. Thus, the above bound implies that, to ensure FI(¯ μN γ ∥π) ≤ ε,
+
+N = O
+
+ σ2
+
+> m
+
+L2d2
+
+ε3
+
+
+
+iterations is sufficient. And the average number of gradient computations per iteration is 
+
+pb + (1 − p) = O(1) .
+
+We next verify that the constraints on N imposed throughout the analysis are consistent with the stated iteration complexity. First, the requirement p = 1 − β = d2/3L2/3   
+
+> σ4/3
+> mN1/3
+
+≤ 1 imposes the lower bound N ≥ d2L2
+
+> σ4
+> m
+
+, which is satisfied by the above choice of N .Second, we show that the step-size condition γ ≤ 1
+
+> L
+
+√27 ϕ(p,β ) is satisfied. We note that 
+
+ϕ(p, β ) = 1 + 2(1 − p)1 − (1 − p)β
+
+= 1 + (1 − p)β
+
+1 − (1 − p)β
+
+≤ 21 − (1 − p)β .
+
+Then, γ can be chosen as 
+
+γ ≤
+
+p1 − (1 − p)βL√54 ≤ 1
+
+Lp27 ϕ(p, β ) .
+
+Substituting the definitions of β = 1 − p and p = d2/3L2/3   
+
+> σ4/3
+> mN1/3
+
+, we get 
+
+p1 − (1 − p)βL√54 =
+
+p1 − (1 − p)2
+
+L√54 
+
+≥√pL√54 = d1/3
+
+σ2/3 
+
+> m
+
+L2/3N 1/6√54 .
+
+Thus, the step-size condition holds provided that 
+
+γ ≤ d1/3
+
+σ2/3 
+
+> m
+
+L2/3N 1/6√54 .
+
+Using the definition of step size 
+
+γ = d1/3
+
+σ2/3 
+
+> m
+
+L2/3N 2/3 ,
+
+this condition reduces to the following lower bound N ≥ 54 , which is satisfied by N = O
+
+ σ2
+
+> mL2d2
+> ε3
+
+
+
+. □
+
+31 B.3.5 Proof of Corollary B.1 (SL-VRLD: squared TV distance convergence) Corollary B.1 (SL-VRLD: squared TV distance convergence) Let π ∝ e−f be the target distribution, where the potential function f satisfies Assumptions 2, 3, and 4. Let (μt)t≥0 denote the law of continuous-time interpolation generated by (9) with estimator (10). Then, for any step size γ ∈
+
+
+
+0, 1
+
+> L
+
+√27 ϕ(p,β )
+
+
+
+, where ϕ(p, β ) = 1 + 2(1 −p)1−(1 −p)β , and for any N ≥ 1,it holds that 
+
+∥¯μN γ − π∥2TV ≤ 8C0CPI 
+
+N γ + 18 CPI σ2
+
+ pb + 2(1 − p)(1 − β)2
+
+1 − (1 − p)β
+
+
+
++ 80 CPI γL 2d
+
+1 − (1 − p)β , (65) 
+
+where 
+
+C0 = KL( μ0∥π) + 9γ
+
+4(1 − (1 − p)β) E[∥∇ f (x0) − g0∥2]. (66) 
+
+Furthermore, choose 
+
+γ =
+
+ dσ2
+
+> m
+
+N 2L2
+
+1/3
+
+, p = 1 − β =
+
+ d2L2
+
+σ4
+
+> m
+
+N
+
+1/3
+
+, b =
+
+l 1
+
+> p
+
+m
+
+, where σm = max {σ, 1}.
+
+Then, the time-averaged law ¯μN γ = 1
+
+> N γ
+
+R N γ  
+
+> 0
+
+μt dt satisfies ∥¯μN γ − π∥2TV ≤ ε with O
+
+ C3PI σ2
+
+> mL2d2
+> ε3
+
+
+
+iterations and O(1) 
+
+gradient computations per iteration. Proof. Recall from the proof (Appendix B.3.4) that the Fisher information of the time-averaged law ¯μN γ satisfies (60), 
+
+1
+
+N γ 
+
+Z N γ 
+
+> 0
+
+FI( μt∥π) dt ≤ 2C0
+
+N γ + 9 σ2
+
+ pb + 2(1 − p)(1 − β)2
+
+2(1 − (1 − p)β)
+
+
+
++ 30 γL 2d
+
+1 − (1 − p)β .
+
+Using Lemma 3 and Assumption 3 we get 
+
+∥¯μN γ − π∥2TV ≤ 8C0CPI 
+
+N γ + 36 CPI 
+
+ p2 + 2(1 − p)(1 − β)2
+
+(1 − (1 − p)β) + 120 CPI γL 2d
+
+1 − (1 − p)β .
+
+Following the same steps in (61,63,64), we obtain 
+
+∥¯μN γ − π∥2TV ≤
+
+ 2C0
+
+d + 48 
+
+ 4CPI σ2/3 
+
+> m
+
+L2/3d2/3
+
+N 1/3 ,
+
+where C0 is in the order of d. This implies it suffices to choose N such that N 1/3 ≥ ˜CC PI σ2/3  
+
+> mL2/3d2/3
+> ε
+
+, where ˜C :=  
+
+> 8C0
+> d
+
++ 192 > 0. Equivalently, this yields iteration complexity of O
+
+ C3PI σ2
+
+> mL2d2
+> ε3
+
+
+
+with O(1) gradient computations per iteration. Since the constraints on N in Theorem 3 remain unchanged, they continue to hold. □
+
+B.3.6 Proof of Theorem B.1 (SL-VRLD: weak convergence) Theorem B.1 (SL-VRLD: weak convergence) Let π ∝ e−f be the target distribution, where the potential function 
+
+f satisfies Assumptions 2 and 4. Let (μt)t≥0 denote the law of continuous-time interpolation generated by (9) with estimator (10). Define the time-varying parameters as follows 
+
+γk = Cγ
+
+k3/2 , pk = Cp
+
+k1/2 , bk =
+
+ 1
+
+pk
+
+
+
+, ∀k ≥ 1,
+
+where 0 < C p < 1 and Cγ > 0 are numerical constants. Then, the time-averaged law ¯μτn = 1
+
+> τn
+
+R τn 
+
+> 0
+
+μt dt , where 
+
+τn = Pnk=1 γk, converges weakly to π.Proof. Given time-varying parameters γk, b k, p k at iteration k, define the cumulative time τn and averaged law ¯μτn at iteration n as 
+
+τn := 
+
+> n
+
+X
+
+> k=1
+
+γk, ¯μτn := 1
+
+τn
+
+Z τn
+
+> 0
+
+μt dt, 
+
+32 where μt denotes the law of the process xt under the following continuous-time interpolation 
+
+xt := xτn − (t − τn) gn + √2  Bt − Bτn
+
+, t ∈ [τn, τ n+1 ]. (67) 
+
+gn is defined as follows 
+
+gn := 
+
+
+
+1
+
+bnbnX
+
+> i=1
+
+∇f (xτn , ξ in) w.p. pn,
+
+∇f (xτn , ξ n) + βn(gn−1 − ∇ f (xτn−1 , ξ n)) w.p. 1 − pn,
+
+(68) for all n ≥ 1. At initialization, we choose γ0, b 0 > 0 and (β0, p 0) ∈ (0 , 1] 2 \ { (1 , 1) }, and define g0 as 
+
+g0 := 1
+
+b0
+
+> b0
+
+X
+
+> i=1
+
+∇f (x0, ξ i
+
+> 0
+
+).
+
+We establish weak convergence by adapting the proof of Theorem 3. To this end, we first verify the step sizes (γk)k≥1
+
+satisfy the step-size condition of Theorem 3, namely 
+
+γk ∈ 0, 1
+
+Lpϕ(pk, β k)
+
+#
+
+, where ϕ(pk, β k) = 1 + 2(1 − p)1 − (1 − p)β (69) for all k ≥ 1. Using the definitions of pk and βk, we have 
+
+ϕ(pk, β k) = 1 + 2(1 − pk)1 − (1 − pk)βk
+
+≤ 1 + 21 − (1 − pk)2
+
+≤ 1 + 2
+
+pk
+
+≤ 1 + 2k1/2
+
+Cp
+
+≤ 4k1/2
+
+Cp
+
+,
+
+where we use the fact that 0 < C p < 1. Then, we have 
+
+1
+
+Lp27 ϕ(pk, β k) ≥
+
+pCp
+
+L√108 k1/4 .
+
+Choosing Cγ =
+
+√Cp 
+
+> L√108
+
+, we have 
+
+γk = Cγ
+
+k3/2 ≤
+
+pCp
+
+L√108 k1/4 ≤ 1
+
+Lp27 ϕ(pk, β k)
+
+for k ≥ 1. This verifies (69). Therefore, we can follow the same steps in Theorem 3 (Appendix B.3.4) up to (59) since the same arguments remain valid for t ∈ [τn−1, τ n] with time-varying parameters. We obtain 
+
+ddt KL( μt∥π) ≤ − 12 FI( μt∥π) − 11 − (1 − pn)βn
+
+
+
+2 + 27 4 γ2
+
+> n
+
+L2ϕ(pn, β n)
+
+  e2 
+
+> n
+
+− e2
+
+> n−1
+
+
+
++ 9σ2
+
+4 1 − (1 − pn)βn
+
+ pn
+
+bn
+
++ 2(1 − pn)(1 − βn)2
+
+
+
++ 15 2 γnL2 ϕ(pn, β n)d (70) 33 for t ∈ [τn−1, τ n], where ϕ(pn, β n) := 1 + 2(1 −pn)1−(1 −pn)βn . Integrating both sides of the inequality over the interval [τn−1, τ n]
+
+yields 
+
+KL( μτn ∥π) − KL( μτn−1 ∥π) ≤ − 12
+
+Z τn
+
+> τn−1
+
+FI( μt∥π) dt − γn
+
+1 − (1 − pn)βn
+
+
+
+2 + 27 4 γ2
+
+> n
+
+L2ϕ(pn, β n)
+
+  e2 
+
+> n
+
+− e2
+
+> n−1
+
+
+
++ 9γn σ2
+
+4 1 − (1 − pn)βn
+
+ p2 
+
+> n
+
++ 2(1 − pn)(1 − βn)2 + 15 2 γ2
+
+> n
+
+L2ϕ(pn, β n)d, 
+
+where we use bn ≥ 1 
+
+> pn
+
+. Iterating the above bound, we obtain 
+
+KL( μτn ∥π) − KL( μ0∥π) ≤ − 12
+
+Z τn
+
+> 0
+
+FI( μt∥π) dt −
+
+> n
+
+X
+
+> k=1
+
+γk
+
+1 − (1 − pk)βk
+
+
+
+2 + 27 4 γ2 
+
+> k
+
+L2ϕ(pk, β k)
+
+  e2 
+
+> k
+
+− e2
+
+> k−1
+
+| {z }
+
+> (I)
+
++ 9σ2
+
+4
+
+> n
+
+X
+
+> k=1
+
+γk
+
+ p2 
+
+> k
+
++ 2(1 − pk)(1 − βk)2
+
+1 − (1 − pk)βk
+
+| {z }
+
+> (II)
+
++ 15 L2d
+
+2
+
+> n
+
+X
+
+> k=1
+
+γ2 
+
+> k
+
+ϕ(pk, β k)
+
+| {z }
+
+> (III)
+
+. (71) It remains to control the terms labeled (I)–(III) and show that their contribution remains uniformly bounded as k → ∞ . This will imply that the upper bound (71) stays bounded, which is a key step toward establishing weak convergence. First, analyze the term (I). Define 
+
+ck := γk
+
+1 − (1 − pk)βk
+
+
+
+4 + 27 2 γ2 
+
+> k
+
+L2ϕ(pk, β k)
+
+
+
+.
+
+If (ck)k≥1 is nonnegative and decreasing sequence, we have 
+
+(I) = −
+
+> n
+
+X
+
+> k=1
+
+ck(e2 
+
+> k
+
+− e2
+
+> k−1
+
+) = c1e20 +
+
+> n−1
+
+X
+
+> k=1
+
+(ck+1 − ck)e2 
+
+> k
+
+− cne2 
+
+> n
+
+≤ c1e20
+
+Thus, it remains to show that (ck)k≥1 is nonnegative and decreasing sequence. Nonnegativity is obvious as all the terms are positive and pk < 1 and βk < 1. To prove that the sequence is decreasing, we substitute γk, β k, and pk. As shown in the proof of Theorem 2, we have 
+
+γk
+
+1 − (1 − pk)βk
+
+= Cγ
+
+2Cpk − C2 
+
+> p
+
+k1/2 ,
+
+which is decreasing for k ≥ 1. In addition, 
+
+27 2 γ2 
+
+> k
+
+L2ϕ(pk, β k) = 27 C2 
+
+> γ
+
+L2
+
+2k3
+
+1 + 2
+
+
+
+1 − Cp
+
+> k1/2
+
+
+
+1 −
+
+
+
+1 − Cp
+
+> k1/2
+
+2
+
+ .
+
+We can write this sequence as a continuous function 
+
+c(x) = 27 C2 
+
+> γ
+
+L2
+
+2x3
+
+1 + 2
+
+
+
+1 − Cp
+
+> x1/2
+
+
+
+1 −
+
+
+
+1 − Cp
+
+> x1/2
+
+2
+
+
+
+for x ≥ 1. We use change of variables r = Cp 
+
+> x1/2
+
+and get 
+
+c(x) = 27 C2 
+
+> γ
+
+L2
+
+2C6
+
+> p
+
+ r5(2 − r2)2 − r
+
+| {z }
+
+> := h(r)
+
+.
+
+34 Differentiating h(r) with respect to r, we have 
+
+h′(r) = 2r4(10 − 4r − 7r2 + 3 r3)(2 − r)2 .
+
+Defining q(r) := 10 − 4r − 7r2 + 3 r3, we note that, for r ∈ (0 , 1) , q′(r) = −4 − 14 r + 9 r2 < −4 − 5r < 0. Therefore, 
+
+q(r) > q (1) = 2 > 0,
+
+which implies h′(r) > 0 for r ∈ (0 , 1) . Hence, 
+
+c′(x) ≤ 27 C2 
+
+> γ
+
+L2
+
+2C6
+
+> p
+
+h′(r(x)) r′(x)
+
+≤ − 27 C2 
+
+> γ
+
+L2
+
+4C5 
+
+> p
+
+x3/2 h′(r(x)) < 0
+
+for x ≥ 1. Therefore, c(x) is decreasing on [1 , ∞), which implies (ck)k≥1 is decreasing sequence. This implies 
+
+lim sup 
+
+> n→∞
+
+(I) ≤ c1e20. (72) We now analyze the term (II) (II) = 9σ2
+
+4
+
+> n
+
+X
+
+> k=1
+
+γk
+
+ p2 
+
+> k
+
++ 2(1 − pk)(1 − βk)2
+
+pk
+
+
+
+≤ 9σ2
+
+4
+
+> n
+
+X
+
+> k=1
+
+γk
+
+ p2 
+
+> k
+
++ 2(1 − βk)2
+
+pk
+
+
+
+= 9σ2
+
+4
+
+> n
+
+X
+
+> k=1
+
+γk
+
+ p2 
+
+> k
+
++ 2 p2
+
+> k
+
+pk
+
+
+
+= 27 4 σ2
+
+> n
+
+X
+
+> k=1
+
+γkpk
+
+Using the definitions of γk and pk, we obtain the following upper bound for (II): 
+
+9σ2
+
+4
+
+> n
+
+X
+
+> k=1
+
+γk
+
+ p2 
+
+> k
+
++ 2(1 − pk)(1 − βk)2
+
+1 − (1 − pk)βk
+
+
+
+≤ 27 Cγ Cpσ2
+
+4
+
+> n
+
+X
+
+> k=1
+
+1
+
+k2 .
+
+Taking the limit as n → ∞ yields 
+
+lim  
+
+> k→∞
+
+(II ) ≤ 27 Cγ Cpσ2
+
+4
+
+> ∞
+
+X
+
+> n=1
+
+1
+
+n2 =: S2 < ∞. (73) Finally, we analyze (III) 
+
+(III) = 15 L2d
+
+2
+
+> n
+
+X
+
+> k=1
+
+γ2
+
+> k
+
+
+
+1 + 2(1 − pk)1 − (1 − pk)βk
+
+
+
+≤ 15 L2d
+
+2
+
+> n
+
+X
+
+> k=1
+
+γ2
+
+> k
+
+
+
+1 + 2(1 − pk)
+
+pk
+
+
+
+≤ 15 L2d
+
+2
+
+> n
+
+X
+
+> k=1
+
+2γ2
+
+> k
+
+pk
+
+.
+
+Using the definitions of γk and pk, and taking the limit as n → ∞ yields 
+
+lim  
+
+> k→∞
+
+(III ) ≤ 15 C2 
+
+> γ
+
+L2dCp
+
+> ∞
+
+X
+
+> k=1
+
+1
+
+k 52
+
+=: S3 < ∞. (74) Now that we have shown the terms (I), (II) and (III) are uniformly bounded, we bound (71) as 
+
+KL( μτn ∥π) − KL( μ0∥π) ≤ − 12
+
+Z τn
+
+> 0
+
+FI( μt∥π) dt + c1e20 + S2 + S3. (75) 35 Since KL divergence is nonnegative, we may discard KL( μμτn ∥π) and rearrange the terms to get 
+
+12
+
+Z τn
+
+> 0
+
+FI( μt∥π) dt ≤ KL( μ0∥π) + c1e20 + S2 + S3.
+
+Dividing both sides by τn 
+
+> 2
+
+, we obtain 
+
+1
+
+τn
+
+Z τn
+
+> 0
+
+FI( μt∥π) dt ≤ 2KL( μ0∥π)
+
+τn
+
++ 2c1e20
+
+τn
+
++ 2S2
+
+τn
+
++ 2S3
+
+τn
+
+.
+
+Since FI( ·∥ π) is convex, we use Jensen’s inequality to obtain 
+
+FI(¯ μτn ∥π) ≤ 1
+
+τn
+
+Z τn
+
+> 0
+
+FI( μt∥π) dt ≤ 2KL( μ0∥π)
+
+τn
+
++ 2c1e20
+
+τn
+
++ 2S2
+
+τn
+
++ 2S3
+
+τn
+
+, (76) where μτn := 1
+
+> τn
+
+R τn 
+
+> 0
+
+μt dt . Given that KL( μ0∥π) < ∞, we have FI(¯ μτn ∥π) < ∞. On the other hand, if t ∈ [τn, τ n+1 ],considering (70) for the interval [τn, τ n+1 ], integrating both sides from τn to t, and dropping the negative integral over the Fisher information gives us 
+
+ddt KL( μt∥π) ≤ − 11 − (1 − pn+1 )βn+1 
+
+
+
+2 + 27 4 γ2
+
+> n+1
+
+L2ϕ(pn+1 , β n+1 )
+
+  e2 
+
+> n+1
+
+− e2
+
+> n
+
+
+
++ 9σ2
+
+4 1 − (1 − pn+1 )βn+1 
+
+ p2 
+
+> n+1
+
++ 2(1 − pn+1 )(1 − βn+1 )2 + 15 2 γn+1 L2d ϕ (pn+1 , β n+1 ).
+
+Furthermore, integrating both sides over the interval [τn, t ], we obtain 
+
+KL( μt∥π) ≤ KL( μτn ∥π) − (t − τn)1 − (1 − pn+1 )βn+1 
+
+
+
+2 + 27 4 γ2
+
+> n+1
+
+L2ϕ(pn+1 , β n+1 )
+
+
+
+(e2 
+
+> n+1
+
+− e2
+
+> n
+
+)+ 9 σ2(t − τn)4 1 − (1 − pn+1 )βn+1 
+
+ pn+1 
+
+bn+1 
+
++ 2(1 − pn+1 )(1 − βn+1 )2
+
+
+
++ 15 2 (t − τn)γn+1 L2ϕ(pn+1 , β n+1 ) d
+
+≤ KL( μ0∥π) + 9 σ2(t − τn)4 1 − (1 − pn+1 )βn+1 
+
+ pn+1 
+
+bn+1 
+
++ 2(1 − pn+1 )(1 − βn+1 )2
+
+
+
++ 15 2 (t − τn)γn+1 L2ϕ(pn+1 , β n+1 ) d + c1e20 + S2 + S3
+
+≤ KL( μ0∥π) + c1e20 + 2 S2 + 2 S3 < ∞.
+
+where the second inequality follows from (71), the bounds on (II) and (III) , and the fact that 
+
+cn+1 ≥ (t − τn)1 − (1 − pn+1 )βn+1 
+
+for t ∈ [τn, τ n+1 ]. To obtain the last inequality, we again use the bounds on (II) and (III) . Thus {KL( μt∥π) | t ≥ 0} is bounded. The weak convergence of ¯μ to π then follows by the same argument as in the proof of Theorem 2. □
+
+B.4 POSTERIOR SAMPLING WITH SGM PRIOR PROOFS B.4.1 Proof of Theorem 4 a (ML-VRLD with SGM prior: FI convergence) Theorem 4 a (ML-VRLD with SGM prior: FI convergence) Let π(x|y) ∝ ℓ(y|x)p(x) be the posterior with the likelihood ℓ(y|x) ∝ e−f (x) and the prior p(x) ∝ e−h(x). Suppose the likelihood potential f satisfies Assumptions 1 and 2 with Lipschitz constant Lf , the prior potential h satisfies Assumption 1 and 5 with Lipschitz constant Lh, and the SGM satisfies Assumption 6 with decreasing error εσk = O(k−1/2) for k ≥ 1. Define Lπ = Lf + Lh. Let (μt)t≥0 denote 
+
+36 the law of the interpolation generated by (11) with the estimator (8) and the schedules defined in (12). For any step size 
+
+γ ∈
+
+
+
+0, 1
+
+> Lπ
+
+√52 ϕ(p,β )
+
+
+
+, where ϕ(p, β ) = 1 + 4(1 −p)β2 
+
+> (1 −(1 −p)β)2
+
+, and for any N ≥ 1, it holds that 
+
+1
+
+N γ 
+
+Z N γ 
+
+> 0
+
+FI( μt|| π) dt ≤ 2C0
+
+N γ + 13 σ2
+
+ pb + (1 − p)(1 − β)2
+
+1 − (1 − p)β
+
+
+
++ 84 γL 2 
+
+> π
+
+d
+
+(1 − (1 − p)β)2 + ¯ σ2 + ¯ ε2 
+
+> σ
+
++ ¯ α2, (77) 
+
+where 
+
+¯σ2 = 39 C21
+
+2N 
+
+> N−1
+
+X
+
+> k=0
+
+σ2
+
+> k
+
+, ¯ε2 
+
+> σ
+
+= 39 2N 
+
+> N−1
+
+X
+
+> k=0
+
+ε2 
+
+> σk
+
+, ¯α2 = 39 C22
+
+2N 
+
+> N−1
+
+X
+
+> k=0
+
+(αk − 1) 2
+
+σ2
+
+> k
+
+, (78) 
+
+C0 = KL( μ0∥π) + 13 γ
+
+2(1 − (1 − p)β)2 E[∥∇ f (x0) − g0∥2], (79) 
+
+and C0, C 1, C 2 are positive constants. Furthermore, let 
+
+γ =
+
+√dσmN 3/4√Lπ
+
+, p = 1 − β =
+
+√Lπ dσmN 1/4 , b =
+
+l 1
+
+> p
+
+m
+
+, where σm = max {σ, 1}, (80) 
+
+and let the initial parameters satisfy σ0 ≥ σmin , εσ0 > 0, α0 ≥ 1, and σmin > 0 is the minimum noise level. Then, the time-averaged law ¯μN γ = 1
+
+> N γ
+
+R N γ  
+
+> 0
+
+μt dt satisfies FI(¯ μN γ ∥π) ≤ ε with O
+
+ σ4 
+
+> mL2
+> πd2
+> ε4
+
+
+
+iterations and O(1) gradient computations per iteration. Proof. In the case of posterior sampling with SGM priors recall that the SDE in interest is: 
+
+dxt = − ∇f (xt) + ∇h(xt) dt + √2 dBt.
+
+We again begin by invoking Lemma 1, 
+
+ddt KL( μt∥π) ≤ − 34 FI( μt∥π) + E ∥∇ log π(xt|y) + gk − αkSθ (xkγ , σ k)∥2
+
+≤ − 34 FI( μt∥π) + E ∥ − ∇ h(xt) − ∇ f (xt) + gk − αkSθ (xkγ , σ k)∥2
+
+≤ − 34 FI( μt∥π) + E[∥∇ f (xkγ ) + ∇h(xkγ ) − ∇ f (xt) − ∇ h(xt) − ∇ f (xkγ ) + gk
+
+− ∇ h(xkγ ) + ∇hσk (xkγ ) − ∇ hσk (xkγ ) − S θ (xkγ , σ k) − (αk − 1) Sθ (xkγ , σ k)∥2].
+
+Applying Young’s inequality together with Assumptions 1, 5, and 6, we get 
+
+ddt KL( μt∥π) ≤ − 34 FI( μt∥π) + 3 Lπ ∆k + 3 e2 
+
+> k
+
++ 3( σkC1 + εσk + ( αk − 1) C2σ−1 
+
+> k
+
+)2 (81) where ∆k := E ∥x(k+1) γ − xkγ ∥2 ≥ E ∥xt − xkγ ∥2, Lπ := Lf + Lh and ek := E ∥gk − ∇ f (xkγ )∥2. We use the recursive upper bound on the estimation error e2 
+
+> k
+
+in (22): 
+
+e2 
+
+> k
+
+≤ − 21 − (1 − p)β
+
+ e2 
+
+> k+1
+
+− e2
+
+> k
+
+ + 2σ2
+
+1 − (1 − p)β
+
+h pb + (1 − p)(1 − β)2i
+
++ 4(1 − p)β2L2
+
+> f
+
+ 1 − (1 − p)β2 ∆k. (82) Plugging this into (81), we obtain 
+
+ddt KL( μt∥π) ≤ − 34 FI( μt∥π) + 3 L2 
+
+> π
+
+ϕ(p, β )∆ k + 6σ2
+
+1 − (1 − p)β
+
+h pb + (1 − p)(1 − β)2i
+
+− 61 − (1 − p)β
+
+ e2 
+
+> k+1
+
+− e2
+
+> k
+
+ + 3( σkC1 + εσk + ( αk − 1) C2σ−1 
+
+> k
+
+)2, (83) where ϕ(p, β ) := 1 + 4(1 −p)β2 
+
+> (1 −(1 −p)β)2
+
+. We bound ∆k using the interpolation (11): 
+
+∆k = E ∥x(k+1) γ − xkγ ∥2 = γ2 E ∥gk − αkSθ (xkγ , σ k)∥2 + 2 γd 
+
+= γ2 E[∥gk − ∇ f (xkγ ) + ∇f (xt) + ∇h(xt) + ∇f (xkγ ) − ∇ f (xt) + ∇h(xkγ )
+
+− ∇ h(xt) − ∇ h(xkγ ) + ∇hσk (xkγ ) − ∇ hσk (xkγ ) − S θ (xkγ , σ k) − (αk − 1) Sθ (xkγ , σ k)∥2] + 2 γd. 
+
+37 Applying Young’s inequality together with Assumptions 1, 5 and 6 yields 
+
+∆k ≤ 4γ2e2 
+
+> k
+
++ 4 γ2E ∥∇ log π(xt|y)∥2 + 4 γ2L2 
+
+> π
+
+∆k + 4 γ2(σkC1 + εσk + ( αk − 1) C2σ−1 
+
+> k
+
+)2 + 2 γd. (84) We now substitute the bound (82) on e2 
+
+> k
+
+and rearrange the terms as follows 
+
+ 1 − 4γ2L2 
+
+> π
+
+ϕ(p, β )∆k ≤ − 8γ2
+
+1 − (1 − p)β (e2 
+
+> k+1
+
+− e2
+
+> k
+
+) + 8γ2σ2
+
+1 − (1 − p)β
+
+h pb + (1 − p)(1 − β)2i
+
++ 4 γ2E ∥∇ log π(xt|y)∥2 + 4 γ2(σkC1 + εσk + ( αk − 1) C2σ−1 
+
+> k
+
+)2 + 2 γd. 
+
+Setting γ ≤ 1
+
+> Lπ
+
+√52 ϕ(p,β ) and dividing both sides by 12 13 , we obtain 
+
+∆k ≤ − 26 γ2
+
+3 1 − (1 − p)β (e2 
+
+> k+1
+
+− e2
+
+> k
+
+) + 26 γ2σ2
+
+3 1 − (1 − p)βh pb + (1 − p)(1 − β)2i
+
++ 13 3 γ2E ∥∇ log π(xt|y)∥2 + 13 3 γ2(σkC1 + εσk + ( αk − 1) C2σ−1 
+
+> k
+
+)2 + 13 6 γd. (85) Substituting the above bound into (83), applying Lemma 2, using the step-size condition γ ≤ 1
+
+> Lπ
+
+√52 ϕ(p,β ) , and using Young’s inequality for (σkC1 + εσk + ( αk − 1) C2σ−1 
+
+> k
+
+)2 yields 
+
+ddt KL( μt∥π) ≤ − 12 FI( μt∥π) − 6 + 26 γ2L2 
+
+> π
+
+ϕ(p, β )1 − (1 − p)β (e2 
+
+> k+1
+
+− e2
+
+> k
+
+) + 13 σ2
+
+2 1 − (1 − p)βh pb + (1 − p)(1 − β)2i
+
++
+
+
+
+26 γL π + 13 2
+
+
+
+γL 2 
+
+> π
+
+dϕ (p, β ) + 39 4 σ2
+
+> k
+
+C21 + 39 4 ε2 
+
+> σk
+
++ 39 C22 (αk − 1) 2
+
+4σ2
+
+> k
+
+. (86) Since ϕ(p, β ) ≥ 1, we have γL π ≥ 1√52 , which implies 
+
+26 γL π + 13 2 ≤ 21 2 .
+
+Then, we have 
+
+ddt KL( μt∥π) ≤ − 12 FI( μt∥π) − 6 + 26 γ2L2 
+
+> π
+
+ϕ(p, β )1 − (1 − p)β (e2 
+
+> k+1
+
+− e2
+
+> k
+
+) + 13 σ2
+
+2 1 − (1 − p)βh pb + (1 − p)(1 − β)2i
+
++ 21 2 γL 2 
+
+> π
+
+dϕ (p, β ) + 39 4 σ2
+
+> k
+
+C21 + 39 4 ε2 
+
+> σk
+
++ 39 C22 (αk − 1) 2
+
+4σ2
+
+> k
+
+. (87) Next, we define Lk := KL( μkγ ∥π) + γ
+
+ 6+26 γ2L2 
+
+> πϕ(p,β )
+
+ 
+
+> 1−(1 −p)β
+
+e2 
+
+> k
+
+and integrate both sides over t ∈ [kγ, (k + 1) γ] to get 
+
+Lk+1 − L k ≤ − 12
+
+Z (k+1) γkγ 
+
+FI( μt∥π) dt + 13 γσ 2
+
+2 1 − (1 − p)βh pb + (1 − p)(1 − β)2i
+
++ 21 2 γL 2 
+
+> π
+
+dϕ (p, β )+ 39 4 γσ 2
+
+> k
+
+C21 + 39 4 γε 2 
+
+> σk
+
++ 39 γC 22 (αk − 1) 2
+
+4σ2
+
+> k
+
+Note that L0 = KL( μ0∥π) + γ
+
+ 6+26 γ2L2 
+
+> πϕ(p,β )
+
+ 
+
+> 1−(1 −p)β
+
+e20 ≤ KL( μ0∥π) + 13 γe 20 
+
+> 2(1 −(1 −p)β)
+
+=: C0. Iterating the above inequality for 
+
+k = 0 , 1, . . . , N − 1 and rearranging the terms, we obtain 
+
+1
+
+N γ 
+
+Z N γ 
+
+> 0
+
+FI( μt∥π) dt ≤ 2C0
+
+N γ + 13 σ2
+
+" pb + (1 − p)(1 − β)2
+
+ 1 − (1 − p)β#
+
++ 84 γL 2 
+
+> π
+
+d
+
+ 1 − (1 − p)β2 + ¯ σ2 + ¯ ε2 
+
+> σ
+
++ ¯ α2,
+
+where ¯σ2, ¯ε2 
+
+> σ
+
+, and ¯α2 are defined in (78). Note that we use ϕ(p, β ) = 1 + 4(1 −p)β2 
+
+> (1 −(1 −p)β)2
+
+≤ 1 + 4(1 −p)β 
+
+> (1 −(1 −p)β)2
+
+= (1+(1 −p)β)2 
+
+> (1 −(1 −p)β)2
+
+≤ 
+
+> 4(1 −(1 −p)β)2
+
+to bound ϕ(p, β ) in the above inequality. This completes the first part of the proof. 38 To establish the iteration complexity, we note that, replacing L by Lπ , all the terms in the upper bound of Theorem 1 (except the bias terms ¯ε2 
+
+> σ
+
+, ¯α2, ¯σ2) are the same with different numerical coefficients. Therefore, choosing the same parameters (replacing L with Lπ ) as in Theorem 1 
+
+γ =
+
+√dσmN 34
+
+√Lπ
+
+, p = 1 − β =
+
+√Lπ dσmN 14
+
+, where σm := max {σ, 1},
+
+we have 
+
+1
+
+N γ 
+
+Z N γ 
+
+> 0
+
+FI( μt∥π) dt ≤ O σmL1/2 
+
+> π
+
+d1/2
+
+N 1/4
+
+!
+
++ ¯ ε2 
+
+> σ
+
++ ¯ α2 + ¯ σ2.
+
+We recall that the noise (σk)N −1 
+
+> k=0
+
+and (αk)N −1 
+
+> k=0
+
+schedules are defined as 
+
+αk = max {α0ρk 
+
+> 1
+
+, 1} and σk = max {σ0ρk 
+
+> 2
+
+, σ min },
+
+where ρ1, ρ 2 ∈ (0 , 1) denote decay rates, σ0 > 0, α0 > 0, and σmin > 0 is the minimum noise level. By definition in (12), there exists indices Kα < N − 1 and Kσ < N − 1 independent of N such that αk = 1 for ∀k ≥ Kα and σk = σmin 
+
+for ∀k ≥ Kσ . Using this definition, we next analyze the convergence behavior of the bias contributions due to the noise schedule, annealing schedule, and SGM estimation error separately. To bound ¯σ2, we proceed as 
+
+¯σ2 = 39 C21
+
+2N 
+
+> N−1
+
+X
+
+> k=0
+
+max {σ20 ρ2k 
+
+> 2
+
+, σ 2min }
+
+> (∗)
+
+= 39 C21
+
+2N 
+
+> Kσ−1
+
+X
+
+> k=0
+
+σ20 ρ2k 
+
+> 2
+
++ 39 C21
+
+2N 
+
+> N−1
+
+X
+
+> k=Kσ
+
+σ2min 
+
+= 39 C21 σ20 (1 − ρ2Kσ 
+
+> 2
+
+)2N (1 − ρ22)
+
+| {z } 
+
+> O(N−1)
+
++ 39 C21 (N − Kσ )σ2min 
+
+2N ,
+
+where (∗) follows from the definition of the annealing schedule (12). Setting σmin = O(N −1/8), we obtain 
+
+¯σ2 = O(N −1) + O(N −1/4) = O(N −1/4). (88) To bound ¯α2, we use the fact that (αk)N −1 
+
+> k=0
+
+is nonincreasing sequence and that there exists a constant Kα < N − 1,independent of N , such that αk = 1 for all k ≥ Kα. Thus, we obtain 
+
+¯α2 = 39 C22
+
+2N 
+
+> N−1
+
+X
+
+> k=0
+
+(αk − 1) 2
+
+σ2
+
+> k
+
+= 39 C22
+
+2N
+
+> Kα−1
+
+X
+
+> k=0
+
+(α0ρk 
+
+> 1
+
+− 1) 2
+
+σ2
+
+> k
+
+= 39 C22
+
+2N σ 2min 
+
+> Kα−1
+
+X
+
+> k=0
+
+(α0ρk 
+
+> 1
+
+− 1) 2
+
+= 39 C22
+
+2N σ 2min 
+
+> Kα−1
+
+X
+
+> k=0
+
+(α20ρ2k 
+
+> 1
+
+− 2α0ρk 
+
+> 1
+
++ 1) 
+
+≤ 39 C22 α20
+
+2N σ 2min 
+
+> Kα−1
+
+X
+
+> k=0
+
+ρ2k 
+
+> 1
+
++ 39 C22 Kα
+
+2N σ 2min 
+
+≤ 39 C22 α20(1 − ρ2Kα 
+
+> 1
+
+)2N σ 2min (1 − ρ21)
+
+| {z } 
+
+> O(N−3/4)
+
++ 39 C22 Kα
+
+2N σ 2min 
+
+| {z } 
+
+> O(N−3/4)
+
+= O(N −3/4). (89) 39 Finally, to bound ¯ε2 
+
+> σ
+
+, we use the assumption that the SGM estimation error decays as ε2 
+
+> σk
+
+≤ C′ 
+
+> k
+
+for some constant C′ > 0.We proceed as 
+
+¯ε2 
+
+> σ
+
+= 39 2N 
+
+> N−1
+
+X
+
+> k=0
+
+ε2
+
+> σk
+
+= 39 ε2
+
+> σ0
+
+2N + 39 C′
+
+2N 
+
+> N−1
+
+X
+
+> k=1
+
+1
+
+k
+
+= O
+
+ log NN
+
+
+
+. (90) Combining the upper bounds (88), (89), and (90), and using the Jensen’s inequality with the convexity of FI( ·∥ π), we obtain 
+
+FI(¯ μN γ ∥π) = O σmL1/2 
+
+> π
+
+d1/2
+
+N 1/4
+
+!
+
++ O
+
+ 1
+
+N 1/4
+
+
+
++ O
+
+ 1
+
+N 3/4
+
+
+
++ O
+
+ log NN
+
+
+
+= O σmL1/2 
+
+> π
+
+d1/2
+
+N 1/4
+
+!
+
+.
+
+This implies that FI(¯ μN γ ∥π) ≤ ε is achieved with O
+
+ σ4 
+
+> mL2
+> πd2
+> ε4
+
+
+
+iterations with pb + (1 − p) = O(1) gradient computations per iteration. □
+
+B.4.2 Proof of Theorem 4 b (SL-VRLD with SGM prior: FI convergence) Theorem 4 (SL-VRLD with SGM prior: FI convergence) Let π(x|y) ∝ ℓ(y|x)p(x) be the posterior with the likelihood 
+
+ℓ(y|x) ∝ e−f (x) and the prior p(x) ∝ e−h(x). Suppose the likelihood potential f satisfies Assumptions 2 and 4 with Lipschitz constant Lf , the prior potential h satisfies Assumptions 1 and 5 with Lipschitz constant Lh, and the SGM satisfies Assumptions 6 with decreasing error εσk = O(k−1/2) for k ≥ 1. Define Lπ = Lf + Lh. Let (μt)t≥0 denote the law of the interpolation generated by (11) with the estimator (10) and the schedules defined in (12). For any step size 
+
+γ ∈
+
+
+
+0, 1
+
+> Lπ
+
+√52 ϕ(p,β )
+
+
+
+, where ϕ(p, β ) = 1 + 2(1 −p)1−(1 −p)β , and for any N ≥ 1, it holds that 
+
+1
+
+N γ 
+
+Z N γ 
+
+> 0
+
+FI( μt|| π) dt ≤ 2C0
+
+N γ + 13 σ2
+
+2
+
+ pb + 2(1 − p)(1 − β)2
+
+(1 − (1 − p)β)
+
+
+
++ 63 γL 2 
+
+> π
+
+d
+
+1 − (1 − p)β + ¯ σ2 + ¯ ε2 
+
+> σ
+
++ ¯ α2, (91) 
+
+where 
+
+¯σ2 = 39 C21
+
+2N 
+
+> N−1
+
+X
+
+> k=0
+
+σ2
+
+> k
+
+, ¯ε2 
+
+> σ
+
+= 39 2N 
+
+> N−1
+
+X
+
+> k=0
+
+ε2 
+
+> σk
+
+, ¯α2 = 39 C22
+
+2N 
+
+> N−1
+
+X
+
+> k=0
+
+(αk − 1) 2
+
+σ2
+
+> k
+
+, (92) 
+
+C0 = KL( μ0∥π) + 13 γ
+
+4(1 − (1 − p)β) E[∥∇ f (x0) − g0∥2], (93) 
+
+and C0, C 1, C 2 are positive constants. Furthermore, let 
+
+γ =
+
+ dσ2
+
+> m
+
+N 2L2
+
+> π
+
+1/3
+
+, p = 1 − β =
+
+ d2L2
+
+> π
+
+σ4
+
+> m
+
+N
+
+1/3
+
+, b =
+
+l 1
+
+> p
+
+m
+
+, where σm = max {σ, 1}, (94) 
+
+and let the initial parameters satisfy σ0 ≥ σmin , εσ0 > 0, α0 ≥ 1, and σmin > 0 is the minimum noise level. Then, the time-averaged law ¯μN γ := 1
+
+> N γ
+
+R N γ  
+
+> 0
+
+μt dt satisfies FI(¯ μN γ ∥π) ≤ ε with O
+
+ σ2 
+
+> mL2
+> πd2
+> ε3
+
+
+
+iterations and O(1) gradient computations per iteration. Proof. Similar to the proof in Appendix B.4.1, we start by using Lemma 1, 
+
+ddt KL( μt∥π) ≤ − 34 FI( μt∥π) + 3 L2 
+
+> π
+
+∆k + 3 e2 
+
+> k
+
++ 3( σkC + εσk + ( αk − 1) Cσ −1 
+
+> k
+
+)2. (95) 40 From the analysis of Theorem 3 in Appendix B.3.4, we have the upper bound (57) on e2
+
+> k
+
+e2 
+
+> k
+
+≤ − 11 − (1 − p)β (e2 
+
+> k+1
+
+− e2
+
+> k
+
+) + 2(1 − p)L2
+
+> π
+
+1 − (1 − p)β ∆k +
+
+h pb + 2(1 − p)(1 − β)2i σ2
+
+1 − (1 − p)β , (96) where we use the fact that Lπ ≥ Lf . Plugging this bound into (95), we obtain 
+
+ddt KL( μt∥π) ≤ − 34 FI( μt∥π) + 3 L2 
+
+> π
+
+ϕ(p, β )∆ k − 31 − (1 − p)β (e2 
+
+> k+1
+
+− e2
+
+> k
+
+)+ 3σ2
+
+1 − (1 − p)β
+
+h pb + 2(1 − p)(1 − β)2i
+
++ 3( σkC + εσk + ( αk − 1) Cσ −1 
+
+> k
+
+)2, (97) where ϕ(p, β ) := 1 + 2(1 −p)1−(1 −p)β . Following the analysis of Theorem 4a, from the inequality (84), we have the following upper bound on ∆k:
+
+∆k ≤ 4γ2e2 
+
+> k
+
++ 4 γ2E ∥∇ log π(xt|y)∥2 + 4 γ2L2 
+
+> π
+
+∆k + 4 γ2(σkC1 + εσk + ( αk − 1) C2σ−1 
+
+> k
+
+)2 + 2 γd. 
+
+Plugging in the upper (96) on e2 
+
+> k
+
+and rearranging the terms yields 
+
+ 1 − 4γ2L2 
+
+> π
+
+ϕ(p, γ ) ∆k ≤ − 4γ2
+
+1 − (1 − p)β (e2 
+
+> k+1
+
+− e2
+
+> k
+
+) + 4γ2σ2
+
+1 − (1 − p)β
+
+h pb + 2(1 − p)(1 − β)2i
+
++ 4 γ2E ∥∇ log π(xt|y)∥2 + 4 γ2(σkC + εσk + ( αk − 1) Cσ −1 
+
+> k
+
+)2 + 2 γd. 
+
+Setting γ such that γ ≤ 1
+
+> Lπ
+
+√52 ϕ(p,β ) and dividing both sides by 12 13 , we obtain 
+
+∆k ≤ − 13 γ2
+
+3 (1 − (1 − p)β) (e2 
+
+> k+1
+
+− e2
+
+> k
+
+) + 13 γ2σ2
+
+3 (1 − (1 − p)β)
+
+h pb + 2(1 − p)(1 − β)2i
+
++ 13 3 γ2E ∥∇ log p(xt|y)∥2 + 13 3 γ2(σkC + εσk + ( αk − 1) Cσ −1 
+
+> k
+
+)2 + 13 6 γd. (98) Substituting the above bound into (97), applying Lemma 2, using the step-size condition γ ≤ 1
+
+> Lπ
+
+√52 ϕ(p,β ) , and using Young’s inequality for (σkC1 + εσk + ( αk − 1) C2σ−1 
+
+> k
+
+)2 yields 
+
+ddt KL( μt∥π) ≤ − 12 FI( μt∥π) − 3 + 13 γ2L2 
+
+> π
+
+ϕ(p, β )1 − (1 − p)β (e2 
+
+> k+1
+
+− e2
+
+> k
+
+) + 13 σ2
+
+4(1 − (1 − p)β)
+
+h pb + 2(1 − p)(1 − β)2i
+
++ 21 2 γL 2 
+
+> π
+
+dϕ (p, β ) + 39 4 σ2
+
+> k
+
+C21 + 39 4 ε2 
+
+> σk
+
++ 39 C22 (αk − 1) 2
+
+4σ2
+
+> k
+
+(99) Next, we define Lk := KL( μkγ ∥π) + γ
+
+ 3+13 γ2L2 
+
+> πϕ(p,β )
+
+ 
+
+> 1−(1 −p)β
+
+e2 
+
+> k
+
+and integrate both sides over t ∈ [kγ, (k + 1) γ].
+
+Lk+1 − L k ≤ − 12
+
+Z (k+1) γkγ 
+
+FI( μt∥π) dt + 13 γσ 2
+
+4 1 − (1 − p)βh pb + 2(1 − p)(1 − β)2i
+
++ 21 2 γL 2 
+
+> π
+
+dϕ (p, β )+ 39 4 γσ 2
+
+> k
+
+C21 + 39 4 γε 2 
+
+> σk
+
++ 39 γC 22 (αk − 1) 2
+
+4σ2
+
+> k
+
+.
+
+Note that L0 = KL( μ0∥π) + γ
+
+ 3+13 γ2L2 
+
+> πϕ(p,β )
+
+ 
+
+> 1−(1 −p)β
+
+e20 ≤ KL( μ0∥π) + 13 γe 20 
+
+> 4(1 −(1 −p)β)
+
+=: C0. Then, iterating the above inequality for k = 0 , 1, . . . , N − 1, multiplying both sides by 2 
+
+> N γ
+
+, and rearranging the terms, we obtain 
+
+1
+
+N γ 
+
+Z N γ 
+
+> 0
+
+FI( μt∥π) dt ≤ 2C0
+
+N γ + 13 σ2
+
+2 1 − (1 − p)βh pb + (1 − p)(1 − β)2i
+
++ 63 γL 2 
+
+> π
+
+d
+
+1 − (1 − p)β + ¯ σ2 + ¯ ε2 
+
+> σ
+
++ ¯ α2,
+
+where ¯σ2, ¯ε2 
+
+> σ
+
+, and ¯α2 are defined in (92). Note that we use ϕ(p, β ) = 1 + 2(1 −p)1−(1 −p)β ≤ 1 + 21−(1 −p)β ≤ 31−(1 −p)β . Since the definitions of γ, p, b, and σm are the same as in Theorem 3, we have 
+
+FI(¯ μN γ ∥π) ≤ 1
+
+N γ 
+
+Z N γ 
+
+> 0
+
+FI( μt∥π) dt ≤ O σ2/3 
+
+> m
+
+L2/3 
+
+> π
+
+d2/3
+
+N 1/3
+
+!
+
++ ¯ σ2 + ¯ ε2 
+
+> σ
+
++ ¯ α2.
+
+41 We note that the annealing and noise schedules (12), and the SGM estimation error are the same as in Theorem 4a. Therefore, we set σmin = O(N −1/6) and follow the same steps in (88), (89), and (90) to obtain 
+
+¯σ2 + ¯ ε2 
+
+> σ
+
++ ¯ α2 = O
+
+ 1
+
+N 1/3
+
+
+
+.
+
+This implies FI(¯ μN γ ∥π) = O
+
+ σ2/3   
+
+> mL2/3
+> πd2/3
+> N1/3
+
+
+
+, that is, FI(¯ μN γ ∥π) ≤ ε is achieved with O
+
+ σ2 
+
+> mL2
+> πd2
+> ε3
+
+
+
+iterations and 
+
+pb + (1 − p) = O(1) gradient computations per iteration. □
+
+B.4.3 Proof of Corollary B.2 (ML-VRLD with SGM prior: squared TV distance convergence) Corollary B.2 (ML-VRLD with SGM prior: squared TV distance convergence) Let π(x|y) ∝ ℓ(y|x)p(x) be the posterior with the likelihood ℓ(y|x) ∝ e−f (x) and the prior p(x) ∝ e−h(x). Suppose that the likelihood potential f satisfies Assumptions 1 and 2 with Lipschitz constant Lf , the prior potential h satisfies Assumption 1 and 5 with Lipschitz constant 
+
+Lh, the target posterior π satisfies Assumption 3, and the SGM satisfies Assumption 6 with decreasing error εσk = O(k−1/2)
+
+for k ≥ 1. Define Lπ = Lf + Lh. Let (μt)t≥0 denote the law of the interpolation generated by (11) with the estimator (8) and the schedules defined in (12). For any step size γ ∈
+
+
+
+0, 1
+
+> Lπ
+
+√52 ϕ(p,β )
+
+
+
+, where ϕ(p, β ) = 1 + 4(1 −p)β2 
+
+> (1 −(1 −p)β)2
+
+, and for any 
+
+N ≥ 1, it holds that 
+
+∥¯μN γ − π∥2TV ≤ 8C0CPI 
+
+N γ + 52 CPI σ2
+
+ pb + (1 − p)(1 − β)2
+
+1 − (1 − p)β
+
+
+
++ 336 CPI γL 2 
+
+> π
+
+d
+
+(1 − (1 − p)β)2 + 4 CPI (¯ σ2 + ¯ ε2 
+
+> σ
+
++ ¯ α2), (100) 
+
+where 
+
+¯σ2 = 39 C21
+
+2N
+
+> N
+
+X
+
+> k=1
+
+σ2
+
+> k
+
+, ¯ε2 
+
+> σ
+
+= 39 2N
+
+> N
+
+X
+
+> k=1
+
+ε2 
+
+> σk
+
+, ¯α2 = 39 C22
+
+2N
+
+> N
+
+X
+
+> k=1
+
+(αk − 1) 2
+
+σ2
+
+> k
+
+, (101) 
+
+C0 = KL( μ0∥π) + 13 γ
+
+2(1 − (1 − p)β) E[∥∇ f (x0) − g0∥2], (102) 
+
+and CPI , C 0, C 1, C 2 are positive constants. Furthermore, let 
+
+γ =
+
+√dσmN 3/4√Lπ
+
+, p = 1 − β =
+
+√Lπ dσmN 1/4 , b =
+
+l 1
+
+> p
+
+m
+
+, where σm = max {σ, 1},
+
+and let the initial parameters satisfy σ0 ≥ σmin , εσ0 > 0, α0 ≥ 1, and σmin > 0 is the minimum noise level. Then, the time-averaged law ¯μN γ = 1
+
+> N γ
+
+R N γ  
+
+> 0
+
+μt dt achieves ∥μN γ − π∥2TV ≤ ε with O
+
+ σ4 
+
+> mC4PI L2
+> πd2
+> ε4
+
+
+
+iterations and O(1) gradient computations per iteration. Proof. Applying Theorem 4 from Appendix B.4.1, we obtain 
+
+FI(¯ μN γ ∥π) ≤ 1
+
+N γ 
+
+Z N γ 
+
+> 0
+
+FI( μt|| π) dt ≤ 2C0
+
+N γ + 13 σ2
+
+  pb + (1 − p)(1 − β)2
+
+(1 − (1 − p)β) + 84 γL 2 
+
+> π
+
+d
+
+(1 − (1 − p)β)2 + ¯ σ2 + ¯ ε2 
+
+> σ
+
++ ¯ α2.
+
+Using Lemma 3 with Assumption 3 yields 
+
+∥¯μN γ − π∥2TV ≤ 8C0CPI 
+
+N γ + 52 CPI σ2
+
+  pb + (1 − p)(1 − β)2
+
+(1 − (1 − p)β) + 336 CPI γL 2 
+
+> π
+
+d
+
+(1 − (1 − p)β)2 + 4 CPI 
+
+ ¯σ2 + ¯ ε2 
+
+> σ
+
++ ¯ α2
+
+Using the definitions of γ, p, β, σk, αk, and εσk from the corollary statement and following the steps in Appendix B.4.1, we prove that an iteration complexity of order O
+
+ C4PI σ4 
+
+> mL2
+> πd2
+> ε4
+
+
+
+suffices to ensure ∥¯μN γ − π∥2TV ≤ ε with pb + (1 − p) = O(1) 
+
+gradient computations per iteration. □
+
+B.4.4 Proof of Corollary B.3 (SL-VRLD with SGM prior: squared TV distance convergence) Corollary B.3 (SL-VRLD with SGM prior: squared TV distance convergence) Let π(x|y) ∝ ℓ(y|x)p(x) be the posterior with the likelihood ℓ(y|x) ∝ e−f (x) and the prior p(x) ∝ e−h(x). Suppose that the likelihood potential f satisfies 
+
+42 Assumptions 2 and 4 with Lipschitz constant Lf , the prior potential h satisfies Assumption 1 and 5 with Lipschitz constant 
+
+Lh, the target posterior π satisfies Assumption 3, and the SGM satisfies Assumption 6 with decreasing error εσk = O(k−1/2)
+
+for k ≥ 1. Define Lπ = Lf + Lh. Let (μt)t≥0 denote the law of the interpolation generated by (11) with the estimator (10) and the schedules defined in (12). For any step size γ ∈
+
+
+
+0, 1
+
+> Lπ
+
+√52 ϕ(p,β )
+
+
+
+, where ϕ(p, β ) = 1 + 2(1 −p)1−(1 −p)β , and for any 
+
+N ≥ 1, it holds that 
+
+∥μN γ − π∥2TV ≤ 8C0CPI 
+
+N γ + 26 CPI σ2
+
+ pb + 2(1 − p)(1 − β)2
+
+1 − (1 − p)β
+
+
+
++ 252 CPI γL 2 
+
+> π
+
+d
+
+1 − (1 − p)β + 4 CPI (¯ σ2 + ¯ ε2 
+
+> σ
+
++ ¯ α2), (103) 
+
+where 
+
+¯σ2 = 39 C21
+
+2N
+
+> N
+
+X
+
+> k=1
+
+σ2
+
+> k
+
+, ¯ε2 
+
+> σ
+
+= 39 2N
+
+> N
+
+X
+
+> k=1
+
+ε2 
+
+> σk
+
+, ¯α2 = 39 C22
+
+2N
+
+> N
+
+X
+
+> k=1
+
+(αk − 1) 2
+
+σ2
+
+> k
+
+, (104) 
+
+C0 = KL( μ0∥π) + 13 γ
+
+4(1 − (1 − p)β)2 E[∥∇ f (x0) − g0∥2], (105) 
+
+and CPI , C 0, C 1, C 2 are positive constants. Furthermore, let 
+
+γ =
+
+ dσ2
+
+> m
+
+N 2L2
+
+> π
+
+1/3
+
+, p = 1 − β =
+
+ d2L2
+
+> π
+
+σ4
+
+> m
+
+N
+
+1/3
+
+, b =
+
+l 1
+
+> p
+
+m
+
+, where σm = max {σ, 1},
+
+and let the initial parameters satisfy σ0 ≥ σmin , εσ0 > 0, α0 ≥ 1, and σmin > 0 is the minimum noise level. Then, the time-averaged law ¯μN γ = 1
+
+> N γ
+
+R N γ  
+
+> 0
+
+μt dt achieves ∥¯μN γ − π∥2TV ≤ ε with O
+
+ C3PI σ2 
+
+> mL2
+> πd2
+> ε3
+
+
+
+iterations and O(1) gradient computations per iteration. Proof. Applying Theorem 4b, we have 
+
+FI(¯ μN γ ∥π) ≤ 1
+
+N γ 
+
+Z N γ 
+
+> 0
+
+FI( μt|| π) dt ≤ 2C0
+
+N γ + 13 σ2   pb + 2(1 − p)(1 − β)2
+
+2(1 − (1 − p)β) + 63 γL 2 
+
+> π
+
+d
+
+1 − (1 − p)β + ¯ σ2 + ¯ ε2 
+
+> σ
+
++ ¯ α2.
+
+Using Lemma 3 with Assumption 3 yields 
+
+∥¯μN γ − π∥2TV ≤ 8C0CPI 
+
+N γ + 26 CPI σ2   pb + (1 − p)(1 − β)2
+
+(1 − (1 − p)β) + 252 CPI γL 2 
+
+> π
+
+d
+
+1 − (1 − p)β + 4 CPI 
+
+ ¯σ2 + ¯ ε2 
+
+> σ
+
++ ¯ α2
+
+Using the definitions of γ, p, β, σk, αk, and εσk from the corollary statement and following the steps in Appendix B.4.2, we prove that an iteration complexity of order O
+
+ C3PI σ2 
+
+> mL2
+> πd2
+> ε3
+
+
+
+suffices to ensure ∥¯μN γ − π∥2TV ≤ ε with pb + (1 − p) = O(1) 
+
+gradient computations per iteration. □
+
+B.4.5 Proof of Theorem 5 a (ML-VRLD with SGM prior: weak convergence) Theorem 5 a (ML-VRLD with SGM prior: weak convergence) Let π(x|y) ∝ ℓ(y|x)p(x) be the posterior with the likelihood ℓ(y|x) ∝ e−f (x) and the prior p(x) ∝ e−h(x). Suppose that the likelihood potential f satisfies Assumptions 1 and 2 with Lipschitz constant Lf , the prior potential h satisfies Assumption 1 and 5 with Lipschitz constant Lh, and the SGM satisfies Assumption 6 with decreasing error εσk = O(k−1/2) for k ≥ 1. Let (μt)t≥0 denote the law of the interpolation generated by (11) with the estimator (8) and the schedules defined in (12). Define the time-varying parameters as follows 
+
+γk = Cγ
+
+k3/2 , pk = Cp
+
+k1/2 , bk =
+
+ 1
+
+pk
+
+
+
+, ∀k ≥ 1,
+
+where 0 < C p < 1 and Cγ > 0 are numerical constants. Then, the time-averaged law ¯μτn = 1
+
+> τn
+
+R τn 
+
+> 0
+
+μt dt , where 
+
+τn = Pnk=1 γk converges weakly to π.Proof. We use the same definitions of the time-varying parameters and the definition of the estimator gk as in the proof of Theorem 4 a. Therefore, the time-varying step sizes (γk)k≥1 satisfy the step-size condition of Theorem 4 a, that is 
+
+γ ∈ 0, 1
+
+Lπ
+
+p52 ϕ(p, β )
+
+#
+
+, where ϕ(pk, β k) = 1 + 4(1 − p)β2
+
+(1 − (1 − p)β)2
+
+43 for all k ≥ 1. Thus, we can use the same upper bound in (87) (Theorem 4 a; Appendix B.4.1) with time-varying parameters, and integrate both sides of the inequality over [τn−1, τ n] to get 
+
+KL( μτn ∥π) − KL( μτn−1 ∥π) ≤ − 12
+
+Z τn
+
+> τn−1
+
+FI( μt∥π) dt − γn
+
+ 6 + 26 γ2
+
+> n
+
+L2 
+
+> π
+
+ϕ(pn, β n)
+
+1 − (1 − pn)βn
+
+(e2 
+
+> n
+
+− e2
+
+> n−1
+
+)+ 13 γnσ2
+
+2 1 − (1 − pn)βn
+
+ p2 
+
+> n
+
++ (1 − pn)(1 − βn)2 + 21 2 γ2
+
+> n
+
+L2 
+
+> π
+
+dϕ (pn, β n)+ 39 4 γnσ2
+
+> n
+
+C21 + 39 4 γnε2 
+
+> σn
+
++ 39 C22 γn(αn − 1) 2
+
+4σ2
+
+> n
+
+,
+
+where we use pk 
+
+> bk
+
+≤ p2
+
+> k
+
+. Iterating the above bound, we obtain 
+
+KL( μτn ∥π) − KL( μ0∥π) ≤ − 12
+
+Z τn
+
+> 0
+
+FI( μt∥π) dt −
+
+> n
+
+X
+
+> k=1
+
+γk
+
+ 6 + 26 γ2 
+
+> k
+
+L2 
+
+> π
+
+ϕ(pk, β k)
+
+1 − (1 − pk)βk
+
+(e2 
+
+> k
+
+− e2
+
+> k−1
+
+)
+
+| {z }
+
+> (I)
+
++ 13 σ2
+
+2
+
+> n
+
+X
+
+> k=1
+
+γk
+
+ p2 
+
+> k
+
++ (1 − pk)(1 − βk)2
+
+1 − (1 − pk)βk
+
+| {z }
+
+> (II)
+
++ 21 2 L2 
+
+> π
+
+d
+
+> n
+
+X
+
+> k=1
+
+γ2 
+
+> k
+
+ϕ(pk, β k)
+
+| {z }
+
+> (III)
+
++ 39 C2
+
+4
+
+> n
+
+X
+
+> k=1
+
+γkσ2
+
+> k
+
+| {z }
+
+> (IV)
+
++ 39 4
+
+> n
+
+X
+
+> k=1
+
+γkε2
+
+> σk
+
+| {z }
+
+> (V)
+
++ 39 C2
+
+4
+
+> n
+
+X
+
+> k=1
+
+γk(αk − 1) 2
+
+σ2
+
+> k
+
+| {z }
+
+> (VI)
+
+(106) In the proof of Theorem 2 (Appendix B.3.3), we show that with the same parameters for γk, pk, βk, bk, we have 
+
+(I) = −
+
+> n
+
+X
+
+> k=1
+
+γk
+
+ 6 + 26 γ2 
+
+> k
+
+L2 
+
+> π
+
+ϕ(pk, β k)
+
+1 − (1 − pk)βk
+
+(e2 
+
+> k
+
+− e2
+
+> k−1
+
+) ≤ γ1
+
+ 6 + 26 γ21 L2 
+
+> π
+
+ϕ(p1, β 1)
+
+1 − (1 − p1)β1
+
+| {z }
+
+> =: c1
+
+e20 < ∞ (107) 
+
+(II) ≤ 13 σ2
+
+2
+
+> ∞
+
+X
+
+> k=1
+
+γk
+
+ p2 
+
+> k
+
++ (1 − pk)(1 − βk)2
+
+1 − (1 − pk)βk
+
+
+
+=: S2 < ∞ (108) 
+
+(III) ≤ 21 L2 
+
+> π
+
+d
+
+2
+
+> ∞
+
+X
+
+> k=1
+
+γ2 
+
+> k
+
+ϕ(pk, β k) =: S3 < ∞ (109) We next show that the terms (IV) , (V) , and (VI) are uniformly bounded. To bound the bias due to the noise schedule (σk)nk=1 , we proceed as 
+
+(IV) = 39 C21
+
+4
+
+> n
+
+X
+
+> k=1
+
+γkσ2 
+
+> k
+
+≤ 39 C21 Cγ
+
+4
+
+> ∞
+
+X
+
+> k=1
+
+max {σ20 ρ2k 
+
+> 2
+
+, σ 2min }
+
+k3/2(∗)
+
+≤ 39 C21 Cγ σ20
+
+4
+
+> ∞
+
+X
+
+> k=1
+
+k−3/2 =: A1 < ∞, (110) where we use the facts that σ0 ≥ σmin and ρ2 < 1 to get (∗).To bound the bias due to the SGM estimation errors (εσk )nk=1 , we use the fact that εσk ≤ Cε 
+
+> k−1/2
+
+for some Cε > 0 and proceed as 
+
+(V) = 39 4
+
+> n
+
+X
+
+> k=1
+
+γkε2 
+
+> σk
+
+≤ 39 4
+
+> ∞
+
+X
+
+> k=1
+
+γkε2 
+
+> σk
+
+≤ 39 Cγ C2
+
+> ε
+
+4
+
+> ∞
+
+X
+
+> k=1
+
+k−5/2 =: A2 < ∞. (111) To bound the bias due to the annealing schedule (σk)nk=1 , we follow 
+
+(VI) = 39 C22
+
+4
+
+> n
+
+X
+
+> k=1
+
+γk(αk − 1) 2
+
+σ2
+
+> k
+
+= 39 C22 Cγ
+
+4
+
+> ∞
+
+X
+
+> k=1
+
+1
+
+k 32
+
+max {α0ρk 
+
+> 1
+
+− 1, 0}2
+
+max {σ20 ρ2k 
+
+> 2
+
+, σ 2min }
+
+> (∗)
+
+≤ 39 C22 Cγ (α20 − 1) 4σ2min 
+
+> ∞
+
+X
+
+> k=1
+
+k−3/2 =: A3 < ∞, (112) 44 where we use the facts that α0 ≥ 1, ρ1 < 1, ρ2 < 1, and σ0 ≥ σmin > 0 to obtain (∗). Plugging the bounds (I) –(VI) 
+
+into (106), using Jensen’s inequality with the convexity of FI( ·∥ π), and rearranging the terms, we have 
+
+FI(¯ μτn ∥π) ≤ 1
+
+τn
+
+Z τn
+
+> 0
+
+FI( μt∥π) dt ≤ 2KL( μ0∥π)
+
+τn
+
++ 2  c1e20 + S2 + S3 + A1 + A2 + A3
+
+
+
+τn
+
+, (113) where ¯μτn := 1
+
+> τn
+
+R τn 
+
+> 0
+
+μt dt is the time-averaged law up to time τn = Pnk=1 γk.On the other hand, if t ∈ [τn, τ n+1 ], integrating (87) (Theorem 4 a; Appendix B.4.1) from τn to t and removing the negative Fisher information term yields 
+
+KL( μt∥π) ≤ KL( μτn ∥π) − (t − τn) 6 + 26 γ2
+
+> n+1
+
+L2 
+
+> π
+
+ϕ(pn+1 , β n+1 )
+
+1 − (1 − pn+1 )βn+1 
+
+(e2 
+
+> n+1
+
+− e2
+
+> n
+
+)+ 13( t − τn)σ2
+
+2 1 − (1 − pn+1 )βn+1 
+
+ pn+1 
+
+bn+1 
+
++ (1 − pn+1 )(1 − βn+1 )2
+
+
+
++ 21 2 (t − τn)γn+1 L2 
+
+> π
+
+dϕ (pn+1 , β n+1 ) + 39 4 (t − τn)σ2
+
+> n+1
+
+C21 + 39 4 (t − τn)ε2
+
+> σn+1
+
++ 39 C22 (t − τn)( αn+1 − 1) 2
+
+4σ2
+
+> n+1
+
+≤ KL( μτn ∥π) − (t − τn) 6 + 26 γ2
+
+> n+1
+
+L2 
+
+> π
+
+ϕ(pn+1 , β n+1 )
+
+1 − (1 − pn+1 )βn+1 
+
+(e2 
+
+> n+1
+
+− e2
+
+> n
+
+) + S2 + S3 + A1 + A2 + A3
+
+≤ KL( μ0∥π) −
+
+> n
+
+X
+
+> k=1
+
+ck(e2 
+
+> k
+
+− e2
+
+> k−1
+
+) − c′
+
+> n+1
+
+(e2 
+
+> n+1
+
+− e2
+
+> n
+
+) + 2 S2 + 2 S3 + 2 A1 + 2 A2 + 2 A3, (114) where 
+
+c′ 
+
+> n+1
+
+:= (t − τn) 6 + 26 γ2
+
+> n+1
+
+L2 
+
+> π
+
+ϕ(pn+1 , β n+1 )
+
+1 − (1 − pn+1 )βn+1 
+
+.
+
+As shown in (42) (Theorem 2; Appendix B.3.3), (ck)nk=1 is a nonnegative and decreasing sequence. We note that cn >cn+1 ≥ c′
+
+> n+1
+
+. Using this property, we have 
+
+−
+
+> n
+
+X
+
+> k=1
+
+ck(e2 
+
+> k
+
+− e2
+
+> k−1
+
+) − c′
+
+> n+1
+
+(e2 
+
+> n+1
+
+− e2
+
+> n
+
+) = c1e20 +
+
+> n−1
+
+X
+
+> k=1
+
+(ck+1 − ck)e2 
+
+> k
+
++ ( c′ 
+
+> n+1
+
+− cn)e2 
+
+> n
+
+− c′
+
+> n+1
+
+en+1 ≤ c1e20.
+
+Applying this upper bound to (114), we obtain 
+
+KL( μt∥π) ≤ KL( μ0∥π) + c1e20 + 2 S2 + 2 S3 + 2 A1 + 2 A2 + 2 A3 < ∞.
+
+Note that the initial mean estimation error e20 = E[∥g0 − ∇ f (x0)∥2] is bounded. This proves KL( μt∥π) is uniformly bounded for all t ≥ 0. By the convexity of the KL divergence, it implies that {KL(¯ μτn ∥π) | n ∈ N} is uniformly bounded as well. Since the sub-level sets of KL( ·∥ π) are weakly compact, (¯ μτn )n∈N is tight. To show that ¯μτn → π weakly, it is sufficient to show that every cluster point of (¯ μτn )n∈N is equal to π.Consider a subsequence of (¯ μτn )n∈N converging to some limit ¯μ. As n → ∞ , τn → ∞ , and by (113) we also have 
+
+FI(¯ μτn ∥π) → 0. Therefore, this is still true along the subsequence. By the weak lower semi-continuity of the Fisher information along the subsequence, FI(¯ μτn ∥π) = 0 . That implies; for ψ := dμ dπ , we have √ψ ∈ dom( E) and E(√ψ) = 0 ,where E denotes the Dirichlet energy (i.e. the squared L2(π)-norm of the gradient; see Section 3 in Balasubramanian et al. [2022]). Since ∇f is Lipschitz by Assumption 1, then π has a continuous and strictly positive density on Rd, so E(√ψ) = 0 
+
+implies that ψ is a constant π with probability 1. Hence, ¯μ = π as n → ∞ . □
+
+B.4.6 Proof of Theorem 5 b (SL-VRLD with SGM prior: weak convergence) Theorem 5 b (SL-VRLD with SGM prior: weak convergence) Let π(x|y) ∝ ℓ(y|x)p(x) be the posterior with the likelihood ℓ(y|x) ∝ e−f (x) and the prior p(x) ∝ e−h(x). Suppose that the likelihood potential f satisfies Assumptions 2 and 4 with Lipschitz constant Lf , the prior potential h satisfies Assumption 1 and 5 with Lipschitz constant Lh, and the SGM 
+
+45 satisfies Assumption 6 with decreasing error εσk = O(k−1/2) for k ≥ 1. Let (μt)t≥0 denote the law of the interpolation generated by (11) with the estimator (10) and the schedules defined in (12). Define the time-varying parameters as follows 
+
+γk = Cγ
+
+k3/2 , pk = Cp
+
+k1/2 , bk =
+
+ 1
+
+pk
+
+
+
+, ∀k ≥ 1,
+
+where 0 < C p < 1 and Cγ > 0 are numerical constants. Then, the time-averaged law ¯μτn = 1
+
+> τn
+
+R τn 
+
+> 0
+
+μt dt , where 
+
+τn = Pnk=1 γk converges weakly to π.Proof. We use the same definitions of the time-varying parameters and the definition of the estimator gk as in the proof of Theorem 4 b. Therefore, the time-varying step sizes (γk)k≥1 satisfy the step-size condition of Theorem 4 b, that is 
+
+γ ∈ 0, 1
+
+Lπ
+
+p52 ϕ(p, β )
+
+#
+
+, where ϕ(pk, β k) = 1 + 4(1 − p)β2
+
+(1 − (1 − p)β)2
+
+for all k ≥ 1.Thus, we can use the same upper bound in (99) (Theorem 4 b; Appendix B.4.2), integrate both sides of the inequality over [τn−1, τ n] to get 
+
+KL( μτn ∥π) − KL( μτn−1 ∥π) ≤ − 12
+
+Z τn
+
+> τn−1
+
+FI( μt∥π) dt − γn
+
+ 3 + 13 γ2
+
+> n
+
+L2 
+
+> π
+
+ϕ(pn, β n)
+
+1 − (1 − pn)βn
+
+(e2 
+
+> n
+
+− e2
+
+> n−1
+
+)+ 13 γnσ2
+
+4 1 − (1 − pn)βn
+
+ p2 
+
+> n
+
++ 2(1 − pn)(1 − βn)2 + 21 2 γ2
+
+> n
+
+L2 
+
+> π
+
+dϕ (pn, β n)+ 39 4 γnσ2
+
+> n
+
+C21 + 39 4 γnε2 
+
+> σn
+
++ 39 C22 γn(αn − 1) 2
+
+4σ2
+
+> n
+
+,
+
+where we use the fact that bn ≥ 1/p n. Iterating the above bound, we obtain 
+
+KL( μτn ∥π) − KL( μ0∥π) ≤ − 12
+
+Z τn
+
+> 0
+
+FI( μt∥π) dt −
+
+> n
+
+X
+
+> k=1
+
+γk
+
+ 3 + 13 γ2 
+
+> k
+
+L2 
+
+> π
+
+ϕ(pk, β k)
+
+1 − (1 − pk)βk
+
+(e2 
+
+> k
+
+− e2
+
+> k−1
+
+)
+
+| {z }
+
+> (I)
+
++ 13 σ2
+
+4
+
+> n
+
+X
+
+> k=1
+
+γk
+
+ p2 
+
+> k
+
++ 2(1 − pk)(1 − βk)2
+
+1 − (1 − pk)βk
+
+| {z }
+
+> (II)
+
++ 21 2 L2 
+
+> π
+
+d
+
+> n
+
+X
+
+> k=1
+
+γ2 
+
+> k
+
+ϕ(pk, β k)
+
+| {z }
+
+> (III)
+
++ 39 C21
+
+4
+
+> n
+
+X
+
+> k=1
+
+γkσ2
+
+> k
+
+| {z }
+
+> (IV)
+
++ 39 4
+
+> n
+
+X
+
+> k=1
+
+γkε2
+
+> σk
+
+| {z }
+
+> (V)
+
++ 39 C22
+
+4
+
+> n
+
+X
+
+> k=1
+
+γk(αk − 1) 2
+
+σ2
+
+> k
+
+| {z }
+
+> (VI)
+
+. (115) In the proof of Theorem B.1 (Appendix B.3.6), we show that with the same parameters for γk, p k, β k, b k, we have 
+
+(I) = −
+
+> n
+
+X
+
+> k=1
+
+γk
+
+ 3 + 13 γ2 
+
+> k
+
+L2 
+
+> π
+
+ϕ(pk, β k)
+
+1 − (1 − pk)βk
+
+(e2 
+
+> k
+
+− e2
+
+> k−1
+
+) ≤ γ1
+
+ 3 + 13 γ21 L2 
+
+> π
+
+ϕ(p1, β 1)
+
+1 − (1 − p1)β1
+
+| {z }
+
+> =: c1
+
+e20 < ∞ (116) 
+
+(II) ≤ 13 σ2
+
+4
+
+> ∞
+
+X
+
+> k=1
+
+γk
+
+ p2 
+
+> k
+
++ (1 − pk)(1 − βk)2
+
+1 − (1 − pk)βk
+
+
+
+=: S2 < ∞ (117) 
+
+(III) ≤ 21 L2 
+
+> π
+
+d
+
+2
+
+> ∞
+
+X
+
+> k=1
+
+γ2 
+
+> k
+
+ϕ(pk, β k) =: S3 < ∞ (118) Following the same steps in the proof of Theorem 5 a (Appendix B.4.5), we have 
+
+(IV) = 39 C21
+
+4
+
+> n
+
+X
+
+> k=1
+
+γkσ2 
+
+> k
+
+= 39 C21 Cγ σ20
+
+4
+
+> ∞
+
+X
+
+> k=1
+
+k−3/2 =: A1 < ∞, (119) 46 (V) = 39 4
+
+> n
+
+X
+
+> k=1
+
+γkε2 
+
+> σk
+
+≤ 39 Cγ C2
+
+> ε
+
+4
+
+> ∞
+
+X
+
+> k=1
+
+k−5/2 =: A2 < ∞, (120) 
+
+(VI) = 39 C22
+
+4
+
+> ∞
+
+X
+
+> k=1
+
+γk(αk − 1) 2
+
+σ2
+
+> k
+
+≤ 39 C22 Cγ (α20 − 1) 4σ2min 
+
+> ∞
+
+X
+
+> k=1
+
+k−3/2 =: A3 < ∞, (121) Applying these upper bounds to (115), dropping the negative KL term, and multiplying both sides by 2/τ n, we obtain 
+
+FI(¯ μτn ∥π) ≤ 1
+
+τn
+
+Z τn
+
+> 0
+
+FI( μt∥π) dt ≤ 2KL( μ0∥π)
+
+τn
+
++ 2  c1e20 + S2 + S3 + A1 + A2 + A3
+
+
+
+τn
+
+, (122) where ¯μτn := 1
+
+> τn
+
+R τn 
+
+> 0
+
+μt dt and τn := Pnk=1 γk.On the other hand, if t ∈ [τn, τ n+1 ], integrating (99) (Theorem 4 b; Appendix B.4.2) from τn to t and removing the negative Fisher information term yields 
+
+KL( μt∥π) ≤ KL( μτn ∥π) − (t − τn) 3 + 13 γ2
+
+> n+1
+
+L2 
+
+> π
+
+ϕ(pn+1 , β n+1 )
+
+1 − (1 − pn+1 )βn+1 
+
+(e2 
+
+> n+1
+
+− e2
+
+> n
+
+)+ 13( t − τn)σ2
+
+4 1 − (1 − pn+1 )βn+1 
+
+ p2 
+
+> n+1
+
++ 2(1 − pn+1 )(1 − βn+1 )2
+
++ 21 2 (t − τn)γn+1 L2 
+
+> π
+
+dϕ (pn+1 , β n+1 ) + 39 4 (t − τn)σ2
+
+> n+1
+
+C21 + 39 4 (t − τn)ε2
+
+> σn+1
+
++ 39 C22 (t − τn)( αn+1 − 1) 2
+
+4σ2
+
+> n+1
+
+.
+
+≤ KL( μτn ∥π) − (t − τn) 3 + 13 γ2
+
+> n+1
+
+L2 
+
+> π
+
+ϕ(pn+1 , β n+1 )
+
+1 − (1 − pn+1 )βn+1 
+
+(e2 
+
+> n+1
+
+− e2
+
+> n
+
+) + S2 + S3 + A1 + A2 + A3
+
+≤ KL( μ0∥π) −
+
+> n
+
+X
+
+> k=1
+
+ck(e2 
+
+> k
+
+− e2
+
+> k−1
+
+) − c′
+
+> n+1
+
+(e2 
+
+> n+1
+
+− e2
+
+> n
+
+) + 2 S2 + 2 S3 + 2 A1 + 2 A2 + 2 A3, (123) where 
+
+c′ 
+
+> n+1
+
+:= (t − τn) 3 + 13 γ2
+
+> n+1
+
+L2 
+
+> π
+
+ϕ(pn+1 , β n+1 )
+
+1 − (1 − pn+1 )βn+1 
+
+.
+
+As shown in (72) (Theorem B.1; Appendix B.3.6), (ck)nk=1 is a nonnegative and decreasing sequence. We note that 
+
+cn > c n+1 ≥ c′
+
+> n+1
+
+. Using this property, we have 
+
+−
+
+> n
+
+X
+
+> k=1
+
+ck(e2 
+
+> k
+
+− c2
+
+> k−1
+
+) − c′
+
+> n+1
+
+(e2 
+
+> n+1
+
+− e2
+
+> n
+
+) = c1e20 +
+
+> n−1
+
+X
+
+> k=1
+
+(ck+1 − ck)e2 
+
+> k
+
++ ( c′ 
+
+> n+1
+
+− cn)e2 
+
+> n
+
+− c′
+
+> n+1
+
+en+1 ≤ c1e20.
+
+Applying this upper bound to (123), we obtain 
+
+KL( μt∥π) ≤ KL( μ0∥π) + c1e20 + 2 S2 + 2 S3 + 2 A1 + 2 A2 + 2 A3 < ∞.
+
+Thus {KL( μt∥π) | t ≥ 0} is bounded. Following the same argument as in the final part of the proof of Theorem 5 a
+
+(Appendix B.4.6), we conclude that ¯μτn converges weakly to π as n → ∞ . □
+
+## C ADDITIONAL EXPERIMENTAL DETAILS 
+
+We provide additional experimental details and results for the synthetic experiments, MRI reconstruction, and sparse-angle CT reconstruction tasks. Our code is available on the project page. 47 Figure 4: Visualization of samples generated by SGLD, ML-VRLD, and SL-VRLD on the 8-mode Gaussian mixture model at different numbers of gradient computations. Rows correspond to different methods and batch sizes, while columns show the evolution of the generated samples as the total number of gradient computations increases. The final column displays ground truth samples from the target GMM. SGLD with a fixed batch size ( b = 6 ) remains trapped in a suboptimal distribution and fails to recover the target modes. Increasing the SGLD batch size to b = 72 enables convergence to the target distribution, but requires substantially more memory. In contrast, both ML-VRLD and SL-VRLD recover all target modes using the same fixed batch size ( b = 6 ), demonstrating their ability to operate under fixed memory requirements. Moreover, SL-VRLD reaches the target distribution with fewer gradient computations, consistent with its improved theoretical convergence rate. 
+
+C.1 SYNTHETIC EXPERIMENTS 
+
+In this section, we give additional results and experimental details on our synthetic experiments, including computation of Fisher information, hyperparameters, and preprocessing steps. 
+
+Numerical Validation with GMM Sampling. We run SGLD, ML-VRLD and SL-VRLD estimators with the following iterations: 
+
+x(k+1) γ = xkγ − γgk + p2γZk, (124) where Zk ∼ N (0 , I ) and gk is defined according to the corresponding estimator definitions. All algorithms are run for 
+
+N = 2000 iterations to generate 10 4 samples, which are initialized over [−50 , 50] 2 grid by sampling from a uniform distribution of U([ −50 , 50] 2). We use a step size of γ = 0 .02 for SGLD and SL-VRLD, and γ = 0 .0015 for ML-VRLD. We set the momentum parameter to β = 0 .9 for ML-VRLD and β = 0 .999 for SL-VRLD, and set p = 0 for both algorithm. We note that jointly using β < 1 and p < 1 does not improve the theoretical convergence rates. These parameters are combined primarily to provide a unified analysis of the underlying algorithms. Therefore, in our experiments, we set p = 0 . We approximately compute the relative Fisher information at each iteration. Specifically, we use kernel density estimation (KDE) to estimate the sampling distribution from the generated samples of each algorithm and then evaluate the relative Fisher information with respect to the target GMM using ground truth samples. In our experiments, we assign equal probability 1/8 to each mixture component and simulate stochastic gradients by adding Gaussian noise with standard deviation 30 to the gradient of the potential function. In addition to the quantitative results in Fig. 1, Fig. 4 provides a qualitative comparison between the samples generated by each algorithm and ground truth samples drawn from the target GMM. SGLD with batch size b = 6 fails to accurately 48 Figure 5: Results on a synthetic 2D inverse problem showing FI convergence for each method with batch size b = 6 . SGLD converges to a suboptimal solution, whereas ML-VRLD and SL-VRLD attain lower FI, consistent with our theory. recover the target distribution, exhibiting a more dispersed sample distribution than the ground truth. This behavior is consistent with the O(Ldσ 2/ε ) batch size requirement of SGLD, which necessitates larger batch sizes to attain higher accuracy. Indeed, increasing the SGLD batch size to b = 72 enables recovery of the target distribution. In contrast, both ML-VRLD and SL-VRLD closely match the ground truth distribution while operating with the same fixed batch size ( b = 6 ), highlighting their ability to achieve convergence under fixed memory requirements. Moreover, SL-VRLD reaches the target distribution with fewer gradient computations than SGLD, consistent with their respective computational complexities of 
+
+O(L2d2σ2/ε 3) and O(L3d3σ2/ε 3).
+
+Numerical Validation with Compressed Sensing. We run SGLD, ML-VRLD and SL-VRLD estimators with the following iterations: 
+
+x(k+1) γ = xkγ − γ(gk + αk∇hσk (xkγ )) + p2γZk, (125) where Zk ∼ N (0 , I ) and gk is defined according to the estimator definition. We use the following annealing schedule defined in (12): 
+
+αk := max {α0ρk 
+
+> 1
+
+, 1} and σk := max {σ0ρk 
+
+> 2
+
+, σ min }, (126) for k ∈ { 0, . . . , N }, where α0, σ 0 > 0 are initial values, σmin > 0 is the minimum smoothing level, and ρ1, ρ 2 ∈ (0 , 1) are decay rates. We recall that we consider a 2D Gaussian mixture prior for p(x), thus ∇hσk (xkγ ) is analytically tractable by the following formula 
+
+pσk (x) := 
+
+Z
+
+> Rd
+
+p(z)N (x|z, σ 2
+
+> k
+
+I), (127) where pσk (x) ∝ e−hσk (x). In our experiments, we set σ0 = 10 , α0 = 10 , ρ2 = 0 .975 , σmin = 0 , and define ρk 
+
+> 1
+
+:= σ2
+
+> k
+
+.To simulate SGM approximation error, we assume ∥S θ (x, σ k) + ∇hσk (x)∥ ≤ εσk and perturb the ground-truth score 
+
+−∇ hσk (x) with additive Gaussian noise, i.e., −∇ hσk (x) + εerr , εerr ∼ N (0 , I ), followed by element-wise clipping of the noise to a maximum magnitude of εmax = 2 .5. We consider a linear inverse problem y = Ax + n with AWGN 
+
+n ∼ N (0 , I ). The measurement operator A ∈ R1×2 is constructed by sampling its entries independently from U(−1, 1) ,followed by normalization with respect to its Frobenius norm. We run each method (i.e. SGLD, ML-VRLD, and SL-VRLD) with 1000 sample points initialized according to a uniform distribution U([ −50 , 50] 2) over [−50 , 50] 2 grid and run for 
+
+N = 1600 iterations. Moreover, we add synthetic AWGN with standard deviation σ = 10 .0 to the likelihood score gradient to simulate stochastic gradient estimates. To estimate the Fisher information at each iteration, we fit a two-component Gaussian mixture model (GMM) to the generated samples, thereby obtaining a parametric approximation of the underlying distribution of samples. This fitted density enables evaluation of the probability at any point on a predefined grid over 
+
+[−50 , 50] 2. Then, for each intermediate sample distribution, we compute the Fisher information for each unit area. The total sum over the grid gives the approximate relative Fisher information. For SGLD, ML-VRLD (p = 0) , and SL-VRLD (p = 0) , we use a batch size of b = 6 and a step size of γ = 0 .01 . The momentum parameter is set to β = 0 .9 for ML-VRLD (p = 0) and β = 0 .99 for SL-VRLD (p = 0) . For ML-VRLD (β = 1 ) and SL-VRLD ( β = 1 ), we use large and small batch sizes of 8 and 5, respectively, with large batch size computation probability p = 0 .4, and set the step size to γ = 0 .004 . This yields an expected batch size of 6. We intentionally use different 49 Figure 6: Results on a synthetic inverse problem used for statistical validation, where the posterior mean and variance are known in closed form. ML-VRLD and SL-VRLD yield more accurate variance estimates than SGLD under both the β = 1 
+
+and p = 0 configurations, whereas SGLD produces samples with substantially inflated variance. step sizes for SL-VRLD and ML-VRLD, as ML-VRLD exhibits improved performance with a smaller step size, consistent with the theoretical results in Theorems 1 and 3. Each method is evaluated over 20 independent realizations of A, with all other settings fixed. The mean performance across runs is reported in Fig. ?? .
+
+Statistical Validation. We validate that ML-VRLD and SL-VRLD can estimate the posterior statistics more accurately than SGLD under the same batch size. We construct a unimodal Gaussian prior by using the sample statistics of female images in CelebA [Liu et al., 2018]. Each image is downscaled to 32 × 32 and normalized to [−1, 1] . The measurement operator A ∈ R115 ×1024 is linear, with entries sampled independently from N (0 , 0.01) . The measurement noise in (4) is modeled as n ∼ N (0 , 0.01) . Similar to our numerical experiments, we use the exact smoothed score ∇hσk (x) with the following annealing schedule parameters: α0 = 1 , σ0 = 1 , and σmin = 0 .015 . For each method, 1000 initial samples are drawn uniformly from the hypercube [−50 , 50] 1024 , i.e., x0 ∼ U ([ −50 , 50] 1024 ), and each algorithm is run for N = 5000 
+
+iterations. To simulate stochastic gradients within a mini-batch, we add AWGN with standard deviation σ = 30 .0 to the likelihood score. Although Fig. 2 reports results for the setting p = 0 , we also conduct experiments with β = 1 and present those results in Fig. 6. For SGLD, ML-VRLD (p = 0) , and SL-VRLD (p = 0) , we use a batch size of b = 6 and a step size of γ = 4 × 10 −4.For ML-VRLD and SL-VRLD with β = 1 , we use large and small batch sizes bL = 8 and bS = 5 , respectively, with large batch size computation probability p = 0 .4, yielding an expected batch size of Ep[b] = 6 . The step size is set to γ = 10 −4.As shown in Fig. 6, SGLD produces samples with significantly higher variance than the ground truth variance. ML-VRLD and SL-VRLD substantially reduce this variance, with SL-VRLD achieving the closest match to the ground-truth posterior variance under both the β = 1 and p = 0 configurations, highlighting the effectiveness of the variance-reduction mechanism. 
+
+C.2 ACCELERATED PARALLEL MRI RECONSTRUCTION 
+
+We consider a multi-coil MRI reconstruction task with a radial subsampling pattern. The inverse problem is defined as 
+
+y =
+
+> K
+
+X
+
+> i=1
+
+P F S ix + n, (128) where Ai := P F S i denotes the measurement operator corresponding to the i-th coil. Here, P is a diagonal subsampling matrix, F denotes the Fourier transform matrix, and Si represents the receiver coil sensitivity map. We set n ∼ N (0 , σ 2
+
+> n
+
+I)
+
+such that the input signal-to-noise ratio (SNR) corresponds to 40 dB. Then the likelihood is p(y|x) = N (Ax , σ 2
+
+> n
+
+I), so the score of the likelihood at kth iteration is 
+
+∇f (xkγ ) = − 1
+
+σ2
+
+> n
+> K
+
+X
+
+> i=1
+
+AHi
+
+y −
+
+> K
+
+X
+
+> j=1
+
+Aj xkγ 
+
+ , (129) 50 Table 3: Peak GPU memory consumption (GB) per iteration for generating a single sample for each method. Lower values indicate better memory efficiency. All results were obtained from a single A100 NVIDIA GPU. 
+
+MRI CT Method Accel. = 8× Accel. = 12 × 360 views 180 views TV 0.38 0.38 1.6 0.81 RED 0.71 0.71 1.96 1.16 PnP-FISTA 0.71 0.71 1.96 1.16 DPS 2.53 2.53 3.76 2.96 PnP-DM 0.71 0.71 1.96 1.16 SGLD 0.71 0.71 1.68 1.15 ML-VRLD 0.71 0.71 1.68 1.15 SL-VRLD 0.71 0.71 1.68 1.15 where AH denotes the Hermitian adjoint (conjugate transpose) of A. In our experiments, for all methods, we sample a subset of coils ξk ⊂ { 1, . . . , K } with |ξk| = b. Then, an unbiased mini-batch stochastic gradient estimate is given by 
+
+∇f (xkγ , ξ k) = − Kbσ 2
+
+> n
+
+X
+
+> i∈ξk
+
+AHi (yi − Aixkγ ) , (130) where yi denotes the measurements from the i-th coil, and ξk ⊂ { 1, . . . , K } is a uniformly sampled subset of size b, i.e., 
+
+P(ξk = S) = 1
+
+ Kb
+
+ , ∀S ⊂ { 1, . . . , K }, |S| = b. (131) We conduct our experiments with two different acceleration factors R ∈ { 8, 12 }, representing highly undersampled regimes used in fast and volumetric MRI acquisitions. We synthesize the multiple coils by using sigpy.mri.birdcage_maps 
+
+function from SigPy [Ong and Lustig, 2019]. We compare ML-VRLD and SL-VRLD against SGLD, used as a stochastic gradient baseline, as well as a diverse set of competing approaches spanning diffusion-based, denoiser-based, and classical regularization frameworks. Specifically, we include DPS, PnP-DM, PnP-FISTA, RED, and TV as representative state-of-the-art baselines. We use brain MRI data from the fastMRI dataset [Zbontar et al., 2019] to train the denoiser and diffusion models used in the baseline methods, and to construct the test set. The training and test sets consist of 70,684 and 100 slices, respectively, where each slice has a shape of 256 × 256 . For ML-VRLD, SL-VRLD, and SGLD methods, we use the annealing schedule defined in (12) with the following hyperparameters: α0 = 10 4, σ0 = 348 , ρ2 = 0 .99 , σmin = 0 .01 ,and define ρk 
+
+> 1
+
+:= σ2
+
+> k
+
+. These hyperparameters are selected based on dataset-specific characteristics, following the guidelines provided in [Song and Ermon, 2020]. We adopt these parameters from [Song and Ermon, 2020, Sun et al., 2024]. In our experiments, we fix p = 0 for both ML-VRLD and SL-VRLD, and tune the step size γ and momentum parameter β using 
+
+Optuna , based on performance evaluated on a validation set of 5 samples. Specifically, for an acceleration factor of 8,we set the step sizes for SGLD, ML-VRLD, and SL-VRLD to γ = 5 × 10 −6, γ = 7 .787 × 10 −6, and γ = 1 .83 × 10 −5,respectively. The corresponding momentum parameters for ML-VRLD and SL-VRLD are β = 0 .318 and β = 0 .155 .For an acceleration factor of 12 , the step sizes are γ = 5 × 10 −6, γ = 7 .899 × 10 −6, and γ = 3 .452 × 10 −5 for SGLD, ML-VRLD, and SL-VRLD, respectively, with corresponding momentum parameters β = 0 .208 and β = 0 .922 for ML-VRLD and SL-VRLD. For each posterior sampling method, we generate 5 samples by using batch size of b = 32 coils at each iteration and report the mean sample results. Furthermore, we implement the denoiser-based methods and TV regularization using DeepInverse [Tachella et al., 2025]. For the training and evaluation of DPS and PnP-DM, we use 
+
+InverseBench [Zheng et al., 2025]. Visual and quantitative results are presented in Fig. 3 and Table 2, respectively. “‘latex 
+
+C.3 SPARSE-ANGLE CT RECONSTRUCTION 
+
+We study sparse-angle CT reconstruction, where the goal is to recover high-quality images from a restricted set of projection views. The limited angular coverage renders the problem ill-posed due to incomplete sampling. We simulate parallel-beam CT 51 measurements using 360 and 180 projection views, each with 258 detector elements. The forward operator A is implemented via deepinv.physics.Tomography from the DeepInverse package. Additional details regarding the acquisition geometry and the implementation of the measurement operator are provided in the DeepInverse documentation. To state the inverse problem formally, let x ∈ Rd denote the unknown CT image and let R ∈ R(KM )×N denote the full discrete Radon (parallel-beam) projection operator over M projection views and K detector elements per view. We assume R is stacked by views 
+
+R =
+
+
+
+R1
+
+R2
+
+...
+
+RM
+
+ , Rm ∈ RK×N . (132) Thus the full sinogram is Rx ∈ RKM . To define the sparse-angle sampling operator, let ξk ⊂ { 1, . . . , M } denote the index set of measured views at the k-th iteration, where |ξk| = b ≪ M , and b denotes the batch size. The measured vies are selected according to a uniform distribution given as 
+
+P(ξk = S) = 1
+
+ Mb
+
+ for every S ⊂ { 1, . . . , M }, |S| = b, (133) and the view-selection matrix Pξ ∈ { 0, 1}b×M is defined by 
+
+(Pξk )i,m =
+
+(
+
+1, m = ωi,
+
+0, otherwise , where ξk = {ω1, . . . , ω b}. (134) Then the sampling operator for projection views is 
+
+Sξk := Pξk ⊗ IK ∈ { 0, 1}(Kb )×(KM ), (135) where ⊗ denotes the Kronecker product and Ik is the K × Kidentity matrix. Then the sparse-angle measurement operator is 
+
+A := Sξk R ∈ R(Kb )×d. (136) We consider the linear inverse problem in (4) with AWGN n ∼ N (0 , σ 2
+
+> n
+
+I). Thus the likelihood is given as p(y|x) = 
+
+N (Ax , σ 2
+
+> n
+
+I) and the likelihood score at step k is given as 
+
+∇f (xkγ ) = − 1
+
+σ2
+
+> n
+
+AT (y − Ax ). (137) In our experiments, we use mini-batch stochastic gradient estimates so we consider the following decompositions of A and 
+
+y:
+
+A =
+
+
+
+A1
+
+...
+
+AM
+
+ and y =
+
+
+
+y1
+
+...
+
+yM
+
+ , (138) where Ai ∈ RK×d and yi ∈ RK . Then the likelihood score becomes a sum 
+
+∇f (xkγ ) = − 1
+
+σ2
+
+> n
+> M
+
+X
+
+> i=1
+
+ATi (yi − Aix). (139) Hence, given a mini-batch views ξk ⊂ { 1, . . . , M } with |ξk| = b, sampled uniformly at random, we obtain an unbiased stochastic gradient estiamte 
+
+∇f (xkγ , ξ k) = − Mbσ 2
+
+> n
+
+X
+
+> i∈ξk
+
+ATi (yi − Aix). (140) In our experiments, we use this formulation for mini-batch stochastic likelihood score estimates. Moreover, we adopt the same baselines as in the MRI experiments, except that zero-filled reconstruction is replaced by filtered back-projection (FBP) with a Ramp filter, which is more suitable for CT reconstruction. For all methods, we consider two batch sizes: 60 views out of 360 and 30 views out of 180 projection views, respectively. We use abdominal CT scans downscaled to 256 × 256 from 52 the 2DeteCT dataset [Kiss et al., 2023] for our training and test sets. The training set consists of 4,500 slices and is used to train: (i) the denoiser for RED and PnP-FISTA, (ii) the diffusion model for DPS and PnP-DM, and (iii) the SGM for SGLD, ML-VRLD, and SL-VRLD. All methods are evaluated on 100 slices and mean of 5 samples are reported for each posterior sampling algorithm. We use the same annealing schedule and parameters in MRI reconstruction experiments. For ML-VRLD and SL-VRLD, we use the configuration with p = 0 and optimize the step size γ and momentum parameter β
+
+using Optuna over 5 samples as a validation set. Specifically, for total number of projection views 360, we set the step sizes for SGLD, ML-VRLD, and SL-VRLD, to γ = 5 .76 × 10 −6, γ = 1 .11 × 10 −5, and γ = 1 .35 × 10 −5, respectively. The corresponding momentum parameters for ML-VRLD and SL-VRLD are β = 0 .583 and β = 0 .774 . For the experiments with total number of projection views 180, we set the step sizes for SGLD, ML-VRLD, and SL-VRLD, to γ = 5 .16 × 10 −6,
+
+γ = 2 .56 × 10 −5, and γ = 1 .7 × 10 −5, respectively. The corresponding momentum parameters are for ML-VRLD and SL-VRLD are β = 0 .41 and β = 0 .988 . We use the same implementations of baseline methods in MRI experiments. Visual and quantitative results are presented in Fig. 3 and Table 2. The implementations of SGLD, ML-VRLD, and SL-VRLD are provided in the supplementary material, along with representative test cases to facilitate reproducibility. 53

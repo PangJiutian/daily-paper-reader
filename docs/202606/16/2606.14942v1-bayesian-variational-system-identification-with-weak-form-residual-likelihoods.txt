@@ -1,0 +1,3302 @@
+Title: Bayesian Variational System Identification with Weak-Form Residual Likelihoods
+
+URL Source: https://arxiv.org/pdf/2606.14942v1
+
+Published Time: Tue, 16 Jun 2026 00:19:06 GMT
+
+Number of Pages: 53
+
+Markdown Content:
+# Bayesian Variational System Identification with Weak-Form Residual Likelihoods 
+
+Chengyang Huang a,c , Siddhartha Srivastava b, Krishna Garikipati c, Xun Huan a
+
+> aDepartment of Mechanical Engineering, University of Michigan, Ann Arbor, MI 48109, United States
+> bDepartment of Aerospace Engineering, Auburn University, Auburn, AL 36849, United States
+> cDepartment of Aerospace and Mechanical Engineering, University of Southern California, Los Angeles, CA 90089, United States
+
+Abstract 
+
+We consider system identification for discovering parameterized operators in governing par-tial differential equations (PDEs) from noisy spatiotemporal data. Building on variational system identification (VSI), which identifies PDEs through Galerkin weak-form residuals, we develop a Bayesian VSI (B-VSI) framework for operator selection, parameter estima-tion, and uncertainty quantification. The central idea is to define the likelihood directly in weak-form residual space by propagating observation uncertainty through the weak-form residual map. The resulting likelihood captures heteroscedastic and correlated residual errors while avoiding repeated forward PDE solves during inference. For efficient computation, we use lagged-covariance updates that yield generalized least-squares estimates and conjugate posterior approximations when applicable, together with gradient-based and particle-based methods for more general priors and posterior structures. Model-form uncertainty is handled through sequential operator elimination guided by a residual-space Bayesian information cri-terion. We demonstrate the framework on state-linear and nonlinear PDEs, including the Fokker–Planck equation and a two-field Cahn–Hilliard equation. The results show that B-VSI accurately recovers active operators and coefficients from noisy data, improves robust-ness relative to classical VSI, and provides posterior uncertainty estimates for coefficients and derived physical quantities. 
+
+Keywords: uncertainty quantification, equation discovery, model selection, finite element method, Fokker–Planck equation, Cahn–Hilliard equation 
+
+2020 MSC: 65M32, 62F15, 93B30, 65M60, 35R30 
+
+1. Introduction 
+
+Understanding and predicting the behavior of complex physical systems fundamentally relies on identifying the governing equations—often in the form of partial differential equa-tions (PDEs)—that encode the underlying physical principles [1]. The task of identifying both the structure and parameters of these governing equations directly from observational data is commonly referred to as system identification (SI) [1, 2]. A broad class of SI approaches formulates the problem as PDE-constrained optimiza-tion [3]. In this setting, parameters are estimated by minimizing the discrepancy between 
+
+> arXiv:2606.14942v1 [cs.CE] 12 Jun 2026
+
+observational data and simulated system states subject to the governing PDE. The dominant computational cost typically arises from repeated forward PDE solves, for example by finite element or finite volume methods, because model-data comparisons are performed directly in the solution space. When gradient-based inference is required, additional sensitivity or adjoint calculations may further increase the computational burden. An alternative class of methods identifies governing equations through residuals evalu-ated directly on observational data. Sparse Identification of Nonlinear Dynamical Systems (SINDy) and its variants [4, 5] bypass full forward solves by applying candidate differential operators to the observed data and solving the resulting sparse regression problem. From this perspective, PDE-constrained optimization assesses candidate models through the qual-ity of their simulated solutions, whereas SINDy-type methods assess how well the observed data satisfy the proposed governing equations themselves. Building on this residual-based viewpoint, Variational System Identification (VSI) 1 [6, 7, 8] and weak-form SINDy [9] employ weak formulations of the governing PDEs rather than operating in strong form. The weak form shifts differentiation onto test functions, improving robustness to noisy data while retaining the sparsity-promoting structure central to SINDy-like methods. Residual-based SI methods are especially attractive for PDE discovery because they identify governing terms directly from data without repeatedly simulating candidate models. VSI and weak-form SINDy retain this computational advantage while improving robustness to noisy data through the weak formulation. Although weak-form residual methods provide an efficient route to PDE discovery, their standard formulations are typically deterministic. Measurement noise, limited data, and model-form ambiguity can significantly affect the selected governing equation, the estimated coefficients, and derived physical quantities. Bayesian uncertainty quantification (UQ) pro-vides a systematic probabilistic framework for representing and updating these uncertain-ties [10, 11]. In this framework, prior distributions encode initial beliefs about model struc-ture and parameters, which are updated to posterior distributions through Bayes’ rule as data become available. The likelihood function plays a central role in this update by quantifying the probability of the observed data under candidate models and parameters. Recent work has incorporated UQ into several SI frameworks. Ensemble-SINDy adopts a frequentist approach, using bagging to generate model ensembles and quantify uncertainty through empirical coefficient distributions [12]. UQ-SINDy uses sparsity-promoting priors and Markov chain Monte Carlo (MCMC) sampling to characterize parametric and struc-tural uncertainty in ordinary differential equation models [13]. Bayesian Dynamical System Identification extends SINDy within a Bayesian regression framework and quantifies param-eter uncertainty using variational Bayesian inference [14]. Bayesian-SINDy incorporates likelihood modeling through noise propagation, enabling efficient UQ without exhaustive sampling [15]. Bayesian Identification of Nonlinear Dynamics jointly quantifies uncertainty in both governing-equation terms and model coefficients using a MCMC method [16]. Be-yond sparse equation discovery, Bayesian neural PDE methods have been developed for for-ward, inverse, and operator-learning problems. Examples include Bayesian-PINNs [17, 18]   
+
+> 1Throughout this paper, Variational System Identification denotes the weak-form SI framework and is distinct from variational inference used for posterior approximation.
+
+2and variational Bayes DeepONet [19]. These approaches provide complementary tools for uncertainty-aware PDE inference, but they rely on learned state or operator representations rather than the weak-form residual regression structure used by VSI. These developments still leave a methodological gap between weak-form residual-based SI and Bayesian UQ. Classical VSI and weak-form SINDy preserve computational efficiency by evaluating candidate equations directly on observed data, but their residual-minimization formulations do not specify how measurement noise propagates through the weak form. Consequently, they do not directly provide posterior distributions over PDE coefficients or derived physical quantities, and their operator-selection procedures are not derived from an explicit residual-space likelihood. Conversely, many Bayesian SI and inverse-problem for-mulations define likelihoods through discrepancies between simulated and observed states, which typically requires repeated forward PDE solves and, for gradient-based methods, sen-sitivity or adjoint calculations. A Bayesian extension of VSI therefore requires more than placing priors on regression coefficients. It requires a likelihood defined directly in weak-form residual space, induced by the observational noise model, and tractable enough to preserve the computational advantages of VSI. Constructing such a residual-space likelihood is nontrivial because weak-form residuals are not generally independent and identically distributed (i.i.d.), even when the observational noise is i.i.d. In a Galerkin weak formulation, each residual entry depends on weighted combi-nations of neighboring nodal values and on the candidate differential operators. As a result, measurement noise propagates through the weak-form residual map to produce residual un-certainties that are generally heteroscedastic and correlated. Accounting for this covariance structure yields a principled residual-space likelihood, replacing the implicit isotropic-error assumption underlying unweighted least-squares residual minimization. In this work, we address this gap by developing Bayesian Variational System Identification (B-VSI), a Bayesian extension of VSI based on weak-form PDE residual likelihoods. For a candidate model form, the proposed framework propagates observational uncertainty through the VSI residual map and constructs an explicit likelihood in residual space. This enables operator selection, parameter uncertainty quantification, and posterior predictive uncertainty without requiring repeated forward PDE solves during inference. The primary contributions of this work are as follows. 
+
+• We derive a weak-form residual likelihood by propagating observational uncertainty through the VSI residual map. This produces an explicit residual-space probabilistic model and avoids the repeated forward PDE solves required by solution-space likeli-hoods. 
+
+• We characterize the induced residual covariance and show that it captures heteroscedas-tic and correlated uncertainty arising from the weak-form discretization. 
+
+• We use the residual likelihood for residual-space model comparison and sequential operator selection, enabling uncertainty-aware identification of active PDE operators and their coefficients from noisy spatiotemporal data. 
+
+• We develop computational strategies for posterior inference, including an expectation-maximization (EM)-style lagged-covariance update for approximately conjugate set-3tings, gradient-based optimization for more general priors and likelihoods, and a hybrid strategy for non-Gaussian posterior approximation. 
+
+• We demonstrate the framework on a linear Fokker–Planck (FP) problem and a nonlin-ear two-field Cahn–Hilliard (CH) problem, including posterior predictive uncertainty in physically meaningful quantities such as the potential function and free-energy deriva-tives. The remainder of the paper is organized as follows. Section 2 reviews the Galerkin finite element method and the classical VSI framework. Section 3 presents the proposed B-VSI formulation, including residual-likelihood construction, posterior inference, model selection, and posterior predictive uncertainty. Section 4 demonstrates the method on both linear and nonlinear PDEs, specifically the FP and CH equations. Section 5 compares different likeli-hood formulations, analyzes computational complexity, and offers a Bayesian interpretation of classical VSI. Section 6 concludes with a summary of the main findings and contributions. 
+
+2. Preliminaries 
+
+We consider a class of time-dependent PDEs that are linear in an unknown coefficient vector but may be nonlinear in the state: 
+
+∂u (x, t )
+
+∂t − M  u(x, t )⊤θ = 0 , (1) where u(x, t ) : Ω × T → R is a real-valued state variable defined on the spatiotemporal domain Ω × T . The vector M(u) = [ F1(u), . . . , F dθ (u)] ⊤ denotes the active model form, whose entries are algebraic or differential operators acting on u. The vector θ = [ θ1, . . . , θ dθ ]⊤
+
+contains the corresponding coefficients. For example, the diffusion equation with a constant source term, 
+
+∂u ∂t − β−1∇2u − γ = 0 , (2) corresponds to M(u) = [ ∇2u, 1] ⊤ and θ = [ β−1, γ ]⊤. Throughout this work, u denotes the physical quantity of interest described by the governing PDE. In the examples in Sec. 4, u
+
+may represent the probability density function ( u ≡ p) in the FP equation or a concentration field ( u ≡ ci) in the CH equation. Although the notation in this section is written for a scalar state, the same construction extends to multi-field systems by stacking the residual equations for each state variable. 
+
+2.1. Galerkin finite element method 
+
+The Galerkin weak form of Eq. (1) is obtained by multiplying the strong form by a test function v(x) : Ω → R and integrating over the spatial domain Ω [20]: 
+
+Z
+
+> Ω
+
+v(x)
+
+∂u (x, t )
+
+∂t − M  u(x, t )⊤θ
+
+
+
+dx = 0 . (3) 4Let Ωh = Sne 
+
+> e=1
+
+Ωe denote a finite element mesh of Ω, where the interiors of distinct elements are disjoint. The mesh defines a finite-dimensional function space 
+
+Vh = span {Ni}ndof  
+
+> i=1
+
+, (4) where {Ni}ndof  
+
+> i=1
+
+are finite element shape functions and ndof is the total number of degrees of freedom. For standard nodal Lagrange elements, the degrees of freedom are associated with nodal locations {xi}ndof  
+
+> i=1
+
+.The finite element approximation of the state and the test function are written as 
+
+uh(x, t ) = 
+
+> ndof
+
+X
+
+> i=1
+
+ui(t)Ni(x), (5a) 
+
+vh(x) = 
+
+> ndof
+
+X
+
+> i=1
+
+viNi(x), (5b) where ui(t) are the time-dependent degrees of freedom of the approximate solution and 
+
+vi are arbitrary test-function coefficients. The shape functions Ni are typically piecewise polynomial functions with local support on elements adjacent to the corresponding degree of freedom. The trial and test spaces are chosen according to the differential order of the PDE and the prescribed boundary conditions. For second-order operators after integration by parts, an 
+
+H1(Ω) -conforming space is typically sufficient. Higher-order operators may require additional regularity or a discontinuous Galerkin treatment, as in the CH example in Sec. 4. Substituting Eq. (5) into Eq. (3) gives 
+
+Z
+
+> Ω
+> ndof
+
+X
+
+> i=1
+
+viNi(x)
+
+∂u h(x, t )
+
+∂t − M  uh(x, t )⊤θ
+
+
+
+dx = 0 . (6) After integration by parts where needed, application of boundary conditions, and use of the arbitrariness of the coefficients vi, the weak form yields one residual equation per degree of freedom: 
+
+ri(t; uh, θ) = 
+
+Z
+
+> Ω
+
+Ni
+
+∂u h
+
+∂t dx −
+
+> dθ
+
+X
+
+> j=1
+
+θj Fj (Ni, u h), i = 1 , . . . , n dof . (7) Here, Fj (Ni, u h) denotes the finite-dimensional weak-form contribution of the operator Fj (u)
+
+when tested against Ni, including any boundary terms that arise from integration by parts. For a forward simulation problem, an appropriate time discretization is added, and the Galerkin approximation is obtained by solving the residual equations. 
+
+2.2. Variational system identification 
+
+SI, formulated as an inverse problem, seeks to learn the PDE model form and its pa-rameters from observational data. VSI identifies the governing equation in weak form by selecting a subset of active operators M from a candidate dictionary χ and estimating their coefficients θ from a spatiotemporal dataset D [6, 8]. 5Let 
+
+D =
+
+n
+
+ˆu(k)
+
+ont
+
+> k=0
+
+, ˆu(k) =
+
+h
+
+ˆu(k)1 , . . . , ˆu(k)
+
+> ndof
+
+i⊤
+
+∈ Rndof , (8) denote measurements collected at times t(k) nt
+
+> k=0
+
+. The finite element mesh used to evaluate the weak form is chosen so that its degrees of freedom correspond to the measurement locations. If the measurement locations do not coincide with the finite element degrees of freedom, the data are first interpolated or projected onto the finite element space. At time 
+
+t(k), the measured field is represented as 
+
+ˆuh, (k)(x) = 
+
+> ndof
+
+X
+
+> j=1
+
+ˆu(k) 
+
+> j
+
+Nj (x). (9) For each time interval t(k−1) , t (k), with uniform step size ∆t = t(k) − t(k−1) , the residual equations in Eq. (7) are assembled into 
+
+r(k) = Ξ ˙u(k) − Ξ(k)θ, k = 1 , . . . , n t. (10) The vector Ξ ˙u(k) ∈ Rndof is the weak-form representation of the time-derivative term. Using a backward-difference approximation, 
+
+
+
+Ξ ˙u(k)
+
+> i
+
+=
+
+Z
+
+> Ω
+
+Nindof X
+
+> j=1
+
+ˆu(k) 
+
+> j
+
+− ˆu(k−1) 
+
+> j
+
+∆t Nj dx, i = 1 , . . . , n dof . (11) The matrix Ξ(k) ∈ Rndof ×dθ is assembled from the active model M ⊆ χ, with dθ = |M| . Its entries are 
+
+Ξ(k)
+
+
+
+> ij
+
+= Fj
+
+ Ni, ˆuh, (k), i = 1 , . . . , n dof , j = 1 , . . . , d θ. (12) For example, for M(u) = [ ∇2u, 1] ⊤ from Eq. (2), the basis matrix at time step k is 
+
+Ξ(k) =
+
+h
+
+Ξ∇2u(k)
+
+Ξconst( k)
+
+i
+
+, (13) where 
+
+Ξ∇2u(k)
+
+> i
+
+= F∇2u
+
+ Ni, ˆuh, (k), (14) 
+
+
+
+Ξconst( k)
+
+> i
+
+=
+
+Z
+
+> Ω
+
+Ni dx. (15) Further details on basis construction and the treatment of boundary conditions are provided in Sec. 4 and in [6, 8]. Stacking all time intervals gives 
+
+y =
+
+
+
+Ξ ˙u(1) 
+
+Ξ ˙u(2) 
+
+...
+
+Ξ ˙u(nt)
+
+ , X =
+
+
+
+Ξ(1) 
+
+Ξ(2) 
+
+...
+
+Ξ(nt)
+
+ , r = y − Xθ . (16) 6The classical VSI estimate is obtained by minimizing the unweighted residual norm: 
+
+θVSI = arg min 
+
+> θ
+
+∥ y − Xθ ∥22 . (17) When X⊤X is nonsingular, the least-squares solution is 
+
+θVSI =  X⊤X−1 X⊤y. (18) If X⊤X is singular or ill-conditioned, the Moore–Penrose pseudoinverse or a regularized least-squares formulation can be used instead. For computational efficiency, the normal-equation terms can be assembled without ex-plicitly forming the full stacked matrix X:
+
+X⊤X =
+
+> nt
+
+X
+
+> k=1
+
+Ξ(k)⊤Ξ(k), (19) 
+
+X⊤y =
+
+> nt
+
+X
+
+> k=1
+
+Ξ(k)⊤Ξ ˙u(k). (20) To mitigate overfitting, ℓ1- or ℓ2-norm regularization may be added to Eq. (17). Operator selection is commonly performed using a statistical criterion, such as the F-statistic, to assess the significance of candidate operators and construct a parsimonious governing model, following the procedure introduced by Wang et al. [6, 8]. The key computational feature of VSI is that all quantities in Eq. (10) are assembled directly from observational data. The method uses finite element shape functions to evaluate weak-form residuals, but it does not require solving the forward PDE for each candidate parameter vector θ.
+
+3. Bayesian Variational System Identification 
+
+3.1. Problem setup and Bayesian target 
+
+We now formulate B-VSI for noisy spatiotemporal measurements of a PDE-governed system. Using the notation introduced in Sec. 2.2, let 
+
+D =
+
+n
+
+ˆu(k)
+
+ont
+
+> k=0
+
+, ˆu(k) ∈ Rndof , (21) denote measurements collected at discrete times t(k) nt
+
+> k=0
+
+. The data are assumed to have been interpolated or projected onto the finite element space used to evaluate the weak-form residuals. Conditioned on a candidate model M and coefficient vector θ, let ¯u(k) 
+
+> θ,M
+
+∈ Rndof denote the model-induced noiseless state at time t(k), represented on the same spatial degrees of freedom as the data. This quantity plays the role of the forward-model prediction in a standard Bayesian inverse problem. The conditional observation model is 
+
+ˆu(k) = ¯u(k) 
+
+> θ,M
+
++ ϵ(k), k = 0 , . . . , n t, (22) 7where ϵ(k) denotes measurement noise. We assume that the measurement errors are inde-pendent across time levels and focus on the Gaussian model 
+
+ϵ(k) ∼ N 
+
+
+
+0, Σ(k)
+
+> u
+
+
+
+. (23) Equivalently, 
+
+ˆu(k) | θ, M ∼ N 
+
+
+
+¯u(k)
+
+> θ,M
+
+, Σ(k)
+
+> u
+
+
+
+. (24) The covariance Σ(k) 
+
+> u
+
+denotes observational noise covariance and may vary with time. The homoscedastic i.i.d. Gaussian noise model is recovered when Σ(k) 
+
+> u
+
+= σ2
+
+> u
+
+I for all k. In what follows, Σ(k) 
+
+> r
+
+denotes the covariance induced in the weak-form residuals. Model-form ambiguity is represented through a dictionary of candidate algebraic and differential operators, 
+
+χ = [ F1(u), F 2(u), . . . , F d(u)] ⊤ . (25) A candidate model M ⊆ χ is a subset of these operators. Its coefficient vector is denoted by θ ∈ Rdθ , where dθ = |M| . For a fixed candidate model M, the Bayesian target is the posterior distribution 
+
+p(θ | D , M) ∝ p(D | θ, M) p(θ | M ), (26) where p(θ | M ) is the prior and p(D | θ, M) is the likelihood. The omitted proportionality constant is the model evidence p(D | M ), which is discussed in Sec. 3.4 in the context of model comparison. The central modeling choice is the likelihood. In many Bayesian PDE inverse problems, the likelihood is defined in observation space by comparing measured states with forward-model predictions. Under Eq. (24), this gives the data-discrepancy likelihood 
+
+p(D | θ, M) = 
+
+> nt
+
+Y
+
+> k=0
+
+N
+
+
+
+ˆu(k); ¯u(k)
+
+> θ,M
+
+, Σ(k)
+
+> u
+
+
+
+. (27) Although natural, this likelihood requires computing ¯u(k) 
+
+> θ,M
+
+by solving the candidate PDE for each proposed θ and M. Gradient-based posterior inference also requires differentiating through the forward solver by sensitivity, adjoint, or automatic-differentiation calculations. A detailed comparison between this observation-space likelihood and the residual-space like-lihood proposed below is provided in Sec. 5.1. B-VSI instead uses the weak-form residual map introduced in Sec. 2.2. For a fixed model 
+
+M, define 
+
+rθ,M = Rθ,M(D), (28) where Rθ,M maps the observed fields to the weak-form PDE residuals associated with M and 
+
+θ. When the model is clear from context, we write rθ for compactness. For the coefficient-linear PDE form considered in this work, the residual can be written as 
+
+rθ = y(D) − X(D; M)θ, (29) 8where y and X are constructed from the weak-form time-derivative and candidate-operator terms following Eq. (16). The matrix X may depend nonlinearly on the observed fields when nonlinear operators are included in M.The model-induced trajectory ¯u(k) 
+
+> θ,M
+> nt
+> k=0
+
+satisfies the candidate weak-form equations for the same θ and M, up to the chosen temporal discretization and solver tolerance. Therefore, 
+
+Rθ,M
+
+n 
+
+¯u(k)
+
+> θ,M
+
+ont
+
+> k=0
+
+
+
+= 0. (30) Since the model-induced noiseless trajectory has zero weak-form residual, the residual eval-uated on the observed data arises from the measurement perturbations in Eq. (22); its distribution is therefore obtained by propagating those perturbations through Rθ,M. B-VSI uses this induced residual distribution as a surrogate likelihood, 
+
+pres (D | θ, M) := p(Rθ,M(D) | θ, M) = p(rθ,M | θ, M). (31) The corresponding residual-space posterior is 
+
+pres (θ | D , M) ∝ pres (D | θ, M) p(θ | M ). (32) For notational simplicity, we write this residual-space posterior as p(θ | D , M) in the re-mainder of the paper unless the observation-space likelihood is explicitly discussed. The remainder of this section follows the B-VSI workflow. Section 3.2 derives the weak-form residual likelihood for linear and nonlinear operators. Section 3.3 describes posterior inference for a fixed candidate model. Section 3.4 presents residual-space model comparison and sequential operator selection. Section 3.5 describes posterior predictive uncertainty for derived quantities of interest. Section 3.6 summarizes the complete B-VSI procedure. 
+
+3.2. Weak-form residual likelihood 
+
+We now derive the residual-space likelihood p(rθ,M | θ, M) introduced in Eq. (31). The goal is not to assign an ad hoc probability model to the weak-form residuals. Instead, we obtain the residual distribution by propagating the conditional observation model in Eq. (22) through the weak-form residual map Rθ,M.For a fixed candidate model M and coefficient vector θ, let 
+
+r(k) 
+
+> θ,M
+
+= R(k)
+
+> θ,M
+
+
+
+ˆu(k−1) , ˆu(k)
+
+
+
+, k = 1 , . . . , n t, (33) denote the weak-form residual over the time interval t(k−1) , t (k). When the model is clear from context, we write r(k) 
+
+> θ
+
+for compactness. The model-induced trajectory ¯u(k)
+
+> θ,M
+> nt
+> k=0
+
+satisfies the candidate weak-form equations for the same θ and M. Thus, 
+
+R(k)
+
+> θ,M
+
+
+
+¯u(k−1)  
+
+> θ,M
+
+, ¯u(k)
+
+> θ,M
+
+
+
+= 0, k = 1 , . . . , n t, (34) up to the chosen temporal discretization and solver tolerance. Under the observation model, the observed residual r(k) 
+
+> θ
+
+is therefore driven by the measurement perturbations ϵ(k−1) and 
+
+ϵ(k). The following subsections make this perturbation explicit and derive its induced co-variance. 9A Monte Carlo construction could be used by sampling observational data from Eq. (24) and evaluating the weak-form residual for each realization. This approach accommodates nonlinear residual maps and non-Gaussian observation models, but it yields an implicit residual distribution rather than an analytically evaluable density. For efficient posterior inference and model comparison, we instead construct explicit Gaussian residual likelihoods. For residual maps that are linear in the observed state, this propagation is exact under Gaussian observational noise. For nonlinear residual maps, we use a first-order local Gaus-sian approximation. Although the present framework focuses on Gaussian likelihoods, the underlying propagation methodology extends naturally to other distribution families that are closed under linear transformations, including the Student-t distribution and Gaussian mixture models. 
+
+3.2.1. Operators linear in the state 
+
+Consider an operator L ∈ χ that is linear in the state variable u. The corresponding weak-form basis vector can be written as a linear map of the nodal data, 
+
+ΞL = AL ˆu, (35) where AL ∈ Rndof ×ndof is the Galerkin matrix associated with L. Consistent with the weak-form notation in Eq. (7), its entries are 
+
+ALij = FL(Ni, N j ), i, j = 1 , . . . , n dof . (36) Equivalently, before integration by parts this expression takes the form R 
+
+> Ω
+
+NiL(Nj ) d x. The notation in Eq. (36) also includes boundary terms and sign changes introduced by integration by parts. Indeed, for a measured field ˆuh(x) = Pndof  
+
+> j=1
+
+ˆuj Nj (x), the i-th entry of the basis vector is 
+
+ΞLi = FL Ni,
+
+> ndof
+
+X
+
+> j=1
+
+ˆuj Nj
+
+!
+
+=
+
+> ndof
+
+X
+
+> j=1
+
+ˆuj FL(Ni, N j ) = ALi, : ˆu. (37) Let M ∈ Rndof ×ndof denote the mass matrix, 
+
+Mij =
+
+Z
+
+> Ω
+
+Ni(x)Nj (x) d x, (38) and define 
+
+B = 1∆tM . (39) Using the backward-difference approximation from Eq. (11), the weak-form time-derivative vector is 
+
+Ξ ˙u(k) = B
+
+
+
+ˆu(k) − ˆu(k−1) 
+
+
+
+. (40) Suppose first that all data-dependent candidate operators in M are linear in the state. Data-independent terms, such as constant source terms, may also be included. They enter 10 the residual through deterministic vectors and do not contribute to the residual covariance. The residual can then be written as 
+
+r(k) 
+
+> θ
+
+= Ξ ˙u(k) − Ξ(k)θ
+
+= B
+
+
+
+ˆu(k) − ˆu(k−1) 
+
+
+
+− X
+
+> Li∈M lin
+
+θiALi ˆu(k) − qθ
+
+= Kθ ˆu(k) − B ˆu(k−1) − qθ, (41) where 
+
+Kθ = B − X
+
+> Li∈M lin
+
+θiALi . (42) Here, Mlin denotes the set of candidate operators that are linear in u, and qθ collects any data-independent weak-form contributions. Conditioned on θ and M, the observations satisfy 
+
+ˆu(j) = ¯u(j) 
+
+> θ,M
+
++ ϵ(j), j = k − 1, k. (43) Substituting the conditional observation model into Eq. (41) gives 
+
+r(k) 
+
+> θ
+
+= Kθ
+
+
+
+¯u(k) 
+
+> θ,M
+
++ ϵ(k)
+
+
+
+− B
+
+
+
+¯u(k−1)  
+
+> θ,M
+
++ ϵ(k−1) 
+
+
+
+− qθ
+
+=
+
+h
+
+Kθ ¯u(k) 
+
+> θ,M
+
+− B ¯u(k−1)  
+
+> θ,M
+
+− qθ
+
+i
+
++ Kθϵ(k) − Bϵ (k−1) . (44) Because the model-induced trajectory satisfies the candidate weak-form residual equations for the same θ and M, the bracketed term vanishes. Hence, 
+
+r(k) 
+
+> θ
+
+= Kθϵ(k) − Bϵ (k−1) . (45) If the observational noise is Gaussian and independent across time levels, 
+
+ϵ(k) ∼ N 
+
+
+
+0, Σ(k)
+
+> u
+
+
+
+, (46) then the residual at time step k is Gaussian, 
+
+p
+
+
+
+r(k) 
+
+> θ
+
+| θ, M
+
+
+
+= N
+
+
+
+r(k) 
+
+> θ
+
+; 0, Σ(k)
+
+> r, θ
+
+
+
+, (47) with covariance 
+
+Σ(k) 
+
+> r, θ
+
+= KθΣ(k) 
+
+> u
+
+K⊤ 
+
+> θ
+
++ BΣ(k−1)  
+
+> u
+
+B⊤. (48) The residual covariance depends on θ through Kθ.11 3.2.2. Operators nonlinear in the state 
+
+When M contains operators that are nonlinear in the state, the weak-form residual remains linear in the previous time-step data through the backward-difference term, but it is generally nonlinear in the current time-step data. Let Mstate ⊆ M denote the operators whose weak-form basis vectors depend on the observed state. The residual can be written as 
+
+r(k) 
+
+> θ
+
+= Ξ ˙u(k) − Ξ(k)θ
+
+= B
+
+
+
+ˆu(k) − ˆu(k−1) 
+
+
+
+− X
+
+> Fi∈M state
+
+θiΞFi
+
+
+
+ˆu(k)
+
+
+
+− qθ, (49) where ΞFi  ˆu(k) denotes the weak-form basis vector associated with Fi at time t(k). As before, qθ collects data-independent weak-form contributions. The exact distribution of r(k) 
+
+> θ
+
+is generally non-Gaussian because Eq. (49) is a nonlinear transformation of the observed data. We approximate this distribution using a first-order Taylor expansion of the residual map with respect to the current state. The current-time sensitivity is 
+
+J(k) 
+
+> θ
+
+= ∂R(k)
+
+> θ,M
+
+∂u(k)
+
+> u(k)=ˆu(k)
+
+= B − X
+
+> Fi∈M state
+
+θiJ(k) 
+
+> Fi
+
+, (50) where 
+
+J(k) 
+
+> Fi
+
+= ∂ΞFi (u)
+
+∂u u=ˆu(k)
+
+. (51) For a candidate model containing both state-linear and nonlinear operators, J(k) 
+
+> Fi
+
+is assembled operator-wise. In particular, if Fi is linear in u, then J(k) 
+
+> Fi
+
+= AFi .Formally, the delta-method linearization would use the Jacobian evaluated at the model-induced state ¯u(k)
+
+> θ,M
+
+. Computing that state would require a forward PDE solve and would therefore forfeit the computational efficiency that motivates the residual-based formulation. B-VSI therefore uses the plug-in approximation in Eq. (50), evaluated at the observed data. After this plug-in evaluation, J(k) 
+
+> θ
+
+is held fixed within each parameter-update step when constructing the local Gaussian residual likelihood. With this approximation, the residual perturbation is 
+
+r(k) 
+
+> θ
+
+≈ J(k) 
+
+> θ
+
+ϵ(k) − Bϵ (k−1) . (52) The resulting local Gaussian residual likelihood is 
+
+p
+
+
+
+r(k) 
+
+> θ
+
+| θ, M
+
+
+
+≈ N 
+
+
+
+r(k) 
+
+> θ
+
+; 0, Σ(k)
+
+> r, θ
+
+
+
+, (53) where 
+
+Σ(k) 
+
+> r, θ
+
+= J(k) 
+
+> θ
+
+Σ(k) 
+
+> u
+
+J(k)
+
+> θ
+> ⊤
+
++ BΣ(k−1)  
+
+> u
+
+B⊤. (54) 12 The approximation in Eq. (54) is a first-order delta-method approximation. The second-order Taylor terms generally produce a nonzero residual-mean correction of order O(∥Σ(k) 
+
+> u
+
+∥)
+
+and additional covariance corrections of higher order. We neglect these terms and use the zero-mean Gaussian likelihood in Eq. (53), which is accurate when the observation noise is sufficiently small and the residual map is locally well approximated by its Jacobian. For operators linear in the state, Eq. (54) reduces to Eq. (48) with J(k) 
+
+> θ
+
+= Kθ.
+
+3.2.3. Stacked residual likelihood 
+
+Let 
+
+rθ =
+
+h
+
+r(1) 
+
+> θ
+> ⊤
+
+r(2) 
+
+> θ
+> ⊤
+
+· · · r(nt)
+
+> θ
+> ⊤
+
+i⊤
+
+(55) denote the stacked residual vector. Because r(k) 
+
+> θ
+
+depends on both ˆu(k−1) and ˆu(k), adjacent residuals generally share observational noise at a common time level. Thus, even when obser-vational errors are independent across time, the stacked residual covariance is not generally block diagonal. For both the state-linear case and the nonlinear local approximation, the residual per-turbation can be written as 
+
+r(k) 
+
+> θ
+
+≈ C(k) 
+
+> θ
+
+ϵ(k) − Bϵ (k−1) , (56) where 
+
+C(k) 
+
+> θ
+
+=
+
+(
+
+Kθ, for operators linear in the state ,
+
+J(k) 
+
+> θ
+
+, for nonlinear operators under the local approximation . (57) Under this linearized representation, the covariance has diagonal blocks 
+
+Cov 
+
+
+
+r(k) 
+
+> θ
+
+, r(k)
+
+> θ
+
+
+
+= C(k) 
+
+> θ
+
+Σ(k) 
+
+> u
+
+C(k)
+
+> θ
+> ⊤
+
++ BΣ(k−1)  
+
+> u
+
+B⊤, (58) and adjacent off-diagonal blocks 
+
+Cov 
+
+
+
+r(k) 
+
+> θ
+
+, r(k+1) 
+
+> θ
+
+
+
+= −C(k) 
+
+> θ
+
+Σ(k) 
+
+> u
+
+B⊤. (59) All non-adjacent blocks vanish under the assumed independence of observational errors across time. In the inference procedures below, we use a block-diagonal approximation that retains the marginal covariance of each time-step residual and neglects the adjacent off-diagonal blocks. This approximation is consistent with the local residual treatment used in classical VSI and keeps likelihood evaluation computationally tractable. The approximate stacked covariance is 
+
+Σbd  
+
+> r, θ
+
+= blockdiag 
+
+
+
+Σ(1) 
+
+> r, θ
+
+, . . . , Σ(nt)
+
+> r, θ
+
+
+
+. (60) The residual-space likelihood is then 
+
+p(rθ | θ, M) ≈
+
+> nt
+
+Y
+
+> k=1
+
+N
+
+
+
+r(k) 
+
+> θ
+
+; 0, Σ(k)
+
+> r, θ
+
+
+
+, (61) where Σ(k) 
+
+> r, θ
+
+is given by Eq. (48) for operators linear in the state and by Eq. (54) for nonlinear operators. 13 3.3. Posterior inference for a fixed model 
+
+We now describe inference for the coefficient vector θ under a fixed candidate model 
+
+M. Model comparison and operator selection are addressed later in Sec. 3.4. Using the block-diagonal residual likelihood in Eq. (61), the approximate residual-space likelihood is 
+
+pres (D | θ, M) = p(rθ | θ, M) ≈ (2 π)− n 
+
+> 2
+
+det  Σbd 
+
+> r, θ
+
+− 12 exp 
+
+
+
+−12r⊤
+
+> θ
+
+ Σbd 
+
+> r, θ
+
+−1 rθ
+
+
+
+, (62) where n = dim( rθ). For a scalar state, n = ndof nt; for a multi-field system, n is the total number of stacked residual equations over all fields and time intervals. The covariance Σbd 
+
+> r, θ
+
+,from Eq. (60), is induced by the weak-form residual map and generally depends on θ through the residual sensitivity matrices in Eq. (48) and (54). This dependence prevents direct closed-form posterior updates, even when the residual likelihood and prior are Gaussian. We distinguish two levels of approximation. The first is the block-diagonal residual covariance approximation. The second is an optional lagged-covariance approximation used to obtain closed-form parameter updates. With the first approximation fixed, one may either retain the full θ-dependence of Σbd  
+
+> r, θ
+
+or hold the covariance fixed during each parameter update. 
+
+3.3.1. Residual-space log density 
+
+The residual-space likelihood in Eq. (62) provides the common probabilistic object under-lying both point estimation and posterior inference. Up to an additive constant, its negative log-likelihood is 
+
+Lres (θ) = 12r⊤
+
+> θ
+
+ Σbd 
+
+> r, θ
+
+−1 rθ + 12 log det  Σbd 
+
+> r, θ
+
+ . (63) When a prior p(θ | M ) is specified, the same likelihood defines the posterior density through Bayes’ rule. Equivalently, the negative log-posterior is 
+
+Lpost (θ) = Lres (θ) − log p(θ | M ). (64) These quantities can be used in two complementary ways. Minimizing Lres or Lpost gives residual-space maximum likelihood (MLE) or maximum a posteriori (MAP) point estimates, respectively. Alternatively, the same likelihood and prior define the posterior density 
+
+pres (θ | D , M) ∝ exp [ −L res (θ)] p(θ | M ), (65) which can be approximated using Gaussian, conjugate, gradient-based, or particle-based methods. Both Lres and Lpost include the weighted residual term and the log-determinant term, and both generally depend on θ through the residual covariance. The inference methods below are organized according to how this θ-dependent covariance is handled. The lagged-covariance approach freezes the covariance at the current iterate and yields generalized least-squares estimates and conjugate posterior updates when applicable. Gradient-based and particle-based methods can instead target the full residual-space likeli-hood or posterior density. A hybrid strategy uses the lagged-covariance approximation to initialize the more general methods. 14 3.3.2. Lagged-covariance inference 
+
+The lagged-covariance approximation uses a fixed-point iteration. Given a current pa-rameter estimate θ(l), define 
+
+Σl = Σbd  
+
+> r, θ(l)
+
+, W l = Σ−1 
+
+> l
+
+. (66) The covariance is then held fixed while updating θ. After the parameter update, the co-variance is recomputed at the new estimate. The iteration is typically initialized with the classical VSI estimate in Eq. (18). 
+
+Point estimation with lagged covariance. With Σl fixed, the log-determinant term is constant with respect to θ. The residual-space MLE update is therefore obtained from the generalized least-squares problem 
+
+θ(l+1) MLE = arg min 
+
+> θ
+
+12 (y − Xθ )⊤ W l (y − Xθ ) . (67) When X⊤W lX is nonsingular, the closed-form update is 
+
+θ(l+1) MLE =  X⊤W lX−1 X⊤W ly. (68) If this matrix is singular or ill-conditioned, a pseudoinverse or regularized least-squares for-mulation may be used. The same lagged-covariance idea also gives a MAP update when a prior is specified. For example, with a Gaussian prior p(θ | M ) = N (θ; μ0, Σ0), the fixed-covariance MAP problem is 
+
+θ(l+1) MAP = arg min 
+
+> θ
+
+12 (y − Xθ )⊤ W l (y − Xθ ) + 12 (θ − μ0)⊤ Σ−10 (θ − μ0) . (69) When X⊤W lX + Σ−10 is nonsingular, this yields the closed-form ridge-type update 
+
+θ(l+1) MAP =  X⊤W lX + Σ−10
+
+−1  X⊤W ly + Σ−10 μ0
+
+ . (70) More general priors lead to regularized optimization problems that may not have closed-form updates. Using the block-diagonal covariance in Eq. (60), the likelihood normal-equation terms can be assembled by summing over time intervals: 
+
+X⊤W lX =
+
+> nt
+
+X
+
+> k=1
+
+Ξ(k)⊤ 
+
+Σ(k)
+
+> r, θ(l)
+
+−1
+
+Ξ(k), (71a) 
+
+X⊤W ly =
+
+> nt
+
+X
+
+> k=1
+
+Ξ(k)⊤ 
+
+Σ(k)
+
+> r, θ(l)
+
+−1
+
+Ξ ˙u(k). (71b) These terms are also used in the Gaussian-prior MAP update in Eq. (70), together with the prior precision Σ−10 and prior-weighted mean Σ−10 μ0.This update has an EM-like structure because the covariance is updated using the current parameter estimate and then held fixed during the next parameter update. We thus also refer to it as an EM-style lagged-covariance update. However, it should be interpreted as a fixed-point approximation to minimizing the full negative log-likelihood or negative log-posterior objective in Eq. (63) and (64), not as a standard latent-variable EM algorithm. 15 Gaussian posterior with known observation-noise covariance. Suppose that the observation-noise covariance Σ(k) 
+
+> u
+
+is known for all time levels and that the coefficient prior is Gaussian, 
+
+p(θ | M ) = N (θ; μ0, Σ0). (72) With the lagged covariance Σl fixed, the residual likelihood is Gaussian in θ. The approxi-mate posterior is also Gaussian [21]: 
+
+p(l+1) (θ | D , M) = N
+
+
+
+θ; μ(l+1)  
+
+> θ
+
+, Σ(l+1) 
+
+> θ
+
+
+
+, (73) where 
+
+Σ(l+1)  
+
+> θ
+
+=  Σ−10 + X⊤W lX−1 , (74a) 
+
+μ(l+1)  
+
+> θ
+
+= Σ(l+1) 
+
+> θ
+
+ Σ−10 μ0 + X⊤W ly . (74b) For the next lagged-covariance iteration, we use the posterior mean as the representative parameter value and set 
+
+θ(l+1) = μ(l+1)  
+
+> θ
+
+. (75) After convergence, the final Gaussian distribution provides an approximate local posterior for the fixed model M.
+
+Normal-inverse-gamma posterior with unknown scalar observation-noise variance. We next consider the case in which the observation-noise covariance has an unknown scalar variance: 
+
+Σ(k) 
+
+> u
+
+= σ2
+
+> u
+
+I, k = 0 , . . . , n t. (76) Under the block-diagonal residual approximation, the residual covariance can be written as 
+
+Σbd  
+
+> r, θ
+
+= σ2 
+
+> u
+
+eΣbd 
+
+> r, θ
+
+, (77) where 
+
+eΣbd  
+
+> r, θ
+
+= blockdiag 
+
+ eΣ(1) 
+
+> r, θ
+
+, . . . , eΣ(nt)
+
+> r, θ
+
+
+
+. (78) For each time interval, 
+
+eΣ(k) 
+
+> r, θ
+
+= C(k) 
+
+> θ
+
+C(k)
+
+> θ
+> ⊤
+
++ BB ⊤, (79) where C(k) 
+
+> θ
+
+is defined in Eq. (56). At iteration l, define the lagged covariance shape and its inverse by 
+
+eΣl = eΣbd  
+
+> r, θ(l)
+
+, fW l = eΣ−1 
+
+> l
+
+. (80) With this covariance shape held fixed, the residual model is approximated by 
+
+y | θ, σ 2
+
+> u
+
+, M ≈ N 
+
+
+
+Xθ , σ 2 
+
+> u
+
+eΣl
+
+
+
+. (81) 16 We use the conjugate normal-inverse-gamma prior 
+
+σ2 
+
+> u
+
+∼ Inv -Gamma( α0, β 0), (82a) 
+
+θ | σ2
+
+> u
+
+, M ∼ N  μ0, σ 2
+
+> u
+
+Σ0
+
+. (82b) The approximate posterior is normal-inverse-gamma [21]: 
+
+σ2 
+
+> u
+
+| D , M ∼ Inv -Gamma  α(l+1) , β (l+1) , (83a) 
+
+θ | σ2
+
+> u
+
+, D, M ∼ N 
+
+
+
+μ(l+1)  
+
+> θ
+
+, σ 2
+
+> u
+
+Σ(l+1) 
+
+> θ
+
+
+
+, (83b) where 
+
+Σ(l+1)  
+
+> θ
+
+=
+
+
+
+Σ−10 + X⊤ fW lX
+
+−1
+
+, (84a) 
+
+μ(l+1)  
+
+> θ
+
+= Σ(l+1) 
+
+> θ
+
+
+
+Σ−10 μ0 + X⊤ fW ly
+
+
+
+, (84b) 
+
+α(l+1) = α0 + n
+
+2 , (84c) 
+
+β(l+1) = β0 + 12
+
+
+
+y⊤ fW ly + μ⊤ 
+
+> 0
+
+Σ−10 μ0 − μ(l+1)  
+
+> θ
+> ⊤
+
+
+
+Σ(l+1) 
+
+> θ
+
+−1
+
+μ(l+1) 
+
+> θ
+
+
+
+. (84d) The marginal posterior of θ is a multivariate Student-t distribution. When only posterior moments are needed, the mean of θ is μ(l+1)  
+
+> θ
+
+and, for α(l+1) > 1, the marginal covariance is 
+
+Cov [ θ | D , M] ≈ β(l+1) 
+
+α(l+1) − 1Σ(l+1)  
+
+> θ
+
+. (85) The posterior mean of the scalar observation-noise variance is 
+
+E σ2 
+
+> u
+
+| D , M = β(l+1) 
+
+α(l+1) − 1, α(l+1) > 1. (86) Its posterior variance is 
+
+Var σ2 
+
+> u
+
+| D , M =
+
+ β(l+1) 2
+
+(α(l+1) − 1) 2 (α(l+1) − 2) , α(l+1) > 2. (87) For the next lagged-covariance iteration, we use the posterior mean of θ as the representative parameter value and set 
+
+θ(l+1) = μ(l+1)  
+
+> θ
+
+. (88) 
+
+3.3.3. Full θ-dependent inference 
+
+The lagged-covariance updates are efficient, but they approximate the full residual-space objective by holding the covariance fixed during each parameter update. For non-Gaussian priors, non-Gaussian posteriors, or direct optimization of the full objective in Eq. (63) and (64), we use gradient-based and particle-based methods. 17 Gradient-based MLE and MAP. For point estimation, MLE and MAP estimates are obtained by minimizing Eq. (63) and Eq. (64), respectively. A basic gradient descent update is 
+
+θ(l+1) = θ(l) − λ∇θL
+
+
+
+θ(l)
+
+
+
+, (89) where λ is the learning rate and L denotes either the negative log-likelihood or the negative log-posterior. More advanced first-order or quasi-Newton optimizers may be used in practice. When the prior is non-smooth, such as a Laplace prior, subgradient, proximal, or smoothed-prior variants may be used. The residual-space formulation avoids repeated forward PDE solves during these updates. Both the residual vector and the residual covariance are assembled from the observed fields and the weak-form operators. If analytic derivatives are available, the i-th component of the gradient of Eq. (63) can be written as 
+
+∂Lres 
+
+∂θ i
+
+= −X⊤ 
+
+> i
+
+W θrθ + 12 tr W θ
+
+∂Σbd 
+
+> r, θ
+
+∂θ i
+
+!
+
+− 12r⊤ 
+
+> θ
+
+W θ
+
+∂Σbd 
+
+> r, θ
+
+∂θ i
+
+W θrθ, (90) where 
+
+W θ =  Σbd 
+
+> r, θ
+
+−1 , (91) and Xi denotes the i-th column of X. Automatic differentiation may also be used. 
+
+SVGD posterior approximation. For posterior approximation, we use Stein variational gra-dient descent (SVGD) [22] when a particle representation is preferred. Let θ(l) 
+
+> i
+> np
+> i=1
+
+denote particles at iteration l. SVGD updates the particles according to 
+
+θ(l+1)  
+
+> i
+
+= θ(l) 
+
+> i
+
++ λbϕ
+
+
+
+θ(l)
+
+> i
+
+
+
+, (92a) 
+
+bϕ(θ) = 1
+
+npnp
+
+X
+
+> j=1
+
+h
+
+κ
+
+
+
+θ(l) 
+
+> j
+
+, θ
+
+
+
+∇θj log pres 
+
+
+
+θ(l) 
+
+> j
+
+| D , M
+
+
+
++ ∇θj κ
+
+
+
+θ(l) 
+
+> j
+
+, θ
+
+i 
+
+, (92b) where κ is a positive-definite kernel, such as a radial basis function. The first term drives particles toward regions of high posterior probability, while the second term promotes particle diversity. The resulting target density is the residual-space posterior pres (θ | D , M) from Eq. (32). 
+
+3.3.4. Hybrid initialization and constrained inference 
+
+The lagged-covariance approximation provides an efficient initialization for gradient-based inference. For point estimation, the converged MLE or MAP estimate from Sec. 3.3.2 can be used to initialize optimization of the full negative log-likelihood or negative log-posterior where the θ-dependence of the residual covariance is retained. For particle-based posterior inference, particles can be initialized from the approximate Gaussian posterior, 
+
+θ(0)  
+
+> i
+
+∼ N (μθ, Σθ), i = 1 , . . . , n p, (93) 18 and then refined using SVGD under the desired prior and residual-space likelihood. This strategy reduces sensitivity to random initialization and improves convergence when the target posterior is non-Gaussian. When the desired prior is non-Gaussian but has finite moments, one may use a Gaussian moment-matched approximation in the lagged-covariance phase and then refine the posterior using the true prior in the gradient-based or SVGD phase. This is the hybrid strategy used in the examples below. Physical constraints on the parameters can be incorporated through priors with con-strained support, reparameterization, projected particle updates, or constrained optimiza-tion. For example, diffusion coefficients are often required to be positive. When using the lagged-covariance Gaussian approximation, linear inequality constraints can be enforced by solving a quadratic program at each iteration: 
+
+θ(l+1) MAP = arg min 
+
+> θ
+
+12 (y − Xθ )⊤ W l (y − Xθ ) + 12 (θ − μ0)⊤ Σ−10 (θ − μ0) , (94a) subject to Acθ ≤ bc. (94b) Here, Ac and bc define the constraint set. The prior term can be omitted for constrained MLE. 
+
+3.3.5. Fixed-model inference algorithm 
+
+Algorithm 1 summarizes posterior inference for a fixed model M.
+
+3.4. Residual-space model comparison and operator selection 
+
+A candidate model M ⊆ χ is a subset of operators selected from the dictionary. The model dimension is the number of active coefficients, dθ = |M| . An exhaustive search over all subsets of a dictionary with d = |χ| candidate operators requires evaluating O(2 d)
+
+models, which is generally impractical for large libraries. We therefore use a greedy sequential operator-elimination procedure guided by a residual-space Bayesian information criterion (BIC). The goal of this step is to select a parsimonious model form. For computational efficiency, model comparison is performed using point estimates under each candidate model. Full posterior inference for θ is then carried out only after the final model M∗ has been selected. 
+
+3.4.1. Residual-space Bayesian information criterion 
+
+For model comparison, the Bayesian posterior probability of a candidate model is 
+
+p(M | D ) = p(D | M ) p(M)
+
+P 
+
+> Mi
+
+p(D | M i) p(Mi). (95) Under a uniform prior over candidate models, selecting the most probable model is equivalent to maximizing the model evidence, 
+
+p(D | M ) = 
+
+Z
+
+p(D | θ, M) p(θ | M ) d θ. (96) 19 Algorithm 1: Posterior inference for a fixed model 
+
+Input : dataset D = {ˆu(k)}nt
+
+> k=0
+
+; candidate model M; prior p(θ | M );observation-noise model; 
+
+Output: point estimate θMLE or θMAP , approximate posterior, or particle approximation;  
+
+> 1
+
+Construct y, X, and the residual sensitivity matrices needed for Σ(k) 
+
+> r, θ
+
+; 
+
+> 2
+
+Initialize θ(0) using the VSI estimate in Eq. (18); 
+
+// Lagged-covariance phase  
+
+> 3
+
+while θ(l) not converged do  
+
+> 4
+
+Assemble Σbd  
+
+> r, θ(l)
+
+using Eq. (48) or Eq. (54);  
+
+> 5
+
+if MLE or MAP is desired then  
+
+> 6
+
+Update θ(l+1) MLE using Eq. (68), or θ(l+1) MAP using Eq. (70);  
+
+> 7
+
+Set θ(l+1) = θ(l+1) MLE , or θ(l+1) = θ(l+1) MAP ; 
+
+> 8
+
+else  
+
+> 9
+
+if the observation-noise covariance is known and a Gaussian prior is used 
+
+then  
+
+> 10
+
+Update the Gaussian posterior parameters using Eq. (74);  
+
+> 11
+
+Set θ(l+1) = μ(l+1)  
+
+> θ
+
+; 
+
+> 12
+
+else  
+
+> 13
+
+Update the normal-inverse-gamma posterior parameters using Eq. (84);  
+
+> 14
+
+Set θ(l+1) = μ(l+1)  
+
+> θ
+
+; 
+
+> 15
+
+end  
+
+> 16
+
+end  
+
+> 17
+
+end 
+
+// Optional full-objective refinement  
+
+> 18
+
+if the full θ-dependent likelihood, a non-Gaussian prior, or a particle posterior is desired then  
+
+> 19
+
+Initialize the optimizer or particles from the lagged-covariance estimate;  
+
+> 20
+
+while the optimizer or particles have not converged do  
+
+> 21
+
+Update point estimates using Eq. (89), or update posterior particles using Eq. (92);  
+
+> 22
+
+end  
+
+> 23
+
+end 
+
+20 In B-VSI, this evidence is approximated using the residual-space likelihood. Specifically, we define the residual-space model evidence as 
+
+pres (D | M ) = 
+
+Z
+
+pres (D | θ, M) p(θ | M ) d θ, (97) where pres (D | θ, M) = p(rθ,M | θ, M) is the residual-space likelihood introduced in Eq. (31). Under the usual regularity assumptions for the large-sample Laplace/BIC approximation, applying this approximation to Eq. (97) gives 
+
+log pres (D | M ) ≈ log pres 
+
+
+
+D | bθMLE ,M, M
+
+
+
+− dθ
+
+2 log nr, (98) where bθMLE ,M is the residual-space MLE under model M and nr = dim( rθ,M) is the number of stacked residual equations. For a scalar state with nt time intervals and ndof spatial degrees of freedom, nr = ndof nt.Equivalently, maximizing the Laplace approximation to the residual-space evidence in Eq. (98) corresponds to minimizing the residual-space BIC: 
+
+BIC res (M) = −2 log pres 
+
+
+
+D | bθMLE ,M, M
+
+
+
++ dθ log nr
+
+= −2 log p
+
+
+
+rbθMLE ,M,M | bθMLE ,M, M
+
+
+
++ dθ log nr. (99) The first term rewards agreement between the observed data and the candidate weak-form equation in residual space. The second term penalizes model complexity. Thus, BIC res favors models that explain the residuals well while avoiding unnecessary operators. When evaluating Eq. (99), the likelihood includes the covariance and log-determinant terms from Eq. (62). In practice, bθMLE ,M can be obtained using the lagged-covariance MLE update in Eq. (68). If the full θ-dependent likelihood is targeted, the MLE may instead be refined using the gradient-based methods in Sec. 3.3.3. 
+
+3.4.2. Sequential operator elimination 
+
+Sequential operator elimination provides a computationally tractable approximation to exhaustive model search. The procedure begins with the full candidate model 
+
+M(0) = χ. (100) If some operators are known a priori to be part of the governing equation, they may be placed in a protected set and excluded from elimination. For example, a diffusion operator may be retained throughout model selection when the physical form of the PDE requires it. At iteration s, let M(s) denote the current model. For each removable operator Fj ∈ M (s),define the reduced model 
+
+M(s) 
+
+> −j
+
+= M(s) \ { Fj }. (101) Each reduced model is fitted to the data by computing bθMLE ,M(s)
+
+> −j
+
+, and its residual-space BIC is evaluated using Eq. (99). The operator removal that yields the smallest BIC is accepted if it improves upon the current model: 
+
+j∗ = arg min 
+
+> j
+
+BIC res 
+
+
+
+M(s)
+
+> −j
+
+
+
+. (102) 21 If 
+
+BIC res 
+
+
+
+M(s)
+
+> −j∗
+
+
+
+< BIC res 
+
+ M(s), (103) we set 
+
+M(s+1) = M(s) 
+
+> −j∗
+
+. (104) Otherwise, the elimination process terminates. The selected model is the model with the lowest residual-space BIC encountered during this procedure: 
+
+M∗ = arg min 
+
+> M∈S seq
+
+BIC res (M), (105) where Sseq denotes the set of models visited by the sequential elimination path. After M∗
+
+is selected, posterior inference for the coefficients is performed under the fixed model M∗
+
+using the methods in Sec. 3.3. 
+
+3.5. Posterior predictive uncertainty 
+
+After a model M∗ has been selected and posterior inference has been performed for its coefficients, we often wish to propagate parameter uncertainty to derived physical quantities. In the examples in Sec. 4, these quantities include the potential function in the FP equation and the free-energy derivatives in the CH equation. For a fixed model M, let 
+
+ψ = g(θ; M) (106) denote a quantity of interest determined by the model coefficients. The posterior predictive distribution is the pushforward of the coefficient posterior through g:
+
+p(ψ | D , M) = 
+
+Z
+
+p(ψ | θ, M) p(θ | D , M) d θ. (107) When ψ is a deterministic function of θ, the conditional distribution p(ψ | θ, M) is a Dirac measure centered at g(θ; M). After model selection, the posterior predictive distribution is evaluated with M = M∗.
+
+Gaussian predictive. Suppose the coefficient posterior is Gaussian, 
+
+p(θ | D , M) = N (θ; μθ, Σθ), (108) and the quantity of interest depends linearly on the coefficients: 
+
+ψ = Φθ. (109) Here, Φ is the evaluation or basis matrix that maps coefficients to the desired physical quantity. For example, Φ may evaluate a polynomial potential on a spatial grid or evalu-ate free-energy derivatives on a grid in concentration space. Then the posterior predictive distribution is Gaussian: 
+
+p(ψ | D , M) = N  ψ; Φμθ, ΦΣ θΦ⊤. (110) 22 Monte Carlo approximation. For nonlinear quantities of interest or non-Gaussian coefficient posteriors, the posterior predictive distribution can be approximated using posterior samples or particles. Let {θ(i)}np 
+
+> i=1
+
+denote samples or particles from p(θ | D , M). For SVGD, these correspond to the final particle ensemble. Each coefficient sample is pushed forward through the quantity-of-interest map: 
+
+ψ(i) = g
+
+
+
+θ(i); M
+
+
+
+, i = 1 , . . . , n p. (111) The empirical distribution of {ψ(i)}np 
+
+> i=1
+
+then approximates p(ψ | D , M). Posterior predictive summaries, such as means, variances, credible intervals, and marginal densities, can be com-puted directly from this empirical distribution. For field-valued quantities, these summaries are evaluated pointwise or componentwise over the field. Histograms, kernel density esti-mates, or empirical quantiles can also be constructed when a more detailed representation of the predictive distribution is desired. 
+
+3.6. Complete B-VSI workflow 
+
+Algorithm 2 summarizes the complete B-VSI workflow. The procedure has three main stages. First, a parsimonious model form is selected by sequential operator elimination using the residual-space BIC described in Sec. 3.4. Second, posterior inference is performed for the coefficients of the selected model M∗ using the fixed-model methods in Sec. 3.3. Third, when quantities of interest are specified, the coefficient posterior is propagated to posterior predictive distributions using the procedures in Sec. 3.5. During model selection, full posterior inference is not required for every candidate model. Only a point estimate bθMLE ,M is needed to evaluate BIC res (M). In the examples below, this estimate is obtained using the lagged-covariance MLE update in Eq. (68). If the full θ-dependent residual likelihood is desired for model comparison, this estimate may be refined using the gradient-based MLE procedure in Sec. 3.3.3. Posterior inference is then carried out only once, after M∗ has been selected. This final inference step may use the Gaussian approximation, the normal-inverse-gamma update for unknown scalar noise variance, SVGD, or the hybrid strategy, depending on the prior and likelihood assumptions. The resulting coefficient posterior can then be pushed forward through a quantity-of-interest map to obtain posterior predictive uncertainty in derived physical quantities, such as potentials or free-energy derivatives. 
+
+4. Numerical Examples 
+
+We demonstrate the B-VSI framework on two representative PDE discovery problems. The first is a state-linear Fokker–Planck equation, and the second is a nonlinear two-field Cahn–Hilliard equation. These examples test the proposed residual-space likelihood, poste-rior inference, and model-selection procedures in both linear and nonlinear settings. For each problem, we construct a candidate operator dictionary, carry out residual-space model selection and posterior inference for the selected coefficients, and propagate parameter uncertainty to physically meaningful quantities of interest. For the FP equation, this quantity is the potential function. For the CH equation, the quantities are the free-energy derivatives. The examples are implemented in Python using the DOLFINx finite element library [23] for PDE solves. 23 Algorithm 2: Bayesian Variational System Identification 
+
+Input : dataset D = {ˆu(k)}nt
+
+> k=0
+
+; candidate operator dictionary χ; observation-noise model; prior p(θ | M ); optional protected operator set Mfix ⊆ χ;
+
+Output: selected model M∗; coefficient posterior p(θ | D , M∗); optional posterior predictive distribution; 
+
+// Residual-space model selection  
+
+> 1
+
+Set s = 0 and initialize M(0) = χ; 
+
+> 2
+
+Fit M(0) by computing bθMLE ,M(0) ; 
+
+> 3
+
+Compute c(0) = BIC res (M(0) ) using Eq. (99);  
+
+> 4
+
+Set Sseq = {(M(0) , c (0) )}; 
+
+> 5
+
+Set improved = true ; 
+
+> 6
+
+while improved do  
+
+> 7
+
+Set Mbest = M(s) and cbest = c(s); 
+
+> 8
+
+foreach Fj ∈ M (s) \ M fix do  
+
+> 9
+
+Define the reduced model M(s) 
+
+> −j
+
+= M(s) \ { Fj }; 
+
+> 10
+
+Fit M(s) 
+
+> −j
+
+by computing bθMLE ,M(s)
+
+> −j
+
+; 
+
+> 11
+
+Compute c(s) 
+
+> −j
+
+= BIC res (M(s) 
+
+> −j
+
+) using Eq. (99);  
+
+> 12
+
+Add (M(s) 
+
+> −j
+
+, c (s) 
+
+> −j
+
+) to Sseq ; 
+
+> 13
+
+if c(s) 
+
+> −j
+
+< c best then  
+
+> 14
+
+Set Mbest = M(s) 
+
+> −j
+
+; 
+
+> 15
+
+Set cbest = c(s) 
+
+> −j
+
+; 
+
+> 16
+
+end  
+
+> 17
+
+end  
+
+> 18
+
+if cbest < c (s) then  
+
+> 19
+
+Set s = s + 1 ; 
+
+> 20
+
+Set M(s) = Mbest ; 
+
+> 21
+
+Set c(s) = cbest ; 
+
+> 22
+
+else  
+
+> 23
+
+Set improved = false ; 
+
+> 24
+
+end  
+
+> 25
+
+end  
+
+> 26
+
+Select M∗ = arg min M∈S seq BIC res (M);
+
+// Posterior inference under the selected model  
+
+> 27
+
+Construct y, X, and the residual sensitivity matrices for M∗; 
+
+> 28
+
+Approximate p(θ | D , M∗) using the fixed-model inference methods in Sec. 3.3; 
+
+// Optional posterior prediction  
+
+> 29
+
+if a quantity of interest ψ = g(θ; M∗) is specified then  
+
+> 30
+
+Propagate p(θ | D , M∗) to p(ψ | D , M∗) using Sec. 3.5;  
+
+> 31
+
+end 
+
+24 4.1. State-linear Fokker–Planck equation 
+
+We first consider a state-linear example governed by the FP equation. The FP equation describes the time evolution of the probability density function of a stochastic process [24]. It is commonly used to model particles subject to deterministic drift and random fluctuations. We consider the form 
+
+∂p (x, t )
+
+∂t = ∇ ·  p(x, t )∇ψ(x) + β−1∇2p(x, t ), (112) where p(x, t ) : Ω × T → R+ is the probability density, ψ(x) : Ω → R is the potential function, and β > 0 is the inverse temperature. In the notation of Eq. (1), the state variable is u ≡ p. For a fixed potential ψ, the FP equation is linear in the state p. After expressing 
+
+ψ in a basis that is linear in unknown coefficients, the governing equation is also linear in the coefficient vector to be estimated. 
+
+4.1.1. Data generation 
+
+The spatial domain is Ω = [ −5, 5] 2. We prescribe the convex quadratic potential 
+
+ψGT (x) = ( x − c)⊤W (x − c), c =
+
+2.52.5
+
+
+
+, W =
+
+1 00 5
+
+
+
+. (113) The potential achieves its minimum at x = c and is shown in Fig. 1. Although ψGT is quadratic in x, the FP equation remains linear in p because the differential operators act linearly on the state. Since only ∇ψ enters Eq. (112), the potential is identifiable only up to an additive constant. All comparisons of recovered potentials below use a common additive-constant convention.   
+
+> Figure 1: Ground-truth potential function ψGT in the FP equation.
+
+The initial density is a Gaussian distribution, 
+
+p(x, 0) = N (x; x0, Σx0 ), x0 =
+
+−2
+
+−2
+
+
+
+, Σx0 =
+
+ 0.2 −0.3
+
+−0.3 0.5
+
+
+
+. (114) 25 We impose homogeneous no-flux boundary conditions on the density, 
+
+(p∇ψ + β−1∇p) · n = 0 on ∂Ω, (115) where n is the outward unit normal on ∂Ω.The FP equation is solved using the finite element method described in Sec. 2.1. The noise-free solution is computed on a 400 × 400 mesh over the time interval [0 , 1] with nt = 50 
+
+time steps, using quadrilateral elements with first-order Lagrange polynomials. The resulting solution is shown in Fig. 2. To generate the observed dataset, the solution is downsampled to a 50 × 50 B-VSI mesh, and additive independent Gaussian noise is added to all nodal values at each time step: 
+
+ˆp(k) = p(k) + ϵ(k) 
+
+> p
+
+, ϵ(k) 
+
+> p
+
+∼ N  0, 10 −6I, k = 0 , . . . , n t. (116) The final dataset is D =
+
+n
+
+ˆp(k)
+
+ont
+
+> k=0
+
+.                     
+
+> (a) p(0) at t= 0 (b) p(5) at t= 0 .1(c) p(10) at t= 0 .2(d) p(50) at t= 1
+> Figure 2: Time evolution of the probability density p(x, t )in the FP equation at selected time steps.
+
+4.1.2. Candidate dictionary and model selection 
+
+We assume that the data are generated by an FP equation of the form in Eq. (112), with known observation-noise model and boundary conditions. The model-selection task is to identify a parsimonious representation of the potential function ψ. We approximate ψ
+
+using polynomial basis functions up to degree three: 
+
+ψ(x) = 
+
+> 9
+
+X
+
+> i=1
+
+θϕi ϕi(x) + constant , (117) where 
+
+{ϕi}9 
+
+> i=1
+
+= x1, x 2, x 21, x 22, x 1x2, x 31, x 32, x 21x2, x 1x22 . (118) The additive constant in Eq. (117) is not identifiable because its gradient is zero. For the ground-truth potential in Eq. (113), the identifiable nonzero coefficients are 
+
+θx1 = −5, θx2 = −25 , θx21 = 1 , θx22 = 5 . (119) The candidate operator dictionary is 
+
+χ = ∇2p, ∇ · (p∇ϕ1), . . . , ∇ · (p∇ϕ9)⊤ . (120) 26 The Laplace term ∇2p is retained throughout model selection because it is part of the prescribed FP form. The coefficient vector is 
+
+θ = β−1, θ ϕ1 , . . . , θ ϕ9
+
+⊤ . (121) Other differentiable basis families, such as Hermite polynomials, may be used in place of Eq. (118). By integration by parts, the finite-dimensional weak forms of the diffusion and drift operators are 
+
+Z
+
+> Ω
+
+vh∇2ph dx = −
+
+Z
+
+> Ω
+
+∇vh · ∇ ph dx +
+
+Z
+
+> ∂Ω
+
+vh∇ph · n dS, (122a) 
+
+Z
+
+> Ω
+
+vh∇ ·  ph∇ϕi
+
+ dx = −
+
+Z
+
+> Ω
+
+ph∇vh · ∇ ϕi dx +
+
+Z
+
+> ∂Ω
+
+vhph∇ϕi · n dS. (122b) For this example, each candidate operator is linear in the state p. The corresponding basis vectors and residual covariance are therefore constructed using the state-linear formulas in Sec. 3.2.1. The boundary term in the diffusion weak form vanishes under Eq. (115), while the drift boundary contribution is assembled as shown in Eq. (122). Following Algorithm 2, we perform sequential operator elimination using the residual-space BIC in Eq. (99). During model selection, only the residual-space MLE is needed for each candidate model. Figure 3 shows the BIC values along the elimination path. Each vertical group corresponds to the candidate models obtained by removing one operator from the current model. The blue point in each group indicates the best reduced model at that elimination step. The final selected model, shown in orange, is the model with the lowest residual-space BIC encountered along the sequential path. The BIC decreases as redundant polynomial terms are removed and increases after essential terms are excluded, indicating the onset of underfitting. 
+
+> Figure 3: Residual-space BIC evaluated along the sequential operator-elimination path for the FP equation.
+
+27 The selected model contains the Laplace operator and the drift operators associated with 
+
+x1, x2, x21, and x22. Full posterior inference is performed after the selected model is fixed. The estimated coefficients are reported in Table 1.                                                                                  
+
+> Table 1: Estimated parameter values for the FP equation. Here, bθdenotes the point estimate for VSI and the posterior mean for B-VSI methods. The potential error is computed as MSE( bψ) = N−1
+> g
+> PNg
+> ℓ=1 (bψ(xℓ)−
+> ψGT (xℓ)) 2after applying a common additive-constant convention. Variances are reported only for posterior coefficient distributions. Aggregate error metrics are computed from the reported point estimate or posterior mean and are therefore listed without posterior variances. Coefficient Ground truth VSI B-VSI-LaggedCov B-VSI-Hybrid Mean Variance Mean Variance
+> β−11.00 0.92 0.93 5.63 ×10 −70.93 5.61 ×10 −6
+> θx1−5.00 −5.03 −5.11 1.74 ×10 −5−5.11 2.71 ×10 −4
+> θx2−25 .00 −23 .31 −24 .38 1.84 ×10 −4−24 .39 3.00 ×10 −3
+> θx211.00 0.99 0.96 2.02 ×10 −60.96 2.69 ×10 −5
+> θx225.00 4.65 4.85 7.83 ×10 −64.85 1.25 ×10 −4
+> θGT −bθ2
+> N/A 1.72 0.65 N/A 0.64 N/A
+> MSE( bψ)N/A 31 .32 8.49 N/A 7.89 N/A
+
+4.1.3. Parameter and predictive uncertainty with Gaussian approximate priors 
+
+We first use Gaussian priors so that the lagged-covariance Gaussian posterior update in Sec. 3.3.2 can be applied efficiently. The priors are 
+
+β−1 ∼ N (3 .08 , 2.69) , (123a) 
+
+θϕi ∼ N (0 , 2) , i = 1 , . . . , 9. (123b) These Gaussian priors are obtained by moment matching the non-Gaussian priors used in Sec. 4.1.4. Specifically, the log-normal prior on β−1 has mean 3.08 and variance 2.69 , while the Laplace prior on each polynomial coefficient has variance 2. The Gaussian approximation does not encode positivity of β−1 directly, so the constraint β−1 > 0 is enforced through the constrained lagged-covariance update. Under the selected model M∗, the state-linear residual likelihood and Gaussian prior yield an efficient approximate Gaussian posterior for the active coefficients. The posterior means and variances are reported in Table 1, and the posterior covariance matrix is shown in Fig. 4. The coefficient θx2 has the largest posterior variance among the active polynomial coefficients. This reflects the combined effects of basis scaling, correlations among polynomial terms, and the fact that the observed density samples only part of the spatial domain over the finite time interval. We next propagate the coefficient posterior to the potential function. Since the identi-fiable part of ψ is linear in the coefficients, its values on the plotting grid can be written as 
+
+ψ = Φθψ, (124) 28 Figure 4: Covariance matrix of the approximate Gaussian posterior p(θ | D , M∗) for the selected FP model. 
+
+where ψ collects the potential values on the plotting grid and Φ evaluates the active poly-nomial basis functions at those grid points. Therefore, the Gaussian predictive formula in Sec. 3.5 applies. The posterior predictive mean and variance of ψ are shown in Fig. 5. The predictive mean closely matches the ground-truth potential, as also reflected by the MSE reported in Table 1. The predictive variance is largest in regions where the data provide limited information. In this example, the density evolves toward the low-potential basin near 
+
+c. High-potential regions that are sparsely visited by the observed density therefore lead to larger uncertainty in the recovered potential.    
+
+> (a) Posterior predictive mean of ψ(b) Posterior predictive variance of ψ
+
+Figure 5: Mean and variance of the posterior predictive distribution p(ψ | D , M∗) for the potential function in the FP equation using the approximate Gaussian posterior. 
+
+29 4.1.4. Parameter and predictive uncertainty with non-Gaussian priors 
+
+We next consider a non-Gaussian prior specification that directly encodes positivity of the diffusion coefficient and promotes sparse polynomial coefficients: 
+
+β−1 ∼ LogNormal(1 , 0.25) , (125a) 
+
+θϕi ∼ Laplace(0 , 1) , i = 1 , . . . , 9. (125b) Here, LogNormal(1 , 0.25) denotes the distribution whose logarithm is Gaussian with mean 
+
+1 and variance 0.25 . The Laplace prior uses scale parameter 1.Because these priors are not conjugate to the Gaussian residual likelihood, we use the hybrid strategy described in Sec. 3.3.4. We first use the Gaussian moment-matched priors in Eq. (123) to obtain an efficient approximate posterior. We then initialize np = 20 SVGD particles from this Gaussian approximation and refine them using the residual-space posterior associated with the non-Gaussian priors in Eq. (125). The empirical means and variances of the SVGD particles are reported in Table 1 under B-VSI-Hybrid. The particle covariance matrix is shown in Fig. 6.     
+
+> Figure 6: Covariance matrix of the particle posterior p(θ| D ,M∗)for the selected FP model estimated using SVGD.
+
+The posterior predictive distribution of the potential is approximated by Monte Carlo propagation of the SVGD particles: 
+
+ψ(i) = Φθ(i) 
+
+> ψ
+
+, i = 1 , . . . , n p. (126) The empirical mean and variance are shown in Fig. 7. The hybrid posterior gives coefficient estimates and predictive uncertainty patterns that are close to those obtained with the Gaus-sian approximate posterior. This agreement suggests that, for this state-linear FP example, the lagged-covariance Gaussian approximation provides an accurate and computationally efficient posterior approximation. The SVGD refinement remains useful when positivity, sparsity, or other non-Gaussian prior information must be represented explicitly. 30 (a) Posterior predictive mean of ψ (b) Posterior predictive variance of ψ    
+
+> Figure 7: Empirical mean and variance of the posterior predictive distribution p(ψ| D ,M∗)for the potential function in the FP equation using SVGD particles.
+
+4.2. Nonlinear two-field Cahn–Hilliard equation 
+
+We next consider a nonlinear two-field Cahn–Hilliard equation. The CH equation models phase separation in multicomponent systems, including alloys and polymer blends [25]. It describes the evolution of concentration fields driven by chemical-potential gradients and interfacial-energy regularization. For two concentration fields c1 and c2, we consider 
+
+∂c 1
+
+∂t = m1∇2μ1, μ1 = ∂g ∂c 1
+
+− k1∇2c1, (127a) 
+
+∂c 2
+
+∂t = m2∇2μ2, μ2 = ∂g ∂c 2
+
+− k2∇2c2. (127b) Here, m1 and m2 are mobilities, μ1 and μ2 are chemical potentials, g(c1, c 2) is the homo-geneous free-energy density, and k1, k 2 > 0 are gradient-energy coefficients. The nonlinear dependence of g on the concentrations makes this a nonlinear PDE system. 
+
+4.2.1. Data generation 
+
+Following the setup in Wang et al. [8], we consider the spatial domain Ω = [0 , 20] 2. The homogeneous free-energy density is 
+
+g(c1, c 2) = 3d
+
+2s4
+
+(2 c1 − 1) 2 + (2 c2 − 1) 22
+
++ ds3 (2 c2 − 1) (2 c2 − 1) 2 − 3(2 c1 − 1) 2
+
+− 3d
+
+2s2
+
+(2 c1 − 1) 2 + (2 c2 − 1) 2 .
+
+(128) The parameters used to generate the data are 
+
+m1 = m2 = 0 .1, k1 = k2 = 10 , d = 0 .4, s = 0 .7. (129) The free-energy density and its partial derivatives are shown in Fig. 8. 31 (a) g(c1, c 2) (b) ∂g ∂c 1 (c) ∂g ∂c 2      
+
+> Figure 8: Ground-truth free-energy density gand partial derivatives ∂g/∂c 1and ∂g/∂c 2used to generate the two-field CH data.
+
+The initial conditions are random perturbations about the homogeneous state, and zero Neumann boundary conditions are appiled: 
+
+c1(x, 0) = 0 .5 + δc1 , δc1 ∼ U (−0.03 , 0.03) , x ∈ Ω, (130a) 
+
+c2(x, 0) = 0 .5 + δc2 , δc2 ∼ U (−0.03 , 0.03) , x ∈ Ω, (130b) 
+
+∇μ1 · n = 0 , ∇c1 · n = 0 , x ∈ ∂Ω, (130c) 
+
+∇μ2 · n = 0 , ∇c2 · n = 0 , x ∈ ∂Ω. (130d) The CH system is solved using the finite element method described in Sec. 2.1. The solution is computed on a 25 × 25 mesh using second-order continuous Lagrange elements over the time interval [0 , 5] . The resulting noise-free concentration fields are shown in Fig. 9. The observed data are generated by adding independent Gaussian noise to the nodal values of both concentration fields: 
+
+ˆc(k)1 = c(k)1 + ϵ(k)1 , ϵ(k)1 ∼ N (0, σ 2 
+
+> c
+
+I), (131a) 
+
+ˆc(k)2 = c(k)2 + ϵ(k)2 , ϵ(k)2 ∼ N (0, σ 2 
+
+> c
+
+I), (131b) for k = 0 , . . . , n t with nt = 10 . In the experiments below, σ2 
+
+> c
+
+= 10 −6. The dataset is 
+
+D =
+
+n
+
+ˆc(k)1 , ˆc(k)2
+
+ont
+
+> k=0
+
+.
+
+4.2.2. Candidate dictionary and model selection 
+
+The data are generated by a CH system with a single free-energy density g. For system identification, we use a slightly more flexible parameterization in which the two equations are allowed to have separate free-energy representations g1 and g2:
+
+∂c 1
+
+∂t = m1∇2μ1, μ1 = ∂g 1
+
+∂c 1
+
+− k1∇2c1, (132a) 
+
+∂c 2
+
+∂t = m2∇2μ2, μ2 = ∂g 2
+
+∂c 2
+
+− k2∇2c2. (132b) This relaxation does not enforce that g1 and g2 arise from the same scalar free energy. It allows us to evaluate how accurately each equation recovers the corresponding free-energy derivative. If thermodynamic consistency is desired, one could instead enforce a shared free energy g1 = g2 = g during model selection. 32 (a) c(0) 1 at t = 0 (b) c(4) 1 at t = 2 .0 (c) c(7) 1 at t = 3 .5 (d) c(10) 1 at t = 5 .0                   
+
+> (e) c(0) 2at t= 0 (f) c(4) 2at t= 2 .0(g) c(7) 2at t= 3 .5(h) c(10) 2at t= 5 .0
+
+Figure 9: Time evolution of the concentration fields c1 and c2 in the two-field CH equation at selected time steps. 
+
+We parameterize g1 and g2 using polynomial basis functions in (c1, c 2). Let 
+
+P1 = ca
+
+> 1
+
+cb 
+
+> 2
+
+2 ≤ a + b ≤ 5, a ≥ 1 , (133a) 
+
+P2 = ca
+
+> 1
+
+cb 
+
+> 2
+
+2 ≤ a + b ≤ 5, b ≥ 1 . (133b) Thus, P1 and P2 contain all monomials up to degree five that can contribute to ∂g 1/∂c 1
+
+and ∂g 2/∂c 2, respectively, after excluding constant and first-order terms. Both sets have cardinality 14 . We write 
+
+g1(c1, c 2) = X
+
+> ϕ∈P 1
+
+θg1 
+
+> ϕ
+
+ϕ(c1, c 2), (134a) 
+
+g2(c1, c 2) = X
+
+> ϕ∈P 2
+
+θg2 
+
+> ϕ
+
+ϕ(c1, c 2). (134b) Only products of mobilities and free-energy coefficients are identifiable from Eq. (132). We therefore define the effective coefficients 
+
+ηg1 
+
+> ϕ
+
+= m1θg1 
+
+> ϕ
+
+, ηg2 
+
+> ϕ
+
+= m2θg2 
+
+> ϕ
+
+, (135a) 
+
+λ1 = −m1k1, λ2 = −m2k2. (135b) The quantities λ1 and λ2 are signed PDE coefficients multiplying the biharmonic terms. They should not be confused with the physical positive gradient-energy coefficients k1 and 
+
+k2. For the data-generation parameters in Eq. (129), the ground-truth signed values are 
+
+λ1 = λ2 = −1. (136) 33 Substituting Eq. (134) into Eq. (132) gives 
+
+∂c 1
+
+∂t = X
+
+> ϕ∈P 1
+
+ηg1 
+
+> ϕ
+
+∇ · 
+
+∂2ϕ∂c 21
+
+∇c1 + ∂2ϕ∂c 1∂c 2
+
+∇c2
+
+
+
++ λ1∇4c1, (137a) 
+
+∂c 2
+
+∂t = X
+
+> ϕ∈P 2
+
+ηg2 
+
+> ϕ
+
+∇ · 
+
+ ∂2ϕ∂c 1∂c 2
+
+∇c1 + ∂2ϕ∂c 22
+
+∇c2
+
+
+
++ λ2∇4c2. (137b) The B-VSI coefficient vector is 
+
+θ =
+
+hηg1 
+
+> ϕϕ∈P 1
+
+, λ 1, ηg2 
+
+> ϕϕ∈P 2
+
+, λ 2
+
+i⊤
+
+. (138) If the mobilities mi are known, the physical free-energy coefficients can be recovered by dividing ηgi 
+
+> ϕ
+
+by mi. If the mobilities are not known, only the effective coefficients in Eq. (135) are identifiable. The candidate dictionary consists of the operators appearing in Eq. (137): 
+
+χ =
+
+  
+
+∇ · 
+
+∂2ϕ∂c 21
+
+∇c1 + ∂2ϕ∂c 1∂c 2
+
+∇c2
+
+ 
+
+> ϕ∈P 1
+
+, ∇4c1,
+
+
+
+∇ · 
+
+ ∂2ϕ∂c 1∂c 2
+
+∇c1 + ∂2ϕ∂c 22
+
+∇c2
+
+ 
+
+> ϕ∈P 2
+
+, ∇4c2
+
+⊤
+
+.
+
+(139) For a coefficient function a(c1, c 2) and concentration field c, the weak form of the diver-gence operator is 
+
+Z
+
+> Ω
+
+vh∇ ·  a(ch 
+
+> 1
+
+, c h 
+
+> 2
+
+)∇ch dx = −
+
+Z
+
+> Ω
+
+a(ch 
+
+> 1
+
+, c h 
+
+> 2
+
+)∇vh · ∇ ch dx +
+
+Z
+
+> ∂Ω
+
+vha(ch 
+
+> 1
+
+, c h 
+
+> 2
+
+)∇ch · n dS. 
+
+(140) In Eq. (139), a is one of the second derivatives of a polynomial basis function. Each summed strong-form candidate term therefore gives a corresponding summed weak-form contribution with its associated effective coefficient. The biharmonic terms are assembled using a discontinuous Galerkin weak form [26, 27, 28]: 
+
+Z
+
+> Ω
+
+vh∇4ch dx = X
+
+> Ωe
+
+Z
+
+> Ωe
+
+∇2vh∇2ch dx
+
++ X
+
+> E∈Eint
+> h
+
+Z
+
+> E
+
+ αhE
+
+[∇vh][ ∇ch] − ∇2ch [∇vh] − [∇ch] ∇2vh
+
+
+
+dS. 
+
+(141) Here, ⟨·⟩ denotes the average across an interior facet, [·] denotes the jump with respect to the outward normals on the neighboring elements, α ≥ 0 is the penalty parameter, hE is a facet-length scale, and Eint  
+
+> h
+
+is the set of interior facets. The biharmonic weak form is linear in ch, so no nonlinear residual linearization is required for this operator. 34 The free-energy operators in Eq. (139) are nonlinear functions of the observed concentra-tion fields. We therefore construct the residual covariance using the nonlinear local Gaus-sian approximation in Sec. 3.2.2. Sequential operator elimination is then performed using the residual-space BIC in Eq. (99). During model selection, only the residual-space MLE is computed for each candidate model. Full posterior inference is performed after the selected model M∗ is fixed. Figure 10 shows the BIC values along the elimination path. The BIC decreases as redun-dant polynomial operators are removed and increases once essential operators are excluded, indicating the onset of underfitting. The selected model and estimated coefficients are sum-marized in Table 2. 
+
+> Figure 10: Residual-space BIC evaluated along the sequential operator-elimination path for the two-field CH equation.
+
+4.2.3. Parameter and predictive uncertainty with known noise variance 
+
+We first assume that the observation-noise variance is known. A Gaussian prior is as-signed to the effective coefficient vector: 
+
+θ ∼ N (0, I). (142) Under the selected model M∗, the lagged-covariance Gaussian posterior update in Sec. 3.3.2 gives an approximate posterior distribution p(θ | D , M∗). The posterior means and variances are reported in Table 2, and the posterior covariance matrix is shown in Fig. 11. The posterior covariance shows relatively high uncertainty in mixed concentration terms, including c21c22, c21c2, c1c22, and c1c2. These terms couple the two concentration fields and can be more difficult to distinguish from one another when the observed trajectory samples only a limited portion of concentration space. We propagate the coefficient posterior to the free-energy derivatives. Because the esti-35 Table 2: Estimated effective coefficients for the CH equation. The coefficients ηgi 
+
+> ϕ
+
+= miθgi 
+
+> ϕ
+
+are mobility-scaled free-energy coefficients, and λi = −miki are signed biharmonic coefficients. Thus, the rows labeled λ1 and 
+
+λ2 correspond to the PDE coefficients multiplying ∇4c1 and ∇4c2, not to the physical positive coefficients 
+
+k1 and k2. The notation bθ denotes the point estimate for VSI and the posterior mean for B-VSI methods. Variances are reported only for posterior coefficient distributions and for σ2 
+
+> u
+
+when it is inferred. Aggregate error metrics are computed from the reported point estimate or posterior mean and are therefore listed without posterior variances. Coefficient Ground truth VSI B-VSI known noise B-VSI unknown noise Mean Variance Mean Variance 
+
+λ1 −1.000 −0.006 −0.971 1.501 × 10 −6 −0.935 1.412 
+
+ηg1
+
+> c41
+
+3.998 0.039 3.899 3.013 × 10 −5 3.809 2.904 × 10 1
+
+ηg1
+
+> c21c22
+
+7.997 0.077 7.796 4.173 × 10 −4 6.754 3.488 × 10 2
+
+ηg1
+
+> c31
+
+−7.997 −0.080 −7.797 1.212 × 10 −4 −7.617 1.168 × 10 2
+
+ηg1 
+
+> c21c2
+
+−10 .796 −0.077 −10 .519 5.179 × 10 −4 −9.309 4.322 × 10 2
+
+ηg1
+
+> c1c22
+
+−7.997 −0.060 −7.794 4.177 × 10 −4 −6.748 3.492 × 10 2
+
+ηg1
+
+> c21
+
+8.906 0.071 8.680 1.286 × 10 −4 8.215 1.181 × 10 2
+
+ηg1 
+
+> c1c2
+
+10 .796 0.068 10 .517 5.194 × 10 −4 9.302 4.335 × 10 2
+
+λ2 −1.000 −0.007 −0.971 1.735 × 10 −6 −0.939 1.652 
+
+ηg2
+
+> c21c22
+
+7.997 0.148 7.781 4.195 × 10 −4 6.835 3.563 × 10 2
+
+ηg2
+
+> c42
+
+3.998 0.052 3.915 3.800 × 10 −5 3.878 3.667 × 10 1
+
+ηg2 
+
+> c21c2
+
+−10 .796 −0.165 −10 .510 6.227 × 10 −4 −9.346 5.296 × 10 2
+
+ηg2
+
+> c1c22
+
+−7.997 −0.141 −7.781 4.228 × 10 −4 −6.828 3.589 × 10 2
+
+ηg2
+
+> c32
+
+−7.064 −0.098 −6.916 1.118 × 10 −4 −6.832 1.080 × 10 2
+
+ηg2 
+
+> c1c2
+
+10 .796 0.154 10 .510 6.250 × 10 −4 9.338 5.314 × 10 2
+
+ηg2
+
+> c22
+
+6.107 0.087 5.968 6.535 × 10 −5 5.673 6.037 × 10 1
+
+σ2 
+
+> u
+
+N/A N/A N/A N/A 6.215 × 10 −5 2.298 × 10 −13 
+
+θGT − bθ 2
+
+N/A 31 .048 0.802 N/A 3.926 N/A 
+
+MSE 
+
+ ∂g 1
+
+> ∂c 1
+
+
+
+N/A 1.117 0.001 N/A 0.011 N/A 
+
+MSE 
+
+ ∂g 2
+
+> ∂c 2
+
+
+
+N/A 0.971 0.001 N/A 0.007 N/A 
+
+36 Figure 11: Covariance matrix of the approximate Gaussian posterior p(θ | D , M∗) for the selected CH model when the observation-noise variance is known. 
+
+mated coefficients are mobility-scaled, define the effective derivative fields 
+
+ζ1(c1, c 2) = X
+
+> ϕ∈P 1
+
+ηg1
+
+> ϕ
+
+∂ϕ ∂c 1
+
+= m1
+
+∂g 1
+
+∂c 1
+
+, (143a) 
+
+ζ2(c1, c 2) = X
+
+> ϕ∈P 2
+
+ηg2
+
+> ϕ
+
+∂ϕ ∂c 2
+
+= m2
+
+∂g 2
+
+∂c 2
+
+. (143b) Since the mobilities are known in this example, posterior predictions for ∂g i/∂c i are obtained by dividing ζi by mi. These derivative fields are linear in the coefficient vector, so the Gaussian predictive formula in Sec. 3.5 applies. The posterior predictive means and variances are shown in Fig. 12. The predictive means closely match the ground-truth free-energy derivatives shown in Fig. 8b and 8c, also reflected by the MSE values in Table 2. The predictive variances are larger in regions of concentration space that are less strongly sampled by the simulated phase-separation trajectory. These regions correspond to a wider range of coefficient values that remain plausible under the observed data. 
+
+4.2.4. Joint inference with unknown scalar noise variance 
+
+We next infer the observation-noise variance jointly with the effective CH coefficients. To isolate the effect of unknown noise variance, we fix the model form to the selected model 
+
+M∗ rather than repeating model selection. The observation-noise covariance is assumed to have the scalar form 
+
+Σ(k) 
+
+> u
+
+= σ2
+
+> u
+
+I, k = 0 , . . . , n t. (144) 37 (a) Posterior predictive mean of ∂g 1 
+
+> ∂c 1
+
+(b) Posterior predictive mean of ∂g 2
+
+> ∂c 2
+
+(c) Posterior predictive variance of ∂g 1 
+
+> ∂c 1
+
+(d) Posterior predictive variance of ∂g 2
+
+> ∂c 2
+
+Figure 12: Posterior predictive means and variances of the free-energy derivatives in the selected CH model when the observation-noise variance is known. 
+
+38 We assign the conjugate prior 
+
+σ2 
+
+> u
+
+∼ Inv -Gamma(1 , 1) , (145a) 
+
+θ | σ2
+
+> u
+
+, M∗ ∼ N (0, σ 2
+
+> u
+
+I). (145b) The normal-inverse-gamma update in Sec. 3.3.2 gives an approximate joint posterior over 
+
+(θ, σ 2
+
+> u
+
+). The posterior moments of the coefficients and the observation-noise variance are reported in Table 2, and the posterior covariance matrix is shown in Fig. 13. 
+
+> Figure 13: Covariance matrix of the approximate coefficient posterior for the selected CH model when the scalar observation-noise variance is inferred jointly with the coefficients.
+
+The posterior predictive distributions for the free-energy derivatives are shown in Fig. 14. Compared with the known-noise case, both the coefficient posterior and the posterior predic-tive distributions have larger variance. This is expected because uncertainty in σ2 
+
+> u
+
+introduces an additional source of uncertainty into the residual likelihood and therefore broadens the range of plausible coefficient values. The predictive means remain close to the ground-truth derivative fields, but the increased variance reflects reduced confidence when the data preci-sion must be inferred rather than prescribed. 
+
+4.3. Sensitivity to noise level and spatial resolution 
+
+We next examine how parameter-estimation accuracy depends on observation noise and spatial resolution. The purpose of this study is to isolate the effect of the covariance-aware residual likelihood used by B-VSI. We therefore compare B-VSI against classical VSI [6, 8] on the FP problem under a fixed model structure. For a fair comparison, model selection is not performed in this study. The operator set is fixed to the ground-truth model, and both methods are evaluated using the same noisy datasets. Classical VSI is applied without regularization using the unweighted least-squares estimator in Eq. (18). B-VSI is applied using the residual-space MLE with known observation-noise covariance, as described in Sec. 3.3.2. No prior is used in this comparison. Thus, the difference between the two estimators comes from the residual covariance weighting in B-VSI. 39 (a) Posterior predictive mean of ∂g 1 
+
+> ∂c 1
+
+(b) Posterior predictive mean of ∂g 2
+
+> ∂c 2
+
+(c) Posterior predictive variance of ∂g 1 
+
+> ∂c 1
+
+(d) Posterior predictive variance of ∂g 2
+
+> ∂c 2
+
+Figure 14: Posterior predictive means and variances of the free-energy derivatives in the selected CH model when the scalar observation-noise variance is inferred jointly with the coefficients. 
+
+40 We vary the observation-noise standard deviation over the range 
+
+10 −5 ≤ σ ≤ 10 −2, (146) and consider B-VSI grids with spatial resolutions 
+
+nx ∈ { 25 , 50 , 100 , 200 } , (147) where each value of nx corresponds to an nx × nx spatial grid. For each case, parameter-estimation error is measured by the absolute coefficient error 
+
+eθ = bθ − θGT 2
+
+, (148) where bθ is the estimated coefficient vector and θGT is the ground-truth coefficient vector. The results are shown in Fig. 15.   
+
+> Figure 15: Sensitivity of parameter-estimation error to observation-noise level and spatial resolution for the FP equation. Each cluster corresponds to a fixed noise level. Within each cluster, the horizontal offsets distinguish different spatial resolutions, with finer grids plotted to the left and coarser grids plotted to the right.
+
+Effect of noise level. At low and moderate noise levels, B-VSI produces smaller parame-ter errors than classical VSI. This improvement is most evident when log 10 (σ) < −3. The difference is expected because B-VSI accounts for the covariance structure induced by prop-agating observational noise through the weak-form residual map. Classical VSI, by contrast, corresponds to an unweighted least-squares estimator and can be interpreted as assuming an isotropic residual covariance. A Bayesian interpretation of this connection is discussed in Sec. 5.3. As the noise level increases, the errors of both methods increase. At sufficiently high noise levels, the benefit of covariance-aware weighting becomes limited because the observed fields enter not only the residual vector but also the operator basis matrices. Thus, the regression problem itself becomes contaminated by noise in the design matrix. 41 Effect of spatial resolution. B-VSI shows a clear decrease in parameter error under mesh refinement when log 10 (σ) < −3. Classical VSI exhibits a comparable convergence trend only at lower noise levels, approximately when log 10 (σ) < −4.5. This suggests that covariance-aware residual weighting improves the effective use of spatial resolution when observation noise is not too large. At higher noise levels, approximately when log 10 (σ) > −2.5, neither method exhibits a clear convergence trend with mesh refinement. This behavior is consistent with the classical errors-in-variables effect, also known as regression attenuation. In ordinary least squares, if the regression features are measured with noise and this noise is ignored, the estimated coefficients are biased toward zero. For example, in the scalar case with z = x + ϵx and ϵx
+
+independent of x and y, regressing y on the noisy feature z gives an attenuation factor 
+
+E[ˆθ] ≈ Var( x)Var( x) + Var( ϵx)θ. (149) In VSI, the weak-form basis matrix is constructed from noisy observations, so the same errors-in-variables mechanism can bias coefficient estimates, especially for nonlinear operators. B-VSI accounts for the propagated covariance of the residuals, but it is not a full errors-in-variables correction for noise in the basis functions themselves. This helps explain the remaining bias observed at higher noise levels or coarser data resolutions [29, 30]. 
+
+5. Discussion 
+
+In this section, we compare observation-space and residual-space likelihood formulations, discuss the computational cost of B-VSI, and provide a Bayesian interpretation of classical VSI. 
+
+5.1. Comparison of likelihood formulations 
+
+We now compare the conventional data-discrepancy likelihood with the weak-form resid-ual likelihood used in B-VSI. The two formulations evaluate candidate models in different spaces. The data-discrepancy likelihood compares measured states with states generated by a forward PDE solve. The residual-space likelihood evaluates how well the observed data satisfy the weak-form equations associated with a candidate model and coefficient vector. For clarity, we present the comparison using a state-linear PDE. The same distinction extends to nonlinear systems, although nonlinear residual maps require the local Gaussian approximation developed in Sec. 3.2.2. 
+
+5.1.1. Observation-space and residual-space likelihoods 
+
+The observation-space and residual-space likelihoods differ primarily in where model-data agreement is evaluated. The conventional data-discrepancy likelihood compares observed states with model-induced states obtained from a forward PDE solve. Under the Gaussian observation model, this likelihood, as introduced in Eq. (27), has the form 
+
+pobs (D | θ, M) = 
+
+> nt
+
+Y
+
+> k=0
+
+N
+
+
+
+ˆu(k); ¯u(k)
+
+> θ,M
+
+, Σ(k)
+
+> u
+
+
+
+, (150) 42 where ¯u(k) 
+
+> θ,M
+
+is obtained by solving the candidate PDE with coefficients θ. This formulation provides a global comparison between the measured data and the simulated trajectory, but each likelihood evaluation requires a forward solve. B-VSI instead evaluates the candidate PDE directly on the observed data. For a state-linear model with one-step weak-form residual 
+
+r(k) 
+
+> θ
+
+= Kθ ˆu(k) − B ˆu(k−1) − qθ, (151) the residual-space likelihood, as introduced in Eq. (62), is 
+
+pres (D | θ, M) = p(rθ | θ, M) ≈
+
+> nt
+
+Y
+
+> k=1
+
+N
+
+
+
+r(k) 
+
+> θ
+
+; 0, Σ(k)
+
+> r, θ
+
+
+
+. (152) This likelihood provides a local comparison over each observed time interval by measuring how well consecutive snapshots satisfy the candidate weak-form equations. It avoids repeated forward PDE solves, but it generally requires full-field or sufficiently rich spatial observations so that the weak-form residuals can be assembled. The two formulations therefore have complementary strengths. The observation-space likelihood is more natural when only sparse sensors or low-dimensional quantities of interest are observed. The residual-space likelihood is more efficient when full-field spatiotemporal data are available and the governing equation can be evaluated directly on the data. 
+
+5.1.2. Relation through a one-step transformed discrepancy 
+
+The two likelihoods are closely related in a one-step setting. Suppose that the previous observed state ˆu(k−1) is treated as a deterministic initial condition for a single-step prediction. For the discrete one-step residual equation, the corresponding one-step state satisfying zero residual is 
+
+¯u(k|k−1)  
+
+> θ
+
+= K−1
+
+> θ
+
+
+
+B ˆu(k−1) + qθ
+
+
+
+, (153) assuming Kθ is nonsingular. Define the one-step data discrepancy 
+
+e(k) 
+
+> θ
+
+= ˆu(k) − ¯u(k|k−1)  
+
+> θ
+
+. (154) Then the residual is a linear transformation of this discrepancy: 
+
+r(k) 
+
+> θ
+
+= Kθe(k) 
+
+> θ
+
+. (155) If 
+
+e(k) 
+
+> θ
+
+∼ N 
+
+
+
+0, Σ(k)
+
+> u
+
+
+
+, (156) then 
+
+r(k) 
+
+> θ
+
+∼ N 
+
+
+
+0, KθΣ(k) 
+
+> u
+
+K⊤
+
+> θ
+
+
+
+. (157) 43 When Kθ is nonsingular, the corresponding densities satisfy the change-of-variables identity 
+
+p(k)obs 
+
+
+
+e(k) 
+
+> θ
+
+| θ, M
+
+
+
+= |det Kθ| p(k)res 
+
+
+
+r(k) 
+
+> θ
+
+| θ, M
+
+
+
+. (158) This identity shows that the residual likelihood can be interpreted as a transformed one-step data-discrepancy likelihood. However, the two likelihoods are not generally identical as functions of θ. The determinant factor in Eq. (158) may depend on θ, and the B-VSI residual likelihood derived in Sec. 3.2 propagates uncertainty from both ˆu(k) and ˆu(k−1) 
+
+rather than treating the previous state as deterministic. Thus, B-VSI should be viewed as a covariance-aware local surrogate likelihood induced by the observation model, not as an exact replacement for the global data-discrepancy likelihood. In the lagged-covariance point-estimation updates in Sec. 3.3.2, the residual covariance is held fixed during each parameter update. Within that update, the determinant term associated with the lagged covariance is constant with respect to θ. The resulting weighted residual objective is therefore closely related to a locally transformed one-step discrepancy objective. 
+
+5.1.3. Computational advantage of the residual-space likelihood 
+
+The main computational benefit of the residual-space likelihood is that it avoids re-peated forward PDE solves. For the data-discrepancy likelihood in Eq. (150), each proposed coefficient vector requires constructing the model-induced trajectory {¯u(k)
+
+> θ,M
+
+}nt
+
+> k=0
+
+. For time-dependent PDEs, this requires sequential time integration across the full observation window. For nonlinear PDEs, each time step may additionally require nonlinear iterations. The residual-space likelihood avoids this step. For a fixed candidate model, the weak-form residuals are assembled by applying the candidate operators to the observed data. In the state-linear case, this involves matrix-vector products such as 
+
+r(k) 
+
+> θ
+
+= Kθ ˆu(k) − B ˆu(k−1) − qθ. (159) For nonlinear operators, the residual and its local covariance require evaluating the nonlinear weak-form basis functions and their Jacobians at the observed fields. These operations are performed directly on the data and do not require advancing the PDE solution for each proposed θ.The exact cost depends on the finite element discretization, matrix sparsity, and linear-algebra implementation. For sparse finite element matrices, residual assembly typically scales with the number of nonzero entries in the relevant operator matrices. Evaluating the Gaus-sian residual likelihood also requires applying or solving with the residual covariance blocks. These covariance operations can be performed using direct factorizations, iterative solvers, di-agonal or sparse approximations, or precomputed structures when applicable. Thus, the com-putational gain should not be interpreted as a universal reduction from O(n3dof ) to O(n2dof ).Rather, the central advantage is that B-VSI replaces repeated forward solves and adjoint or sensitivity calculations with weak-form residual assembly and covariance-weighted residual evaluation. This distinction is especially important for gradient-based point estimation and poste-rior inference. With a data-discrepancy likelihood, gradients require differentiating through 44 the time integrator and PDE solver. With the residual-space likelihood, gradients can be computed directly from the residual vector and residual covariance with respect to θ. This avoids backpropagation through a forward PDE solve and makes residual-space MLE, MAP point estimation, and SVGD posterior inference substantially more tractable when full-field data are available. Finally, the residual-space formulation ties the discretization used for likelihood evalua-tion to the data representation. The method still uses finite element shape functions and weak-form assembly, but it does not require choosing a separate forward-simulation mesh for each candidate parameter value. This avoids the repeated stability and solver-tolerance considerations that arise when evaluating many candidate models through forward time integration. 
+
+5.2. Computational complexity 
+
+We summarize the main computational costs of B-VSI in Table 3. The costs depend on the finite element discretization, sparsity pattern, covariance structure, and linear-algebra implementation. The estimates below should therefore be interpreted as representative costs rather than universal bounds. Let N denote the number of residual equations per time interval. For a scalar state, 
+
+N = ndof . For a multi-field system, N denotes the total number of stacked spatial degrees of freedom across all fields. Let nt be the number of time intervals, dθ the number of active coefficients in the current model, d = |χ| the size of the full candidate dictionary, np the number of SVGD particles, ne the number of elements, and nloc the number of local degrees of freedom per element. We also define two implementation-dependent costs. Let Cfac (N ) denote the cost of factoring one N × N residual covariance block and computing its log determinant, and let 
+
+Csol (N, m ) denote the cost of applying the inverse of one covariance block to m right-hand sides after factorization. For dense covariance blocks, 
+
+Cfac (N ) = O(N 3), Csol (N, m ) = O(N 2m). (160) For diagonal, sparse, low-rank, or otherwise structured covariance blocks, these costs can be substantially smaller. 
+
+Weak-form assembly. The weak-form dataset is assembled from the observed fields and the finite element basis. For each operator, element-level integration requires looping over ele-ments and forming local contributions. A typical element-level assembly cost is 
+
+O(nen2loc ) (161) per operator, up to factors associated with quadrature and the number of state variables. For state-linear operators, the corresponding Galerkin matrices can be assembled once and reused across time. For nonlinear operators, the weak-form basis vectors and local Jacobians are evaluated on the observed fields, typically for each time interval. Thus, assembling all active nonlinear basis vectors and Jacobians scales approximately as 
+
+O(ntdθnen2loc ), (162) 45 again up to quadrature and implementation-dependent constants. The resulting global matrices are usually sparse because finite element basis functions have local support. They may be banded under particular node orderings, but sparsity is the more general property. Consequently, applying a preassembled operator matrix to data can often be done in time proportional to the number of nonzero entries rather than O(N 2).
+
+Residual and covariance evaluation. Once the weak-form basis matrices are available, the stacked residual has the regression form 
+
+rθ = y − Xθ . (163) Evaluating the residual over all time intervals costs 
+
+O(ntN d θ) (164) when the basis matrix blocks are explicitly available. If residuals are evaluated through sparse operator applications rather than through assembled dense basis matrices, this cost is better described in terms of the number of nonzero entries in the operator matrices. The residual covariance for each time interval has the form 
+
+Σ(k) 
+
+> r, θ
+
+= C(k) 
+
+> θ
+
+Σ(k) 
+
+> u
+
+C(k)
+
+> θ
+> ⊤
+
++ BΣ(k−1)  
+
+> u
+
+B⊤, (165) where C(k) 
+
+> θ
+
+is the current-state residual sensitivity. For dense matrices, explicitly forming this covariance block can cost up to O(N 3). When Σ(k) 
+
+> u
+
+is diagonal or scalar and the sen-sitivity matrices are sparse, the cost can be reduced by exploiting sparsity or by avoiding explicit dense covariance formation. Evaluating the Gaussian residual likelihood also requires applying the covariance inverse and computing a log determinant, which are represented by 
+
+Cfac (N ) and Csol (N, m ) in Table 3. 
+
+Lagged-covariance point estimation and Gaussian posterior inference. In the lagged-covariance update, the covariance Σbd  
+
+> r, θ(l)
+
+is assembled or updated using the current parameter value and then held fixed while updating θ. For MLE point estimation, the dominant operations are factoring the covariance blocks and forming the weighted normal equations, 
+
+X⊤W lX, X⊤W ly. (166) For each time interval, this requires applying 
+
+
+
+Σ(k)
+
+> r, θ(l)
+
+−1
+
+to the columns of Ξ(k) and to Ξ ˙u(k).The dense-block cost per lagged-covariance iteration is therefore dominated by O(ntN 3)
+
+when dθ ≪ N .The Gaussian posterior update with known observation-noise covariance has the same dominant cost as the lagged-covariance MLE update, with an additional inversion of a dθ ×dθ
+
+matrix. The normal-inverse-gamma update for an unknown scalar observation-noise variance has the same leading-order cost, with only inexpensive scalar updates for the inverse-gamma parameters. Thus, the conjugate posterior updates are usually dominated by residual co-variance operations rather than by operations in coefficient space. 46 Table 3: Representative computational costs for B-VSI under the block-diagonal residual covariance approxi-mation. Here, N is the number of residual equations per time interval, dθ is the number of active coefficients, 
+
+d is the dictionary size, and np is the number of SVGD particles. The functions Cfac (N ) and Csol (N, m )
+
+denote the cost of factoring one residual covariance block and applying its inverse to m right-hand sides, respectively. Component Dominant operation Representative cost Weak-form assembly Assemble one operator matrix or Jaco-bian O(nen2loc )
+
+Weak-form assembly Assemble active nonlinear basis vectors and Jacobians over all time intervals 
+
+O(ntdθ nen2loc )
+
+Residual evaluation Compute rθ = y − Xθ O(ntN d θ )
+
+Residual likelihood Factor covariance blocks and evaluate Gaussian densities O(ntCfac (N )) 
+
+Lagged-covariance MLE Form weighted normal equations and solve for θ
+
+O(nt[Cfac (N ) + Csol (N, d θ + 1) +N d 2 
+
+> θ
+
+] + d3
+
+> θ
+
+
+
+Gaussian posterior infer-ence Known observation-noise covariance Same leading cost as lagged-covariance MLE Normal-inverse-gamma posterior inference Unknown scalar observation-noise vari-ance Same leading cost as lagged-covariance MLE Full-objective gradient methods Evaluate full likelihood and gradient with θ-dependent covariance Problem-dependent; at least one residual-likelihood evaluation plus covariance-derivative costs per itera-tion SVGD posterior infer-ence Update np particles O(npT∇) + O(n2
+
+> p
+
+dθ )
+
+Model selection Sequential operator elimination O(d2) × O (point-estimation fit )
+
+47 Full θ-dependent point estimation and posterior inference. Gradient-based MLE or MAP point estimation targets the full objective in which Σbd  
+
+> r, θ
+
+depends on θ. Each iteration requires evaluating the residual likelihood and its gradient. The likelihood evaluation has the covariance costs described above. The gradient additionally requires differentiating the residual vector and, when the full covariance dependence is retained, differentiating the covariance and log-determinant terms with respect to θ. These derivative costs are problem-dependent and may be obtained analytically or through automatic differentiation. For SVGD posterior inference, the residual-space posterior gradient must be evaluated for each particle. If T∇ denotes the cost of one posterior-gradient evaluation for one particle, then one SVGD iteration costs approximately 
+
+O(npT∇) + O(n2
+
+> p
+
+dθ), (167) where the second term is the cost of kernel evaluations and kernel-gradient interactions among particles. Thus, SVGD is more expensive than a single point-estimation run by roughly a factor of np, plus the particle-interaction cost. 
+
+Model selection. Sequential operator elimination evaluates a sequence of reduced models. Starting from a dictionary with d candidate operators, backward elimination visits at most 
+
+d + ( d − 1) + · · · + 1 = O(d2) (168) candidate reductions. If some operators are protected and never removed, this count is reduced accordingly. During model selection, only an MLE point estimate is required for each candidate model to evaluate the residual-space BIC. Full posterior inference is performed only after the selected model is fixed. Therefore, the model-selection cost is approximately 
+
+O(d2) × O (point-estimation fit ). (169) 
+
+Practical comparison of inference strategies. The lagged-covariance updates and the full gradient-based methods can have comparable leading-order costs per iteration when dense covariance factorizations dominate. In practice, however, the lagged-covariance updates are often faster because they avoid automatic differentiation through covariance terms and typ-ically require fewer iterations. Gradient-based methods are more flexible and can target non-Gaussian priors, constrained parameterizations, or the full θ-dependent residual likeli-hood. SVGD provides a particle approximation to the posterior, but it incurs an additional factor proportional to the number of particles. The main computational advantage of B-VSI relative to observation-space likelihood methods is not a universal dense-matrix complexity reduction. Rather, it is the replacement of repeated forward PDE solves, and their associated sensitivity or adjoint calculations, with weak-form residual assembly and covariance-weighted residual evaluation. 
+
+5.3. Bayesian perspective on VSI 
+
+Classical VSI can be interpreted from a Bayesian perspective as a residual-space estima-tion method with a simplified likelihood model. This interpretation clarifies when VSI and B-VSI are expected to agree, and when the covariance-aware likelihood in B-VSI becomes important. 48 Residual likelihood implied by VSI. The standard VSI objective in Eq. (17) minimizes an unweighted squared weak-form residual. Comparing this objective with the MLE objective in B-VSI, such as Eq. (67), shows that VSI corresponds to the likelihood model 
+
+rθ ∼ N (0, σ 2I), (170) where σ2 is a scalar residual variance. For MLE, the value of σ2 does not affect the optimizer because it only rescales the objective. Thus, the classical VSI estimator can be viewed as an ordinary least-squares estimator in residual space. This likelihood assumes that the residual errors have constant variance and are mutually uncorrelated across spatial nodes, time steps, and state variables. Equivalently, it treats all residual equations as equally reliable and statistically independent. With ℓ2 regularization, the same interpretation becomes MAP estimation with a zero-mean Gaussian prior on θ.With ℓ1 regularization, it becomes MAP estimation with a zero-mean Laplace prior. There-fore, regularized VSI can be viewed as a Bayesian point estimator under an isotropic residual likelihood and a sparsity- or shrinkage-promoting prior. The isotropic residual covariance assumption is generally not implied by the observation model. As shown in Sec. 3.2, uncertainty in the measured fields is propagated through the weak-form residual map. For a state-linear residual, this gives covariance terms of the form 
+
+Σ(k) 
+
+> r, θ
+
+= C(k) 
+
+> θ
+
+Σ(k) 
+
+> u
+
+C(k)
+
+> θ
+> ⊤
+
++ BΣ(k−1)  
+
+> u
+
+B⊤. (171) Even if the observation noise covariance Σ(k) 
+
+> u
+
+is diagonal or isotropic, the residual covariance need not be diagonal or isotropic after multiplication by the finite element residual sensitivity matrices. Because each weak-form residual depends on local neighborhoods of nodal values, the propagated residual errors can have non-uniform variances and nonzero correlations. B-VSI accounts for this induced covariance structure, whereas classical VSI replaces it with 
+
+σ2I.
+
+Why VSI remains accurate in low-noise regimes. The comparative results in Sec. 4.3 show that VSI can still produce accurate parameter estimates in low-noise conditions, often per-forming similarly to B-VSI. This behavior is expected. When observation noise is small, the measured fields ˆu are close to the noise-free solution ¯u. Consequently, the weak-form residuals evaluated at the correct model are also small, and the difference between weighted and unweighted residual minimization has limited practical effect. More precisely, B-VSI replaces the ordinary least-squares residual objective with a gen-eralized least-squares objective, 
+
+r⊤ 
+
+> θ
+
+Σ−1
+
+> r, θ
+
+rθ. (172) When all candidate parameter values near the optimum produce very small residuals, chang-ing the weighting matrix often produces only a small change in the minimizer. In this regime, the dominant source of accuracy is the weak-form structure itself, and the covariance cor-rection mainly affects uncertainty quantification rather than the point estimate. As the noise level increases, however, the covariance structure becomes more consequen-tial. Residual equations with larger propagated uncertainty should contribute less to the 49 likelihood, and correlated residuals should not be treated as independent information. Clas-sical VSI cannot make this distinction because it assigns the same variance and independence assumption to every residual equation. B-VSI therefore provides a statistically better cal-ibrated estimator and posterior approximation when the propagated residual covariance is heteroscedastic or correlated. In summary, classical VSI is a special case of residual-space Bayesian inference with an isotropic Gaussian residual likelihood. This approximation is often adequate for point estimation in low-noise settings, but it can become statistically inefficient or overconfident when measurement noise is non-negligible. B-VSI generalizes VSI by using the covariance structure induced by the observation model and the weak-form residual map. 
+
+6. Conclusions 
+
+We presented Bayesian Variational System Identification (B-VSI), a framework for dis-covering governing PDEs from noisy spatiotemporal data while quantifying uncertainty in the identified model and its derived predictions. B-VSI extends classical VSI by replacing the unweighted weak-form residual objective with a likelihood defined directly in weak-form residual space. This likelihood is induced by the observation model, where measurement uncertainty is propagated through the weak-form residual map, producing residual errors that are generally heteroscedastic and correlated. The framework preserves the main com-putational advantage of VSI, namely that coefficient estimation and posterior inference can be performed without repeated forward PDE solves. The proposed formulation provides a unified Bayesian treatment of operator selection, parameter estimation, posterior inference, and posterior prediction. For a fixed candidate model, the residual-space likelihood supports both point estimates and posterior approxi-mations. We developed lagged-covariance updates that yield generalized least-squares es-timates and conjugate posterior approximations when applicable. For more general priors, likelihoods, or posterior structures, these updates can be used to initialize gradient-based op-timization or particle-based posterior inference. Model-form uncertainty is handled through sequential operator elimination guided by a residual-space BIC criterion, enabling parsimo-nious model discovery from candidate operator dictionaries. The numerical examples on the Fokker–Planck and two-field Cahn–Hilliard equations demonstrate that B-VSI can recover active operators and estimate their coefficients accu-rately from noisy data. The results show that accounting for the propagated residual covari-ance improves robustness relative to classical VSI when measurement noise is non-negligible. At low noise levels, classical VSI and B-VSI produce similar point estimates, consistent with the interpretation of classical VSI as an isotropic residual-likelihood approximation. Be-yond coefficient estimation, B-VSI provides posterior uncertainty estimates for physically meaningful derived quantities, including potential functions and free-energy derivatives. Overall, B-VSI provides a computationally tractable route to uncertainty-aware PDE discovery from full-field spatiotemporal data. Future work will extend the framework to par-tial and sparse observations, higher-dimensional parameter spaces, and optimal experimental design for more data-efficient discovery of governing equations. 50 Acknowledgment 
+
+We acknowledge support from the W. M. Keck Foundation Medical Research Grant Program. During the preparation of this work, the authors used ChatGPT to assist with language editing, organization, clarity, and consistency checks of mathematical notation and presen-tation. The authors reviewed and revised all AI-assisted text and take full responsibility for the content of the manuscript. 
+
+References 
+
+[1] F. Neto, A. da Silva Neto, An Introduction to Inverse Problems with Applications, Springer Berlin Heidelberg, 2012. [2] S. L. Brunton, J. N. Kutz, Data-Driven Science and Engineering: Machine Learning, Dynamical Systems, and Control, 2nd ed., Cambridge University Press, 2022, pp. 520– 541. [3] J. C. De los Reyes, Numerical PDE-Constrained Optimization, Springer International Publishing, 2015. doi: 10.1007/978-3-319-13395-9 .[4] S. L. Brunton, J. L. Proctor, J. N. Kutz, Discovering governing equations from data by sparse identification of nonlinear dynamical systems, Proceedings of the National Academy of Sciences 113 (2016) 3932–3937. doi: 10.1073/pnas.1517384113 .[5] S. H. Rudy, S. L. Brunton, J. L. Proctor, J. N. Kutz, Data-driven discovery of partial dif-ferential equations, Science Advances 3 (2017) e1602614. doi: 10.1126/sciadv.1602614 .[6] Z. Wang, X. Huan, K. Garikipati, Variational system identification of the partial dif-ferential equations governing the physics of pattern-formation: Inference under varying fidelity and noise, Computer Methods in Applied Mechanics and Engineering 356 (2019) 44–74. doi: 10.1016/j.cma.2019.07.007 .[7] Z. Wang, B. Wu, K. Garikipati, X. Huan, A perspective on regression and Bayesian approaches for system identification of pattern formation dynamics, Theoretical and Applied Mechanics Letters 10 (2020) 188–194. doi: 10.1016/j.taml.2020.01.028 .[8] Z. Wang, X. Huan, K. Garikipati, Variational system identification of the partial differ-ential equations governing microstructure evolution in materials: Inference over sparse and spatially unrelated data, Computer Methods in Applied Mechanics and Engineering 377 (2021) 113706. doi: 10.1016/j.cma.2021.113706 .[9] D. A. Messenger, D. M. Bortz, Weak SINDy for partial differential equations, Journal of Computational Physics 443 (2021) 110525. doi: 10.1016/j.jcp.2021.110525 .[10] R. C. Smith, Uncertainty Quantification: Theory, Implementation, and Applications, Society for Industrial and Applied Mathematics, Philadelphia, PA, 2013. doi: 10.1137/ 1.9781611973228 .51 [11] A. Gelman, J. Carlin, H. Stern, D. Dunson, A. Vehtari, D. Rubin, Bayesian Data Analysis, 3rd ed., Chapman and Hall/CRC, 2013. [12] U. Fasel, J. N. Kutz, B. W. Brunton, S. L. Brunton, Ensemble-SINDy: Robust sparse model discovery in the low-data, high-noise limit, with active learning and control, Proceedings of the Royal Society A: Mathematical, Physical and Engineering Sciences 478 (2022) 20210904. doi: 10.1098/rspa.2021.0904 .[13] S. M. Hirsh, D. A. Barajas-Solano, J. N. Kutz, Sparsifying priors for Bayesian uncer-tainty quantification in model discovery, Royal Society Open Science 9 (2022) 211823. doi: 10.1098/rsos.211823 .[14] R. K. Niven, L. Cordier, A. Mohammad-Djafari, M. Abel, M. Quade, Dynamical sys-tem identification, model selection, and model uncertainty quantification by Bayesian inference, Chaos: An Interdisciplinary Journal of Nonlinear Science 34 (2024) 083140. doi: 10.1063/5.0200684 .[15] L. Fung, U. Fasel, M. Juniper, Rapid Bayesian identification of sparse nonlinear dy-namics from scarce and noisy data, Proceedings of the Royal Society A: Mathematical, Physical and Engineering Sciences 481 (2025) 20240200. doi: 10.1098/rspa.2024.0200 .[16] M. D. Champneys, T. J. Rogers, BINDy: Bayesian identification of nonlinear dynamics with reversible-jump Markov-chain Monte Carlo, Proceedings of the Royal Society A: Mathematical, Physical and Engineering Sciences 481 (2025) 20240620. doi: 10.1098/ rspa.2024.0620 .[17] C. Blundell, J. Cornebise, K. Kavukcuoglu, D. Wierstra, Weight uncertainty in neural network, in: Proceedings of the 32nd International Conference on Machine Learning, volume 37 of Proceedings of Machine Learning Research , PMLR, Lille, France, 2015, pp. 1613–1622. [18] L. Yang, X. Meng, G. E. Karniadakis, B-PINNs: Bayesian physics-informed neural net-works for forward and inverse PDE problems with noisy data, Journal of Computational Physics 425 (2021) 109913. doi: 10.1016/j.jcp.2020.109913 .[19] S. Garg, S. Chakraborty, VB-DeepONet: A Bayesian operator learning framework for uncertainty quantification, Engineering Applications of Artificial Intelligence 118 (2023) 105685. doi: 10.1016/j.engappai.2022.105685 .[20] S. C. Brenner, L. R. Scott, The Mathematical Theory of Finite Element Methods, Springer New York, 2008. doi: 10.1007/978-0-387-75934-0 .[21] P. Diaconis, D. Ylvisaker, Conjugate priors for exponential families, The Annals of Statistics 7 (1979) 269–281. doi: 10.1214/aos/1176344611 .[22] Q. Liu, D. Wang, Stein variational gradient descent: A general purpose Bayesian inference algorithm, in: Advances in Neural Information Processing Systems, volume 29, Curran Associates, Inc., 2016. 52 [23] I. A. Baratta, J. P. Dean, J. S. Dokken, M. Habera, J. S. Hale, C. N. Richardson, M. E. Rognes, M. W. Scroggs, N. Sime, G. N. Wells, DOLFINx: The next generation FEniCS problem solving environment, 2023. doi: 10.5281/zenodo.10447666 .[24] H. Risken, The Fokker–Planck Equation: Methods of Solution and Applications, Springer Berlin Heidelberg, 1996. doi: 10.1007/978-3-642-61544-3 .[25] J. W. Cahn, J. E. Hilliard, Free energy of a nonuniform system. I. Interfacial free energy, The Journal of Chemical Physics 28 (1958) 258–267. doi: 10.1063/1.1744102 .[26] G. Engel, K. Garikipati, T. Hughes, M. Larson, L. Mazzei, R. Taylor, Continuous/dis-continuous finite element approximations of fourth-order elliptic problems in structural and continuum mechanics with applications to thin beams and plates, and strain gra-dient elasticity, Computer Methods in Applied Mechanics and Engineering 191 (2002) 3669–3750. doi: 10.1016/S0045-7825(02)00286-4 .[27] G. N. Wells, E. Kuhl, K. Garikipati, A discontinuous Galerkin method for the Cahn– Hilliard equation, Journal of Computational Physics 218 (2006) 860–877. doi: 10.1016/ j.jcp.2006.03.010 .[28] G. N. Wells, K. Garikipati, Analysis of a finite element formulation for modelling phase separation, in: IUTAM Symposium on Discretization Methods for Evolving Discontinuities, Springer Netherlands, Dordrecht, 2007, pp. 89–102. [29] W. A. Fuller, Measurement Error Models, Wiley, 1987. doi: 10.1002/9780470316665 .[30] R. J. Carroll, D. Ruppert, L. A. Stefanski, C. M. Crainiceanu, Measurement Error in Nonlinear Models, Chapman and Hall/CRC, 2006. doi: 10.1201/9781420010138 .53
