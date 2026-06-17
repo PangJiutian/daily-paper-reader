@@ -1,0 +1,637 @@
+Title: Incorporating wave physical priors into diffusion models: A novel approach to seismic resolution enhancement
+
+URL Source: https://arxiv.org/pdf/2606.17808v1
+
+Published Time: Wed, 17 Jun 2026 01:26:47 GMT
+
+Number of Pages: 26
+
+Markdown Content:
+# Incorporating wave physical priors into diffusion models: A novel approach to seismic resolution enhancement 
+
+A P REPRINT 
+
+Huanhuan Tang, Weijian Mao 
+
+Research Center for Computational and Exploration Geophysics, State Key Laboratory of Precision Geodesy, Innovation Academy for Precision Measurement Science and Technology, Chinese Academy of Sciences, Wuhan 430077, China 
+
+Shijun Cheng 
+
+Division of Physical Science and Engineering King Abdullah University of Science and Technology Thuwal 23955-6900, Saudi Arabia 
+
+Haoran Zhang 
+
+School of Petroleum, China University of Petroleum-Beijing at Karamay, Xinjiang 834000, China 
+
+Yingying Zhang 
+
+School of Geography and Tourism, Zhengzhou Normal University, Zhengzhou 450044, China 
+
+> ∗
+
+Corresponding author: Shijun Cheng (sjcheng.academic@gmail.com )June 17, 2026 
+
+## ABSTRACT 
+
+Seismic resolution enhancement remains a critical challenge in exploration geophysics, particularly when processing field data characterized by limited bandwidth, strong noise, and insufficient labeled training samples. Existing deep learning methods typically rely on supervised learning with synthetic training data, leading to distribution mismatch and poor generalization on real seismic acquisitions. To address these limitations, we develop a physics-guided self-supervised diffusion model (PG-SSDM) that learns directly from field observations without requiring paired high-resolution labels. The proposed framework combines three key innovations. First, a self-supervised training strategy constructs learning targets by progressively filtering the observed data itself, eliminating the need for high-resolution ground truth through iterative refinement across multiple stages. Second, seismic convolution model is embedded as a hard physical constraint in both the training loss function and the reverse sampling process, ensuring that generated high-resolution outputs respect fundamental seismic wave propagation physics. Third, the probabilistic nature of diffusion models enables uncertainty quantification, providing spatial confidence maps that identify regions where resolution enhancement may be less reliable. We validate PG-SSDM on synthetic data under various noise conditions and on a 3D post-stack field dataset. Experimental results demonstrate that the proposed method effectively recovers thin layers and subtle structures, suppresses noise, preserves structural continuity, thereby significantly improving the resolution and interpretability of seismic data. 
+
+Keywords Seismic resolution enhancement · Physics-guided · Generative diffusion model · Self-supervised learning. 
+
+> arXiv:2606.17808v1 [physics.geo-ph] 16 Jun 2026
+
+PG-SSDM for seismic resolution enhancement A P REPRINT 
+
+## 1 Introduction 
+
+Advancing exploration targets now commonly involve complex geological features, like thin interbeds, minor faults, and subtle reservoirs, which demand increasingly higher seismic data resolution. Unfortunately, field seismic data often fails to meet these interpretation requirements due to multiple factors: wave attenuation during propagation, equipment precision limitations, environmental noise, and earth filtering effects. While recent broadband seismic sources and high-density acquisition technologies represent significant progress, their high cost and operational constraints in the field mean that post-acquisition processing must compensate for hardware limitations [Subash et al., 2012]. Existing approaches to enhance seismic resolution can be grouped into four main categories: deconvolution, inverse Q filtering, spectral whitening, and deep learning methods. Deconvolution, a classical technique for enhancing seismic data resolution, aims to broaden the frequency band by compressing the seismic wavelet [Huang, 1988, Robinson and Treitel, 2006, Peacock and Treitel, 1969]. Traditional methods, such as Wiener filtering [Robinson and Treitel, 2006], least-squares deconvolution [Huang, 1988], predictive deconvolution [Peacock and Treitel, 1969], and surface-consistent deconvolution [Ulvmoen and Omre, 2010], rely on the convolution model and assume sparse reflection coefficients. However, these approaches assume locally stationary media and struggle when reflection coefficients are not sparse under complex geology. To address these limitations, [Gholami and Sacchi, 2014] introduced L1-norm regularization for sparse-constrained deconvolution, while [Ulvmoen and Omre, 2010] developed a Bayesian framework that incorporates geostatistical information through prior distributions. Yet all these methods assume a stationary wavelet during propagation, resulting in poor performance when processing non-stationary seismic signals. This motivated non-stationary deconvolution techniques, such as the generalized time-variant deconvolution theory [Koehler and Taner, 1985] and Gabor transform-based deconvolution methods [Margrave et al., 2011, Jin et al., 2017], which allow the seismic wavelet to vary with time, thereby better handling the non-stationarity of seismic signals. Despite these advances, deconvolution faces several persistent challenges in field applications: (1) accurate wavelet estimation remains difficult, (2) the minimum-phase wavelet assumption often breaks down, (3) attenuated high-frequency components cannot be recovered, and (4) the inverse problem requires regularization parameters that are typically chosen empirically. Inverse Q filtering improves resolution by compensating for amplitude loss and phase distortion caused by subsurface absorption [Sheriff, 1975, Wang, 2002]. Zhang et al. [2007] developed a stable wavefield-based algorithm. Hargreaves and Calvert [1991] proposed a phase-only inverse Q filtering method grounded in the wavefield extrapolation principle. Yao et al. [2003] introduced a depth-domain inverse Q filtering technique that simultaneously performs amplitude compensation and phase correction in the depth domain. Inverse Q filtering involves wavefield extrapolation methods where explicit approaches are unstable, leading to unstable amplitude compensation. Therefore, Wang [2006] derived inverse Q filtering formulas with gain-limiting constraints and stabilization methods based on wavefield extrapolation. To address the numerical instability of inverse Q-filter amplitude compensation, Zhang et al. [2015] proposed a self-adaptive, time-variant gain-limit approach. In pre-stack domains, inverse Q-filtering is often hindered by the difficulty in estimating layer-specific traveltimes. Liu et al. [2020] addressed this by transforming attenuation factors from the τ –p
+
+domain to the t–x domain using inverse warped mapping, stabilized via Taylor-expansion-based division. Nevertheless, practical application of inverse Q filtering remains two fundamental challenges. Accurate Q-value estimation is difficult to achieve, and errors propagate directly into compensation artifacts. Moreover, field data are often noisy, and the amplitude compensation process amplifies noise along with signal, leading to signal-to-noise ratio (SNR) degradation. Spectral whitening balances the energy distribution across different frequencies to enhance high-frequency components and, thus, improve vertical resolution. The basic method involves transforming seismic signals into the frequency domain via Fourier transform, followed by amplitude compensation within the effective frequency range [Allen, 1977, Gao et al., 2009]. However, Fourier transform inherently lacks the ability to analyze local frequency characteristics of signals. Alternatives based on wavelet transform [Grossmann et al., 1990, Pinnegar and Mansinha, 2003, Xu et al., 2022] and Hilbert-Huang transform [Huang et al., 1998, Battista et al., 2007, Siyuan et al., 2023] better handle nonlinear and non-stationary signals. Nonetheless, while spectral whitening enhances vertical resolution by boosting high-frequency components, it may distort the original amplitude-phase relationships, affecting the reliability of subsequent inversion and attribute extraction for quantitative interpretation. Furthermore, parameters such as wavelet basis selection and filtering thresholds require manual tuning, heavily relying on experience, which may lead to over- or under-whitening. Deep learning (DL) avoids the restrictive assumptions and manual parameter selection inherent in traditional methods [LeCun et al., 2015, Mousavi and Beroza, 2022, Yu and Ma, 2021], offering new approaches for seismic resolution enhancement. Existing work can be broadly categorized into two methodological frameworks. The first treats resolution enhancement as a reflectivity inversion problem. Kim and Nakata [2018] used 1D CNNs for trace-by-trace high-resolution inversion, but this approach is sensitive to noise and lateral variations, producing unstable results. To improve robustness, Gao et al. [2022] introduced structural constraints based on t − x predictive error filters (PEF), and Chen 2PG-SSDM for seismic resolution enhancement A P REPRINT 
+
+et al. [2021] combined traditional regularization with CNNs to learn regularization parameters. These methods assume a known, stationary wavelet. Yet wavelets are typically unknown and time-varying in practice. While Gao et al. [2024] achieved high-resolution mapping from acoustic impedance to band-limited non-stationary seismic data using TV regularization, reliable wavelet estimation from field data remains challenging. The second considers resolution enhancement as low-to-high frequency extension. Li et al. [2021] trained a U-Net to map low- to high-frequency components using synthetic data generated by convolving reflectivity models with multi-frequency Ricker wavelets. Similarly, Gao et al. [2022, 2023] built training sets from well-log data and incorporated structural constraints to improve reconstruction accuracy. However, most DL-based methods rely on supervised learning with labeled training data, which creates a fundamental generalization challenge: models trained on synthetic data often perform poorly on field data due to distribution mismatch, while obtaining sufficient labeled field data is impractical. Several strategies have been developed to address this limitation. Jo et al. [2022] reduced the synthetic-to-field gap by extracting time-varying wavelets directly from field data at different depths to construct more realistic training sets. Domain adaptation methods aim to narrow the gap between synthetic and field data by applying domain-specific transformations, such as correlation-based alignment, to bring their input distributions closer and improve generalization [Alkhalifah et al., 2022, Zhang et al., 2022, Yang et al., 2025]. More recently, self-supervised learning (SSL) has emerged as a promising alternative that bypasses the need for labeled data entirely [Cheng et al., 2024]. In realm of seismic resolution enhancement, Chai et al. [2023] and Wang et al. [2023a] embedded a convolutional model in the loss function for geophysics-guided SSL deconvolution. Cheng et al. [2025a] proposed an SSL framework for seismic resolution enhancement that reformulates the task as high-frequency reconstruction and achieves robust generalization through iterative pseudo-label refinement. An additional limitation is that these methods are based on deterministic models, which produce a single deterministic solution after training. In contrast, generative diffusion models (GDMs) enable probabilistic modeling, capturing the uncertainty inherent in geophysical inverse problems. GDMs have been successfully applied to seismic modeling [Cheng et al., 2025b], processing [Durall et al., 2023, Liu and Ma, 2024, Cheng et al., 2025c, Wang et al., 2025], imaging [Shi et al., 2024], and inversion [Wang et al., 2023b, Zhang et al., 2025]. Compared to generative adversarial networks (GANs), GDMs avoid adversarial training, achieve more stable optimization through gradual denoising, prevent mode collapse, and demonstrate better hyperparameter robustness [Dhariwal and Nichol, 2021]. For resolution enhancement, Zhang et al. [2024] applied a denoising diffusion probabilistic model (DDPM) conditioned on low-resolution seismic data to reconstruct high-resolution images. Also, Yu et al. [2025] used GDMs to seismic resolution enhancement by treating seismic deconvolution as an unsupervised generation problem, where they employed diffusion posterior sampling to inject observed data into the reverse process. However, their models are trained on synthetic data and then applied to field data. This means the learned distribution remains that of synthetic data, not field data, the same generalization gap that affects deterministic methods persists. Table 1 systematically compares the major seismic resolution enhancement approaches across key dimensions including underlying principles, assumptions, data requirements, and limitations. This comparison highlights several important trends in the evolution of resolution enhancement techniques. Traditional methods (deconvolution, inverse Q filtering, spectral whitening) offer computational efficiency and solid theoretical foundations but are limited by restrictive assumptions about wavelet stationarity, accurate prior knowledge requirements, and poor noise robustness. Supervised deep learning methods demonstrate superior performance in controlled settings but face critical generalization challenges due to synthetic-to-field distribution mismatch. Recent advances in self-supervised learning and generative models attempt to address these limitations. However, existing approaches either lack physical constraints (pure SSL methods) or still rely on synthetic training data (supervised GDMs), leaving a gap for methods that can combine field-adaptive learning, physical consistency, and uncertainty quantification. To address the aforementioned challenges, this paper proposes a physics-guided self-supervised diffusion model (PG-SSDM) that trains directly on field data without requiring labels. The method has three key features. First, a novel self-supervised learning strategy is adopted, which requires only the original low-resolution data itself for training, effectively linking the training objective with the input data. Second, it incorporates seismic wavelet information and convolutional physics into the reverse diffusion sampling process, enforcing physical consistency with Robinson’s convolution model. Finally, it employs a composite loss function combining pixel loss with physical loss and total variation regularization, ensuring that predictions match data statistics, satisfy convolution physics, and maintain good signal-to-noise ratios and lateral continuity. We validate PG-SSDM through numerical experiments on both synthetic and field data. Synthetic tests evaluate the method’s robustness under various noise types and intensity levels. The approach is then applied to a 3D land post-stack dataset, demonstrating its effectiveness on real field data. 3PG-SSDM for seismic resolution enhancement A P REPRINT 
+
+Table 1: Comparison of seismic resolution enhancement methods 
+
+> Method Category  Core Principle  Key Assumptions  Prior Knowledge Required  Training Data Needed  Main Advantages  Main Limitations
+> Traditional Methods
+> Stationary Deconvolution  Wavelet compression via inverse filtering Stationary wavelet, sparse reflectivity, minimum phase Wavelet estimation  None  Well-established theory; computationally efficient Cannot recover attenuated frequencies; fails for non-stationary signals Non-stationary Deconvolution  Time-variant wavelet compression Time-varying wavelet, local stationarity Time-varying wavelet estimation None  Handles signal non-stationarity Complex wavelet estimation; high computational cost Inverse Q Filtering  Amplitude and phase compensation for absorption Known Q model; stable extrapolation Q-value distribution  None  Compensates physical attenuation Q estimation difficult; noise amplification Spectral Whitening  Frequency-domain energy balancing Effective frequency band definition Frequency range selection  None  Simple implementation  Distorts amplitude–phase relations; manual tuning required
+> Deterministic Deep Learning Methods
+> Supervised Reflectivity Inver-sion CNN-based inverse mapping  Known stationary wavelet  Wavelet; paired labels  High–low resolution pairs (synthetic) Learns complex mappings  Poor field generalization; wavelet dependence Supervised Frequency Exten-sion Low-to-high frequency mapping (U-Net) Training and field distributions match None (implicitly learned)  Multi-resolution synthetic data  Avoids explicit wavelet estimation Synthetic-to-field gap; data-hungry Domain Adaptation  Distribution alignment across domains Transferable latent features exist None  Synthetic data + limited field data Reduces domain mismatch  Limited adaptation capacity Self-Supervised Learning  Pseudo-label generation from data Method-dependent  Method-dependent  None (field data only)  No labeled data; field adaptive  Weak physical constraints; iterative refinement
+> Probabilistic Generative Models
+> Supervised GDMs  Conditional generative modeling Distribution learned from training data None  Paired synthetic data  Uncertainty quantification; stable training Generalization limited by synthetic data
+> Physics-Guided SSL GDMs (Proposed)
+> Self-supervised probabilistic generation with physics constraints Physical convolutional forward model Wavelet estimate  None (self-supervised on field data) Label-free; physically consistent; uncertainty-aware; field adaptive Requires wavelet estimation
+
+4PG-SSDM for seismic resolution enhancement A P REPRINT 
+
+Figure 1: Diagram of the conditional diffusion model-based seismic resolution enhancement [Zhang et al., 2024]. 
+
+## 2 Method 
+
+2.1 Review of conditional diffusion model-based seismic resolution enhancement 
+
+GDMs [Ho et al., 2020] have recently been adopted for seismic resolution enhancement due to their ability to learn powerful generative priors that map low-resolution seismic data to high-resolution representations. In this setting, a diffusion model aims to learn the conditional distribution p(x0 | ˜x), where x0 denotes the desired high-resolution seismic profile and ˜x is its degraded or band-limited counterpart. The conditional diffusion approaches is illustrated in Figure 1. In this framework, the forward diffusion process gradually corrupts x0 with Gaussian noise following a fixed variance schedule, producing noisy variables xt via 
+
+q(xt | xt−1) = N
+
+
+
+xt; p1 − βt xt−1, β tI
+
+
+
+, (1) and equivalently, 
+
+xt = √¯αt x0 + √1 − ¯αt ϵ, (2) where ϵ ∼ N (0 , I) represents Gaussian noise and ¯αt = Qti=1 (1 − βi). This corruption process is deterministic and requires no learning. Resolution enhancement is achieved during the reverse process, where the model reconstructs x0 from noisy inputs while being guided by the low-resolution constraint ˜x. A neural network (NN) is trained to approximate the reverse transition distribution 
+
+pθ (xt−1 | xt, ˜x) = N (xt−1; μθ (xt, t, ˜x), Σθ (xt, t )) , (3) where conditioning on ˜x enforces structural consistency between the generated reflectivity and the observed band-limited data. In practice, most seismic super-resolution approaches adopt the noise-prediction parameterization, where the network receives (xt, ˜x) as input and predicts the added noise ϵθ (xt, t, ˜x). The reverse update then takes the form 
+
+xt−1 = 1
+
+√αt
+
+
+
+xt − 1 − αt
+
+√1 − ¯αt
+
+ϵθ (xt, t, ˜x)
+
+
+
++ σtz, (4) which iteratively removes noise until a high-resolution estimate x0 is obtained, where z ∼ N (0 , I). This conditional diffusion mechanism leverages the robustness of the denoising process and ensures that large-scale structures represented in ˜x are preserved, while the generative prior synthesizes the missing high-frequency components. However, existing conditional diffusion approaches rely on paired high-low-resolution seismic data for supervised training and require repeated noise-prediction across diffusion steps, resulting in high computational cost and limiting their applicability in field scenarios where high-resolution labels are unavailable. 5PG-SSDM for seismic resolution enhancement A P REPRINT 
+
+These limitations motivate the development of alternative training strategies that do not depend on paired supervision and that more efficiently parameterize the reverse process. In the following subsection, we introduce a self-supervised diffusion framework that constructs its own training pairs from observed data and adopts an x0-prediction formulation, enabling survey-specific adaptation without requiring clean high-resolution ground truth. 
+
+2.2 Self-supervised diffusion models for seismic resolution enhancement 
+
+Building on the limitations of conditional diffusion models discussed above, we develop a diffusion framework that leverages the observed seismic data itself to drive the learning of high-resolution reconstructions. Instead of relying on externally provided paired high–low-resolution examples, the method derives both the conditioning input and the supervision target directly from the acquired seismic data. This is achieved by generating a physically meaningful low-resolution counterpart through a low-pass operator and constructing noisy diffusion samples via the forward corruption process. The network then learns to predict the clean seismic data x0 from these self-generated pairs, enabling the model to adapt naturally to the survey-specific spectral content and structural characteristics without requiring any high-resolution ground truth. The framework begins by generating a physically meaningful low-resolution version of the observed seismic data x
+
+through a low-pass operator FLP , producing 
+
+˜x = FLP (x). (5) This low-pass filtering operation attenuates high-frequency components in the seismic data, effectively reducing its resolution. By applying such filtering to the original field data x, we deliberately create a lower-resolution version ˜x
+
+that serves as a controllable degradation. This strategy enables us to construct self-supervised training pairs where the original data x acts as the target distribution and the filtered data ˜x provides the conditioning constraint. In this manner, the diffusion model can be trained to learn the conditional distribution p(x|˜x) without requiring external paired labels, a key advantage inspired by the self-supervised denoising framework of Cheng et al. [2025a]. Meanwhile, applying the forward diffusion process to x produces noisy samples 
+
+xt = √¯αt x + √1 − ¯αt ϵ, ϵ ∼ N (0 , I), (6) forming self-generated training triplets {(xt, ˜x), x }. Unlike standard diffusion models that predict the noise ϵ, our network directly predicts the clean high-resolution data as follows 
+
+ˆx0 = fθ (xt, ˜x, t ), (7) where fθ is the U-Net-based conditional generator. In the initial stage, the network is trained using the self-generated pairs {(xt, ˜x), x } with a multi-objective loss function: 
+
+Linit (θ) = Et, ϵ [LMSE (fθ , x t, ˜x, x, t ) + Lreg (fθ , x t, ˜x, t )] , (8) where LMSE represents the reconstruction loss and Lreg encompasses physics-guided regularization terms. The detailed formulation of each loss component will be presented in the next subsection. The network is trained for Niter iterations, acquiring a basic capability to enhance seismic resolution while respecting physical constraints. After the initial training stage, the framework proceeds through multiple progressive stages to approximate increasingly higher-resolution conditional distributions. Specifically, at the end of the initial stage, the trained network generates an enhanced output: 
+
+y(1) = fθinit (x, ˜x, t =1) , (9) where θinit denotes the parameters after initial training. To construct the first refinement stage, we generate a new low-resolution version 
+
+˜x(1) = FLP (y(1) ), (10) and apply forward diffusion to y(1) :
+
+y(1)  
+
+> t
+
+= √¯αt y(1) + √1 − ¯αt ϵ. (11) This forms new training triplets {(y(1)  
+
+> t
+
+, ˜x(1) ), y (1) } with a stronger resolution contrast between the conditioning input 
+
+˜x(1) and the target output y(1) .The network is then retrained using the same multi-objective loss function structure: 
+
+L(1) (θ) = Et, ϵ 
+
+h
+
+LMSE (fθ , y (1)  
+
+> t
+
+, ˜x(1) , y (1) , t ) + Lreg (fθ , y (1)  
+
+> t
+
+, ˜x(1) , t )
+
+i
+
+, (12) 6PG-SSDM for seismic resolution enhancement A P REPRINT 
+
+Algorithm 1 Physics-guided self-supervised diffusion training 
+
+Require: Observed low-resolution seismic data x, low-pass operator FLP , diffusion schedule {βt}Tt=1 , number of progressive stages K, iterations per stage Niter 
+
+Ensure: Trained enhancement model fθ
+
+1: 2: // Initial training stage 
+
+3: ˜x(0) ← F LP (x) ▷ Generate initial low-resolution constraint 
+
+4: y(0) ← x ▷ Initial target is the observed data 
+
+5: for i = 1 to Niter do 
+
+6: Sample t ∼ Uniform {1, . . . , T }
+
+7: Sample ϵ ∼ N (0 , I)
+
+8: xt = √¯αt y(0) + √1 − ¯αt ϵ
+
+9: ˆx0 = fθ (xt, ˜x(0) , t ) ▷ Predict high-resolution output 
+
+10: Compute Linit (θ) with LMSE and Lreg ▷ Multi-objective loss 
+
+11: Update θ by gradient descent on Linit (θ)
+
+12: end for 
+
+13: θinit ← θ ▷ Save initial stage parameters 
+
+14: 15: // Progressive refinement stages 
+
+16: for k = 1 to K do 
+
+17: y(k) ← fθ (y(k−1) , ˜x(k−1) , t =1) ▷ Generate enhanced output from previous stage 
+
+18: ˜x(k) ← F LP (y(k)) ▷ Create new low-resolution condition 
+
+19: for i = 1 to Niter do 
+
+20: Sample t ∼ Uniform {1, . . . , T }
+
+21: Sample ϵ ∼ N (0 , I)
+
+22: y(k) 
+
+> t
+
+= √¯αt y(k) + √1 − ¯αt ϵ
+
+23: ˆy(k)0 = fθ (y(k) 
+
+> t
+
+, ˜x(k), t )
+
+24: Compute L(k)(θ) with LMSE and Lreg ▷ Multi-objective loss 
+
+25: Update θ by gradient descent on L(k)(θ)
+
+26: end for 
+
+27: end for 
+
+28: 29: return trained enhancement model fθ
+
+again for Niter iterations. This process repeats for K progressive stages. At stage k, the enhanced output from the previous stage serves as the new training target: 
+
+y(k) = fθ(k−1) (y(k−1) , ˜x(k−1) , t =1) , (13) with the corresponding low-resolution condition 
+
+˜x(k) = FLP (y(k)), (14) and diffused samples 
+
+y(k) 
+
+> t
+
+= √¯αt y(k) + √1 − ¯αt ϵ. (15) Through these progressive stages, the model iteratively learns to map increasingly degraded low-resolution inputs to progressively enhanced high-resolution targets, gradually approximating the conditional distribution of higher-resolution seismic data. The complete training procedure is summarized in Algorithm 1. 
+
+2.3 Physics-guided composite loss function 
+
+As mentioned in the previous subsection, both the initial training stage and the progressive refinement stages employ a multi-objective loss function to guide network optimization. This composite loss integrates data fidelity, physical constraints, sparsity priors, and spatial regularity to ensure that the enhanced seismic data maintains high resolution while respecting physical authenticity and geological plausibility. 7PG-SSDM for seismic resolution enhancement A P REPRINT 
+
+The total loss function at stage k (including the initial stage with k = 0 ) is formulated as: 
+
+L(k)(θ) = λmse L(k) 
+
+> mse
+
++ λphy L(k) 
+
+> phy
+
++ λL1 L(k) 
+
+> L1
+
++ λtv L(k) 
+
+> tv
+
+, (16) where L(k)
+
+> mse
+
+, L(k)
+
+> phy
+
+, L(k) 
+
+> L1
+
+, and L(k) 
+
+> tv
+
+represent the mean squared error loss, physical constraint loss, L1 sparsity loss, and total variation (TV) regularization, respectively. The hyperparameters λmse , λphy , λL1 , and λtv control the relative importance of each term and remain constant across all training stages. The mean squared error (MSE) loss serves as the foundational reconstruction objective, minimizing the distance between the predicted high-resolution output and the target data: 
+
+L(k) 
+
+> mse
+
+= Et,ϵ 
+
+h
+
+∥y(k) − fθ (y(k) 
+
+> t
+
+, ˜x(k), t )∥22
+
+i
+
+, (17) where y(k) denotes the target data at stage k (with y(0) = x for the initial stage), y(k) 
+
+> t
+
+is the corresponding noisy sample from forward diffusion, ˜x(k) = FLP (y(k)) is the low-resolution conditioning input, and fθ is the neural network. This term ensures basic reconstruction fidelity. The physics-guided loss represents the key component of our method, incorporating the seismic convolution model as a physical constraint: 
+
+L(k) 
+
+> phy
+
+= Et,ϵ 
+
+h
+
+∥˜x(k) − fθ (y(k) 
+
+> t
+
+, ˜x(k), t ) ∗ w∥22
+
+i
+
+, (18) where w is the known or estimated seismic wavelet and ∗ denotes convolution. This loss enforces that the predicted high-resolution output, after convolution with the wavelet, should match the low-resolution input ˜x(k), ensuring consistency with Robinson’s convolution model. By back-propagating gradients of Lphy through the network parameters θ, the generation process is guided toward physically plausible solutions that conform to seismic wave propagation physics. The L1 sparsity loss promotes sparse reflection coefficients, consistent with geological priors: 
+
+L(k) 
+
+> L1
+
+= Et,ϵ 
+
+h
+
+∥fθ (y(k) 
+
+> t
+
+, ˜x(k), t )∥1
+
+i
+
+. (19) Sparsity encourages sharper seismic events and clearer boundaries, enhancing the visual resolution of geological structures. The TV loss promotes spatial smoothness by penalizing differences between horizontally adjacent samples: 
+
+L(k) 
+
+> tv
+
+= Et,η 
+
+ 1
+
+H × (W − 1) 
+
+> H
+
+X 
+
+> i=1
+> W−1
+
+X
+
+> j=1
+
+q
+
+(ˆ x(k)0,i,j +1 − ˆx(k)0,i,j )2 + η
+
+ , (20) where ˆx(k)0 = fθ (y(k) 
+
+> t
+
+, ˜x(k), t ), H and W are the height and width of the output, and η is a small constant for numerical stability. This term improves lateral continuity of seismic signals and mitigates the negative impact of random or anomalous noise on resolution enhancement. By integrating these four complementary objectives, the composite loss function ensures that the diffusion model learns to enhance seismic resolution while maintaining physical consistency with the convolution model, geological plausibility through sparsity, spatial coherence through TV regularization, and overall fidelity through MSE reconstruction. This multi-faceted approach is essential for producing high-quality, geologically interpretable enhanced seismic data. 
+
+2.4 Physics-guided reverse sampling process 
+
+While the physics-guided composite loss function enforces physical consistency during training, we further integrate physical constraints into the reverse sampling (inference) process to ensure that the generated high-resolution seismic data respects Robinson’s convolution model at each denoising step. This is achieved through the physics-guided posterior sampling (PGPS) strategy, where we leverages the physical loss Lphy as a guidance to boost the sampling process. Recall that in the self-supervised framework described in Section 2.2, the network directly predicts the clean high-resolution data ˆx0 from the noisy sample xt at each timestep t. Given this predicted ˆx0, the standard reverse diffusion process computes the posterior mean based on Bayes’ rule: 
+
+μθ (xt, ˜x, t ) = 
+
+√¯αt−1βt
+
+1 − ¯αt
+
+ˆx0 +
+
+√αt(1 − ¯αt−1)1 − ¯αt
+
+xt, (21) 8PG-SSDM for seismic resolution enhancement A P REPRINT 
+
+where ˆx0 = fθ (xt, ˜x, t ) and αt = 1 − βt. The reverse diffusion step then proceeds as: 
+
+xt−1 = μθ (xt, ˜x, t ) + σtz, (22) where σt is the noise scale, and z ∼ N (0 , I) for t > 1, z = 0 for t = 1 .To guide the reverse sampling toward physically plausible solutions, we incorporate Robinson’s convolution model as a hard constraint. Robinson’s model describes the relationship between observed seismic data, wavelet, and reflectivity: 
+
+x = x0 ∗ w, (23) where x0 represents the high-resolution reflectivity (the desired output), w is the seismic wavelet, and x is the original observed low-resolution seismic data. At each reverse diffusion timestep t, the network predicts ˆx(t)0 = fθ (xt, ˜x, t ) from the current noisy sample xt. To ensure this prediction satisfies the physical constraint, we compute the gradient of the physical loss with respect to xt:
+
+∇xt Lphy (xt) = ∇xt ∥x − ˆx(t)0 ∗ w∥22. (24) This gradient quantifies how the current prediction ˆx(t)0 deviates from the physical constraint in Eq. (23). Therefore, we can use this gradient to correct the intermediate sample xt before applying the standard reverse diffusion step: 
+
+˜xt = xt − λ · ∇ xt Lphy (xt), (25) where λ is the guidance strength parameter controlling the magnitude of the physical correction, and ˜xt denotes the physics-corrected intermediate sample. This correction steers xt toward regions of the latent space where the convolution model is better satisfied. The corrected sample ˜xt is then used in the standard reverse diffusion update. Specifically, we re-predict the clean data from the corrected sample ˆxcorr  
+
+> 0
+
+= fθ (˜ xt, ˜x, t ) and compute the posterior mean based on the direct x0 prediction parameterization. The reverse diffusion step becomes: 
+
+xt−1 =
+
+√¯αt−1βt
+
+1 − ¯αt
+
+fθ (˜ xt, ˜x, t ) + 
+
+√αt(1 − ¯αt−1)1 − ¯αt
+
+˜xt + σtz. (26) The first two terms in Eq. (26) represent the posterior mean μθ (˜ xt, ˜x, t ), which combines the network’s prediction of the clean data with the current corrected noisy sample to estimate the previous timestep’s sample mean. This two-step correction mechanism ensures that at each denoising iteration, the sampling trajectory is first adjusted to align with physical constraints, and then the standard diffusion dynamics drive the sample toward higher-resolution data. The negative gradient −λ · ∇ xt Lphy (xt) acts as a correction force derived from the physics of seismic wave propagation. Conceptually, the network first generates a candidate high-resolution prediction based on learned priors, and the physical guidance then refines the intermediate state to ensure compatibility with the known wavelet and low-resolution input. The physics-guided reverse sampling process is summarized in Algorithm 2. By integrating physical guidance into both training (via Lphy in the composite loss) and inference (via PGPS gradient correction), our framework ensures that the enhanced seismic data maintains physical authenticity throughout the entire generation pipeline. As a result, we can enable the model to reconstruct high-resolution details that are both sharp and consistent with seismic physics. 
+
+2.5 Uncertainty quantification 
+
+A key advantage of the diffusion model framework, compared to deterministic DL approaches, is its inherent capability for probabilistic modeling. Unlike deterministic networks that produce a single fixed output for a given input, diffusion models generate samples from a learned conditional distribution p(x0|˜x), naturally enabling uncertainty quantification, which represents a critical feature for assessing the reliability of enhanced results in geophysical applications. During the reverse sampling process described before, the stochastic injection of Gaussian noise z ∼ N (0 , I) at each timestep t introduces variability in the generation trajectory. By performing M independent sampling runs with different noise realizations for the same low-resolution input ˜x, we can obtain an ensemble of high-resolution outputs 
+
+{x(m)0 }Mm=1 , each representing a plausible solution consistent with both the conditioning input and the learned physical constraints. The ensemble mean provides a stable estimate of the high-resolution data: 
+
+¯x0 = 1
+
+M
+
+> M
+
+X
+
+> m=1
+
+x(m)0 , (27) 9PG-SSDM for seismic resolution enhancement A P REPRINT 
+
+Algorithm 2 Physics-guided reverse sampling for inference 
+
+Require: Observed low-resolution seismic data x, trained model fθ , wavelet w, diffusion schedule {βt}Tt=1 , guidance strength λ
+
+Ensure: High-resolution seismic data x0 
+
+> 1:
+
+xT ∼ N (0 , I) ▷ Initialize with pure noise  
+
+> 2:
+
+for t = T, T − 1, . . . , 1 do  
+
+> 3:
+
+ˆx(t)0 ← fθ (xt, x, t ) ▷ Predict clean high-resolution data  
+
+> 4:
+
+Compute ∇xt Lphy (xt) = ∇xt ∥x − ˆx(t)0 ∗ w∥22 
+
+> 5:
+
+˜xt ← xt − λ · ∇ xt Lphy (xt) ▷ Physics-guided correction  
+
+> 6:
+
+ˆxcorr  
+
+> 0
+
+← fθ (˜ xt, x, t ) ▷ Re-predict from corrected sample  
+
+> 7:
+
+μθ ← √ ¯αt−1βt  
+
+> 1−¯αt
+
+ˆxcorr  
+
+> 0
+
++ √αt(1 − ¯αt−1)1− ¯αt ˜xt ▷ Compute posterior mean  
+
+> 8:
+
+if t > 1 then  
+
+> 9:
+
+Sample z ∼ N (0 , I) 
+
+> 10:
+
+xt−1 ← μθ + σtz ▷ Reverse diffusion with noise  
+
+> 11:
+
+else  
+
+> 12:
+
+x0 ← μθ ▷ Final step without noise  
+
+> 13:
+
+end if  
+
+> 14:
+
+end for  
+
+> 15:
+
+return x0
+
+where x(m)0 denotes the m-th generated sample. More importantly, the ensemble standard deviation quantifies spatial uncertainty: 
+
+σx0 (i, j ) = 
+
+vuut 1
+
+M
+
+> M
+
+X
+
+> m=1
+
+(x(m)0 (i, j ) − ¯x0(i, j )) 2, (28) where (i, j ) indexes spatial positions. High values of σx0 indicate regions where the model exhibits greater variability across samples, suggesting lower confidence in the enhanced high-resolution content. This uncertainty map serves multiple practical purposes. First, it identifies geologically complex or poorly constrained regions, like such as thin-layer boundaries, complex fault zones, and discontinuous reservoirs, where resolution enhancement becomes more challenging. Second, it provides interpreters with a quantitative measure of confidence for assessing the reliability of recovered high-frequency components. Third, it enables risk-aware decision making in subsequent interpretation workflows, such as reservoir characterization and drilling site selection, by flagging areas that may require additional data acquisition or alternative interpretation strategies. 
+
+2.6 Network architecture 
+
+The neural network fθ is based on the U-Net architecture from improved denoising diffusion probabilistic models [Nichol and Dhariwal, 2021], adapted for seismic resolution enhancement. We employ a 5-level U-Net with an encoder-decoder structure. The encoder extracts multi-scale features through progressive downsampling, while the decoder reconstructs high-resolution seismic details through upsampling. The network configuration is as follows: the initial channel count is 64, with channel multipliers of (1 , 2, 4, 8, 8) at each level, yielding 64, 128, 256, 512, and 512 channels at resolutions 1, 1/2, 1/4, 1/8, and 1/16 of the input size, respectively. Skip connections between corresponding encoder and decoder layers preserve fine-scale details during reconstruction. To capture long-range dependencies in geological structures, we incorporate self-attention mechanisms at the bottleneck layer and at resolutions 1/8 and 
+
+1/16 , which enables the network to model spatial relationships across distant locations. The network uses sinusoidal positional embeddings for timestep t and concatenates the low-resolution condition ˜x with the noisy input xt along the channel dimension. 
+
+## 3 Numerical Examples 
+
+3.1 Synthetic data with Gaussian noise 
+
+We first evaluate the proposed method on synthetic data contaminated with Gaussian noise to assess its fundamental performance and noise robustness. The vertical reflectivity model is derived from the Overthrust velocity-density model, as shown in Figure 2(a). We convolve this reflectivity with a Ricker wavelet of 80 Hz dominant frequency to 10 PG-SSDM for seismic resolution enhancement A P REPRINT 
+
+Figure 2: Reflectivity and synthetic post-stack seismic data of the Overthrust model. generate low-resolution seismic data (Figure 2(b)). The resulting synthetic dataset comprises 801 traces, each containing 186 time samples at a 1 ms sampling interval. The band-limited nature of the seismic wavelet significantly reduces resolution, obscuring several weak reflectors present in the original reflectivity model. For example, the first reflector within the red rectangular region in the upper-left portion of Figure 2(a) becomes virtually indistinguishable in Figure 2(b) due to wavelet side-lobe interference. Similarly, subtle geological features within the blue rectangular area around 0.1 seconds exhibit blurred boundaries in Figure 2(b), making precise interpretation challenging. To validate the robustness of the proposed method under realistic acquisition conditions, we contaminate the synthetic low-resolution seismic data with varying levels of Gaussian random noise. The noise is added following d′ =
+
+d + λ · std (d) · N (0 , 1) , where d is the clean low-resolution data, std (d) is its standard deviation, N (0 , 1) denotes standard Gaussian noise, and λ controls the noise intensity. We create four datasets with λ = 0 .0, 0.1, 0.3, and 0.5,representing progressively increasing noise levels, which serve as original observed data for resolution enhancement test. We compare the proposed method against two benchmark approaches: sparse spike inversion (SSI) [Gholami and Sacchi, 2014] and physics-informed self-supervised deconvolution (PISSD) [Chai et al., 2023]. To ensure fair comparison and isolate the contribution of our framework from architectural differences, both the proposed method and PISSD employ the same U-Net architecture described in Section 2.6. The PISSD implementation differs only in that it removes the timestep embedding and uses a single-channel input consisting solely of the observed seismic data, rather than the multi-channel noisy-clean pair used in our framework. Figures 3 to 6 compare the resolution enhancement performance of the three methods across the four noise levels ( λ = 0 .0, 0.1, 0.3, and 0.5). In each figure, subplot (a) shows the input low-resolution data, while subplots (b), (c), and (d) present results from SSI, PISSD, and the proposed method, respectively. Under noise-free conditions (Figure 3), all three methods improve data resolution to varying degrees. However, in the region highlighted by the red rectangle, the SSI result still exhibits noticeable wavelet side-lobe effects, producing composite events that merge adjacent weak reflections without clear separation. Both PISSD and the proposed method achieve more effective side-lobe suppression. For the subtle geologic features indicated by the blue rectangle, the SSI method fails to provide discernible structural recovery, whereas PISSD and the proposed method successfully resolve such fine details. As noise level increases ( λ ≥ 0.1, Figures 4 to 6), the performance differences become more pronounced. The SSI method consistently struggles to distinguish closely spaced weak reflectors, as seen in the red rectangular zones. In the 11 PG-SSDM for seismic resolution enhancement A P REPRINT 
+
+Table 2: Performance comparison under different noise levels Noise Level RMSE SSIM SSI PISSD Our Method SSI PISSD Our Method 
+
+0.0 0.0157 0.0104 0.0101 0.8819 0.9553 0.9599 
+
+0.1 0.0158 0.0145 0.0132 0.8804 0.9044 0.9168 
+
+0.3 0.0168 0.0162 0.0134 0.8680 0.8815 0.9131 
+
+0.5 0.0184 0.0194 0.0145 0.8434 0.8296 0.8932 
+
+blue rectangular region near 0.1 seconds, where the original low-resolution data show ambiguous structural boundaries, SSI offers limited improvement and introduces high-frequency artifacts due to its inherent noise sensitivity. PISSD exhibits some denoising capability but tends to oversmooth subtle stratigraphic features. In contrast, the proposed method maintains superior performance across all noise levels, recovering sharp structural boundaries, suppressing noise effectively, and preserving stratigraphic continuity. Table 2 provides quantitative comparisons using root mean square error (RMSE) and structural similarity index measure (SSIM) metrics across different noise levels. The proposed method achieves the lowest RMSE and highest SSIM under all noise conditions, demonstrating superior overall performance. Under noise-free conditions, the proposed method performs comparably to PISSD, with both significantly outperforming SSI. This highlights the inherent advantages of deep learning approaches in resolution enhancement tasks. As noise level increases, this performance gap becomes significant. At λ = 0 .5, the RMSE values of SSI and PISSD rise to 0.0184 and 0.0194, respectively, while the proposed method increases only marginally to 0.0145. For SSIM, both SSI and PISSD exhibit notable degradation, whereas the proposed method maintains a high value of 0.8932. These results validate the exceptional noise robustness and stability of the proposed method, confirming its suitability for real-world seismic data characterized by random noise contamination. 
+
+Figure 3: Noise-free synthetic data test. (a) Original low-resolution data. (b) SSI method result. (c) PISSD prediction. (d) Proposed method prediction. 12 PG-SSDM for seismic resolution enhancement A P REPRINT 
+
+Figure 4: Noisy synthetic data test (Noise level = 0 .1). (a) Original low-resolution data. (b) SSI method result. (c) PISSD prediction. (d) Proposed method prediction. 
+
+Figure 5: Noisy synthetic data test (Noise level = 0 .3). (a) Original low-resolution data. (b) SSI method result. (c) PISSD prediction. (d) Proposed method prediction. 13 PG-SSDM for seismic resolution enhancement A P REPRINT 
+
+Figure 6: Noisy synthetic data test (Noise level = 0 .5). (a) Original low-resolution data. (b) SSI method result. (c) PISSD prediction. (d) Proposed method prediction. 
+
+Figure 7: The realistic noise extracted from field data. (a) Random noise and coupling noise. (b) Zoomed-in view corresponding to the red box area in (a). 14 PG-SSDM for seismic resolution enhancement A P REPRINT 
+
+Figure 8: Multi-noisy synthetic data test. (a) Original low-resolution data. (b) SSI method result. (c) PISSD prediction. (d) Proposed method prediction. 
+
+3.2 Synthetic data with realistic noise 
+
+While the previous section demonstrated the method’s robustness under Gaussian random noise, field seismic data typically contain more complex interference patterns. Beyond random noise, various types of coherent noise are commonly present, such as the coupling noise prevalent in Distributed Acoustic Sensing (DAS) data. This type of noise significantly overlaps with the effective signal in the frequency domain, making it difficult to suppress without damaging the signal [Tang et al., 2025]. To evaluate the proposed method under more realistic conditions, we introduce coupling noise extracted from real DAS data into the synthetic dataset, in addition to random Gaussian noise. Figure 7(a) shows the coupling noise pattern extracted from field DAS data. Figure 7(b) presents a zoomed-in view of a local section, where the characteristic striping pattern of coupling noise is clearly distinguishable from random noise in both morphology and spatial distribution. We add this coupling noise to the synthetic low-resolution data along with Gaussian random noise ( λ = 0 .3) to simulate realistic field acquisition conditions. The contaminated seismic data is shown in Figure 8(a), with results from SSI, PISSD, and the proposed method displayed in Figure 8(b), (c), and (d), respectively. We can see that in the red rectangular area, the proposed method effectively identifies and separates adjacent formation interfaces despite strong noise interference. In contrast, both SSI and PISSD fail to achieve clear stratigraphic differentiation, reflecting their limitations in simultaneous noise suppression and resolution enhancement. The blue rectangular region contains fine geological structures where signal continuity and structural integrity are critical. Here, the proposed method also outperforms the two benchmark approaches, further validating its capability to recover details in complex noise environments. Quantitative evaluation confirms these observations. The proposed method achieves RMSE of 0.0150 and SSIM of 0.8843, substantially outperforming SSI (RMSE: 0.0192, SSIM: 0.8248) and PISSD (RMSE: 0.0208, SSIM: 0.7786). These results demonstrate the method’s advantages in both numerical reconstruction accuracy and structural fidelity under realistic noise conditions. To further assess frequency enhancement capabilities, we compare the amplitude spectra of results from the three methods under both noise-free (Figure 3) and realistic noise conditions (Figure 8). Figures 9(a) and (b) show these comparisons. All methods substantially enhance high-frequency amplitude above 115 Hz, confirming their capability to extend the frequency bandwidth effectively. Under noise-free conditions, the amplitude spectra from the proposed method and PISSD closely align with the true high-resolution data, clearly surpassing SSI. In noisy environments, all 15 PG-SSDM for seismic resolution enhancement A P REPRINT 
+
+methods exhibit some performance degradation. However, the proposed method maintains the smallest deviation from the true amplitude spectrum, highlighting its superior robustness in high-frequency reconstruction and noise resistance. To demonstrate the uncertainty quantification capability of the proposed method introduced in Section 2.5, we generate ten high-resolution realizations for each test case using different noise initializations while maintaining the same conditioning inputs (low-resolution seismic data and wavelet). Figure 10 shows the standard deviation maps computed across these realizations for different noise scenarios: (a) noise-free, (b)-(d) Gaussian noise with levels λ = 0 .1, 0.3, 0.5,and (e) realistic noise conditions. The uncertainty maps reveal several important characteristics: • First, noise significantly elevates prediction uncertainty. Compared to the noise-free case (Figure 10(a)), all noisy scenarios exhibit substantially higher uncertainty levels. As Gaussian noise intensity increases from 
+
+λ = 0 .1 to 0.5 (Figures 10(b)-(d)), the overall uncertainty progressively intensifies, as indicated by the warmer colors spreading across the sections. • Second, noise contamination fundamentally alters the spatial distribution of uncertainty. In the noise-free case (Figure 10(a)), uncertainty is primarily localized near reflection events, appearing as discrete patterns following the geological structures. However, as noise is introduced and its intensity increases, uncertainty becomes pervasive across the entire grid. This contamination effect is particularly evident in Figures 10(c)-(d), where elevated uncertainty values are distributed uniformly throughout the sections rather than being confined to specific geological features. The realistic noise case (Figure 10(e)) exhibits similar widespread uncertainty, with additional striping patterns reflecting the coherent coupling noise characteristics. • Third, strong reflection events consistently correspond to higher uncertainty values. This pattern is observable across all scenarios, where zones with high-amplitude reflectors exhibit elevated standard deviation. This correlation suggests that amplitude strength in the input data influences the variability of diffusion model predictions, likely due to the multiplicative nature of noise corruption in these high-energy regions. 
+
+Figure 9: Amplitude spectrum comparison between the original synthetic data, the ture high-resolution data, and the predictions from the three methods. (a) Noise-free condition. (b) Multi-noise condition. 16 PG-SSDM for seismic resolution enhancement A P REPRINT 
+
+3.3 Field data application 
+
+Having validated the method’s performance on synthetic data under various noise conditions, we now evaluate its practical applicability on field seismic data. We apply the proposed method to a 3D post-stack seismic volume comprising 76 inline sections and 64 crossline sections. For computational efficiency, we extract 320 time samples from each trace at a 1 ms sampling interval for testing. Figure 11(a) shows the original low-resolution field data, where the amplitude distribution is uneven across depth, with weaker signals in the shallow and deep sections and less distinct event continuity compared to the middle section. We estimate the seismic wavelet from the field data using geophysical software and apply three methods for resolution enhancement. Figure 11(b), (c), and (d) present results from SSI, PISSD, and the proposed method, respectively. All three methods improve the resolution of the original seismic data and balance the amplitudes of events at different depths. However, notable differences emerge in their detailed performance. In the red rectangular regions, the proposed method (Figure 11(d)) effectively identifies thin layers with weak energy, whereas SSI (Figure 11(b)) and PISSD (Figure 11(c)) fail to resolve these features. The blue rectangular regions highlight that the proposed method exhibits better event continuity. Additionally, in the red elliptical regions, the proposed method provides clearer and more accurate fault boundary information. For detailed examination, Figures 12 and 13 show the fifth inline profile and the 18th crossline profile, respectively. The red solid-line rectangles in both figures indicate thin-layer zones. While SSI and PISSD fail to accurately distinguish adjacent layers and exhibit poor continuity, the proposed method yields clear and continuous layers, demonstrating superior thin-layer recovery capability. The red dashed rectangles indicate deep and geologically complex areas where the original data exhibit weak amplitude and unclear reflector continuity. After processing, all three methods effectively 
+
+Figure 10: Standard deviation map of the 10 predictions using our method. (a) λ = 0 .0 profile. (b) λ = 0 .1 profile. (c) 
+
+λ = 0 .3 profile. (d) λ = 0 .5 profile. (e) Realistic noise profile. 17 PG-SSDM for seismic resolution enhancement A P REPRINT 
+
+balance the reflector amplitudes in these regions. However, the proposed method produces clearer structural trends and morphology than SSI and PISSD, demonstrating significant advantages in handling complex geological conditions. To verify the reliability of the enhanced results, we compare them against well log data at three well locations (Figure 14). In each subplot, the black line represents the original low-resolution seismic data, the blue line shows synthetic seismograms generated by convolving the high-resolution output from our method with a 0-150 Hz wavelet, and the red line displays synthetic seismograms from well log reflectivity convolved with the same wavelet. The comparison demonstrates strong agreement between the predicted results and well log synthetics, with notably better waveform consistency than the original seismic data (green solid rectangles). More importantly, the enhanced results reveal multiple thin layers (green dashed rectangles) that are absent in the original data but clearly present in the well log synthetics. This confirms that the proposed method reliably improves resolution and successfully recovers weak thin-layer features that were obscured in the original observations. Similarly, we also conducted an uncertainty analysis on the predictions made by the proposed method for the field data. Figures 15(a) and (b) show the normalized standard deviation distributions for inline #5 and crossline #18, respectively. We can see that regions with higher uncertainty exhibit spatial correlation with strong-amplitude zones in the original seismic data. This pattern indicates that amplitude variations in the original low-resolution data influence prediction reliability, with stronger amplitudes generally corresponding to elevated uncertainty. This uncertainty analysis offers valuable guidance for subsequent exploration decisions, such as identifying areas requiring additional data acquisition or prioritizing zones for detailed interpretation. 
+
+## 4 Discussion 
+
+The experimental results presented in Section 3 demonstrated that the proposed method achieves superior performance in seismic resolution enhancement compared to existing methods. To provide deeper insights into the framework, we examine four key aspects: the role of physical priors and progressive learning in enabling successful resolution enhancement, the benefits of physics-guided sampling for accelerating convergence, the contributions of multi-term loss functions in balancing different reconstruction objectives, and the limitations that suggest directions for future research. This discussion clarifies why the method works effectively and identifies opportunities for further improvements. 
+
+Figure 11: Field data test. (a) Original low-resolution data. (b) SSI method result. (c) PISSD prediction. (d) Proposed method prediction. 18 PG-SSDM for seismic resolution enhancement A P REPRINT 
+
+4.1 The role of physical priors and progressive learning 
+
+The success of the proposed method stems from two fundamental design principles: the integration of physics-based prior knowledge and the progressive refinement strategy for distribution learning. First, we include physics as prior knowledge for solution space constraint. Robinson’s convolution model serves as a powerful prior that fundamentally constrains the solution space. The physical law x = x0 ∗ w requires that any valid high-resolution output, when convolved with the wavelet and low-pass filtered, should reproduce the observed data. 
+
+Figure 12: Zoomed-in view corresponding to inline #5 in Fig.10. (a) Original low-resolution data. (b) SSI method result. (c) PISSD prediction. (d) Proposed method prediction. 
+
+Figure 13: Zoomed-in view corresponding to crossline #18 in Fig.10. (a) Original low-resolution data. (b) SSI method result. (c) PISSD prediction. (d) Proposed method prediction. 19 PG-SSDM for seismic resolution enhancement A P REPRINT 
+
+Figure 14: Comparing the original low resolution seismic data (black line) and our predictions (blue line) with the well data (red line). (a)–(c) Wells at different locations. By embedding this constraint into both the training loss ( Lphy ) and reverse sampling (gradient-based correction), the diffusion model learns to restrict predictions to a physically plausible manifold. This effectively reduces the vast space of possible outputs to a smaller subspace consistent with seismic physics. Unlike purely data-driven approaches that learn mappings solely from training examples, our method encodes governing physics directly into the optimization process. This ensures better generalization even with limited field data, as the model has learned underlying physical principles rather than just empirical patterns. The physical constraint acts as a regularizer that prevents physically implausible solutions, particularly important when dealing with noisy inputs. Second, the progressive training strategy gradually shifts the target distribution from low to high resolution across multiple stages. In the initial stage ( k = 0 ), the diffusion model learns the distribution of the original observed seismic data. This provides a stable foundation, as the model first captures the inherent characteristics and structure of field seismic data at its native resolution. The model learns to represent the data manifold faithfully, including its geological structures, amplitude patterns, and spatial correlations. Subsequently, through progressive stages ( k = 1 , 2, . . . , K ), we incrementally enhance the resolution of the training target. At each stage k, the enhanced output from stage k − 1
+
+becomes the new target, and its low-pass filtered version provides the conditioning input. This creates a sequence of increasingly challenging learning tasks, where the resolution gap between conditioning input and target output grows progressively larger. Therefore, we decomposes the difficult task of learning a large distribution shift into manageable smaller shifts. Each stage builds upon previous knowledge, allowing the model to refine its understanding incrementally. As a result, it allows the diffusion model to adapt its learned distribution representation step by step, moving smoothly along the manifold from low-resolution to high-resolution data distributions. The combination of physics-based constraints and progressive distribution learning creates a synergistic effect. The physical prior ensures that at each progressive stage, the model moves toward physically consistent higher-resolution representations rather than arbitrary high-frequency patterns. Meanwhile, the progressive strategy provides a smooth learning trajectory that helps the model effectively incorporate physical constraints without getting trapped in poor local minima. Together, these principles enable the diffusion model to learn a high-quality mapping from low to high resolution that generalizes robustly to unseen field data. 20 PG-SSDM for seismic resolution enhancement A P REPRINT 
+
+Figure 15: Normalized standard deviation map of the 10 predictions using our method. (a) Inline #5 profile. (b) Crossline #18 profile. 
+
+4.2 Acceleration through physics-guided sampling 
+
+The physics-guided sampling process provides computational benefits by accelerating convergence to physically consistent solutions. Figure 16 compares the evolution of physical loss Lphy during 1000-step sampling with and without physics guidance. Without physics guidance (blue curve), the physical loss decreases gradually throughout the entire sampling process, requiring all 1000 steps to reach low values. The model relies solely on learned priors to ensure physical consistency, which emerges slowly through progressive denoising. With physics-guided correction (red curve), the physical loss drops rapidly within the first 100 steps and converges to near-zero by approximately step 900. The gradient-based correction in Eq. (23) actively steers each intermediate sample toward the physically consistent manifold, rather than relying on implicit enforcement through the full trajectory. This explicit correction immediately projects predictions onto the solution space satisfying Robinson’s convolution model. 
+
+4.3 The contributions of multi-term loss functions 
+
+To understand the individual contributions of different loss components, we conduct an ablation study by progressively adding loss terms to the training objective. Figure 17 shows results on synthetic noisy data (see Figure 8(a)) using four configurations: (a) data loss only ( Lmse ), (b) data loss with sparsity constraint ( Lmse + LL1 ), (c) adding total variation (TV) regularization ( Lmse + LL1 + Ltv ), and (d) the complete composite loss including physical constraints (Lmse + LL1 + Ltv + Lphy ). Using only MSE loss (Figure 17(a)), the network produces noisy results with poor signal-to-noise ratio. While some geological structures are visible, substantial artifacts persist throughout the section. The lack of regularization allows the model to overfit to noise during training, resulting in the artifacts in the predictions. Adding L1 sparsity loss 21 PG-SSDM for seismic resolution enhancement A P REPRINT 
+
+Figure 16: Loss evolution during DDIM sampling: physics-guided (red) versus unguided (blue) cases. (Figure 17(b)) suppresses noise to some extent and slightly improves the resolution of reflection events. The sparsity constraint promotes solutions with sparse reflectivity, reducing background noise. However, the improvement in resolution remains limited, and lateral continuity of events is still poor with visible discontinuities along reflectors. Incorporating TV regularization (Figure 17(c)) further improves lateral continuity of seismic events. The TV term penalizes abrupt spatial variations, encouraging smooth transitions along the horizontal direction and enhancing event coherence. However, resolution enhancement remains modest compared to expectations. More critically, some reflection events are significantly suppressed, as the TV regularization tends to oversmooth the data in its attempt to enforce spatial continuity. The complete composite loss with physical constraints (Figure 17(d)) yields the best results. The complete composite loss with physical constraints (Figure 17(d)) yields the best results. The addition of Lphy enforces consistency with Robinson’s convolution model, ensuring that predictions satisfy fundamental seismic physics. This final constraint eliminates remaining artifacts and produces the sharpest, most continuous events with optimal signal-to-noise ratio. While the composite loss function improves physical plausibility and stability, it introduces the challenge of tuning four weighting coefficients λmse , λphy , λL1 , and λtv . The high-dimensional parameter space complicates hyperparameter optimization. To address this, we adopt two strategies. First, we employ adaptive weighting during training, dynamically adjusting the contribution of each loss term to balance competing objectives as training progresses. Second, we use a phased tuning approach: initially setting higher λmse to ensure stable convergence, then gradually increasing λphy and the regularization weights λL1 and λtv to refine physical consistency and spatial quality. This staged strategy reduces the effective parameter search space and improves training stability. 
+
+4.4 Limitations and future directions 
+
+While the proposed method demonstrates superior performance, it has inherent limitations that warrant discussion and suggest directions for future research. The physics-guided framework relies on the availability of a reasonable seismic wavelet. Robinson’s convolution model x = x0 ∗ w explicitly requires the wavelet w as prior knowledge to constrain the solution space and guide the sampling process. In the field data application, we estimated the wavelet using commercial geophysical software. While wavelet estimation is a standard procedure in seismic processing and can be performed for any dataset, the quality of estimation varies depending on data characteristics, signal-to-noise ratio, and the presence of well log constraints. Inaccurate wavelet estimates can degrade the effectiveness of physical guidance, potentially leading to biased resolution enhancement or artifacts. 22 PG-SSDM for seismic resolution enhancement A P REPRINT 
+
+Figure 17: Network performance under different loss functions. (a) Only use data loss (i.e., Lmse ). (b) Data loss + sparsity loss ( λmse Lmse + λL1 LL1 ). (c) Data loss + sparsity loss + total variation regularization (i.e., λmse Lmse +
+
+λL1 LL1 + λtV LtV ). (d) Data loss + sparsity loss + total variation regularization + physical constraint loss (i.e., 
+
+λmse Lmse + λL1 LL1 + λtV LtV + λphy Lphy ). This limitation raises an important question: can we relax the requirement for pre-estimated wavelets by incorporating wavelet estimation into the optimization framework itself? Two potential strategies merit investigation. First, joint optimization could simultaneously enhance resolution and refine the wavelet during training or inference. The diffusion model would treat both the high-resolution seismic data and the wavelet as unknowns to be recovered, potentially using additional constraints such as wavelet smoothness or causality. Second, an alternating optimization scheme could iteratively update resolution and wavelet: (1) fix the current wavelet estimate and optimize for high-resolution data, (2) fix the enhanced data and update the wavelet to better satisfy the convolution relationship, (3) return to step 1 with the refined wavelet for further resolution enhancement. This alternating approach could progressively improve both the data resolution and wavelet accuracy through multiple cycles. Such joint or alternating optimization strategies would reduce dependence on external wavelet estimation tools and potentially improve robustness when initial wavelet estimates are poor. However, they also introduce additional complexity, including convergence challenges and the risk of non-unique solutions when both unknowns are optimized simultaneously. Careful regularization and initialization would be essential. Exploring these extensions represents a promising direction for future work that could enhance the method’s applicability to datasets where reliable wavelet estimation is challenging. 
+
+## 5 Conclusions 
+
+We proposed a novel physics-guided self-supervised diffusion model for seismic resolution enhancement. The method integrated the generative capability of diffusion models, the flexibility of self-supervised learning, and the physical principles of seismic convolution models, establishing a processing framework that achieves both high fidelity and strong generalization. By adopting a progressive iterative training strategy combining low-pass filtering and high-resolution prediction, the method eliminated the dependence on paired labeled data while maintaining physical consistency through Robinson’s convolution model. The incorporation of a composite loss function during training further ensured that the enhanced results satisfied data fidelity, physical constraints, sparsity priors, and spatial regularity. Additionally, the integration of physics-guided correction in the reverse sampling process guaranteed that the generated high-resolution seismic data respected the convolution relationship at each denoising step. 23 PG-SSDM for seismic resolution enhancement A P REPRINT 
+
+Experimental results on both synthetic and field data demonstrated the superior performance of the proposed method compared to SSI and PISSD. The method effectively improved the resolution and lateral continuity of seismic events, enabling more accurate characterization of thin layers and subtle geological structures. Under challenging conditions such as strong random noise, realistic noise, and amplitude imbalance in complex geological settings, the method maintained stable performance and robust noise suppression. The uncertainty quantification capability provided by the diffusion framework offered valuable guidance for risk assessment in exploration decisions. As a result, this study provided a physics-data integrated technical approach for high-resolution reconstruction of seismic signals. The results demonstrated significant potential for supporting high-precision reservoir interpretation and inversion tasks in practical exploration applications. 
+
+## Acknowledgments 
+
+This work is supported by the National Natural Science Foundation of China (Nos. 42404140, 42130808). The author Shijun Cheng thanks King Abdullah University of Science and Technology for supporting this research. The authors thank Qianru Xu for the valuable discussions and the BGP Research and Development Center for graciously supplying the field data. 
+
+## References 
+
+K. Subash, R. Amogh, and P. Venugopalan. Design and development of a giga-bit ethernet based high speed broadband data acquisition system for an underwater imaging array. In Oceans , 2012. doi:10.1109/OCEANS.2010.5664104. Xiao Jing Huang. Least-squares deconvolution of the mixed-phase unknown pulse. Seg Technical Program Expanded Abstracts , 7(1):1359, 1988. Enders A. Robinson and Sven Treitel. Principles of digital wiener filtering. Geophysical Prospecting , 15(3):311–332, 2006. doi:10.1111/j.1365-2478.1967.tb01793.x. K. L. Peacock and Sven Treitel. Predictive deconvolution: Theory and practice. Geophysics , 34(2):155, 1969. doi:10.1190/1.1440003. Marit Ulvmoen and Henning Omre. Improved resolution in bayesian lithology/fluid inversion from prestack seismic data and well observations: Part 1—methodology. Geophysics , 75(2):R21–R35, 2010. doi:doi.org/1.0.1190/1.3294570. A. Gholami and M. D. Sacchi. Robust sparse deconvolution in the presence of outliers. In Eage Conference & Exhibition Incorporating Spe Europec , 2014. doi:10.3997/2214-4609.20149194. Fulton Koehler and M Turhan Taner. The use of the conjugate-gradient algorithm in the computation of predictive deconvolution operators. Geophysics , 50(12):2752–2758, 1985. doi:10.3997/2214-4609.20149194. Gary F Margrave, Michael P Lamoureux, and David C Henley. Gabor deconvolution: Estimating reflectivity by nonstationary deconvolution of seismic data. Geophysics , 76(3):W15–W30, 2011. Ming-xia Jin, Bing ZHANG, and Shu-chang YI. Research on the application to seismic data in bohai bay based on gabor deconvolution. Progress in Geophysics , 32(2):856–861, 2017. doi:10.6038/pg20170255. Robert E Sheriff. Factors affecting seismic amplitudes. Geophysical prospecting , 23(1):125–138, 1975. Yanghua Wang. A stable and efficient approach of inverse q filtering. Geophysics , 67(2):657–663, 2002. doi:10.1190/1.1468627. Xianwen Zhang, Liguo Han, Fengjiao Zhang, and Gangyi Shan. An inverse q-filter algorithm based on stable wavefield continuation. Applied Geophysics , 4:263–270, 2007. doi:10.1007/s11770-007-0040-9. Neil D Hargreaves and Andrew J Calvert. Inverse q filtering by fourier transform. Geophysics , 56(4):519–527, 1991. doi:10.1190/1.1443067. Zhenxing Yao, Xing GAO, and Weixin LI. The forward q method for compensating attenuation and frequency dispersion used in the seismic profile of depth domain. Chinese Journal of Geophysics , 46(2):318–323, 2003. Yanghua Wang. Inverse q-filter for seismic resolution enhancement. Geophysics , 71(3):V51–V60, 2006. doi:10.1190 /1.2192912. Gulan Zhang, Ximing Wang, and Zhenhua He. A stable and self-adaptive approach for inverse q-filter. Journal of Applied Geophysics , 116:236–246, 2015. Guochang Liu, Chao Li, Ying Rao, and Xiaohong Chen. Oriented pre-stack inverse q filtering for resolution enhance-ments of seismic data. Geophysical Journal International , 223(1):488–501, 2020. 24 PG-SSDM for seismic resolution enhancement A P REPRINT 
+
+Jonathan Allen. Short term spectral analysis, synthesis, and modification by discrete fourier transform. IEEE transactions on acoustics, speech, and signal processing , 25(3):235–238, 1977. Jing-Huai Gao, Ling-Ling WANG, and Wei ZHAO. Enhancing resolution of seismic traces based on the changing wavelet model of the seismogram. Chinese Journal of Geophysics , 52(5):1289–1300, 2009. doi:10.3969/jissn.0001-5733.2009.05.018. Alexandre Grossmann, Richard Kronland-Martinet, and J Morlet. Reading and understanding continuous wavelet transforms. In Wavelets: Time-Frequency Methods and Phase Space Proceedings of the International Conference, Marseille, France, December 14–18, 1987 , pages 2–20. Springer, 1990. C Robert Pinnegar and Lalu Mansinha. The s-transform with windows of arbitrary and varying shape. Geophysics , 68 (1):381–385, 2003. Wenhao Xu, Jinghuai Gao, Lingling Wang, Yajun Tian, Jianfeng Qiu, Xiudi Jiang, and Daxing Wang. Compact smoothness and relative sparsity algorithm for high-resolution wavelet and reflectivity inversion of seismic data. 
+
+IEEE Transactions on Geoscience and Remote Sensing , 60:1–11, 2022. doi:10.1109/TGRS.2022.3223280. Norden E Huang, Zheng Shen, Steven R Long, Manli C Wu, Hsing H Shih, Quanan Zheng, Nai-Chyuan Yen, Chi Chao Tung, and Henry H Liu. The empirical mode decomposition and the hilbert spectrum for nonlinear and non-stationary time series analysis. Proceedings of the Royal Society of London. Series A: mathematical, physical and engineering sciences , 454(1971):903–995, 1998. Bradley Matthew Battista, Camelia Knapp, Tom McGee, and Vaughn Goebel. Application of the empirical mode decomposition and hilbert-huang transform to seismic reflection data. Geophysics , 72(2):H29–H37, 2007. CAO Siyuan, SUN Yaoguang, and CHEN Siyuan. Challenges and solutions to high-resolution data processing for seismic exploration. Coal Geology & Exploration , 51(1):25, 2023. doi:10.12363/issn.1001-1986.22.11.0841. Yann LeCun, Yoshua Bengio, and Geoffrey Hinton. Deep learning. nature , 521(7553):436–444, 2015. S Mostafa Mousavi and Gregory C Beroza. Deep-learning seismology. Science , 377(6607):eabm4470, 2022. doi:10.1126/science.abm4470. Siwei Yu and Jianwei Ma. Deep learning for geophysics: Current and future trends. Reviews of Geophysics , 59(3): e2021RG000742, 2021. doi:10.1029/2021RG000742. Yuji Kim and Nori Nakata. Geophysical inversion versus machine learning in inverse problems. The Leading Edge , 37 (12):894–901, 2018. Yang Gao, Jialiang Zhang, Hao Li, and Guofa Li. Incorporating structural constraint into the machine learning high-resolution seismic reconstruction. IEEE Transactions on Geoscience and Remote Sensing , 60:1–12, 2022. Hongling Chen, Jinghuai Gao, Xiudi Jiang, Zhaoqi Gao, and Wei Zhang. Optimization-inspired deep learning high-resolution inversion for seismic data. Geophysics , 86(3):R265–R276, 2021. doi:10.1190/geo2020-0034.1. Zhaoqi Gao, Linsen Yang, Yang Yang, and Jinghuai Gao. High-resolution acoustic-impedance inversion based on a deep-learning-aided representation model of nonstationary seismic data. Geophysics , 89(6):R521–R539, 2024. doi:10.1190/geo2023-0535.1. Jintao Li, Xinming Wu, and Zhanxuan Hu. Deep learning for simultaneous seismic image super-resolution and denoising. IEEE Transactions on Geoscience and Remote Sensing , 60:1–11, 2021. Yang Gao, Dongfeng Zhao, Tinghui Li, Guofa Li, and Shuwen Guo. Deep learning vertical resolution enhancement considering features of seismic data. IEEE Transactions on Geoscience and Remote Sensing , 61:1–13, 2023. Yeonghwa Jo, Yonggyu Choi, Soon Jee Seol, and Joongmoo Byun. Machine learning-based vertical resolution enhancement considering the seismic attenuation. Journal of Petroleum Science and Engineering , 208:109657, 2022. Tariq Alkhalifah, Hanchen Wang, and Oleg Ovcharenko. Mlreal: Bridging the gap between training on synthetic data and real data applications in machine learning. Artificial Intelligence in Geosciences , 3:101–114, 2022. Haoran Zhang, Tariq Alkhalifah, Yang Liu, Claire Birnie, and Xi Di. Improving the generalization of deep neural networks in seismic resolution enhancement. IEEE Geoscience and Remote Sensing Letters , 20:1–5, 2022. Yang Yang, Zhuo Wang, Naihao Liu, Yuxin Zhang, Rongchang Liu, and Jinghuai Gao. Seismic resolution enhancement using physics-assisted seismic deconvolution network and domain adaptation. Geophysics , 90(3):R113–R125, 2025. Shijun Cheng, Yi Wang, Qingchen Zhang, Randy Harsuko, and Tariq Alkhalifah. A self-supervised learning framework for seismic low-frequency extrapolation. Journal of Geophysical Research: Machine Learning and Computation , 1 (3):e2024JH000157, 2024. Xintao Chai, Taihui Yang, Hanming Gu, Genyang Tang, Wenjun Cao, and Yufeng Wang. Geophysics-steered self-supervised learning for deconvolution. Geophysical Journal International , 234(1):40–55, 2023. 25 PG-SSDM for seismic resolution enhancement A P REPRINT 
+
+Yongxiao Wang, Jingyi Xu, Zhencong Zhao, Yang Gao, and Hao Zhang. Structurally-constrained unsupervised deep learning for seismic high-resolution reconstruction. IEEE Transactions on Geoscience and Remote Sensing , 2023a. Shijun Cheng, Haoran Zhang, and Tariq Alkhalifah. Self-supervised seismic resolution enhancement. IEEE Transactions on Geoscience and Remote Sensing , 2025a. Shijun Cheng, Mohammad H Taufik, and Tariq Alkhalifah. Seismic wavefield solutions via physics-guided generative neural operator. arXiv preprint arXiv:2503.06488 , 2025b. Ricard Durall, Ammar Ghanim, Mario Ruben Fernandez, Norman Ettrich, and Janis Keuper. Deep diffusion models for seismic processing. Computers & Geosciences , 177:105377, 2023. Qi Liu and Jianwei Ma. Generative interpolation via a diffusion probabilistic model. Geophysics , 89(1):V65–V85, 2024. doi:10.1190/geo2023-0182.1. Shijun Cheng, Randy Harsuko, and Tariq Alkhalifah. A generative foundation model for an all-in-one seismic processing framework. Surveys in Geophysics , 2025c. Xinyang Wang, Qianyu Ge, Xintong Dong, Shiqi Dong, and Tie Zhong. Self-supervised diffusion model for 3d seismic data reconstruction. Geophysics , 90(5):1–124, 2025. Xingchen Shi, Shijun Cheng, Weijian Mao, and Wei Ouyang. Generative diffusion model for seismic imaging improvement of sparsely acquired data and uncertainty quantification. IEEE Transactions on Geoscience and Remote Sensing , 2024. Fu Wang, Xinquan Huang, and Tariq A Alkhalifah. A prior regularized full waveform inversion us-ing generative diffusion models. IEEE transactions on geoscience and remote sensing , 61:1–11, 2023b. doi:10.1109/TGRS.2023.3337014. Qingchen Zhang, Shijun Cheng, Wei Chen, and Weijian Mao. Well-and structure-constrained initial velocity building for full-waveform inversion via a generative diffusion model. IEEE Transactions on Geoscience and Remote Sensing ,2025. Prafulla Dhariwal and Alexander Nichol. Diffusion models beat gans on image synthesis. Advances in neural information processing systems , 34:8780–8794, 2021. Hao-Ran Zhang, Yang Liu, Yu-Hang Sun, and Gui Chen. Seisresodiff: Seismic resolution enhancement based on a diffusion model. Petroleum Science , 21(5):3166–3188, 2024. Hongzhi Yu, Wenchao Chen, Xiaokai Wang, and Dawei Liu. Unsupervised diffusion model for seismic deconvolution. 
+
+IEEE Geoscience and Remote Sensing Letters , 2025. Jonathan Ho, Ajay Jain, and Pieter Abbeel. Denoising diffusion probabilistic models. Advances in neural information processing systems , 33:6840–6851, 2020. Alexander Quinn Nichol and Prafulla Dhariwal. Improved denoising diffusion probabilistic models. In International conference on machine learning , pages 8162–8171. PMLR, 2021. Huan-Huan Tang, Shi-Jun Cheng, Wu-Qun Li, and Wei-Jian Mao. An edcc-emd analysis-based network for das vsp data denoising in frequency domain. Petroleum Science , 2025. 26
