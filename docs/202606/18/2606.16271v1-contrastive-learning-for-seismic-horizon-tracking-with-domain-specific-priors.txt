@@ -1,0 +1,344 @@
+Title: Contrastive Learning for Seismic Horizon Tracking with Domain-Specific Priors
+
+URL Source: https://arxiv.org/pdf/2606.16271v1
+
+Published Time: Tue, 16 Jun 2026 01:46:02 GMT
+
+Number of Pages: 5
+
+Markdown Content:
+> 1
+
+# Contrastive Learning for Seismic Horizon Tracking with Domain-Specific Priors 
+
+Alexandre Thouvenot, Lionel Boillot, and Vincent Gripon, Senior Member, IEEE 
+
+Abstract —Unsupervised 3D seismic horizon tracking faces a key limitation: signal-based propagators provide accurate trace-level alignment but often fail near faults, whereas texture-driven deep models are more robust to discontinuities, typically at the cost of labeled data requirements and reduced trace-level precision. We propose a self-supervised fusion of both paradigms in which signal-derived local horizon correspondences act as domain-specific priors to train a texture-based deep learning model. Specifically, we estimate reliable trace-to-trace flows from reflector slopes and use them to form positive pairs in a contrastive objective, while restricting training to high-confidence neighborhoods, optionally augmented with a fault mask. The objective is not to infer ambiguous correspondences close to discontinuities, but to preserve horizon identity across them. As a result, the network learns voxel-wise embeddings that preserve local signal continuity while enabling horizon propagation beyond discontinuities through similarity search. Experiments on the public F3 dataset and a faulted synthetic dataset achieve lower mean absolute error (MAE) than unsupervised baselines and competitive performance against a semi-supervised method using a single labeled slice. 
+
+Index Terms —Seismic interpretation, contrastive learning, representation learning. 
+
+I. I NTRODUCTION 
+
+Seismic data provide 3D images of subsurface geological structures. Geoscientists interpret various subsurface features such as faults, salt bodies, channels, and stratigraphic surfaces (hereafter referred to as horizons), which are the focus of this work. Accurately tracking horizons throughout a 3D seismic volume is critical for many applications, yet remains challenging, as their geometry is affected by folding, faulting, and sedimentary variations. Here, horizon texture refers to local temporal patterns along seismic traces, such as amplitude and frequency content, rather than spatial texture across neighboring traces. These patterns can vary significantly across the volume, creating a trade-off between trace-level precision and robustness to discontinuities. As a result, manual interpretation is time-consuming and requires expert knowledge. A wide range of methods has been developed to automate horizon interpretation, from signal-based propagation tech-niques [1]–[4] to deep learning models [5], [6]. Signal-based approaches exploit local trace similarity (e.g., cross-correlation or amplitude-gradient methods) to propagate horizons, but they often fail near discontinuities because they assume local conti-nuity. Deep learning approaches typically learn texture-based features and can be more robust for recovering horizons across                      
+
+> Alexandre Thouvenot and Vincent Gripon are with IMT Atlan-tique, LAB-STICC, UMR CNRS 6285, F-29238 Brest, France (email: alexandre.thouvenot@imt-atlantique.fr; vincent.gripon@imt-atlantique.fr). Alexandre Thouvenot and Lionel Boillot are with TotalEnergies, OneTech, 64000 Pau, France (email: alexandre.thouvenot@totalenergies.com; li-onel.boillot@totalenergies.com).
+
+faults or erosional breaks, yet they generally require labeled data and training sets that cover the full variability of horizon textures. This motivates methods that transfer the local precision of signal-based alignment into learned representations that can preserve horizon identity across structurally complex regions. In this work, we combine signal-based and texture-based approaches through a self-supervised framework with two com-ponents: (i) an encoder that extracts voxel-wise features from seismic traces, and (ii) a contrastive objective that aligns em-beddings along locally estimated trace-to-trace correspondences (signal-based) while separating different depths within a trace. Our main contributions are:  
+
+> •
+
+A self-supervised framework that learns voxel-wise em-beddings for horizon tracking in 3D seismic volumes.  
+
+> •
+
+A structure-informed contrastive pair definition: signal-based propagators define positive voxel pairs within high-confidence neighborhoods, while within-trace negatives enforce separation between horizons.  
+
+> •
+
+Evaluations on a faulted synthetic dataset and the public F3 dataset, including ablations on architecture, embedding dimension, and faulted horizon propagation. II. R ELATED WORK 
+
+A. Horizon Interpretation a) Signal-Based Methods: The propagation of seismic horizons is a longstanding problem, often formulated as identifying local signal similarity between neighboring traces. Classical methods iteratively extend horizons from seed points by maximizing correlation [1]. Although locally accurate, these approaches degrade in noisy or discontinuous regions. To mitigate correlation failures, alternatives such as Dynamic Time Warping [7] and learning-based flow estimation for 1D trace alignment [8] (including 4D settings [9]) have been explored. These methods can be more robust to certain discon-tinuities by explicitly modeling trace-to-trace deformation. Another widely used family relies on relative geological time (RGT) and slope estimation to follow seismic stratigraphy [2]– [4]. However, inaccurate slope estimates near faults may lead to poor horizon predictions in complex regions. 
+
+b) Texture-Based Methods: Over the past decade, texture-based methods, generally implemented using deep learn-ing architectures, have been increasingly explored [5], [6]. Their generalization remains limited by the representative-ness of labeled training data. To reduce reliance on labeled data, semi-supervised ap-proaches have gained attention. Prior work [10] introduced a 2D regularization constraint based on seismic slopes applied to unlabeled regions. While effective, its 2D formulation 
+
+> arXiv:2606.16271v1 [cs.CV] 15 Jun 2026 2
+
+restricts the analysis to specific slices of the seismic cube, which may miss complex 3D structures. Other methods also explore contrastive learning to improve pixel-level predic-tions under limited supervision [11]. More recently, pretrained seismic representation models have been transferred to downstream tasks such as horizon tracking [12]. While these features can improve propagation, performance may still depend on the diversity of the pretraining data and the extent to which the learned representations capture stratigraphic consistency. 
+
+B. Contrastive Learning 
+
+Contrastive learning with the InfoNCE objective [13] has been extended to dense prediction, enabling pixel-level repre-sentation learning [14], [15]. These methods typically enforce consistency between corresponding pixels across different views as positive pairs, while treating unrelated pixels as negatives. In our setting, signal-based local propagation provides stratigraph-ically consistent correspondences that naturally define positive voxel pairs, while within-trace depth samples serve as negatives. III. M ETHODOLOGY 
+
+We consider a 3D seismic volume of size L × W × T
+
+represented as a set of traces xp ∈ RT , indexed by spatial position p ∈ S = {1, . . . , L } × { 1, . . . , W }. Stratigraphic horizons are modeled as functions νk : S → { 1, . . . , T }
+
+that assign a unique time sample to each spatial position, where k indexes individual horizons. We aim to learn a mapping gθ : S × T → RN
+
+such that voxels lying on the same horizon share simi-lar embeddings (see Fig. 1): 
+
+∃k, t 1 = νk(p1) ∧ t2 = νk(p2) ⇒ gθ (p1, t 1) ≈ gθ (p2, t 2)
+
+(1) Since νk is unknown, we use signal-based local correspon-dences as priors to learn voxel-wise representations aligned with local approximations of νk. We implement gθ with a 1D en-coder fθ : RT → RT ×N , so that gθ (p, t ) = fθ (xp)t = Yp,t .
+
+k
+
+k′
+
+p1 p2
+
+## gθ(p1, ν k(p1)) = gθ(p2, ν k(p2)) 
+
+## gθ(p1, ν k(p1)) ̸ = gθ(p1, ν k′ (p1))  
+
+> Fig. 1. A 2D slice of a synthetic dataset with two horizons (green and orange dotted lines). Our method promotes similar representations for voxels belonging to the same horizon, while encouraging separation for representations across different depths along the same trace (Eq. 1).
+
+A. Contrastive Learning 
+
+We use a trace-to-trace flow ϕpi,pj : {1, . . . , T } →
+
+[1 , T ] to map a time index from trace pi to its corre-sponding index on trace pj . This local correspondence can be expressed as follows: 
+
+xpi,t ≈ xpj ,ϕ pi,pj (t) ⇒ Ypi,t ≈ Ypj ,ϕ pi,pj (t) (2) For an anchor voxel (p, t ), a positive sample is defined by the mapped voxel (p′, ϕ p,p′ (t)) for p′ in a local neighborhood 
+
+B(p, t ). Negatives are taken as other depth samples along the anchor trace p, encouraging separation between nearby horizons. Following InfoNCE [13], the loss at depth t is: 
+
+L(p, t ) = X
+
+> p′∈B (p,t )
+
+− ln 
+
+" exp( s+
+
+> p,p′,t
+
+)exp( s+
+
+> p,p′,t
+
+) + P  
+
+> t′̸=t
+
+exp( s− 
+
+> p,t,t ′
+
+)
+
+#
+
+(3) where s+ 
+
+> p,p′,t
+
+= cosim( Yp,t , Yp′,ϕ p,p′ (t))/τ denotes the pos-itive pair similarity, s− 
+
+> p,t,t ′
+
+= cosim( Yp,t , Yp,t ′ )/τ denotes the negative pair similarity, cosim is the cosine similarity, and 
+
+τ > 0 is a temperature hyperparameter. The loss is averaged over sampled anchors at different depths and positions. We handle non-integer ϕ(t) by linear interpolation. The main challenge is to restrict training to neighborhoods B
+
+where flow-based correspondences are reliable. Otherwise, false positives may align different horizons. Next, we de-scribe how ϕ and B are computed. 
+
+B. Flow ϕ Estimation 1) Seismic Reflector Slope: Numerous methods have been proposed to estimate seismic reflector slopes [8], [16]–[18]. We use the structure tensor-based method [17], from which we derive ϕp,p+v and an associated confidence measure cp,p+v :
+
+{1, . . . , T } → [0 , 1] . Here, v ∈ { (±1, 0) , (0 , ±1) } connects 4-neighbor traces on the 2D grid S. For each neighboring direction v, the estimated reflector slope uv(p, t ) from p to 
+
+p + v at depth t is converted into a local trace-to-trace flow: 
+
+ϕp,p+v(t) = t + uv(p, t ) (4) A deformation field between two given points p1 and pn is obtained by composing local deformation fields: 
+
+ϕp1,pn (t) = ( ϕpn−1,pn ◦ · · · ◦ ϕp2,p3 ◦ ϕp1,p2 )( t) (5) where pi − pi−1 ∈ {(±1, 0) , (0 , ±1) }.The path (p1, . . . , pn) is not unique and we favor paths that avoid noisy, faulted, or chaotic areas. Path quality is measured using the confidence index c, which is low where no dominant orientation exists (typically near faults or in chaotic regions). However, fault delineation using this method may be incomplete, potentially resulting in inaccurate neighborhood estimates near faults. We optionally combine c with a deep-learning fault mask (e.g., [19]) from a pretrained model. Masked voxels are assigned zero confidence. The mask is not intended to improve horizon tracking near faults, but to prevent ambiguous fault-crossing correspondences from being selected as contrastive positives (results are also reported without it). 3
+
+2) Neighborhood Construction: We model the confidence 
+
+μ along a path P = (p0, p1, · · · , pn−1, pn) at depth t
+
+using a multiplicative formulation: 
+
+μt(P ) = 
+
+> n−1
+
+Y
+
+> i=0
+
+cpi,pi+1 (ϕp0,pi (t)) (6) By applying a logarithmic transform, each transition 
+
+(pi, ϕ p0,pi (t)) → (pi+1 , ϕ p0,pi+1 (t)) is associated with the local cost: 
+
+wpi,pi+1 (ϕp0,pi (t)) = − ln(max( ϵ, c pi,pi+1 (ϕp0,pi (t)))) (7) The total path cost is then given by: 
+
+dt(P ) = 
+
+> n−1
+
+X
+
+> i=0
+
+wpi,pi+1 (ϕp0,pi (t)) (8) We define the neighborhood B at depth t and threshold δ as the set of traces that can be reached from p0 through at least one path whose cumulative cost does not exceed δ:
+
+B(p0, t ) = {p ∈ S|∃ P ∈ P (p0, p), d t(P ) ≤ δ} (9) where P(p0, p) denotes the set of spatial paths from p0 to p.In practice, this set is approximated by a front-propagation procedure to limit computational cost. This approximation may underestimate B(p0, t ). The neighborhood is constructed incrementally from the anchor (p0, t ), initialized as B(p0, t ) = 
+
+{p0}. Let Pp denote the path assigned to p when p is added to B(p0, t ). A neighboring trace p + v, with v ∈{(±1, 0) , (0 , ±1) } and p + v /∈ B (p0, t ), defines a candidate extension through the path P ′ = ( Pp, p + v). Among all such candidate extensions, we select the one with minimum cumulative cost and add its endpoint p + v to B(p0, t ) if 
+
+dt(P ′) ≤ δ. The propagation proceeds by expanding candidate extensions in increasing order of cumulative cost. In the contrastive loss, the anchor trace itself is excluded from 
+
+B(p0, t ) when forming positive pairs. IV. R ESULTS 
+
+A. Evaluation Protocol 
+
+After training on a given 3D seismic volume, each voxel is associated with an N -dimensional embedding. To reconstruct a horizon, we start from a seed point (p, t ) and use its embedding 
+
+Yp,t as reference. The predicted surface is obtained by select-ing, for each p′ ∈ S, the depth that maximizes cosine similarity: 
+
+˜νp,t (p′) = arg max  
+
+> t′∈{ 1,...,T }
+
+cosim ( Yp,t , Yp′,t ′ ) (10) For evaluation, we choose one seed point in the middle of the ground-truth horizon νk, where the seed is assumed to lie on the sought horizon, and report the mean absolute error (MAE): MAE (νk, ˜νp,t ) = 1
+
+|S|
+
+X
+
+> p′∈S
+
+|νk(p′) − ˜νp,t (p′)| (11) For all methods, MAE is computed on the same voxels outside the fault mask. This protocol evaluates horizon propagation across faults. The objective is to recover the same seeded horizon in interpretable regions on both sides of discontinuities, not to predict horizon positions inside fault zones where reflector correspondences may be ambiguous or ill-defined. ν0
+
+> ν1
+> ν2
+> ν3
+> ν4ν0
+> ν1
+> ν2
+> ν3
+
+ν4
+
+> Fig. 2. Representative inline and crossline sections of the synthetic 3D seismic cube with the five ground-truth horizons.
+
+B. Implementation Details 
+
+The 3D seismic cubes are normalized using a z-score. We train a 1D U-Net [20] (output dimension N = 32 for each voxel) using the Adam optimizer (learning rate 10 −3) for 20 epochs. The InfoNCE temperature is set to τ = 0 .7. For within-trace negatives, we use a thresholded negative similarity: 
+
+˜s− 
+
+> p,t,t ′
+
+=
+
+(
+
+cosim( Yp,t , Yp,t ′ )/τ, cosim( Yp,t , Yp,t ′ ) ≥ α, 
+
+0 otherwise (12) with α = 0 .5 unless stated otherwise. Negative pairs with cosine similarity below α are assigned a constant logit equal to zero, so that only hard negatives above the threshold are emphasized. Neighborhoods B(p, t ) are computed on the fly within a 20 ×20 spatial window using a graph-distance threshold 
+
+δ = − log(0 .7) and ϵ = 10 −5. Anchor voxels (p, t ) are sampled uniformly along the depth dimension. All experiments were conducted on an 80 GB NVIDIA A100 GPU. 
+
+C. Datasets 
+
+We evaluate the proposed method on the F3 dataset [5] using seven interpreted ground-truth horizons. In addition, we introduce a synthetic dataset generated with Synthoseis [21]. This synthetic volume of dimensions L = W = 160 and 
+
+T = 256 contains five major horizons disrupted by three significant faults. This synthetic dataset is used for computa-tionally intensive experiments, as its smaller size makes such evaluations more tractable. A depiction of the 3D volume and its five ground-truth horizons is shown in Fig. 2. 
+
+D. Benchmark 
+
+We compare our method to three representative baselines: (i) a correlation-based propagator with a single seed (Corr), using a window size of 10 for the synthetic dataset and 12 
+
+for F3, selected to provide sufficient temporal context for the expected vertical displacements [1], (ii) an RGT-based approach [4], and (iii) Geo2.5D [10], which combines texture and signal in a semi-supervised setting. The first two baselines are fully unsupervised, while Geo2.5D uses a single labeled 4                  
+
+> TABLE I MAE COMPARISON . O URS −EXCLUDES THE FAULT MASK PRIOR ; O URS +
+> INCLUDES IT .
+> Unsupervised Self-Supervised Semi-Supervised
+> Corr [1] RGT [4] Ours −Ours +Geo2.5D [10] Synthetic 5.83 5.72 0.43 0.40 0.35
+> F3 7.78 4.11 2.24 1.99 2.68
+
+2D slice per dataset. Results are reported in Table I. Reported MAE values are averaged over the horizons. Geo2.5D achieves strong accuracy with a single labeled slice, illustrating the benefit of semi-supervision. Without horizon labels, our method substantially improves over correlation and RGT baselines and remains competitive with Geo2.5D. The optional fault mask further improves performance by suppressing unreliable positive pairs, while Ours − shows that the method remains effective without this prior. Fig. 3 and Fig. 4 visualize the learned embeddings with principal component analysis (PCA) and the corresponding horizon reconstructions in areas affected by faults. 
+
+(a) label 
+
+> Prediction
+
+(b)   
+
+> Fig. 3. Predictions on the F3 dataset obtained with a model trained using a fault mask prior, in an area affected by faults. (a) PCA projection of the
+> N-dimensional representation to RGB space. (b) Predicted horizons versus ground truth.
+
+E. Ablation and Sensitivity Analysis 
+
+Ablations are performed on the synthetic dataset using the default configuration: 1D U-Net, N = 32 , and δ =
+
+− log(0 .7) , unless stated otherwise. 
+
+1) Network Architecture: In this section, we evaluate the influence of the network architecture and compare a 1D UNET [20], a 1D UNET with a ResNet backbone [22], and a 1D version of the UNETR hybrid architecture [23]. As shown in Table II, the 1D U-Net matches the best MAE while using fewer parameters, and is therefore used in all subsequent experiments. 
+
+(a) Ground Truth  
+
+> Predictions
+
+(b)               
+
+> Fig. 4. Predictions on the synthetic dataset illustrate horizon propagation in the presence of three major faults. (a) PCA projection of the N-dimensional representation to RGB space. (b) Predicted horizons versus ground truth. TABLE II MAE COMPARISON ON THREE ARCHITECTURES .Model 1D U-Net 1D UNETR 1D U-Net ResNet MAE ↓0.40 0.40 0.63 Parameters (M) 17.1 19.7 21.6
+
+2) Seed Sensitivity: To assess the influence of the seed location, we repeat horizon tracking from 225 different seeds sampled on a regular 15 × 15 spatial grid (outside the fault mask). For each horizon νk, each seed (pi, ν k(pi)) produces one propagated surface ˜νpi,ν k (pi). We summarize performance in Fig. 5a by reporting the mean and standard deviation of the MAE. The relatively large standard deviation reflects genuine spatial heterogeneity. Seeds near faults or low-confidence regions are more likely to produce partial tracking failures. 
+
+3) Embedding Dimension: The dimensionality of the repre-sentation space N may need to increase with the complexity or the number of horizons. To investigate this relationship, we evaluate embedding dimension N ∈ { 2, 4, 8, . . . , 1024 }. We report the results in Fig. 5b. Low-dimensional representations (N = 2 and N = 4) yield poor performance, whereas higher dimensions result in more stable outcomes. Performance stabilizes once sufficient embedding dimension is selected. 
+
+4) Angular Relaxation: We evaluate the cosine threshold 
+
+α ∈ {0.1, . . . , 0.9} used in the angular-relaxed negative similarity. Fig. 5c shows a U-shaped MAE trend, with best per-formance for moderate thresholds α ∈ (0 .4, 0.6) . Standard In-foNCE without angular relaxation yields a higher MAE of 0.58 .
+
+5) Discontinuity Handling: We first study δ without a fault mask, using only the confidence to prevent unreliable local correspondences. As shown in Fig. 5d, we evalu-ate exp( −δ) ∈ [0 .5, 0.95] . Values in [0 .85 , 0.95] yield the best performance, while lower values degrade results, high-lighting the role of δ in selecting reliable positive pairs across structurally complex areas. 51 2 3 4 5
+
+> Horizon
+> 0.2
+> 0.4
+> 0.6
+> 0.8
+> 1.0
+> 1.2
+> 1.4
+> 1.6
+> MAE
+
+(a) 4 16 64 256 1024   
+
+> Embedding Dimension N
+> 0
+> 10
+> 20
+> 30
+> 40
+> 50
+> MAE
+
+(b) 0.1 0.2 0.3 0.4 0.5 0.6 0.7 0.8 0.9   
+
+> Angle α
+> 0.4
+> 0.6
+> 0.8
+> 1.0
+> 1.2
+> 1.4
+> 1.6
+> 1.8
+> 2.0
+> MAE
+
+(c) 0.5 0.6 0.7 0.8 0.9   
+
+> Threshold exp( −δ)
+> 0.5
+> 1.0
+> 1.5
+> 2.0
+> 2.5
+> 3.0
+> MAE
+
+(d) 
+
+Fig. 5. Ablation studies on the synthetic dataset (results averaged over five runs). (a) Seed sensitivity: distribution of MAE over 225 seed locations sampled on a regular spatial grid for each horizon (mean indicated). (b) Impact of embedding dimension N : values greater than or equal to 16 show improved performance. (c) Impact of angular relaxation: values (0 .3, 0.7) show improved stability and horizon propagation. (d) Impact of the path confidence threshold exp( −δ)
+
+without a fault mask: higher values improve horizon propagation. Error bars in (b)–(d) denote mean ± standard error (SE). 
+
+V. C ONCLUSION 
+
+We proposed a self-supervised contrastive framework for horizon propagation in 3D seismic volumes, using signal-based local correspondences to learn voxel-wise embeddings. Experiments on a synthetic faulted benchmark and the public F3 dataset show that the proposed method improves over unsuper-vised baselines for horizon propagation across faulted regions and remains competitive with a semi-supervised approach using a single labeled slice. Future work will focus on relaxing the locality assumption used in neighborhood construction. In par-ticular, extending the graph-based search beyond local windows, while controlling the reliability of long-range correspondences, could improve global consistency in complex areas. ACKNOWLEDGMENT 
+
+This work was supported by TotalEnergies and the French National Association for Research and Technology (ANRT) through a CIFRE Ph.D. fellowship. The authors declare that this work is related to a patent application filed by their institution. REFERENCES [1] J. Gallon, S. Guillon, B. Jobard, H. Barucq, and N. Keskes, “Slimming brick cache strategies for seismic horizon propagation algorithms,” 
+
+Eurographics/IEEE VGTC on Volume Graphics , pp. 37–44, 05 2010. [2] J. Lomask, A. Guitton, S. Fomel, J. Claerbout, and A. A. Valenciano, “Flattening without picking,” GEOPHYSICS , vol. 71, no. 4, pp. P13–P20, 2006. [3] A. Abubakar, H. Di, Z. Li, H. Maniar, and T. Zhao, “An artificial intelligence workflow for horizon volume generation from 3-d seismic data,” The Leading Edge , vol. 43, no. 4, pp. 235–243, 2024. [4] S. Guillon, N. Keskes, J. Gallon, and M. Donias, “Geotime: A 3-d automatic tool for chronostratigraphic seismic interpretation and filtering,” 
+
+The leading edge , vol. 32, no. 2, pp. 154–159, 2013. [5] R. M. Silva, L. Baroni, R. S. Ferreira, D. Civitarese, D. Szwarcman, and E. V. Brazil, “Netherlands dataset: A new public dataset for machine learning in seismic interpretation,” arXiv preprint arXiv:1904.00770 ,2019. [6] Z. Wang, Q. Wang, Y. Yang, N. Liu, Y. Chen, and J. Gao, “Seismic facies segmentation via a SegFormer-based specific en-coder–decoder–hypercolumns scheme,” IEEE Transactions on Geoscience and Remote Sensing , vol. 61, pp. 1–11, 2023. [7] M. Su, F. Qian, S. Cui, C. Yuan, and X. Cui, “Research on a 3-d seismic horizon automatic-tracking method based on corrugated global diffusion,” 
+
+Applied Sciences , vol. 13, no. 10, 2023. [8] Z. Li and A. Abubakar, “Seismic flownet: Using optical flow field for dense horizon interpretation,” in 82nd EAGE annual conference & exhibition , vol. 2021, no. 1. European Association of Geoscientists & Engineers, 2021, pp. 1–5. [9] J. S. Dramsch, A. N. Christensen, C. MacBeth, and M. L ¨uthje, “Deep unsupervised 4-d seismic 3-d time-shift estimation with convolutional neural networks,” IEEE Transactions on Geoscience and Remote Sensing ,vol. 60, pp. 1–16, 2022. [10] A. Thouvenot, L. Boillot, and V. Gripon, “Signal-informed semi-supervised 3-d segmentation for subsurface analysis,” in 33rd European Signal Processing Conference (EUSIPCO) , 2025, pp. 621–625. [11] K. Li, W. Liu, Y. Dou, Z. Xu, H. Duan, and R. Jing, “CONSS: Contrastive learning method for semisupervised seismic facies classification,” IEEE Journal of Selected Topics in Applied Earth Observations and Remote Sensing , vol. 16, pp. 7838–7849, 2023. [12] N. Pham, H. Di, T. Zhao, and A. Abubakar, “Seisbert: A pretrained seismic image representation model for seismic data interpretation,” The Leading Edge , vol. 44, no. 2, pp. 96–106, 2025. [13] A. v. d. Oord, Y. Li, and O. Vinyals, “Representation learning with contrastive predictive coding,” arXiv preprint arXiv:1807.03748 , 2018. [14] Z. Xie, Y. Lin, Z. Zhang, Y. Cao, S. Lin, and H. Hu, “Propagate yourself: Exploring pixel-level consistency for unsupervised visual representation learning,” in Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR) , June 2021, pp. 16 684–16 693. [15] M. Goncharov, V. Soboleva, A. Kurmukov, M. Pisov, and M. Belyaev, “vox2vec: A framework for self-supervised contrastive learning of voxel-level representations in medical images,” in International Conference on Medical Image Computing and Computer-Assisted Intervention . Springer, 2023, pp. 605–614. [16] Fast Local Cross-correlations of Images , ser. SEG International Exposi-tion and Annual Meeting, vol. 2006 SEG Annual Meeting, 10 2006. [17] G. C. Fehmers and C. F. W. H ¨ocker, “Fast structural interpretation with structure-oriented filtering,” GEOPHYSICS , vol. 68, no. 4, pp. 1286–1293, 2003. [18] Y. Lou, S. Li, N. Liu, and R. Liu, “Seismic volumetric dip estimation via a supervised deep learning model by integrating realistic synthetic data sets,” Journal of Petroleum Science and Engineering , vol. 218, p. 111021, 2022. [19] Y. An, H. Du, S. Ma, Y. Niu, D. Liu, J. Wang, Y. Du, C. Childs, J. Walsh, and R. Dong, “Current state and future directions for deep learning based automatic seismic fault interpretation: A systematic review,” 
+
+Earth-Science Reviews , vol. 243, p. 104509, 2023. [20] O. Ronneberger, P. Fischer, and T. Brox, “U-Net: Convolutional networks for biomedical image segmentation,” in International Conference on Medical image computing and computer-assisted intervention . Springer, 2015, pp. 234–241. [21] T. P. Merrifield, D. P. Griffith, S. A. Zamanian, S. Gesbert, S. Sen, J. D. L. T. Guzman, R. D. Potter, and H. Kuehl, “Synthetic seismic data for training deep learning networks,” Interpretation , vol. 10, no. 3, pp. SE31–SE39, 2022. [22] F. I. Diakogiannis, F. Waldner, P. Caccetta, and C. Wu, “ResUNet-a: A deep learning framework for semantic segmentation of remotely sensed data,” ISPRS Journal of Photogrammetry and Remote Sensing , vol. 162, pp. 94–114, Apr. 2020. [23] A. Hatamizadeh, Y. Tang, V. Nath, D. Yang, A. Myronenko, B. Landman, H. R. Roth, and D. Xu, “UNETR: Transformers for 3-d medical image segmentation,” in Proceedings of the IEEE/CVF winter conference on applications of computer vision , 2022, pp. 574–584.

@@ -6,67 +6,53 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-06-17
-- 运行时间：2026-06-17 22:13:35 UTC
+- 最新运行日期：2026-06-18
+- 运行时间：2026-06-18 22:17:36 UTC
 - 运行状态：成功
-- 本次总论文数：15
-- 精读区：4
-- 速读区：11
+- 本次总论文数：11
+- 精读区：1
+- 速读区：10
 
 ### 今日简报（AI）
-1) 今日精选15篇论文，精读两篇9分高质成果，聚焦地震分辨率增强与循环世界模型前沿。
-2) 最值得关注：融合物理先验的扩散模型显著提升地震分辨率；循环世界模型在结构化推理中展现潜力。
-3) 建议优先精读这两篇高分论文，深入理解物理引导生成与循环建模的交叉创新。
-- 详情：[/202606/17/README](/202606/17/README)
+今日精读《Starter-Iterator Neural Operator》高分文章（9分），速读10篇中Bayesian Triangulation Splines与DeepJEB++各获7分推荐。最值得关注的是PDE问题统一求解架构及不规则域空间自适应方法。建议优先精读高分解法论文，再浏览工程数据增强与采样停止策略的速读论文。
+- 详情：[/202606/18/README](/202606/18/README)
 
 ### 精读区论文标签
-1. [Incorporating wave physical priors into diffusion models: A novel approach to seismic resolution enhancement](/202606/17/2606.17808v1-incorporating-wave-physical-priors-into-diffusion-models-a-novel-approach-to-seismic-resolution-enhancement)  
+1. [Starter-Iterator Neural Operator: A Unified Architecture for High-Fidelity Forward and Inverse PDE Problems](/202606/18/2606.18305v1-starter-iterator-neural-operator-a-unified-architecture-for-high-fidelity-forward-and-inverse-pde-problems)  
    标签：评分：9.0/10、query:geo-phys-ai
-   evidence：融合波动物理先验的扩散模型用于地震分辨率增强
-2. [Looped World Models](/202606/17/2606.18208v1-looped-world-models)  
-   标签：评分：9.0/10、query:geo-phys-ai
-   evidence：循环架构的世界模型，实现高效长期模拟
-3. [Operator Boosting Produces Pareto-Efficient PDE Surrogates](/202606/17/2606.17460v1-operator-boosting-produces-pareto-efficient-pde-surrogates)  
-   标签：评分：8.0/10、query:geo-phys-ai
-   evidence：算子提升用于构建紧凑神经算子代理，包括FNO
-4. [LGNO: A Local-Global Neural Operator for Hyperbolic Conservation Laws](/202606/17/2606.18221v1-lgno-a-local-global-neural-operator-for-hyperbolic-conservation-laws)  
-   标签：评分：8.0/10、query:geo-phys-ai
-   evidence：将FNO与局部分支结合的神经算子，用于双曲守恒律
+   evidence：用于正反PDE问题的神经算子架构，直接适用于地震成像和地下建模
 
 ### 速读区论文标签
-1. [Clay-CNN Hybrids: Leveraging Geospatial Foundation Models as Auxiliary Context for Landslide Detection](/202606/17/2606.14081v2-clay-cnn-hybrids-leveraging-geospatial-foundation-models-as-auxiliary-context-for-landslide-detection)  
+1. [Bayesian Triangulation Splines: Spatial Adaptation on Irregular Domains](/202606/18/2606.12296v1-bayesian-triangulation-splines-spatial-adaptation-on-irregular-domains)  
    标签：评分：7.0/10、query:geo-phys-ai
-   evidence：地理空间基础模型Clay用于滑坡分割
-2. [Clay-CNN Hybrids: Leveraging Geospatial Foundation Models as Auxiliary Context for Landslide Detection](/202606/17/2606.14081v3-clay-cnn-hybrids-leveraging-geospatial-foundation-models-as-auxiliary-context-for-landslide-detection)  
+   evidence：用于不规则域空间自适应的贝叶斯三角样条，适用于3D地质建模
+2. [DeepJEB++: Foundation Model-Driven Large-Scale 3D Engineering Dataset via 2D Latent Space Augmentation](/202606/18/2606.12994v2-deepjeb-foundation-model-driven-large-scale-3d-engineering-dataset-via-2d-latent-space-augmentation)  
    标签：评分：7.0/10、query:geo-phys-ai
-   evidence：地理空间基础模型Clay作为滑坡检测的辅助上下文
-3. [BRICKS-WM: Building Reusability via Interface Composition Kinetics for Structured World Models](/202606/17/2606.16489v1-bricks-wm-building-reusability-via-interface-composition-kinetics-for-structured-world-models)  
+   evidence：基于基础模型的大规模3D工程数据集生成框架，通过2D潜在增强，与3D地下数据生成相关
+3. [Stop the Sampler! Classifier-Based Adaptive Stopping for Sampling Kernels](/202606/18/2606.16073v1-stop-the-sampler-classifier-based-adaptive-stopping-for-sampling-kernels)  
    标签：评分：7.0/10、query:geo-phys-ai
-   evidence：模块化物理动力学的结构化世界模型
-4. [Towards Fast GNN Surrogates for CO2 Migration in Complex Geological Formations](/202606/17/2606.17180v1-towards-fast-gnn-surrogates-for-co2-migration-in-complex-geological-formations)  
+   evidence：使用分类器和GFlowNets的自适应采样内核停止，与后验采样和扩散方法相关
+4. [Contrastive Learning for Seismic Horizon Tracking with Domain-Specific Priors](/202606/18/2606.16271v1-contrastive-learning-for-seismic-horizon-tracking-with-domain-specific-priors)  
    标签：评分：7.0/10、query:geo-phys-ai
-   evidence：用于地质构造中CO2运移的图神经代理模型
-5. [Generalization Guarantees for Multi-Input Neural Operator Learning in Sobolev Spaces](/202606/17/2606.17419v1-generalization-guarantees-for-multi-input-neural-operator-learning-in-sobolev-spaces)  
+   evidence：基于对比学习和领域先验的自监督地震层位跟踪
+5. [MR-GVNO: A Geometry-Aware Variational Physics-Informed Neural Operator for Mindlin-Reissner Plates on Irregular Domains](/202606/18/2606.16624v1-mr-gvno-a-geometry-aware-variational-physics-informed-neural-operator-for-mindlin-reissner-plates-on-irregular-domains)  
    标签：评分：7.0/10、query:geo-phys-ai
-   evidence：多输入神经算子的理论泛化保证
-6. [Perron--Frobenius Operator Matching for Generative Modeling](/202606/17/2606.17465v1-perron--frobenius-operator-matching-for-generative-modeling)  
+   evidence：几何感知变分物理信息神经算子，方法可迁移至地震成像
+6. [Blind Recovery of Latent Domains via Unsupervised Symmetry Discovery](/202606/18/2606.17782v1-blind-recovery-of-latent-domains-via-unsupervised-symmetry-discovery)  
    标签：评分：7.0/10、query:geo-phys-ai
-   evidence：统一流、扩散和跳跃模型的生成框架可应用于后验采样
-7. [Volterra Generative Models](/202606/17/2606.18071v1-volterra-generative-models)  
+   evidence：利用群卷积网络的无监督对称性发现用于盲逆问题
+7. [Conservation Laws for Modern Neural Architectures](/202606/18/2606.17816v1-conservation-laws-for-modern-neural-architectures)  
    标签：评分：7.0/10、query:geo-phys-ai
-   evidence：提出Volterra生成模型，用分数核注入路径依赖噪声，适用于建模非马尔可夫物理动力学
-8. [Decision-Driven Geosteering Under Uncertainty: A Unified Framework for Sequential Decision Optimization](/202606/17/2606.17331v1-decision-driven-geosteering-under-uncertainty-a-unified-framework-for-sequential-decision-optimization)  
+   evidence：现代神经架构中的守恒律
+8. [Structure Over Nonlinearity: Explicit Interaction Architectures for Dynamical Learning](/202606/18/2606.19101v1-structure-over-nonlinearity-explicit-interaction-architectures-for-dynamical-learning)  
+   标签：评分：7.0/10、query:geo-phys-ai
+   evidence：显式结构动态单元用于学习动力学
+9. [Geometry-Aware Post-Hoc Uncertainty Quantification in Operator Learning](/202606/18/2606.17513v1-geometry-aware-post-hoc-uncertainty-quantification-in-operator-learning)  
    标签：评分：6.0/10、query:geo-phys-ai
-   evidence：将粒子滤波用于地下概率解释与强化学习结合，实现不确定性下的地质导向决策
-9. [Design principles for stable and generalizable data-driven discretizations for solving linear hyperbolic conservation laws](/202606/17/2606.17497v1-design-principles-for-stable-and-generalizable-data-driven-discretizations-for-solving-linear-hyperbolic-conservation-laws)  
+   evidence：神经算子后验不确定性量化，利用其内部嵌入
+10. [FlowObject: Flow Steering for Bridging Generative Priors and Reconstruction Fidelity](/202606/18/2606.19019v1-flowobject-flow-steering-for-bridging-generative-priors-and-reconstruction-fidelity)  
    标签：评分：6.0/10、query:geo-phys-ai
-   evidence：面向线性双曲守恒律的数据驱动有限体积离散化，分析稳定性和泛化
-10. [How Sparse and How Noisy? Systematic Benchmarking of Inverse Physics-Informed Neural Networks for Manning Friction Estimation in Shallow Water Equations](/202606/17/2606.18149v1-how-sparse-and-how-noisy-systematic-benchmarking-of-inverse-physics-informed-neural-networks-for-manning-friction-estimation-in-shallow-water-equations)  
-   标签：评分：6.0/10、query:geo-phys-ai
-   evidence：物理信息神经网络是一种具有物理归纳偏置的神经架构
-11. [Adaptive Volumetric Mechanical Property Fields Invariant to Resolution](/202606/17/2606.18231v1-adaptive-volumetric-mechanical-property-fields-invariant-to-resolution)  
-   标签：评分：6.0/10、query:geo-phys-ai
-   evidence：预测体积力学属性用于物理仿真与学习物理世界模型相关
+   evidence：流匹配生成先验用于逆问题重建
 
 
 <div class="dpr-home-promo-card">

@@ -1,0 +1,1459 @@
+Title: Stop the Sampler! Classifier-Based Adaptive Stopping for Sampling Kernels
+
+URL Source: https://arxiv.org/pdf/2606.16073v1
+
+Published Time: Tue, 16 Jun 2026 01:56:14 GMT
+
+Number of Pages: 23
+
+Markdown Content:
+# Stop the Sampler! Classifier-Based Adaptive Stopping for Sampling Kernels 
+
+Kirill Korolev 1 Nikita Morozov 1 Stepan Pavlenko 1 Esmeralda S. Whitammer 2 3 Sergey Samsonov 1
+
+## Abstract 
+
+Sampling from complex, unnormalized proba-bility densities is a fundamental challenge in Bayesian inference and probabilistic modeling. While Markov chain Monte Carlo (MCMC) meth-ods provide asymptotic guarantees, they often suffer from slow mixing and high computational costs due to fixed or manually tuned trajectory lengths. In this work, we propose a novel frame-work that treats trajectory termination as a learn-able component of the sampling dynamics. By framing MCMC within the theory of non-acyclic generative flow networks (GFlowNets), we train state-dependent neural classifiers to decide when a trajectory has reached a high-density region and should terminate. We theoretically establish the connection between optimal classifiers and the target density via detailed balance conditions and introduce a multilevel training scheme to facili-tate exploration in complex geometries. Experi-mental results across various benchmark densities demonstrate that our approach significantly re-duces average trajectory lengths while improving mode coverage and mixing compared to standard MCMC baselines. 
+
+## 1. Introduction 
+
+In this paper, we consider the problem of sampling from a probability distribution given by its unnormalized density: 
+
+𝜋 (𝑥 ) = 𝑟 (𝑥 )/ 𝑍, 𝑍 = ∫ 
+
+> R𝑑
+
+𝑟 (𝑥 ) 𝑑𝑥 (1) where 𝑟 : R𝑑 → R+ is a positive function and 𝑍 is an un-known normalizing constant. The problem arises in many domains, including Bayesian statistics, probabilistic deep learning, and natural sciences (Liu & Liu, 2001; Stoltz et al., 2010; Welling & Teh, 2011; Noé et al., 2019; Izmailov et al., 
+
+> 1
+
+HSE University 2University of Edinburgh 3CIFAR Fellow. Correspondence to: Kirill Korolev <kkorolev@hse.ru>. 
+
+Accepted to the Structured Probabilistic Inference & Generative Modeling workshop at ICML 2026 , Seoul, South Korea. PMLR 306, 2026. Copyright 2026 by the author(s). 
+
+2021). The main two approaches to solve the sampling problem (1) are either to perform (asymptotically) exact sampling from 𝜋 based on Monte Carlo or MCMC algo-rithms (Neal, 2001; Neal et al., 2011; Hoffman et al., 2014), or to bypass exact sampling in favor of amortized solutions to this problem. MCMC algorithms operate by construct-ing an ergodic Markov chain (see, e.g., Douc et al. (2018)) 
+
+{𝑌 𝑛 }𝑛 ∈N with invariant distribution equal to 𝜋 , such that the distribution of 𝑛 -th iterate 𝑌 𝑛 becomes close to 𝜋 regardless of the starting distribution of 𝑌 0. MCMC-based approaches are known to suffer from slow convergence to the target dis-tribution (Andrieu et al., 2003; Neal et al., 2011), especially when the target dimension 𝑑 is large. In addition to slow convergence, the important question related to this family of methods is whether the length of the generated trajectory is sufficient for the marginal distribution of the last element to be close to 𝜋 . Known approaches to this problem consider some statistics based on generated samples (Roy, 2020; Wu & Kawai, 2025), which do not always provide affirmative stopping criteria. Contrary to exact sampling approaches, amortized solutions to (1) train a generative model to approximately sample from 𝜋 . Contrary to MCMC, they shift the computational burden to the training phase, enabling faster inference at the price of bypassing the exact sampling. Models of this class include normalizing flows (Noé et al., 2019; Midg-ley et al., 2023; Gabrié et al., 2022), diffusion samplers (Zhang & Chen, 2022; Vargas et al., 2023; Blessing et al., 2024), and generative flow networks (GFlowNets) (Bengio et al., 2021; 2023; Lahlou et al., 2023). While GFlowNets were initially developed for discrete domains, they were further extended to continuous problems in Lahlou et al. (2023) and offer another family of training algorithms for diffusion samplers (Zhang et al., 2024; Sendera et al., 2024; Kim et al., 2025; Gritsaev et al., 2025; Berner et al., 2026). GFlowNets operate by training a stochastic policy to ap-proximate the target distribution over terminal states in an appropriately constructed Markov decision process (MDP), see, e.g., Tiapkin et al. (2024). Recent theoretical develop-ments in GFlowNets (Lahlou et al., 2023; Deleu & Bengio, 2023; Brunswic et al., 2024) present a broad and convenient theoretical framework for developing sampling algorithms. In this work, we utilize GFlowNet methodology to train neu-ral network classifiers for early stopping of MCMC kernels, 1
+
+> arXiv:2606.16073v1 [cs.LG] 15 Jun 2026 Stop the Sampler! Classifier-Based Adaptive Stopping for Sampling Kernels
+
+creating a new family of amortized samplers based on algo-rithms from both worlds. Our key idea is to treat stopping as a learnable component of the sampling dynamics: instead of running a Markov chain for a fixed or externally determined number of steps, we learn state-dependent classifiers that decide when a trajectory should terminate. This leads to a unified framework where sampling trajectories are dynam-ically shortened in high-density regions while remaining exploratory elsewhere. Our main contributions are: 1. We theoretically show how sampling dynamics in R𝑑 
+
+with an addition of a possibility to stop in any point 
+
+𝑥 can be viewed as a non-acyclic GFlowNet environ-ment (Brunswic et al., 2024), establish connections be-tween the learned stopping policies and the target density via flow and detailed balance conditions, and derive a characterization of optimal classifiers in terms of under-lying MCMC dynamics. 2. Building on this foundation and prior non-acyclic GFlowNet training methodology (Brunswic et al., 2024; Morozov et al., 2026), we introduce practical algorithms that combine learned stopping with adaptive forward and backward kernels, as well as a multilevel extension that improves training and exploration. 3. We provide experimental evaluation on a number of den-sity functions, demonstrating that our approach yields substantially shorter trajectories compared to standard MCMC while better capturing the geometry of complex target distributions and improving mixing across modes through learned drift corrections. Source code: github.com/kkorolev1/stop-the-sampler. 
+
+## 2. Background 
+
+2.1. GFlowNets on general state spaces 
+
+We briefly describe the setting of the sampling problem on the general state space. Given a measurable space (X , ΣX ),and a finite reward measure 𝑅 on this space, we aim to generate samples from the distribution 𝜋 defined by 
+
+𝜋 ( 𝐴 ) = 𝑅 ( 𝐴 )/ 𝑅 (X) , 𝐴 ∈ ΣX .
+
+Following Lahlou et al. (2023), we solve this problem with an extension of GFlowNets, which can be defined on general state spaces using a measure-theoretic extension of directed acyclic graphs. This structure is represented by a mea-surable pointed graph G = ( ¯S, Σ, 𝑠 0, 𝑠 𝑓 , 𝜅 𝐹 , 𝜅 𝐵 , 𝜈 ). Here, 
+
+( ¯S, Σ) is a measurable space with ¯S = {𝑠 0 } ∪ S ∪ { 𝑠 𝑓 },where 𝑠 0, 𝑠 𝑓 ∈ ¯S are the distinguished source and sink states. We assume that X = {𝑠 ∈ S : 𝜅 𝐹 (𝑠, {𝑠 𝑓 }) > 0}
+
+denote the set of terminal states, and 𝜈 is some reference measure on S, such that 𝑅 ≪ 𝜈 . In this statement, 𝜅 𝐹 (𝑠, ·) ,and 𝜅 𝐵 (𝑠, ·) are the reference forward and backward ker-nels. The supports of 𝜅 𝐹 (𝑠, ·) and 𝜅 𝐵 (𝑠, ·) generalize the notions of children and parents in a discrete DAG, respec-tively, defining the set of states reachable from 𝑠 (resp. from which 𝑠 is reachable) in one step. The kernels 𝜅 𝐹 and 𝜅 𝐵 
+
+must satisfy several compatibility conditions, in particular, it should exist 𝑁 ∈ N, such that 
+
+supp (𝜅 𝑁 𝐹 (𝑠 0, ·)) = {𝑠 𝑓 } . (2) 
+
+Trajectory distribution and sampling problem. Suppose that we are given a forward Markov kernel 𝑃 𝐹 on ( ¯S, Σ)
+
+such that 𝑃 𝐹 (𝑠, ·) ≪ 𝜅 𝐹 (𝑠, ·) . Learner should be able to sample from 𝑃 𝐹 (𝑠, ·) . The kernel 𝑃 𝐹 (𝑠, ·) naturally induces a measure over (S 𝑛 , Σ⊗𝑛 ) given by 
+
+𝑃 ⊗𝑛 𝐹 (𝑠 0, d𝑠 1: 𝑛 ) = Î𝑛 𝑖 =1 𝑃 𝐹 (𝑠 𝑖 −1, d𝑠 𝑖 ) . (3) Under appropriate regularity conditions (see Lahlou et al. (2023)), 𝑃 ⊗𝑛 𝐹 induces the probability distribution over the complete trajectories 𝜏 = (𝑠 0 → 𝑠 1 → · · · → 𝑠 𝑛 → 𝑠 𝑛 +1 =
+
+𝑠 𝑓 ) of all possible length 𝑛 ∈ N given for any 𝐶 𝑛 ∈ Σ𝑛 by 
+
+𝑃 (𝜏 ∈ ({ 𝑠 0 } ⊗ 𝐶 𝑛 ⊗ { 𝑠 𝑓 })) =
+
+∫
+
+> ¯S𝑛 +1
+
+𝑃 ⊗ ( 𝑛 +1) 
+
+> 𝐹
+
+(𝑠 0, d𝑠 1: 𝑛 +1)I{𝑠 1: 𝑛 ∈ 𝐶 𝑛 }I{𝑠 𝑛 +1 = 𝑠 𝑓 } . (4) Note that the condition (2) implies that a trajectory sampled starting from 𝑠 0 according to the probability distribution 
+
+𝑃 (𝜏 ) defined above will terminate with probability 1 in the number of steps not exceeding 𝑁 . Marginalization of the above trajectory distribution 𝑃 (𝜏 ) over the terminal states 
+
+𝑠 𝑛 induces the terminating distribution 𝑃 T (𝐵 ) on (X , ΣX ).The goal of our sampling procedure is to ensure proper conditions on the forward Markov kernel 𝑃 𝐹 such that for any 𝐴 ∈ ΣX
+
+𝑃 T ( 𝐴 ) = 𝜋 ( 𝐴 ) . (5) 
+
+Local balance conditions. Given a 𝜎 -finite measure 𝐹 ≪ 𝜈 
+
+over ( ¯S, Σ) and a Markov kernel 𝑃 𝐹 , the tuple (𝐹, 𝑃 𝐹 ) is said to satisfy flow-matching conditions if for any 𝐴 ⊆
+
+¯S \ { 𝑠 0 }:
+
+𝐹 ( 𝐴 ) = ∫   
+
+> ¯S\{ 𝑠 𝑓 }
+
+𝐹 (d𝑠 ) 𝑃 𝐹 (𝑠, 𝐴 ), (6) where 𝐹 and 𝑃 𝐹 are said to be a flow measure and a forward kernel, respectively, over G. The tuple (𝐹, 𝑃 𝐹 ) satisfies the 
+
+reward-matching conditions if for any 𝑥 ∈ X :
+
+𝑅 (d𝑥 ) = 𝐹 (d𝑥 ) 𝑃 𝐹 (𝑥, {𝑠 𝑓 }) . (7) Specifically, Lahlou et al. (2023) showed that when the flow and reward matching conditions are satisfied, the terminat-ing distribution 𝑃 T induced by 𝑃 𝐹 is proportional to 𝑅 , and (5) holds. 
+
+Detailed balance. Given a backward Markov kernel 𝑃 𝐵 on 
+
+( ¯S, Σ) with 𝑃 𝐵 (𝑠 ′, ·) ≪ 𝜅 𝐵 (𝑠 ′, ·) , the tuple (𝐹, 𝑃 𝐹 , 𝑃 𝐵 ) is said to satisfy detailed balance conditions if: 
+
+𝐹 (d𝑠 ) 𝑃 𝐹 (𝑠, d𝑠 ′) = 𝐹 (d𝑠 ′) 𝑃 𝐵 (𝑠 ′, d𝑠 ). (8) 2Stop the Sampler! Classifier-Based Adaptive Stopping for Sampling Kernels 
+
+Furthermore, Lahlou et al. (2023) demonstrated that if 
+
+(𝐹, 𝑃 𝐹 , 𝑃 𝐵 ) satisfies the detailed balance conditions, then 
+
+(𝐹, 𝑃 𝐹 ) satisfies the flow-matching conditions. Equations (7) and (8) generalize the familiar equations in the discrete case (Bengio et al., 2023) for a reward function 𝑅 : X → R+,a flow function 𝐹 : ¯S → R≥0 and policies 𝑃 𝐹 , 𝑃 𝐵 repre-sented as transition probability masses: 
+
+𝑅 (𝑥 ) = 𝐹 (𝑥 )𝑃 𝐹 (𝑠 𝑓 | 𝑥 ),𝐹 (𝑠 )𝑃 𝐹 (𝑠 ′ | 𝑠 ) = 𝐹 (𝑠 ′)𝑃 𝐵 (𝑠 | 𝑠 ′). (9) If one defines 𝑟 (𝑠 ), 𝑓 (𝑠 ), 𝑝 𝐹 (𝑠 ′ | 𝑠 ) and 𝑝 𝐵 (𝑠 | 𝑠 ′) as the Radon–Nikodym derivatives of the reward measure 𝑅 , flow measure 𝐹 , forward kernel 𝑃 𝐹 , and backward kernel 𝑃 𝐵 
+
+with respect to the corresponding reference measures and kernels, then (7) and (8) can be rewritten in terms of densi-ties to resemble (9) directly: 
+
+𝑟 (𝑥 ) = 𝑓 (𝑥 ) 𝑝 𝐹 (𝑠 𝑓 | 𝑥 ),𝑓 (𝑠 ) 𝑝 𝐹 (𝑠 ′ | 𝑠 ) = 𝑓 (𝑠 ′) 𝑝 𝐵 (𝑠 | 𝑠 ′), (10) for 𝜈 -a.e. 𝑥 ∈ X and (𝜈 ⊗ 𝜅 𝐹 )-a.e. (𝑠, 𝑠 ′).
+
+Trajectory balance. Fix 𝑛 ∈ N and let 𝜏 = (𝑠 0 → 𝑠 1 →· · · → 𝑠 𝑛 = 𝑥 → 𝑠 𝑛 +1 = 𝑠 𝑓 ) denote a complete trajectory of length 𝑛 starting at 𝑠 0, passing through non-terminal states in S, reaching a terminal state 𝑠 𝑛 = 𝑥 ∈ X , and then transitioning to 𝑠 𝑓 . Given 𝑍 ∈ R+, the tuple (𝑍, 𝑃 𝐹 , 𝑃 𝐵 ) is said to satisfy trajectory balance conditions if for any 𝑛 ∈ N,
+
+𝑍 
+
+> 𝑛
+
+Ö
+
+> 𝑡 =0
+
+𝑝 𝐹 (𝑠 𝑡 +1 | 𝑠 𝑡 ) = 𝑟 (𝑠 𝑛 )
+
+> 𝑛 −1
+
+Ö
+
+> 𝑡 =0
+
+𝑝 𝐵 (𝑠 𝑡 | 𝑠 𝑡 +1), (11) for 𝜅 ⊗𝑛 𝐹 -a.e. (𝑠 0, 𝑠 1, . . . , 𝑠 𝑛 , 𝑠 𝑓 ). Moreover, Lahlou et al. (2023) showed that the trajectory balance conditions imply both flow and reward matching. Note that the framework described above corresponds to the finitely absorbing setting (2) , when the trajectories sampled according to 𝑃 𝐹 (𝑠, ·) are guaranteed to have finite length. Later we show how this setting can be generalized under the Assumption 3.1, see the detailed discussion in §gobble 3.1. 
+
+2.2. Generalizations to non-acyclic setting 
+
+The theory of non-acyclic GFlowNets was developed in Brunswic et al. (2024), extending the standard framework to settings where the graph may contain cycles. In this case, additional considerations arise due to the presence of cycles, which may lead to unnecessarily long trajectories. It was shown that the expected trajectory length is controlled by the total flow through non-terminal states, yielding the bound 
+
+E𝜏 ∼𝑃 [𝑛 𝜏 ] ≤ 𝐹 (S) 
+
+𝐹 ({ 𝑠 0 }) . (12) Subsequently, Morozov et al. (2025) refined this result for the discrete case by showing that, when 𝐹 corresponds to the occupancy measure induced by the backward process, the inequality becomes an equality. These results highlight that minimizing the total flow 𝐹 (S) can be an effective strategy for reducing expected trajectory lengths in non-acyclic GFlowNets, providing a principled motivation for incorporating flow regularization into training objectives. 
+
+2.3. Related work on adaptive kernels and early-stopping in MCMC 
+
+Another line of work in Monte Carlo studies stopping rules for Markov chains, i.e., criteria for deciding whether a par-tial trajectory is sufficient for estimation. These rules are typically based on convergence diagnostics or precision cri-teria computed from the generated samples (Roy, 2020; Wu & Kawai, 2025). For example, Kwon et al. (2025) compare Gelman–Rubin, Geweke diagnostics, and effective sample size, showing that aggressive thresholds may lead to pre-mature termination and biased estimates. Thus, stopping in MCMC is usually an online diagnostic applied to the gener-ated trajectory. We provide the corresponding formulas for these diagnostic approaches in §B. A complementary direction focuses on adaptive kernels, where the transition mechanism is adjusted according to local geometry or performance. In adaptive MCMC (Haario et al., 2001; Andrieu & Thoms, 2008; Vihola, 2012; Tit-sias & Dellaportas, 2019), proposal parameters are opti-mized within families such as Gaussian random-walk or MALA. Extensions include position-dependent precondi-tioning and state-dependent step sizes (Roy & Zhang, 2023; Biron-Lattes et al., 2023; Liu et al., 2025). More recent work formulates proposal adaptation as a reinforcement learning problem (Wang et al., 2025a;b). 
+
+## 3. Non-acyclic GFlowNets with adaptive sampling time 
+
+3.1. Classifier-based adaptive stopping Structured state space. In the context of continuous acyclic GFlowNets, it is common to encode the state space 
+
+S as pairs (𝑠, 𝑛 ), where 𝑠 ∈ R𝑑 and 𝑛 indicates a discrete timestep along a trajectory (Lahlou et al., 2023). In contrast, in this work we remove the notion of time, moving instead to the non-acyclic GFlowNet setting. We define the state space as ¯S = {𝑠 0 } ∪ S ∪ { 𝑠 𝑓 }, where 𝑠 0
+
+and 𝑠 𝑓 denote the source and sink states, respectively, and 
+
+S = R𝑑 . Forward transitions are allowed only from 𝑠 0 to 
+
+S and from S to S ∪ { 𝑠 𝑓 }, and 𝑠 𝑓 is absorbing. Backward transitions are defined analogously in the reverse direction. Following Lahlou et al. (2023), we model the forward and backward policies as Markov kernels on ¯S. We equip ¯S
+
+with the reference measure 𝜈 = 𝜆 + 𝛿 𝑠 0 + 𝛿 𝑠 𝑓 , where 𝜆 is 3Stop the Sampler! Classifier-Based Adaptive Stopping for Sampling Kernels                  
+
+> Figure 1. Structured state space for the non-acyclic continuous GFlowNet. The generation process starts from the source state 𝑠 0,enters the continuous space R𝑑 according to 𝑝 0, evolves between continuous states using 𝑞 𝐹 (𝑠 ′|𝑠 )( 1−𝑑 𝐹 (𝑠 )) , and terminates at 𝑠 𝑓 with probability 𝑑 𝐹 (𝑠 ). Backward transitions are defined analogously in the reverse direction.
+
+the Lebesgue measure on R𝑑 and 𝛿 𝑠 is the Dirac measure at 𝑠 . Throughout, we assume that the relevant measures are absolutely continuous with respect to the reference measure 
+
+𝜈 . In turn, a sequence 𝜏 = (𝑠 0 → 𝑠 1 → . . . → 𝑠 𝑛 𝜏 →
+
+𝑠 𝑛 𝜏 +1 = 𝑠 𝑓 ) is called a trajectory of length 𝑛 𝜏 ∈ N if 𝑠 𝑡 ∈
+
+R𝑑 , 𝑡 ∈ { 1, . . . , 𝑛 𝜏 } and T denotes the set of such complete trajectories. Figure 1 illustrates the proposed non-acyclic state space. 
+
+Assumption 3.1. Let 𝑃 be the trajectory distribution induced by the forward kernel 𝑃 𝐹 , then we assume 
+
+E𝜏 ∼𝑃 [𝑛 𝜏 ] < ∞.In particular, Assumption 3.1 is justified and used in all previous non-acyclic works (Brunswic et al., 2024; Morozov et al., 2025; 2026). In §A.1 we argue why it holds in our case in practice. 
+
+Flow measure and reward matching. In contrast to Lahlou et al. (2023), where the flow is defined as a measure satisfying the flow-matching condition, we define it directly in terms of the forward transition kernel 𝑃 𝐹 . This is com-plementary to the approach of Morozov et al. (2025), where the flow is constructed via a backward transition kernel 𝑃 𝐵 .
+
+Definition 3.2 (Flow measure) . Under Assumption 3.1, the flow measure 𝐹 is defined as 
+
+𝐹 ({ 𝑠 0 }) = 𝐹 ({ 𝑠 𝑓 }) = 𝑍, 𝐹 ( 𝐴 ) = 𝑍 
+
+> ∞
+
+∑︁ 
+
+> 𝑛 =0
+
+𝑃 𝑛 𝐹 (𝑠 0, 𝐴 ), 𝐴 ∈ Σ| S . (13) Consequently, as in the discrete case (Morozov et al., 2025), this definition of a flow measure yields flow-matching. 
+
+Proposition 3.3. The flow measure 𝐹 from Def. 3.2 and the Markov kernel 𝑃 𝐹 satisfy the flow-matching conditions (6) .
+
+The proof is in §D.2. Note that our structured state space is a particular instance of the measurable non-acyclic setting in Brunswic et al. (2024). Hence, their general sampling result applies directly in our case. 
+
+Theorem 3.4. If a flow measure 𝐹 satisfies both flow and reward matching conditions, then the sampling distribution 
+
+𝑃 𝑇 ( 𝐴 ) = 𝜋 ( 𝐴 ).
+
+In contrast to Brunswic et al. (2024), where the flow is arbitrary and yields only an upper bound on the expected trajectory length, our flow is defined as the occupancy mea-sure induced by 𝑃 𝐹 , and the bound becomes tight: 
+
+Proposition 3.5. Let 𝑃 be the trajectory distribution in-duced by the forward kernel 𝑃 𝐹 . Let 𝐹 be the flow measure (Def. 3.2). Then the expected trajectory length is a constant multiple of the total flow: 
+
+E𝜏 ∼𝑃 [𝑛 𝜏 ] = 𝐹 ( S)    
+
+> 𝐹 ( { 𝑠 0} )
+
+. (14) The proof can be found in §D.3. To handle trajectory ter-mination without fixed length, we introduce forward and backward classifiers, 𝑑 𝐹 , 𝑑 𝐵 : R𝑑 → [ 0, 1], which map a state 𝑠 ∈ R𝑑 to the probability of stopping the trajectory. The forward classifier 𝑑 𝐹 (𝑠 ) determines the probability of transitioning directly to the sink state 𝑠 𝑓 , while the back-ward classifier 𝑑 𝐵 (𝑠 ) controls the probability of moving to the source state 𝑠 0. The forward transition density on ¯S is defined by 
+
+𝑝 𝐹 (𝑠 | 𝑠 0) = 𝑝 0 (𝑠 ),𝑝 𝐹 (𝑠 ′ | 𝑠 ) = (1 − 𝑑 𝐹 (𝑠 )) 𝑞 𝐹 (𝑠 ′ | 𝑠 ),𝑝 𝐹 (𝑠 𝑓 | 𝑠 ) = 𝑑 𝐹 (𝑠 ),
+
+(15) where 𝑝 0 is a fixed initial distribution and 𝑞 𝐹 is a transition density on R𝑑 . The backward transition density 𝑝 𝐵 on ¯S is defined analogously in the reverse direction using transition density 𝑞 𝐵 on R𝑑 and a classifier 𝑑 𝐵 , with the sink transition fixed by reward matching 𝑝 𝐵 (𝑠 | 𝑠 𝑓 ) = 𝜋 (𝑠 ).In §D.1, we show that detailed balance implies the following relations: 
+
+𝑓 (𝑠 ) = 𝑟 (𝑠 )
+
+𝑑 𝐹 (𝑠 ) = 𝑍 𝑝 0 (𝑠 )
+
+𝑑 𝐵 (𝑠 ) ,𝑑 𝐹 (𝑠 ) = 𝜋 (𝑠 )
+
+𝑝 0 (𝑠 ) 𝑑 𝐵 (𝑠 ).
+
+(16) 
+
+3.2. Connection with MCMC 
+
+In this section, we relate the generation kernel restricted to transitions within S to early stopping of time-homogeneous chains that use this kernel as the their transition operator, which establishes a precise link between MCMC and our framework. Let 𝑄 𝐹 be a fixed forward kernel with a transition density 
+
+𝑞 𝐹 . Assume that 𝑄 𝐹 has full support on R𝑑 and is uni-formly geometrically ergodic. That is, 𝑄 𝐹 admits a unique stationary measure 𝜋 𝑄 , and there exist constants 𝐶 < ∞ and 
+
+𝜌 ∈ ( 0, 1) such that 
+
+∥𝜈𝑄 𝑛 𝐹 − 𝜋 𝑄 ∥TV ≤ 𝐶 𝜌 𝑛 (17) 4Stop the Sampler! Classifier-Based Adaptive Stopping for Sampling Kernels 
+
+for all 𝑛 ∈ N and any probability measure 𝜈 , where ∥ · ∥ TV 
+
+denotes the total variation norm. Let 𝜋 (𝑠 ) = 𝑟 (𝑠 )/ 𝑍 be a target distribution, 𝑝 0 be the initial distribution of a Markov chain, and 𝑃 be the trajectory distribution induced by 𝑝 𝐹 =
+
+(𝑞 𝐹 , 𝑑 𝐹 ). By a slight abuse of notation, we use 𝑝 0, 𝜋 and 
+
+𝜋 𝑄 to denote both the corresponding probability measures and their densities, depending on the context. 
+
+Theorem 3.6. Assume 𝑄 𝐹 is a kernel with a density 𝑞 𝐹 
+
+satisfying (17) . The tuple ( 𝑓 , 𝑞 𝐹 , 𝑑 𝐹 , 𝑞 𝐵 , 𝑑 𝐵 ) is a solution to detailed balance conditions (8) if and only if the following two statements hold: 1. The flow measure 𝐹 satisfies for any measurable 𝐴 ⊆ R𝑑 
+
+𝐹 ( 𝐴 ) = 𝑍  𝑈 ( 𝐴 ) + 𝑛 𝑄 𝜋 𝑄 ( 𝐴 ), (18) 
+
+where 
+
+𝑈 ( 𝐴 ) =
+
+> ∞
+
+∑︁ 
+
+> 𝑛 =0
+
+ 𝑝 0𝑄 𝑛 𝐹 − 𝜋𝑄 𝑛 +1
+
+> 𝐹
+
+ ( 𝐴 ),𝑛 𝑄 ≥ 𝑛 ∗ 
+
+> 𝑄
+
+:= sup 
+
+> 𝑠 ∈R𝑑
+
+max {𝜋 (𝑠 ), 𝑝 0 (𝑠 )} − 𝑢 (𝑠 )
+
+𝜋 𝑄 (𝑠 ) ,
+
+(19) 
+
+and 𝑢 (𝑠 ) is the density of the measure 𝑈 .2. The classifiers 𝑑 𝐹 , 𝑑 𝐵 and the backward transition den-sity 𝑞 𝐵 satisfy 
+
+𝑑 𝐹 (𝑠 ) = 𝑟 (𝑠 )
+
+𝑓 (𝑠 ) , 𝑑 𝐵 (𝑠 ) = 𝑍 𝑝 0 (𝑠 )
+
+𝑓 (𝑠 ) ,𝑞 𝐵 (𝑠 | 𝑠 ′) = 𝑓 (𝑠 ) − 𝑟 (𝑠 )
+
+𝑓 (𝑠 ′) − 𝑍 𝑝 0 (𝑠 ′) 𝑞 𝐹 (𝑠 ′ | 𝑠 ),
+
+(20) 
+
+where 𝑓 (𝑠 ) = 𝑍 (𝑢 (𝑠 ) + 𝑛 𝑄 𝜋 𝑄 (𝑠 )) is the density of the flow measure 𝐹 .
+
+Corollary 3.7. The constant 𝑛 𝑄 from Theorem 3.6 coincides with the mean trajectory length E𝜏 ∼𝑃 [𝑛 𝜏 ]. The total flow 
+
+𝐹 (S) is minimized if and only if 𝑛 𝑄 = 𝑛 ∗
+
+> 𝑄
+
+.
+
+We provide the proof of these statements in §D.4. The measure 𝑈 ( 𝐴 ) admits an interpretation as the accumulated discrepancy between injected and removed mass from a measurable set 𝐴 , when we run a Markov chain with the fixed kernel 𝑄 𝐹 . Additional discussion and interpretation are provided in §C. This result shows that, once the forward kernel 𝑄 𝐹 is fixed, for example to the ULA kernel, we can potentially de-bias it to obtain samples from a target distri-bution 𝜋 (𝑥 ) using a classifier. However, doing so requires at least 𝑛 ∗ 
+
+> 𝑄
+
+steps on average, given that this quantity is finite. If the forward kernel 𝑄 𝐹 is already invariant with respect to the target distribution, i.e., 𝜋 𝑄 = 𝜋 , then the measure 𝑈 
+
+simplifies to 𝑈 ( 𝐴 ) = Í∞ 
+
+> 𝑛 =0
+
+( 𝑝 0𝑄 𝑛 𝐹 − 𝜋 )( 𝐴 ), which can be intuitively viewed as an accumulated discrepancy between distributions at step 𝑛 of the Markov chain 𝑝 0𝑄 𝑛 𝐹 and the target 𝜋 .
+
+3.3. Training algorithm 
+
+Based on our theory, various GFlowNet objectives can be used to train the model. However, there are various con-siderations related to their practical efficiency. Detailed balance (DB) (Bengio et al., 2023) is a local objective, and Morozov et al. (2025) showed that it can be effec-tively used with state flow regularization to train non-acyclic GFlowNets. However, we found DB to perform poorly in continuous environments, which is consistent with the find-ings of Berner et al. (2026). Alternatively, subtrajectory balance (SubTB) (Madan et al., 2023) objective can be used, which incorporates both local and global trajectory infor-mation, but introduces a quadratic number of terms in the trajectory length, making it computationally inefficient for training in non-acyclic environments. Recently Morozov et al. (2026) introduced a computationally efficient prefix trajectory balance objective, which we found well-suited for training in non-acyclic continuous spaces, and use it in our experiments. We assume parametric forward and backward policies 𝑝 𝐹 
+
+and 𝑝 𝐵 with learnable classifiers 𝑑 𝐹 , 𝑑 𝐵 and learnable ker-nels 𝑞 𝐹 , 𝑞 𝐵 . At each iteration, we sample partial trajectories of fixed length 𝑁 max with the classifier disabled to encour-age exploration. Each prefix of length 𝑖 is extended with a terminal transition, yielding a complete trajectory 𝜏 0: 𝑖 . For each prefix, we minimize 
+
+LTB (𝜃, 𝜏 0: 𝑖 ) =
+
+
+
+log 𝑝 0 (𝑠 1) Î𝑖 𝑡 =1 𝑝 𝐹 (𝑠 𝑡 +1 | 𝑠 𝑡 ; 𝜃 )
+
+𝑟 (𝑠 𝑖 )/ 𝑍 𝜃 
+
+Î𝑖 −1 
+
+> 𝑡 =0
+
+𝑝 𝐵 (𝑠 𝑡 | 𝑠 𝑡 +1; 𝜃 )
+
+2
+
+,
+
+(21) where the normalizing constant 𝑍 𝜃 is treated as a learnable scalar parameter and allows the model to match the partition function 𝑍 = 𝑅 (X) .To encourage shorter trajectories, we add flow regularization (Brunswic et al., 2024; Morozov et al., 2025), which can be computed directly from the classifier using (16) . We sum the loss over all prefixes, weighted by the model’s stopping prob-ability at step 𝑖 : 𝑤 𝑖 = sg 𝑑 𝐹 (𝑠 𝑖 ; 𝜃 ) Î𝑖 −1 
+
+> 𝑡 =1
+
+(1 − 𝑑 𝐹 (𝑠 𝑡 ; 𝜃 )) ,where sg denotes stopgrad. The weights focus training on prefixes that are likely under the current policy and thus improve stability. The final objective is 
+
+L( 𝜃, 𝜏, 𝜌 ) =
+
+> 𝑁 max
+
+∑︁ 
+
+> 𝑖 =1
+
+𝑤 𝑖 
+
+
+
+LTB (𝜃, 𝜏 0: 𝑖 ) + 𝜌 𝑟 (𝑠 𝑖 )
+
+𝑑 𝐹 (𝑠 𝑖 ; 𝜃 )
+
+
+
+, (22) where 𝜌 > 0 controls flow regularization. In §A.1, we provide the concrete parameterizations of the continuous kernels 𝑞 𝐹 and 𝑞 𝐵 . Learning a parameterized backward policy is particularly natural in our setting, as it can help encourage shorter trajectories. This perspective is also supported by recent work of Gritsaev et al. (2025), who show that adaptive optimization of the backward policy can 5Stop the Sampler! Classifier-Based Adaptive Stopping for Sampling Kernels 
+
+substantially improve diffusion sampler training. 
+
+3.4. Multilevel generalization 
+
+We extend the state space with levels variables, allowing the model to switch between regimes during generation. In the basic formulation from §3.1, the transition kernels and classifiers are homogeneous and do not explicitly depend on the generation step. To introduce additional flexibility, we augment the state space and consider continuous states of the form (𝑠, ℓ ), where 𝑠 ∈ R𝑑 and ℓ ∈ { 1, . . . , 𝐿 }, with 
+
+𝐿 denoting the number of levels. Starting from 𝑠 0, we sample 𝑠 ∼ 𝑝 0 at level ℓ = 1 and evolve the process using 𝑃 𝐹 . The classifier decides whether to continue within the current level or transition to the next one, until level 𝐿 is reached and the trajectory terminates at 
+
+𝑠 𝑓 . The backward dynamics are defined analogously. The resulting process remains non-acyclic, as cycles may occur within each level. Inspired by annealed importance sampling (AIS; Neal, 2001) and the use of geometric interpolations in dynamics-based samplers (e.g., Máté & Fleuret (2023); Choi et al. (2026)), we define intermediate rewards 
+
+𝑟 (𝑠, ℓ ) = 𝑝 0 (𝑠 )1−𝛽 ℓ 𝑟 (𝑠 )𝛽 ℓ , (23) where 0 = 𝛽 0 < · · · < 𝛽 𝐿 = 1. This yields a sequence of distributions interpolating between 𝑝 0 and 𝑅 . For each pair (ℓ − 1, ℓ ), where 𝑙 ∈ { 1, . . . , 𝐿 }, we solve a GFlowNet problem with initial and target distributions 
+
+𝑝 (ℓ ) 
+
+> 0
+
+(𝑠 ) = 𝑟 (𝑠, ℓ − 1)/ 𝑍 (ℓ −1) ,𝜋 (ℓ ) (𝑠 ) = 𝑟 (𝑠, ℓ )/ 𝑍 (ℓ ) . (24) These are implemented using shared forward and backward policies conditioned on the level ℓ, with learnable constants 
+
+𝑍 (ℓ ) 
+
+> 𝜃
+
+. Training follows §3.1, where we sample trajectories of length 𝑁 max , allocate 𝑁 𝐿 = 𝑁 max /𝐿 steps per level, and apply prefix trajectory balance within each segment. The final objective sums losses across all levels with the same weighting and flow regularization. The multilevel scheme decomposes a difficult generation problem into a sequence of easier ones. Intermediate re-wards 𝑟 (𝑠, ℓ ) are smoother and closer to each other than the original pair ( 𝑝 0, 𝑅 ), stabilizing learning and exploration. Correctness follows from the following evident statement. 
+
+Proposition 3.8. If each pair of levels (ℓ − 1, ℓ ), where 
+
+𝑙 ∈ { 1, . . . , 𝐿 }, satisfies trajectory balance with initial dis-tribution 𝑟 (𝑠, ℓ − 1)/ 𝑍 (ℓ −1) and target 𝑟 (𝑠, ℓ )/ 𝑍 (ℓ ) , then the terminating distribution 𝑝 𝑇 ( 𝐴 ) = 𝜋 ( 𝐴 ).Remark 3.9 . A related line of work is diffusion-based sam-pling (e.g., Zhang & Chen (2022); Sendera et al. (2024)), where samples evolve through a sequence of intermediate distributions, moving to the next level after each transition. In contrast, our model can apply the same transition ker-nel multiple times per level, using a learned classifier to decide when to advance. This added flexibility allows the sampler to allocate more steps to difficult regions and fewer to simpler ones. 
+
+## 4. Experiments 
+
+Improvement over ULA. In this section, we evaluate the proposed method against the Unadjusted Langevin Algo-rithm (ULA) and study the effects of classifier-based early stopping and learned corrections to the forward dynamics. Experiments are performed on several synthetic environ-ments described in §A.2. We evaluate the algorithms using standard metrics commonly adopted in the sampling litera-ture, following Blessing et al. (2024). Additional details are provided in §A.6. We first consider a configuration where the forward con-tinuous kernel 𝑞 𝐹 is fixed to the ULA proposal, while the forward classifier 𝑑 𝐹 , the backward classifier 𝑑 𝐵 , and the backward kernel 𝑞 𝐵 are learned. In this setting, the learned classifier significantly reduces the average trajectory length relative to fixed-step ULA, as shown in Table 1. However, the improvement in sample quality is generally limited. Next, we study the full model, where the forward kernel 𝑞 𝐹 
+
+is also learned (as a correction to the ULA kernel, see §A.1) in addition to 𝑑 𝐹 , 𝑑 𝐵 , and 𝑞 𝐵 . In this setting, the sam-pler is able to make substantially more effective transitions between distant high-density regions, leading to improved approximation quality. The learned classifier in the full model is visualized in Figure 3. The classifier assigns higher stopping probabilities in regions of high density and lower probabilities elsewhere, effectively recovering the geometry          
+
+> Figure 2. Comparison of our approach to ULA and ULA with stopping based on the Gelman–Rubin and Geweke convergence diagnostics on GMM9 task, where modes are imbalanced. Pairs of two values next to points corresponding to our models denote
+> (𝛾, 𝜌 ), step size and regularization coefficient respectively. Base-lines (ULA, ULA RG, ULA Geweke) with equal step sizes share the same color. ULA w/ clf denotes our model with 𝑞 𝐹 fixed to the ULA kernel. ULA w/ clf & corr denotes our full model with learnable 𝑞 𝐹 .
+
+6Stop the Sampler! Classifier-Based Adaptive Stopping for Sampling Kernels      
+
+> Figure 3. Forward classifier 𝑑 𝐹 (𝑠 )visualizations for different environments (from left to right: Funnel, GMM9, ManyWell, with the first and last projected onto the first two coordinates).
+> Figure 4. Samples on the GMM9 target. Left to right: ULA, ULA with classifier, ULA with classifier and drift correction. True density shown in background. Additional images in §A.7.
+
+of the target distribution. This behavior is also consistent with the relation 𝑑 𝐹 (𝑠 ) = 𝑟 (𝑠 )/ 𝑓 (𝑠 ), since the flow typi-cally becomes close to uniform within a mode, the classifier tends to resemble the target density itself. Figure 9 in the Appendix compares trajectories produced by ULA and the full model. As expected, ULA remains trapped within a single mode or local region and therefore requires a large time to move between modes. In contrast, the proposed method is able to make effective transitions between modes and more distant high-density regions due to learned stopping and corrections to the ULA dynamics. The quantitative results are summarized in Table 1. Eval-uation metrics are Sinkhorn distance (SD), RBF maxi-mum mean discrepancy (MMD), evidence lower and upper bounds (ELBO, EUBO), and the mean trajectory length 
+
+E[𝑛 𝜏 ]. ULA RG and ULA Geweke denote ULA with stopping based on the Gelman–Rubin and Geweke con-vergence diagnostics, respectively. Overall, classifier-based stopping substantially improves sampling efficiency by re-ducing the average trajectory length, while learned forward corrections further improve approximation quality, typically achieving lower Sinkhorn distance and MMD, and tighter ELBO/EUBO estimates. For ULA, we report metrics after the chain reaches a stationary regime with respect to the Sinkhorn metric. In Figure 2, we compare our methods against ULA and standard stopping diagnostics across dif-ferent step sizes and numbers of steps on a gaussian mixture target where modes have different weights. Even on the relatively simple two-dimensional imbalanced mixture task, MCMC-based approaches remain impractical, as they re-quire extremely long mixing times to correctly recover the target distribution, while the learned classifier helps to cor-rectly adjust to the weights of different mixture components. This behavior is also clearly seen in the visualization of the samples in Figure 4. Additional experiments, hyperparame-ters and visualizations are provided in §A.4. 
+
+Experiments with the multilevel scheme. We now evalu-ate the proposed multilevel extension described in §3.4. We consider configurations with 𝐿 ∈ { 1, 2, 5} levels and com-pare them against established diffusion sampling methods, namely PIS (Zhang & Chen, 2022) and DDS (Vargas et al., 2023). Note that a multilevel scheme with 𝐿 = 1 reduces to the single-level scheme with learnable 𝑞 𝐹 .Table 2 reports results on the GMM9 and ManyWell targets with 𝑑 = 40 , as well as on the more challenging 𝑑 = 196 
+
+dimensional Digits task from Blessing et al. (2024), corre-sponding to sampling MNIST images from density induced by a NICE normalizing flow model (Dinh et al., 2014). For a trained multilevel sampler, we measure it mean trajectory length and train diffusion samplers with the approximately this number of steps. Overall, the multilevel scheme consis-tently improves sample quality relative to the single-level model, especially on more difficult and high-dimensional tasks. Increasing the number of levels further improves ap-proximation quality, yielding lower SD, MMD, and tighter ELBO/EUBO estimates. On GMM9 and Digits, the multi-level models significantly outperform the single-level base-line and become competitive with diffusion samplers. In 7Stop the Sampler! Classifier-Based Adaptive Stopping for Sampling Kernels 
+
+Table 1. Comparison of various ULA extensions across four target densities. The best result in each row is highlighted in gray. ULA w/ clf denotes our model with 𝑞 𝐹 fixed to the ULA kernel. ULA w/ clf & corr denotes our full model with learnable 𝑞 𝐹 . Mean ±std over three runs. 
+
+Target → GMM9 ( 𝑑 = 2) Funnel ( 𝑑 = 2) GMM9 ( 𝑑 = 40 ) ManyWell ( 𝑑 = 40 )Algorithm ↓ Metric → SD ↓ MMD ↓ SD ↓ MMD ↓ SD ↓ MMD ↓ SD ↓ MMD ↓
+
+ULA 0.463 ±0.131 0.002 ±0.005 14 .101 ±0.243 0.142 ±0.014 376 .406 ±2.165 0.347 ±0.011 71 .508 ±0.876 0.332 ±0.018 
+
+ULA RG 0.463 ±0.154 0.002 ±0.001 11 .686 ±0.165 0.112 ±0.002 376 .652 ±2.377 0.345 ±0.002 70 .614 ±0.189 0.328 ±0.001 
+
+ULA Geweke 3.234 ±0.243 0.010 ±0.001 16 .262 ±0.133 0.216 ±0.004 376 .407 ±1.935 0.346 ±0.001 73 .531 ±0.081 0.338 ±0.001 
+
+ULA w/ clf 1.522 ±0.051 0.053 ±0.002 8.849 ±0.126 0.128 ±0.003 321 .803 ±2.038 0.314 ±0.017 54 .804 ±4.203 0.298 ±0.019 
+
+ULA w/ clf & corr 0.221 ±0.026 0.027 ±0.006 4.947 ±0.097 0.089 ±0.013 243 .809 ±1.984 0.251 ±0.019 62 .472 ±1.237 0.314 ±0.017 
+
+Algorithm ↓ Metric → ELBO ↑ EUBO ↓ ELBO ↑ EUBO ↓ ELBO ↑ EUBO ↓ ELBO ↑ EUBO ↓
+
+ULA w/ clf −1.753 ±0.045 2.478 ±0.083 −1.264 ±0.038 14 .462 ±0.312 −64 .581 ±0.912 174 .390 ±1.726 92 .507 ±10 .109 317 .601 ±15 .301 
+
+ULA w/ clf & corr −0.157 ±0.025 2.278 ±0.065 −0.392 ±0.023 1.005 ±0.053 −51 .701 ±0.778 168 .609 ±1.618 150 .008 ±8.421 248 .303 ±9.152 
+
+Algorithm ↓ Metric → E[𝑛 𝜏 ] ↓ E[𝑛 𝜏 ] ↓ E[𝑛 𝜏 ] ↓ E[𝑛 𝜏 ] ↓ 
+
+ULA 10 4 5 × 10 2 5 × 10 2 1.5 × 10 3
+
+ULA RG 10 4 10 3 10 3 2 × 10 3
+
+ULA Geweke 5307 .304 ±29 .689 406 .579 ±0.662 437 .228 ±1.370 1468 .161 ±8.509 
+
+ULA w/ clf 15 .017 ±0.227 21 .842 ±0.330 37 .659 ±2.589 79 .123 ±4.203 
+
+ULA w/ clf & corr 29 .591 ±0.345 36 .337 ±0.421 27 .837 ±3.494 75 .383 ±2.918 
+
+Table 2. Comparison of the multilevel GFlowNet with levels 𝐿 = {1, 2, 5} against diffusion sampling baselines PIS and DDS on GMM9 (𝑑 = 40 ), ManyWell ( 𝑑 = 40 ), and Digits ( 𝑑 = 196 ). 
+
+Target → GMM9 ( 𝑑 = 40 ) ManyWell ( 𝑑 = 40 ) Digits ( 𝑑 = 196 )Algorithm ↓ Metric → SD ↓ MMD ↓ SD ↓ MMD ↓ SD ↓ MMD ↓
+
+PIS 329 .400 ±1.814 0.186 ±0.012 38 .740 ±1.329 0.258 ±0.011 1728 .000 ±10 .351 0.540 ±0.023 
+
+DDS 180 .200 ±1.310 0.181 ±0.015 38 .81 ±1.329 0.259 ±0.013 202 .400 ±4.189 0.346 ±0.021 
+
+ULA w/ clf & corr 243 .809 ±1.984 0.251 ±0.019 62 .472 ±1.237 0.314 ±0.017 469 .500 ±1.532 0.410 ±0.036 
+
+Multilevel ( 𝐿 = 2) 186 .200 ±1.723 0.203 ±0.015 36 .330 ±0.561 0.108 ±0.021 343 .600 ±0.386 0.394 ±0.042 
+
+Multilevel ( 𝐿 = 5) 152 .347 ±2.281 0.184 ±0.011 28 .400 ±4.843 0.095 ±0.020 196 .938 ±3.519 0.304 ±0.028 
+
+Algorithm ↓ Metric → ELBO ↑ EUBO ↓ ELBO ↑ EUBO ↓ ELBO ↑ EUBO ↓
+
+PIS −278 .4±1.841 47 .55 ±4.125 200 .9±7.924 278 .9±5.118 −3671 .000 ±21 .931 925 .200 ±7.815 
+
+DDS −7.631 ±5.183 6.610 ±9.131 201 .100 ±8.914 331 .100 ±7.185 −149 .300 ±3.194 149 .9±8.917 
+
+ULA w/ clf & corr −51 .701 ±0.778 168 .609 ±1.618 150 .008 ±8.421 248 .303 ±9.152 −210 .340 ±3.591 270 .913 ±5.951 
+
+Multilevel ( 𝐿 = 2) −34 .735 ±6.192 71 .100 ±6.813 143 .500 ±4.254 254 .9±3.138 −184 .391 ±8.138 138 .200 ±6.984 
+
+Multilevel ( 𝐿 = 5) −28 .421 ±2.156 58 .734 ±3.021 154 .267 ±3.845 221 .456 ±4.932 −121 .570 ±4.193 102 .630 ±3.903 
+
+Algorithm ↓ Metric → E[𝑛 𝜏 ] ↓ E[𝑛 𝜏 ] ↓ E[𝑛 𝜏 ] ↓ 
+
+PIS 45 75 65 DDS 45 75 65 
+
+ULA w/ clf & corr 27 .837 ±3.494 75 .383 ±2.918 71 .600 ±6.139 
+
+Multilevel ( 𝐿 = 2) 44 .600 ±3.613 74 .173 ±2.590 62 .300 ±5.058 
+
+Multilevel ( 𝐿 = 5) 72 .900 ±4.152 68 .730 ±2.741 68 .281 ±5.300 
+
+particular, the 𝐿 = 5 configuration achieves the best overall performance among the proposed methods. 
+
+## 5. Conclusion 
+
+We have proposed a novel framework for adaptive sampling that treats trajectory termination as a learnable component of the dynamics. By casting MCMC with stopping deci-sions into the framework of non-acyclic GFlowNets, we established a principled connection between optimal stop-ping policies and the target distribution via flow and detailed balance conditions. Empirically, the method significantly reduces trajectory lengths while improving mode coverage and mixing across a range of standard benchmarks. The proposed approach introduces additional learning compo-nents, which increases optimization complexity and can require careful balancing between exploration and regular-ization during training, posing typical challenges that arise in learning-based sampling methods. Future work could focus on improving training objectives for continuous non-acyclic GFlowNets, as well as extending the framework to more expressive sampling dynamics, e.g., Hamiltonian Monte Carlo (Neal et al., 2011). 
+
+## Acknowledgmenents 
+
+This research was supported in part through computational resources of HPC facilities at HSE University (Kostenetskiy et al., 2021). ESW acknowledges support from the CIFAR Learning in Machines and Brains programme. 
+
+## Impact Statement 
+
+This paper presents work whose goal is to advance the field of Machine Learning. There are many potential societal consequences of our work, none which we feel must be 8Stop the Sampler! Classifier-Based Adaptive Stopping for Sampling Kernels 
+
+specifically highlighted here. 
+
+## References 
+
+Andrieu, C. and Thoms, J. A tutorial on adaptive MCMC. 
+
+Statistics and Computing , 18(4):343–373, 2008. Andrieu, C., De Freitas, N., Doucet, A., and Jordan, M. I. An introduction to MCMC for machine learning. Machine learning , 50(1):5–43, 2003. Bengio, E., Jain, M., Korablyov, M., Precup, D., and Ben-gio, Y. Flow network based generative models for non-iterative diverse candidate generation. Neural Information Processing Systems (NeurIPS) , 2021. Bengio, Y., Lahlou, S., Deleu, T., Hu, E. J., Tiwari, M., and Bengio, E. GFlowNet foundations. Journal of Machine Learning Research , 24(210):1–55, 2023. Berner, J., Richter, L., Sendera, M., Rector-Brooks, J., and Malkin, N. From discrete-time policies to continuous-time diffusion samplers: Asymptotic equivalences and faster training. Transactions on Machine Learning Re-search , 2026. Biron-Lattes, M., Surjanovic, N., Syed, S., Campbell, T., and Bouchard-Cote, A. autoMALA: Locally adaptive Metropolis-adjusted Langevin algorithm. Artificial Intel-ligence and Statistics (AISTATS) , 2023. Blessing, D., Jia, X., Esslinger, J., Vargas, F., and Neumann, G. Beyond ELBOs: A large-scale evaluation of varia-tional methods for sampling. International Conference on Machine Learning (ICML) , 2024. Brunswic, L., Li, Y., Xu, Y., Feng, Y., Jui, S., and Ma, L. A theory of non-acyclic generative flow networks. 
+
+Association for the Advancement of Artificial Intelligence (AAAI) , 2024. Choi, S., Mittal, S., Elvira, V., Park, J., and Whitammer, E. S. Reinforced sequential Monte Carlo for amortised sampling. International Conference on Machine Learning (ICML) , 2026. Deleu, T. and Bengio, Y. Generative flow net-works: a markov chain perspective. arXiv preprint arXiv:2307.01422 , 2023. Dinh, L., Krueger, D., and Bengio, Y. NICE: Non-linear independent components estimation. arXiv preprint arXiv:1410.8516 , 2014. Douc, R., Moulines, E., Priouret, P., and Soulier, P. Markov chains . Springer Series in Operations Research and Fi-nancial Engineering. Springer, 2018. Gabrié, M., Rotskoff, G. M., and Vanden-Eijnden, E. Adap-tive Monte Carlo augmented with normalizing flows. Pro-ceedings of the National Academy of Sciences , 119(10): e2109420119, 2022. Gretton, A., Borgwardt, K. M., Rasch, M. J., Schölkopf, B., and Smola, A. A kernel two-sample test. Journal of Machine Learning Research , 13(1):723–773, 2012. Gritsaev, T., Morozov, N., Tamogashev, K., Tiapkin, D., Samsonov, S., Naumov, A., Vetrov, D., and Malkin, N. Adaptive destruction processes for diffusion samplers. 
+
+arXiv preprint arXiv:2506.01541 , 2025. Haario, H., Saksman, E., and Tamminen, J. An adaptive Metropolis algorithm. Bernoulli , 7(2):223 – 242, 2001. Hoffman, M. D., Gelman, A., et al. The No-U-Turn sampler: adaptively setting path lengths in Hamiltonian Monte Carlo. Journal of Machine Learning Research , 15(1): 1593–1623, 2014. Izmailov, P., Vikram, S., Hoffman, M. D., and Wilson, A. G. G. What are Bayesian neural network posteriors really like? International Conference on Machine Learning (ICML) , 2021. Kim, M., Seong, K., Woo, D., Ahn, S., and Kim, M. On scal-able and efficient training of diffusion samplers. Neural Information Processing Systems (NeurIPS) , 2025. Kostenetskiy, P., Chulkevich, R., and Kozyrev, V. Hpc resources of the higher school of economics. In Journal of Physics: Conference Series , volume 1740, pp. 012050. IOP Publishing, 2021. Kwon, S., Zhang, S., Köhn, H. F., and Zhang, B. MCMC stopping rules in latent variable modelling, 2025. Lahlou, S., Deleu, T., Lemos, P., Zhang, D., Volokhova, A., Hernández-Garcıa, A., Ezzine, L. N., Bengio, Y., and Malkin, N. A theory of continuous generative flow networks. International Conference on Machine Learning (ICML) , 2023. Liu, J. S. and Liu, J. S. Monte Carlo strategies in scientific computing , volume 10. Springer, 2001. Liu, T., Surjanovic, N., Biron-Lattes, M., Bouchard-Cote, A., and Campbell, T. AutoStep: Locally adaptive invo-lutive MCMC. International Conference on Machine Learning (ICML) , 2025. Madan, K., Rector-Brooks, J., Korablyov, M., Bengio, E., Jain, M., Nica, A. C., Bosc, T., Bengio, Y., and Malkin, N. Learning GFlowNets from partial episodes for improved convergence and stability. International Conference on Machine Learning (ICML) , 2023. 9Stop the Sampler! Classifier-Based Adaptive Stopping for Sampling Kernels 
+
+Máté, B. and Fleuret, F. Learning interpolations between Boltzmann densities. Transactions on Machine Learning Research (TMLR) , 2023. Midgley, L. I., Stimper, V., Simm, G. N. C., Schölkopf, B., and Hernández-Lobato, J. M. Flow annealed impor-tance sampling bootstrap. International Conference on Learning Representations (ICLR) , 2023. Morozov, N., Maksimov, I., Tiapkin, D., and Samsonov, S. Revisiting non-acyclic GFlowNets in discrete environ-ments. International Conference on Machine Learning (ICML) , 2025. Morozov, N., Maksimov, I., Tiapkin, D., and Samsonov, S. Learning shortest paths with generative flow networks. 
+
+arXiv preprint arXiv:2603.01786 , 2026. Neal, R. M. Annealed importance sampling. Statistics and computing , 11(2):125–139, 2001. Neal, R. M. et al. MCMC using Hamiltonian dynamics. 
+
+Handbook of Markov Chain Monte Carlo , 2(11):2, 2011. Noé, F., Olsson, S., Köhler, J., and Wu, H. Boltzmann generators: Sampling equilibrium states of many-body systems with deep learning. Science , 365(6457), 2019. Peyré, G. and Cuturi, M. Computational optimal transport: With applications to data science . Now Foundations and Trends, 2019. Roy, V. Convergence diagnostics for Markov chain Monte Carlo. Annual Review of Statistics and Its Application , 7: 387–412, 2020. Roy, V. and Zhang, L. Convergence of position-dependent MALA with application to conditional simulation in GLMMs. Journal of Computational and Graphical Statis-tics , 32(2):501–512, 2023. Sendera, M., Kim, M., Mittal, S., Lemos, P., Scimeca, L., Rector-Brooks, J., Adam, A., Bengio, Y., and Malkin, N. Improved off-policy training of diffusion samplers. 
+
+Neural Information Processing Systems (NeurIPS) , 2024. Stoltz, G., Rousset, M., et al. Free energy computations: A mathematical perspective . World Scientific, 2010. Tiapkin, D., Morozov, N., Naumov, A., and Vetrov, D. P. Generative flow networks as entropy-regularized RL. Ar-tificial Intelligence and Statistics (AISTATS) , 2024. Titsias, M. and Dellaportas, P. Gradient-based adaptive Markov chain Monte Carlo. Neural Information Process-ing Systems (NeurIPS) , 2019. Vargas, F., Grathwohl, W., and Doucet, A. Denoising dif-fusion samplers. International Conference on Learning Representations (ICLR) , 2023. Vaswani, A., Shazeer, N., Parmar, N., Uszkoreit, J., Jones, L., Gomez, A. N., Kaiser, Ł., and Polosukhin, I. At-tention is all you need. Advances in neural information processing systems , 30, 2017. Vihola, M. Robust adaptive metropolis algorithm with co-erced acceptance rate. Statistics and Computing , 22(5): 997–1008, 2012. Wang, C., Chen, W., Kanagawa, H., and Oates, C. J. Rein-forcement learning for adaptive MCMC. Artificial Intelli-gence and Statistics (AISTATS) , 2025a. Wang, C., Fisher, M. A., Kanagawa, H., Chen, W., and Oates, C. J. Harnessing the power of reinforce-ment learning for adaptive MCMC. arXiv preprint arXiv:2507.00671 , 2025b. Welling, M. and Teh, Y. W. Bayesian learning via stochastic gradient Langevin dynamics. 2011. Wu, J. and Kawai, R. Stopping rules for Monte Carlo methods: A review. arXiv preprint arXiv:2510.22688 ,2025. Zhang, D., Chen, R. T., Liu, C.-H., Courville, A., and Ben-gio, Y. Diffusion generative flow samplers: Improving learning signals through partial trajectory optimization. 
+
+International Conference on Learning Representations (ICLR) , 2024. Zhang, Q. and Chen, Y. Path integral sampler: A stochastic control approach for sampling. International Conference on Learning Representations (ICLR) , 2022. 10 Stop the Sampler! Classifier-Based Adaptive Stopping for Sampling Kernels 
+
+## A. Experimental details 
+
+A.1. Continuous kernels parameterizations 
+
+We initialize trajectories from the Gaussian distribution 
+
+𝑝 0 (𝑠 ) = N ( 𝑠 | 0, 𝜎 20 𝐼 ).
+
+For transitions between continuous states, we use the forward density 
+
+𝑞 𝐹 (𝑠 ′ | 𝑠 ; 𝜃 ) = N ( 𝑠 ′ | 𝜇 𝐹 (𝑠 ; 𝜃 ), Σ𝐹 (𝑠 ; 𝜃 )) ,𝜇 𝐹 (𝑠 ; 𝜃 ) = 𝑠 + 𝛾 
+
+
+
+𝑢 𝐹 (𝑠 ; 𝜃 ) +  1 + 𝑣 𝐹 (𝑠 ; 𝜃 ) ⊙ ∇ log 𝑟 (𝑠 )
+
+
+
+,
+
+Σ𝐹 (𝑠 ; 𝜃 ) = 2𝛾 diag  exp 𝐶 𝐹 tanh (𝑤 𝐹 (𝑠 ; 𝜃 )) ,
+
+(25) where 𝑢 𝐹 , 𝑣 𝐹 , 𝑤 𝐹 : R𝑑 → R𝑑 are learnable functions, 1 is a vector of 𝑑 ones, ⊙ is a Hadamard product, 𝛾 is the step size and we set 𝐶 𝐹 = 4 across all experiments. The forward transition density 𝑞 𝐹 is chosen following the Langevin-type parameterization used in prior works (Zhang & Chen, 2022), (Sendera et al., 2024). In particular, it resembles a discretization of Langevin dynamics, augmented with a learned correction to the drift term and a state-dependent scaling of the target score 
+
+∇ log 𝑟 (𝑠 ). We also found it beneficial to learn the variance of the forward process, which provides additional adaptability compared to fixed-noise parameterizations. Note that when 𝑢 𝐹 ≡ 0, 𝑣 𝐹 ≡ 0, and 𝑤 𝐹 ≡ 0, the forward transition reduces to the standard Unadjusted Langevin Algorithm (ULA) kernel. For the backward transitions, we use the density 
+
+𝑞 𝐵 (𝑠 | 𝑠 ′; 𝜃 ) = N ( 𝑠 | 𝜇 𝐵 (𝑠 ′; 𝜃 ), Σ𝐵 (𝑠 ′; 𝜃 )) ,𝜇 𝐵 (𝑠 ′; 𝜃 ) = 𝑠 ′ − 𝛾 softplus (𝑢 𝐵 (𝑠 ′; 𝜃 )) 𝑠 ′,
+
+Σ𝐵 (𝑠 ′; 𝜃 ) = 𝛾 diag  exp {𝐶 𝐵 tanh (𝑤 𝐵 (𝑠 ′; 𝜃 ))} ,
+
+(26) where 𝑢 𝐵 , 𝑤 𝐵 : R𝑑 → R𝑑 are learnable functions and 𝐶 𝐵 = 4. Here, we employ a homogeneous kernel, as our formulation does not rely on an explicit notion of time. The backward density is inspired by an Ornstein–Uhlenbeck-type process targeting a zero-mean distribution, effectively acting as a mechanism for destructing or reversing the forward generative process, similar in spirit to diffusion samplers (Zhang & Chen, 2022). We further introduce a learned correction 𝑢 𝐵 to the drift of the backward kernel, following (Gritsaev et al., 2025), where the backward process is enhanced by learnable adjustments to both its drift and variance. We now justify why Assumption 3.1 holds in our setting in practice. Provided that 𝑝 = inf 𝑠 ∈R𝑑 𝑑 𝐹 (𝑠 ) > 0, we have 
+
+E𝜏 ∼𝑃 [𝑛 𝜏 ] ≤ E[𝜉 ] = 1/𝑝 < ∞, where 𝜉 ∼ Geom ( 𝑝 ). We impose a lower-bound for a classifier 𝑑 𝐹 (𝑠 ) ≥ 𝜀 for any 𝑠 ∈ R𝑑 ,where 𝜀 = 10 −5.
+
+A.2. Target densities 
+
+We evaluate the proposed method on a set of synthetic benchmark distributions commonly used to assess sampling algorithms in continuous spaces. These environments are designed to capture different challenges such as multimodality or complex geometry. 
+
+GMM9. The GMM9 environment is a Gaussian mixture model with nine components arranged randomly in [-5,5]. Each component has diagonal covariance and the mixture weights are non-uniform, making the distribution both multimodal and imbalanced. Formally, the density is given by a mixture of Gaussian components 
+
+𝜋 (𝑥 ) =
+
+> 9
+
+∑︁ 
+
+> 𝑘 =1
+
+𝑤 𝑘 N ( 𝑥 | 𝜇 𝑘 , Σ𝑘 ),
+
+where Σ𝑘 = 0.55 𝐼 𝑑 and Í9 
+
+> 𝑘 =1
+
+𝑤 𝑘 = 1. This environment tests the ability of the sampler to correctly capture multiple modes and their relative probabilities. 11 Stop the Sampler! Classifier-Based Adaptive Stopping for Sampling Kernels 
+
+Funnel. The Funnel distribution is a hierarchical model with strong scale variation across dimensions. The first coordinate 
+
+𝑥 1 controls the variance of the remaining coordinates: 
+
+𝑥 1 ∼ N ( 0, 32), 𝑥 2: 𝑑 ∼ N ( 0, exp (𝑥 1)𝐼 ).
+
+This leads to regions of very different scales, creating a narrow “funnel” structure. Such distributions are well known to be challenging for MCMC methods due to poor mixing between regions of different variance. 
+
+ManyWell. The ManyWell density consists of multiple independent double-well potentials, leading to an exponentially large number of modes in higher dimensions. The energy is constructed as a sum of double-well energies: 
+
+𝑈 (𝑥 1, 𝑥 2) = 𝑎𝑥 1 + 𝑏𝑥 21 + 𝑐𝑥 41 + 𝑥 22
+
+2 ,
+
+which induces a multimodal distribution with well-separated modes, where we set 𝑎 = −0.5, 𝑏 = −6.0, 𝑐 = 1.0. This environment is particularly challenging because it requires efficient transitions between a large number of modes. 
+
+Digits. The Digits environment is adopted from (Blessing et al., 2024) and corresponds to sampling MNIST images from a density defined by a NICE normalizing flow model (Dinh et al., 2014). The target distribution is a continuous density over R196 , obtained by training an invertible flow on 14 × 14 MNIST images. Although the underlying dataset consists of images, the resulting target distribution has full support on R196 . Samples from this environment therefore correspond to continuous vectors that can be reshaped into grayscale digit images. This task provides a substantially more challenging high-dimensional benchmark than the synthetic multimodal targets considered in the main text. 
+
+A.3. Algorithm details and hyperparameters 
+
+We train the proposed non-acyclic GFlowNet using the prefix trajectory balance objective described in §3.1. The overall training procedure is summarized in Algorithm 1. In this section, we provide additional implementation details. At each iteration, the algorithm alternates between forward (on-policy) and backward (off-policy) updates. During forward updates, trajectories are sampled from the forward policy starting from the initial distribution 𝑝 0. During backward updates, terminal states are sampled from a replay buffer and trajectories are generated using the backward policy. This alternating scheme allows the model to combine on-policy exploration with off-policy refinement and was inspired by (Sendera et al., 2024). Across all experiments, we used a replay ratio of 𝑁 RR = 2, which specifies the number of off-policy iterations performed within each on-policy iteration. Practically, collecting data with early termination hinders exploration of the continuous space. This issue motivates us to disable classifiers during trajectory collection and instead sample trajectories of a fixed length 𝑁 max . We choose 𝑁 max 
+
+based on the number of iterations required for ULA with the same step-size 𝛾 to reach a stationary regime, monitored via the Wasserstein metric. If 𝑁 max is chosen too small, trajectories may fail to reach proper high-density regions, resulting in poor exploration of the state space. Conversely, setting a very large 𝑁 max slows down training and is impractical, though it remains functional because we apply flow regularization to encourage shorter trajectories. Following (Sendera et al., 2024), to improve sample efficiency, we employ a prioritized replay buffer that stores terminal states. Each state is assigned a priority based on its reward, which biases sampling toward high-reward regions of the state space. The buffer is updated continuously as new samples are generated from the forward policy. Before training, we pre-fill the buffer with 100 × 𝐵 terminal samples from a forward policy initialized as Langevin dynamics, where 𝐵 is the batch size. This initial pre-filling improves training at the beginning. We further incorporate a local search procedure based on the Metropolis-adjusted Langevin algorithm (MALA) (Sendera et al., 2024). At regular intervals 𝑁 LS , states sampled from the replay buffer are refined using a small number of MALA steps, and the resulting samples are added back to the buffer. This improves exploration by enabling transitions between distant high-density regions and helps mitigate the limitations of purely learned dynamics. In our implementation, we used 300 MALA steps with 𝛾 = 10 −3 and set 𝑁 LS = 25 .The forward and backward policies are parameterized by neural networks as described in §A.1. We use a shared backbone consisting of a 3-layer MLP for forward and backward embeddings, followed by a 2-layer MLP for their respective specific predictions, with a hidden dimension of 128. The forward continuous kernel 𝑞 𝐹 is either fixed (in the ULA-based setup) or augmented with learned drift and variance corrections, while the backward kernel is always learned. The forward and 12 Stop the Sampler! Classifier-Based Adaptive Stopping for Sampling Kernels 
+
+Algorithm 1 Training non-acyclic continuous GFlowNet with prefix trajectory balance 
+
+Input: Initial parameters 𝜃 , reward 𝑅 , initial distribution 𝑝 0, maximum trajectory length 𝑁 max , batch size 𝐵 , number of training steps 𝐾 , replay buffer B, regularization coefficient 𝜌 , replay ratio 𝑁 RR , local search frequency 𝑁 LS 
+
+Output: Trained model parameters 𝜃 
+
+Pre-fill buffer B with terminal states from 𝑝 𝐹 
+
+for 𝑘 = 1 to 𝐾 do if (𝑘 − 1) mod 𝑁 RR ≡ 0 then 
+
+Sample initial states {𝑠 𝑏  
+
+> 1
+
+}𝐵 𝑏 =1 ∼ 𝑝 0
+
+Sample trajectories e𝜏 = {( 𝑠 0 → 𝑠 𝑏  
+
+> 1
+
+→ · · · → 𝑠 𝑏 𝑁 max = 𝑥 𝑏 )} 𝐵 𝑏 =1 using 𝑝 𝐹 with 𝑑 𝐹 disabled Add {𝑥 𝑏 }𝐵 𝑏 =1 to B with priorities 𝑟 (𝑥 𝑏 )
+
+else 
+
+Sample terminal states {𝑥 𝑏 }𝐵 𝑏 =1 ∼ B 
+
+Sample trajectories e𝜏 = {( 𝑠 0 → 𝑠 𝑏  
+
+> 1
+
+→ · · · → 𝑠 𝑏 𝑁 max = 𝑥 𝑏 )} 𝐵 𝑏 =1 using 𝑝 𝐵 with 𝑑 𝐵 disabled 
+
+end if 
+
+Set 𝜏 𝑏  
+
+> 0: 𝑖
+
+= e𝜏 𝑏  
+
+> 0: 𝑖
+
+∪ { 𝑠 𝑓 } for 𝑖 = 1, . . . , 𝑁 max , 𝑏 = 1, . . . , 𝐵 
+
+For all complete prefixes {𝜏 𝑏  
+
+> 0: 𝑖
+
+}𝐵, 𝑁 max 
+
+> 𝑏 =1,𝑖 =1
+
+, compute TB loss LTB (𝜃, 𝜏 𝑏  
+
+> 0: 𝑖
+
+) and weights {𝑤 𝑏 𝑖 }𝐵 𝑏 =1
+
+Compute 
+
+L( 𝜃 ) = 1
+
+𝐵 
+
+> 𝐵
+
+∑︁ 
+
+> 𝑏 =1
+> 𝑁 max
+
+∑︁ 
+
+> 𝑖 =1
+
+𝑤 𝑏 𝑖 
+
+"
+
+LTB (𝜃, 𝜏 𝑏  
+
+> 0: 𝑖
+
+) + 𝜌 𝑟 (𝑠 𝑏 𝑖 )
+
+𝑑 𝐹 (𝑠 𝑏 𝑖 ; 𝜃 )
+
+#
+
+Update 𝜃 by a gradient step on L( 𝜃 )
+
+if (𝑘 − 1) mod 𝑁 LS ≡ 0 then 
+
+Sample {𝑧 𝑏 }𝐵 𝑏 =1 ∼ B , run MALA to obtain { ¯𝑧 𝑏 }𝐵 𝑏 =1, and add { ¯𝑧 𝑏 }𝐵 𝑏 =1 to B
+
+end if end for 
+
+backward classifiers control the stopping behavior and are trained jointly with the transition kernels. The normalizing constant log 𝑍 𝜃 is also learned as a scalar parameter with a learning rate 10 −1. We set the variance of the initial distribution 
+
+𝜎 20 = 1 for low-dimensional environments and 𝜎 20 = 5 for high-dimensional ones. Optimization is performed using Adam with a batch size of 2000 with gradient clipping. Environment-specific hyperparam-eters are summarized in the next sections, where we discuss experiments in details. All experiments were performed on NVIDIA A100 GPUs. Our implementations are based upon the published code of (Blessing et al., 2024). 
+
+A.4. Details on the improvement over ULA 
+
+As additional stopping-based baselines, we consider ULA with the Gelman–Rubin convergence diagnostic (ULA RG) and ULA with the Geweke convergence diagnostic (ULA Geweke). Formal definitions of the corresponding diagnostics are provided in §B. For ULA RG, we run several parallel ULA chains and evaluate the multivariate ˆ𝑅 statistic on a predefined grid of trajectory lengths 𝑡 using only trajectory prefixes of length 𝑡 . Sampling is stopped at the first checkpoint where the maximum ˆ𝑅 value across coordinates falls below a fixed threshold. In our experiments, we use a threshold of 1.1. If the criterion is never satisfied before the final checkpoint, the trajectory is truncated at the maximal allowed length. For ULA Geweke, we independently analyze each trajectory by comparing statistics of an early trajectory window (first 10% of samples) and a late window (last 50% of samples) within the prefix of length 𝑡 . A Geweke 𝑍 -score is computed for each coordinate, and the stopping time is defined as the first checkpoint where the maximum absolute 𝑍 -score across coordinates falls below a threshold of 4.0. Unlike ULA RG, the stopping time for ULA Geweke is determined independently for each chain. In Table 3 we specify hyperparameters for the runs in Table 1. 
+
+A.5. Details on the multilevel scheme experiments 
+
+We added the positional encoding (Vaswani et al., 2017) for the levels variables in neural network. Then a state 𝑠 is concatenated with this level embedding and passed to the MLP. For a schedule 𝛽 𝑙 we adapt a linear schedule from 0 to 1. In 13 Stop the Sampler! Classifier-Based Adaptive Stopping for Sampling Kernels 
+
+Table 3. Environment-specific hyperparameters for ULA experiments, where lr is a learning rate of the optimizer, 𝜌 is a regularization coefficient, 𝛾 is the step-size, 𝑁 max is trajectory length during training and grad clip specifies values of the gradient clipping with respect to parameters in the optimizer. 
+
+Environment ↓ Parameter → lr 𝜌 𝛾 𝑁 max grad clip GMM9 ( 𝑑 = 2) 10 −3 10 −1 10 −1 10 2 10 0
+
+Funnel ( 𝑑 = 2) 10 −4 10 −2 10 −2 10 2 10 −3
+
+GMM9 ( 𝑑 = 40 ) 10 −4 10 0 10 −1 10 2 10 −3
+
+ManyWell ( 𝑑 = 40 ) 10 −5 10 −1 10 −2 10 2 10 −5
+
+Table 4 we specify hyperparameters for the runs in Table 2. 
+
+Table 4. Environment-specific hyperparameters for multi-level experiments, where lr is a learning rate of the optimizer, 𝜌 is a regularization coefficient, 𝛾 is the step-size, 𝑁 max is trajectory length during training and grad clip specifies values of the gradient clipping with respect to parameters in the optimizer. 
+
+Environment ↓ Parameter → lr 𝜌 𝛾 𝑁 max grad clip GMM9 ( 𝑑 = 40 ) 10 −4 10 0 10 −1 10 2 10 −3
+
+ManyWell ( 𝑑 = 40 ) 10 −5 10 −1 10 −2 10 2 10 −5
+
+Digits ( 𝑑 = 196 ) 10 −4 10 0 10 −1 5 × 10 1 10 −3
+
+A.6. Metrics 
+
+Let 𝜋 (𝑥 ) = 𝑟 (𝑥 )/ 𝑍 denote the target distribution, and let 𝑝 𝑇 be the marginal distribution of terminal states produced by the model. Following (Blessing et al., 2024), to assess the discrepancy between 𝑝 𝑇 and 𝜋 , we report the following sample-based metrics that are widely used in the evaluation of generative samplers. Additionally, to measure performance of our method we report ELBO and EUBO (Blessing et al., 2024). For these metrics we utilize the implementation from https://github.com/DenisBless/variational_sampling_methods . Furthermore, we calculate the mean trajectory length of our sampler and denote this quantity by 𝑛 𝜏 .
+
+Maximum Mean Discrepancy 
+
+Maximum Mean Discrepancy (Gretton et al., 2012; Blessing et al., 2024) is a kernel-based integral probability metric that compares two distributions through their embeddings in a reproducing kernel Hilbert space (RKHS). Let H𝑘 be the RKHS associated with a positive definite kernel 𝑘 . The MMD between 𝑝 𝑇 and 𝜋 is defined as 
+
+MMD 𝑘 ( 𝑝 𝑇 , 𝜋 ) = sup     
+
+> 𝑓 ∈ H 𝑘
+> ∥𝑓 ∥H𝑘 ≤1
+
+ E𝑥 ∼ 𝑝 𝑇 [ 𝑓 (𝑥 )] − E𝑦 ∼ 𝜋 [ 𝑓 (𝑦 )]  . (27) For characteristic kernels, this quantity is nonnegative and vanishes if and only if 𝑝 𝑇 = 𝜋 . Given samples 𝑋 = {𝑥 𝑖 }𝑛 𝑖 =1 ∼ 𝑝 𝑇 
+
+and 𝑌 = {𝑦 𝑗 }𝑚 𝑗 =1 ∼ 𝜋 , we use the usual unbiased estimator of the squared MMD: 
+
+MMD 2 
+
+> 𝑘
+
+(𝑋, 𝑌 ) = 1
+
+𝑛 (𝑛 − 1)∑︁ 𝑖 ≠ 𝑗 
+
+𝑘 (𝑥 𝑖 , 𝑥 𝑗 ) + 1
+
+𝑚 (𝑚 − 1)∑︁ 𝑖 ≠ 𝑗 
+
+𝑘 (𝑦 𝑖 , 𝑦 𝑗 ) − 2
+
+𝑛𝑚 
+
+> 𝑛
+
+∑︁ 
+
+> 𝑖 =1
+> 𝑚
+
+∑︁ 
+
+> 𝑗 =1
+
+𝑘 (𝑥 𝑖 , 𝑦 𝑗 ). (28) In our experiments, the squared exponential kernel 
+
+𝑘 (𝑥, 𝑦 ) = exp − ∥𝑥 − 𝑦 ∥22
+
+𝛼 
+
+!
+
+(29) is used with bandwidth 𝛼 selected by the median heuristic (Blessing et al., 2024). 14 Stop the Sampler! Classifier-Based Adaptive Stopping for Sampling Kernels 
+
+Entropic optimal transport distance 
+
+As a complementary metric, we use an entropy-regularized optimal transport distance (Peyré & Cuturi, 2019; Blessing et al., 2024) based on the quadratic cost. The underlying unregularized quantity is the 2-Wasserstein distance, 
+
+𝑊 2, 𝜀 ( 𝑝 𝑇 , 𝜋 ) = inf     
+
+> 𝜉 ∈Γ(𝑝 𝑇 , 𝜋 )
+
+∫  
+
+> R𝑑 ×R𝑑
+
+∥𝑥 − 𝑦 ∥22 𝜉 (𝑑𝑥, 𝑑𝑦 ) − 𝜖 H ( 𝜉 )
+
+1/2
+
+, (30) where Γ( 𝑝 𝑇 , 𝜋 ) denotes the set of couplings with marginals 𝑝 𝑇 and 𝜋 , and H ( 𝜉 ) = − ∫  
+
+> R𝑑 ×R𝑑
+
+𝜉 (𝑥, 𝑦 ) log 𝜉 (𝑥, 𝑦 ) d𝑥 d𝑦 . In practice, we compute its entropically regularized counterpart using Sinkhorn iterations, which is substantially more tractable numerically. Throughout all experiments, we set 𝜖 = 10 −3 (Blessing et al., 2024). 
+
+Evidence lower and upper bounds 
+
+For a given terminal point 𝑥 ∈ R𝑑 , let T𝑥 = {𝜏 ∈ T | 𝑠 𝑛 𝜏 = 𝑥 }. For 𝜏 ∈ T 𝑥 one can write trajectory distributions induced by the transition densities 𝑝 𝐹 and 𝑝 𝐵 from §3.1 as 𝑝 𝐹 (𝜏 ) and 𝑝 𝐵 (𝜏 ) = 𝑝 𝐵 (𝜏 | 𝑠 𝑛 𝜏 = 𝑥 )𝜋 (𝑥 ). then we have: 
+
+𝑍 =
+
+∫
+
+> R𝑑
+
+𝑟 (𝑥 )𝑑𝑥 =
+
+∫
+
+> R𝑑
+
+𝑟 (𝑥 )
+
+ ∫ 
+
+> T𝑥
+
+𝑝 𝐵 (𝜏 | 𝑠 𝑛 𝜏 = 𝑥 )𝑑𝜏 
+
+
+
+𝑑𝑥 
+
+=
+
+∫
+
+> T
+
+𝑟 (𝑥 ) 𝑝 𝐵 (𝜏 | 𝑠 𝑛 𝜏 = 𝑥 )𝑑𝜏 = E𝜏 ∼ 𝑝 𝐹 
+
+ 𝑟 (𝑥 ) 𝑝 𝐵 (𝜏 | 𝑠 𝑛 𝜏 = 𝑥 )
+
+𝑝 𝐹 (𝜏 )
+
+
+
+.
+
+(31) One way to construct an estimator for log 𝑍 is to use the evidence lower-bound (ELBO) (Blessing et al., 2024): 
+
+log 𝑍 = log E𝜏 ∼ 𝑝 𝐹 
+
+ 𝑟 (𝑥 ) 𝑝 𝐵 (𝜏 | 𝑠 𝑛 𝜏 = 𝑥 )
+
+𝑝 𝐹 (𝜏 )
+
+
+
+≥ E𝜏 ∼ 𝑝 𝐹 
+
+
+
+log 𝑟 (𝑥 ) + log 𝑝 𝐵 (𝜏 | 𝑠 𝑛 𝜏 = 𝑥 ) − log 𝑝 𝐹 (𝜏 )
+
+
+
+. (32) To estimate the ELBO, we draw 𝑀 = 2000 samples from the current policy and compute the average of the estimated log 𝑍 
+
+values: ELBO = 1
+
+𝑀 
+
+> 𝑀
+
+∑︁ 
+
+> 𝑖 =1
+
+
+
+log 𝑟 (𝑥 𝑖 ) + log 𝑝 𝐵 (𝜏 𝑖 | 𝑠 𝑛 𝜏 = 𝑥 𝑖 ) − log 𝑝 𝐹 (𝜏 𝑖 )
+
+
+
+, 𝜏 𝑖 ∼ 𝑝 𝐹 , 𝜏 𝑖 { 𝑥 𝑖 . (33) To measure mode coverage, evidence upper-bound (EUBO) metric (Blessing et al., 2024) was introduced, but it requires samples from 𝜋 :
+
+log 𝑍 = E𝑥 ∼ 𝜋, 𝜏 ∼ 𝑝 𝐵 (· | 𝑠 𝑛𝜏 =𝑥 )
+
+
+
+log 𝑟 (𝑥 ) 𝑝 𝐵 (𝜏 | 𝑠 𝑛 𝜏 = 𝑥 )
+
+𝑝 𝐹 (𝜏 )
+
+
+
+− KL (𝜋 · 𝑝 𝐵 || 𝑝 𝐹 ) ≤ E𝑥 ∼ 𝜋, 𝜏 ∼ 𝑝 𝐵 (· | 𝑥 )
+
+
+
+log 𝑟 (𝑥 ) 𝑝 𝐵 (𝜏 | 𝑠 𝑛 𝜏 = 𝑥 )
+
+𝑝 𝐹 (𝜏 )
+
+
+
+.
+
+(34) We draw 𝑀 = 2000 samples from 𝜋 and then simulate trajectories using a backward policy: EUBO = 1
+
+𝑀 
+
+> 𝑀
+
+∑︁ 
+
+> 𝑖 =1
+
+
+
+log 𝑟 (𝑥 𝑖 ) + log 𝑝 𝐵 (𝜏 𝑖 | 𝑠 𝑛 𝜏 = 𝑥 𝑖 ) − log 𝑝 𝐹 (𝜏 𝑖 )
+
+
+
+, 𝑥 𝑖 ∼ 𝜋, 𝜏 𝑖 ∼ 𝑝 𝐵 (· | 𝑠 𝑛 𝜏 = 𝑥 𝑖 ). (35) 
+
+A.7. Additional visualizations 
+
+We provide qualitative sample visualizations for all environments studied in the experiments in §4. For each environment, we show samples generated by ULA, ULA RG, ULA Geweke, ULA with a learned classifier, and the full model. 15 Stop the Sampler! Classifier-Based Adaptive Stopping for Sampling Kernels 
+
+ULA ULA RG ULA Geweke 
+
+ULA + clf ULA w/ clf & corr 
+
+Figure 5. Samples on 9GMM ( 𝑑 = 2) with step-size 𝛾 = 0.1.
+
+ULA ULA RG ULA Geweke 
+
+ULA + clf ULA w/ clf & corr 
+
+Figure 6. Samples on Funnel ( 𝑑 = 2) with step-size 𝛾 = 0.01 .
+
+16 Stop the Sampler! Classifier-Based Adaptive Stopping for Sampling Kernels 
+
+ULA ULA RG ULA Geweke 
+
+ULA + clf ULA w/ clf & corr 
+
+Figure 7. Samples on GMM9 ( 𝑑 = 40 ) using marginal projections, step-size 𝛾 = 0.1.
+
+17 Stop the Sampler! Classifier-Based Adaptive Stopping for Sampling Kernels 
+
+ULA ULA RG ULA Geweke 
+
+ULA + clf ULA w/ clf & corr 
+
+Figure 8. Marginal projections of samples from ManyWell ( 𝑑 = 40 ), step-size 𝛾 = 0.1.
+
+18 Stop the Sampler! Classifier-Based Adaptive Stopping for Sampling Kernels 
+
+Figure 9. Comparison of trajectories produced by ULA and the full model in different environments (from left to right: Funnel, GMM9, ManyWell). ULA tends to remain trapped within a single mode or local region of the target and therefore requires a large mixing time to move between modes. In contrast, the proposed model is able to make effective transitions between modes and more distant high-density regions, resulting in substantially more efficient exploration of the target distribution. 
+
+## B. Classical stopping diagnostics for MCMC 
+
+For 𝑚 chains of length 𝑛 , let ¯𝑥 𝑗 be the mean of chain 𝑗 , let 
+
+¯𝑥 = 1
+
+𝑚 
+
+> 𝑚
+
+∑︁ 
+
+> 𝑗 =1
+
+¯𝑥 𝑗 
+
+denote the overall mean across chains, and let 𝑠 2 
+
+> 𝑗
+
+be the within-chain variance. The Gelman–Rubin potential scale reduction factor is based on 
+
+𝐵 = 𝑛 𝑚 − 1
+
+> 𝑚
+
+∑︁ 
+
+> 𝑗 =1
+
+( ¯𝑥 𝑗 − ¯𝑥 )2, 𝑊 = 1
+
+𝑚 
+
+> 𝑚
+
+∑︁ 
+
+> 𝑗 =1
+
+𝑠 2 
+
+> 𝑗
+
+, (36) and 
+
+ˆ𝑅 =√︄ ˆ𝑉 𝑊 , ˆ𝑉 = 𝑛 − 1
+
+𝑛 𝑊 + 1
+
+𝑛 𝐵. (37) Values of ˆ𝑅 close to one indicate approximate agreement between between-chain and within-chain variability. Another commonly used quantity is the effective sample size, 
+
+ESS = 𝑁 
+
+1 + 2 Í𝑘 ≥1 𝜌 𝑘 
+
+, (38) where 𝑁 is the total number of retained samples and 𝜌 𝑘 denotes the lag-𝑘 autocorrelation. A related diagnostic is Geweke’s statistic, 
+
+𝑍 = ¯𝑔 𝐴 − ¯𝑔 𝐵 √︁ 
+
+ˆ𝑆 𝐴 (0)/ 𝑛 𝐴 + ˆ𝑆 𝐵 (0)/ 𝑛 𝐵 
+
+, (39) which compares the averages of a scalar summary over an early window 𝐴 and a late window 𝐵 , with ˆ𝑆 𝐴 (0) and ˆ𝑆 𝐵 (0)
+
+denoting corresponding long-run variance estimates. 
+
+## C. Interpretation of Theorem 3.6 
+
+In this section we discuss and interpret results of Theorem 3.6. At first, let us define useful objects for this matter. Following (Brunswic et al., 2024), given a flow measure 𝐹 from Def. 3.2, we define an edge flow 
+
+𝐹 ( 𝐴 × 𝐵 ) =
+
+∫
+
+> 𝐴
+
+𝐹 (d𝑠 )𝑃 𝐹 (𝑠, 𝐵 ), (40) 19 Stop the Sampler! Classifier-Based Adaptive Stopping for Sampling Kernels 
+
+for any measurable 𝐴 ⊆ ¯S \ { 𝑠 𝑓 }, 𝐵 ⊆ ¯S \ { 𝑠 0 }. Then using an edge flow we can define an incoming and outcoming flow measures 𝐹 in and 𝐹 out , respectively: 
+
+𝐹 in (𝐵 ) = 𝐹 ( ¯S \ { 𝑠 𝑓 } × 𝐵 ),𝐹 out ( 𝐴 ) = 𝐹 ( 𝐴 × ¯S \ { 𝑠 0 }) . (41) Consider a measurable set 𝐴 ⊆ R𝑑 . Then from the definitions of transitions in our state space 
+
+𝑃 𝐹 (𝑠 0, 𝐴 ) = 𝑝 0 ( 𝐴 ),𝑃 𝐹 (𝑠, 𝐴 ) = (1 − 𝑑 𝐹 (𝑠 )) 𝑄 𝐹 (𝑠, 𝐴 ) + 𝑑 𝐹 (𝑠 )𝛿 𝑠 𝑓 ( 𝐴 ), (42) we obtain 
+
+𝐹 in ( 𝐴 ) =
+
+∫ 
+
+> S∪{ 𝑠 0}
+
+𝐹 (d𝑠 )𝑃 𝐹 (𝑠, 𝐵 ) = 𝐹 ({ 𝑠 0 }) 𝑝 0 ( 𝐴 ) + 
+
+∫
+
+> R𝑑
+
+𝐹 (d𝑠 )( 1 − 𝑑 𝐹 (𝑠 )) 𝑄 𝐹 (𝑠, 𝐴 )
+
+= 𝑍 𝑝 0 ( 𝐴 ) + 
+
+∫
+
+> R𝑑
+
+(𝐹 (d𝑠 ) − 𝑅 (d𝑠 )) 𝑄 𝐹 (𝑠, 𝐴 ) = 𝑍 𝑝 0 ( 𝐴 ) − ( 𝐹 − 𝑅 )𝑄 𝐹 ( 𝐴 ),
+
+(43) where we used that from Proposition 3.3 the flow measure 𝐹 and the Markov kernel 𝑃 𝐹 satisfy flow matching conditions (6) .Therefore, detailed balance conditions (8) must hold and we can express a classifier 𝑑 𝐹 from a relation (16) . In turn, a flow measure we defined in Def. 3.2 coincides with the outcoming flow measure 𝐹 out :
+
+𝐹 out ( 𝐴 ) =
+
+∫
+
+> 𝐴
+
+𝐹 (d𝑠 )𝑃 𝐹 (𝑠, ¯𝑆 \ { 𝑠 0 }) =
+
+∫
+
+> 𝐴
+
+𝐹 (d𝑠 ) = 𝐹 ( 𝐴 ). (44) In Proof of the Theorem 3.6 we show that detailed balance conditions for continuous transitions imply a Poisson equation: 
+
+𝐹 (𝐼 − 𝑄 𝐹 )( 𝐴 ) = 𝑍 𝑝 0 ( 𝐴 ), (45) for a measurable set 𝐴 ⊆ R𝑑 . By substituting 𝐹 out = 𝐹 and 𝐹 in = (𝐹 out − 𝑅 )𝑄 𝐹 + 𝑍 𝑝 0, then 
+
+(𝑍 𝑝 0 − 𝑅𝑄 𝐹 )( 𝐴 ) = 𝐹 in ( 𝐴 ) − 𝐹 out 𝑄 𝐹 ( 𝐴 ). (46) The left hand side is exactly the unnormalized term in the series of the measure 𝑈 . Therefore, we can interpret 𝑈 ( 𝐴 ) as an accumulated discrepancy between injected flow 𝐹 in ( 𝐴 ) and removed flow 𝐹 out 𝑄 𝐹 ( 𝐴 ), when we applied a kernel 𝑄 𝐹 .
+
+## D. Proofs of results in the main text 
+
+D.1. Derivation of flow representations 
+
+In this section, we derive key relations from the detailed balance conditions, which implies flow-matching as shown in (Lahlou et al., 2023). Since this implication does not depend on acyclicity, it remains valid in our non-acyclic setting. Moreover, since all relevant measures and kernels in our framework admit densities with respect to the chosen reference measure, we may express these conditions in density form. Applying detailed balance for transitions from 𝑠 0 to 𝑠 ∈ R𝑑 ,yields 
+
+𝑓 (𝑠 0) 𝑝 𝐹 (𝑠 | 𝑠 0) = 𝑓 (𝑠 ) 𝑝 𝐵 (𝑠 0 | 𝑠 ). (47) Substituting 𝑝 𝐹 (𝑠 | 𝑠 0) = 𝑝 0 (𝑠 ), 𝑓 (𝑠 0) = 𝑍 , and 𝑝 𝐵 (𝑠 0 | 𝑠 ) = 𝑑 𝐵 (𝑠 ), we obtain 
+
+𝑓 (𝑠 ) = 𝑍 𝑝 0 (𝑠 )
+
+𝑑 𝐵 (𝑠 ) . (48) Applying detailed balance to transitions from 𝑠 ∈ R𝑑 to 𝑠 𝑓 , we obtain 
+
+𝑓 (𝑠 ) 𝑝 𝐹 (𝑠 𝑓 | 𝑠 ) = 𝑓 (𝑠 𝑓 ) 𝑝 𝐵 (𝑠 | 𝑠 𝑓 ). (49) Substituting 𝑝 𝐹 (𝑠 𝑓 | 𝑠 ) = 𝑑 𝐹 (𝑠 ), 𝑓 (𝑠 𝑓 ) = 𝑍 , and 𝑝 𝐵 (𝑠 | 𝑠 𝑓 ) = 𝑟 (𝑠 )/ 𝑍 , we arrive at the alternative representation 
+
+𝑓 (𝑠 ) = 𝑟 (𝑠 )
+
+𝑑 𝐹 (𝑠 ) . (50) Therefore, we have the following connection between classifiers: 
+
+𝑑 𝐹 (𝑠 ) = 𝜋 (𝑠 )
+
+𝑝 0 (𝑠 ) 𝑑 𝐵 (𝑠 ). (51) 20 Stop the Sampler! Classifier-Based Adaptive Stopping for Sampling Kernels 
+
+D.2. Proof of Proposition 3.3. 
+
+From Def. 3.2, we have 
+
+𝐹 ({ 𝑠 0 }) = 𝐹 ({ 𝑠 𝑓 }) = 𝑍, 𝐹 ( 𝐴 ) = 𝐹 ({ 𝑠 0 }) 
+
+> ∞
+
+∑︁ 
+
+> 𝑛 =0
+
+𝑃 𝑛 𝐹 (𝑠 0, 𝐴 ), 𝐴 ⊆ ¯S \ { 𝑠 0, 𝑠 𝑓 }. (52) We aim to prove the flow-matching condition (6), namely that for any measurable set 𝐴 ⊆ ¯S \ { 𝑠 0 },
+
+𝐹 ( 𝐴 ) =
+
+∫  
+
+> ¯S\{ 𝑠 𝑓 }
+
+𝐹 (d𝑠 ) 𝑃 𝐹 (𝑠, 𝐴 ). (53) Case 𝐴 ⊆ R𝑑 . Using the definition of 𝐹 , we obtain 
+
+∫  
+
+> ¯S\{ 𝑠 𝑓 }
+
+𝐹 (d𝑠 ) 𝑃 𝐹 (𝑠, 𝐴 ) = 𝐹 ({ 𝑠 0 }) 
+
+∫  
+
+> ¯S\{ 𝑠 𝑓 }∞
+
+∑︁ 
+
+> 𝑛 =0
+
+𝑃 𝑛 𝐹 (𝑠 0, d𝑠 ) 𝑃 𝐹 (𝑠, 𝐴 )
+
+> (𝑎 )
+
+= 𝐹 ({ 𝑠 0 }) 
+
+> ∞
+
+∑︁ 
+
+> 𝑛 =0
+
+∫  
+
+> ¯S\{ 𝑠 𝑓 }
+
+𝑃 𝑛 𝐹 (𝑠 0, d𝑠 ) 𝑃 𝐹 (𝑠, 𝐴 )
+
+> (𝑏 )
+
+= 𝐹 ({ 𝑠 0 }) 
+
+> ∞
+
+∑︁ 
+
+> 𝑛 =0
+
+𝑃 𝑛 +1 
+
+> 𝐹
+
+(𝑠 0, 𝐴 )
+
+= 𝐹 ( 𝐴 ) − 𝐹 ({ 𝑠 0 }) 𝛿 𝑠 0 ( 𝐴 )
+
+= 𝐹 ( 𝐴 ).
+
+(54) In step (a), we interchange the integral and the series using Tonelli’s theorem. In step (b), we apply the Chapman–Kolmogorov relation: 
+
+𝑃 𝑛 +1 
+
+> 𝐹
+
+(𝑠 0, 𝐴 ) =
+
+∫  
+
+> ¯S\{ 𝑠 𝑓 }
+
+𝑃 𝑛 𝐹 (𝑠 0, d𝑠 ) 𝑃 𝐹 (𝑠, 𝐴 ), (55) because for 𝐴 ⊆ R𝑑 , we have 𝑃 𝐹 (𝑠 𝑓 , 𝐴 ) = 0. In the last step, noting that 𝑃 0 
+
+> 𝐹
+
+(𝑠 0, 𝐴 ) = 𝛿 𝑠 0 ( 𝐴 ) = 0 for 𝐴 ⊆ R𝑑 concludes the claim for this case. Case 𝐴 = {𝑠 𝑓 }. In this case, the absorbing nature of 𝑠 𝑓 implies 
+
+𝑃 𝑛 +1 
+
+> 𝐹
+
+(𝑠 0, {𝑠 𝑓 }) =
+
+∫
+
+> ¯S
+
+𝑃 𝑛 𝐹 (𝑠 0, d𝑠 ) 𝑃 𝐹 (𝑠, {𝑠 𝑓 }) 
+
+=
+
+∫  
+
+> ¯S\{ 𝑠 𝑓 }
+
+𝑃 𝑛 𝐹 (𝑠 0, d𝑠 ) 𝑃 𝐹 (𝑠, {𝑠 𝑓 }) + 𝑃 𝑛 𝐹 (𝑠 0, {𝑠 𝑓 }) ,
+
+(56) since 𝑃 𝐹 (𝑠 𝑓 , {𝑠 𝑓 }) = 1. Repeating the steps from the previous case and using the above equation, yields: 
+
+∫  
+
+> ¯S\{ 𝑠 𝑓 }
+
+𝐹 (d𝑠 ) 𝑃 𝐹 (𝑠, {𝑠 𝑓 }) = 𝐹 ({ 𝑠 0 }) 
+
+> ∞
+
+∑︁ 
+
+> 𝑛 =0
+
+ 𝑃 𝑛 +1 
+
+> 𝐹
+
+(𝑠 0, {𝑠 𝑓 }) − 𝑃 𝑛 𝐹 (𝑠 0, {𝑠 𝑓 }) 
+
+= 𝐹 ({ 𝑠 0 }) 
+
+
+
+𝛿 𝑠 𝑓 ({ 𝑠 𝑓 }) − 𝛿 𝑠 0 ({ 𝑠 𝑓 }) 
+
+
+
+= 𝐹 ({ 𝑠 0 }) = 𝐹 ({ 𝑠 𝑓 }) ,
+
+(57) where under Assumption 3.1, we have 𝑃 𝑛 𝐹 (𝑠 0, ·) → 𝛿 𝑠 𝑓 . Combining these two cases, we conclude that the flow-matching conditions hold for all measurable sets 𝐴 ⊆ ¯S \ { 𝑠 0 }. □
+
+D.3. Proof of Proposition 3.5. 
+
+E𝜏 ∼𝑃 [𝑛 𝜏 ] = E𝜏 ∼𝑃 
+
+ ∞∑︁ 
+
+> 𝑛 =0
+
+1{𝑠 𝑛 ∈ S} 
+
+
+
+=
+
+> ∞
+
+∑︁ 
+
+> 𝑛 =0
+
+P(𝑠 𝑛 ∈ S) =
+
+> ∞
+
+∑︁ 
+
+> 𝑛 =0
+
+𝑃 𝑛 𝐹 (𝑠 0, S) = 𝐹 (S) 
+
+𝐹 ({ 𝑠 0 }) . (58) Note that under Assumption 3.1 the series above converges. □
+
+21 Stop the Sampler! Classifier-Based Adaptive Stopping for Sampling Kernels 
+
+D.4. Proof of Theorem 3.6 and Corollary 3.7 Proof of Theorem 3.6. From the detailed balance conditions at the source and sink states, we obtain for 𝑠 ∈ R𝑑 that: 
+
+𝑓 (𝑠 )𝑑 𝐵 (𝑠 ) = 𝑍 𝑝 0 (𝑠 ),𝑓 (𝑠 )𝑑 𝐹 (𝑠 ) = 𝑟 (𝑠 ). (59) Now consider the detailed balance relation in the interior for 𝑠, 𝑠 ′ ∈ R𝑑 :
+
+𝑓 (𝑠 )  1 − 𝑑 𝐹 (𝑠 )𝑞 𝐹 (𝑠 ′ | 𝑠 ) = 𝑓 (𝑠 ′)  1 − 𝑑 𝐵 (𝑠 ′)𝑞 𝐵 (𝑠 | 𝑠 ′). (60) Integrating both sides with respect to 𝑠 , and using that 𝑞 𝐵 (· | 𝑠 ′) is a probability density, yields: 
+
+∫
+
+> R𝑑
+
+𝑓 (𝑠 )  1 − 𝑑 𝐹 (𝑠 )𝑞 𝐹 (𝑠 ′ | 𝑠 ) 𝑑𝑠 = 𝑓 (𝑠 ′)  1 − 𝑑 𝐵 (𝑠 ′). (61) Expanding both sides and using (59), gives the following: 
+
+∫
+
+> R𝑑
+
+𝑓 (𝑠 )𝑞 𝐹 (𝑠 ′ | 𝑠 ) 𝑑𝑠 −
+
+∫
+
+> R𝑑
+
+𝑟 (𝑠 )𝑞 𝐹 (𝑠 ′ | 𝑠 ) 𝑑𝑠 = 𝑓 (𝑠 ′) − 𝑍 𝑝 0 (𝑠 ′). (62) For the purpose of further proof, it will be convenient to write the above equation in a measure-kernel form. Define 
+
+𝑉 ( 𝐴 ) := 𝐹 ( 𝐴 )/ 𝑍 for 𝐴 ⊆ R𝑑 , and let 𝜋 , 𝑝 0 and 𝜋 𝑄 denote the measures of the corresponding densities. Dividing the above equation by 𝑍 , we obtain the Poisson equation: 
+
+𝑉 (𝐼 − 𝑄 𝐹 ) = 𝑝 0 − 𝜋𝑄 𝐹 . (63) Since 𝑄 𝐹 is uniformly geometrically ergodic with a unique stationary measure 𝜋 𝑄 , there exist constants 𝐶 < ∞ and 
+
+𝜌 ∈ ( 0, 1) such that 
+
+∥𝜈 𝑄 𝑛 𝐹 − 𝜋 𝑄 ∥TV ≤ 𝐶 𝜌 𝑛 , (64) for all 𝑛 ∈ N and any probability measure 𝜈 , where ∥ · ∥ TV is a total variation norm. Define a measure 
+
+𝑈 :=
+
+> ∞
+
+∑︁ 
+
+> 𝑛 =0
+
+( 𝑝 0𝑄 𝑛 𝐹 − 𝜋𝑄 𝑛 +1 
+
+> 𝐹
+
+), (65) where the series converges absolutely in total variation using (64) and a triangular inequality. Then by telescoping 
+
+𝑈 − 𝑈𝑄 𝐹 =
+
+> ∞
+
+∑︁ 
+
+> 𝑛 =0
+
+( 𝑝 0𝑄 𝑛 𝐹 − 𝜋𝑄 𝑛 +1 
+
+> 𝐹
+
+) − 
+
+> ∞
+
+∑︁ 
+
+> 𝑛 =0
+
+( 𝑝 0𝑄 𝑛 +1 
+
+> 𝐹
+
+− 𝜋𝑄 𝑛 +2 
+
+> 𝐹
+
+) = 𝑝 0 − 𝜋𝑄 𝐹 , (66) which means that a measure 𝑈 is a solution to a Poisson equation (63). Suppose that 𝑉 is another solution to (63), then 
+
+(𝑉 − 𝑈 )( 𝐼 − 𝑄 𝐹 ) = 0, (67) which implies that 𝑉 − 𝑈 is an invariant measure for the kernel 𝑄 𝐹 . By the assumption that 𝑄 𝐹 admits a unique stationary measure 𝜋 𝑄 , it follows that 𝑉 − 𝑈 lies in the one-dimensional subspace spanned by 𝜋 𝑄 . Therefore, all solutions of (63) are of the form 
+
+𝑉 =
+
+> ∞
+
+∑︁ 
+
+> 𝑛 =0
+
+ 𝑝 0𝑄 𝑛 𝐹 − 𝜋𝑄 𝑛 +1
+
+> 𝐹
+
+ + 𝑛 𝑄 𝜋 𝑄 , 𝑛 𝑄 ∈ R. (68) Since 𝑞 𝐹 (· | 𝑠 ) is a transition density, the pushforward of any absolutely continuous measure remains absolutely continuous. Hence 𝑉 admits a density of the form 
+
+𝑣 (𝑠 ) = 𝑢 (𝑠 ) + 𝑛 𝑄 𝜋 𝑄 (𝑠 ), 𝑛 𝑄 ∈ R, (69) where by 𝑢 (𝑠 ) we denote the corresponding density of a measure 𝑈 . Using the connection of a flow and a forward classifier in (59), we obtain 
+
+𝑑 𝐹 (𝑠 ) = 𝑟 (𝑠 )
+
+𝑓 (𝑠 ) = 𝜋 (𝑠 )
+
+𝑣 (𝑠 ) = 𝜋 (𝑠 )
+
+𝑢 (𝑠 ) + 𝑛 𝑄 𝜋 𝑄 (𝑠 ) . (70) 22 Stop the Sampler! Classifier-Based Adaptive Stopping for Sampling Kernels 
+
+Similarly for the backward classifier from (16) 
+
+𝑑 𝐵 (𝑠 ) = 𝑝 0 (𝑠 )
+
+𝜋 (𝑠 ) 𝑑 𝐹 (𝑠 ) = 𝑝 0 (𝑠 )
+
+𝑢 (𝑠 ) + 𝑛 𝑄 𝜋 𝑄 (𝑠 ) . (71) Thus, in order for both classifiers to define valid probabilities, it is necessary and sufficient that 
+
+𝑢 (𝑠 ) + 𝑛 𝑄 𝜋 𝑄 (𝑠 ) ≥ max {𝜋 (𝑠 ), 𝑝 0 (𝑠 )} , ∀𝑠 ∈ R𝑑 . (72) The admissible values of 𝑛 𝑄 are 
+
+𝑛 𝑄 ≥ 𝑛 ∗ 
+
+> 𝑄
+
+= sup 
+
+> 𝑠 ∈R𝑑
+
+max {𝜋 (𝑠 ), 𝑝 0 (𝑠 )} − 𝑢 (𝑠 )
+
+𝜋 𝑄 (𝑠 ) . (73) Finally, from the balance for the interior transitions 
+
+𝑞 𝐵 (𝑠 | 𝑠 ′) = (𝑣 (𝑠 ) − 𝜋 (𝑠 )) 𝑞 𝐹 (𝑠 ′ | 𝑠 )
+
+𝑣 (𝑠 ′) − 𝑝 0 (𝑠 ′) . (74) If the detailed balance conditions are satisfied and Assumption 3.1 holds, it follows that 𝑛 𝑄 and 𝑛 ∗ 
+
+> 𝑄
+
+are finite. Conversely, given a solution 𝑉 to (63) with admissible values of 𝑛 𝑄 , detailed balance conditions for a source-to-continuous and continuous-to-sink transitions are satisfied by setting 𝑑 𝐹 (𝑠 ) := 𝜋 (𝑠 )/ 𝑣 (𝑠 ) and 𝑑 𝐵 (𝑠 ) := 𝑝 0 (𝑠 )/ 𝑣 (𝑠 ). From (74) balance conditions for the interior transitions are satisfied and by integrating over R𝑑 we conclude that 𝑞 𝐵 defines a valid transition density ∫
+
+> R𝑑
+
+𝑞 𝐵 (𝑠 | 𝑠 ′)d𝑠 =
+
+∫ 
+
+> R𝑑
+
+(𝑣 (𝑠 ) − 𝜋 (𝑠 )) 𝑞 𝐹 (𝑠 ′ | 𝑠 )d𝑠 𝑣 (𝑠 ′) − 𝑝 0 (𝑠 ′) = 𝑣 (𝑠 ′) − 𝑝 0 (𝑠 ′)
+
+𝑣 (𝑠 ′) − 𝑝 0 (𝑠 ′) = 1, (75) where we used that (𝑉 − 𝜋 )𝑄 𝐹 = 𝑉 − 𝑝 0, since 𝑉 is a solution to (63) . Hence, from 𝑉 we can uniquely recover all other objects to satisfy detailed balance conditions. □
+
+Proof of Corollary 3.7. Notice that from Proposition 3.5 
+
+E[𝑛 𝜏 ] = 𝐹 (S) 
+
+𝐹 ({ 𝑠 0 }) = 𝑉 (S) = 𝑈 (S) + 𝑛 𝑄 𝜋 𝑄 (S) = 𝑛 𝑄 , (76) because we are dealing with probability measures and S = R𝑑 . Finally, minimizing the total flow is equivalent to minimizing 
+
+∫
+
+> R𝑑
+
+𝑓 (𝑠 ) 𝑑𝑠 = 𝑍 
+
+∫
+
+> R𝑑
+
+𝑣 (𝑠 ) 𝑑𝑠 = 𝑍 
+
+∫
+
+> R𝑑
+
+ 𝑢 (𝑠 ) + 𝑛 𝑄 𝜋 𝑄 (𝑠 ) 𝑑𝑠. (77) Since 𝜋 𝑄 is a probability density, this quantity is affine and strictly increasing in 𝑛 𝑄 . Therefore, the minimum is attained at the smallest admissible value of 𝑛 𝑄 = 𝑛 ∗
+
+> 𝑄
+
+.23
