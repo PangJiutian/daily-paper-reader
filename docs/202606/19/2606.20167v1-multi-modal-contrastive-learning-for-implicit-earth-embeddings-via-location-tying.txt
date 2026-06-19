@@ -1,0 +1,446 @@
+Title: Multi-Modal Contrastive Learning for Implicit Earth Embeddings via Location Tying
+
+URL Source: https://arxiv.org/pdf/2606.20167v1
+
+Published Time: Fri, 19 Jun 2026 01:15:24 GMT
+
+Number of Pages: 8
+
+Markdown Content:
+# Multi-Modal Contrastive Learning for Implicit Earth Embeddings via Location Tying 
+
+Jonathan Hecht 1,3, Lukas Arzoumanidis 1, Ziyue Li 2 and Youness Dehbi 1
+
+Abstract — Spatial prediction tasks are often limited by a lack of high-quality labelled ground-truth observations. To overcome this challenge, self-supervised pre-training is a possible solution, with contrastive learning dominant for location encoders. Those approaches usually align geographic coordinates with just one additional modality. We propose two multimodal contrastive learning architectures: Multimodal Embedding via Location Tying ( MELT ) and Sequential Alternating Location Training (SALT ). These architectures expand this framework beyond two modalities by utilising unpaired geospatial data. Both methods are technically viable and match the performance of the strongest two-modality baseline (S AT CLIP) across four down-stream tasks. However, increasing the number of modalities does not consistently improve performance, suggesting that the chosen location encoder is the main limitation – the contrastive objective reaches its peak early, regardless of modality diversity or pre-training volume. MELT provides more stable training than SALT and presents a stronger foundation for future scaling. 
+
+I. INTRODUCTION Diverse large-scale spatial prediction tasks ranging from ecological modelling to human population dynamics are fundamentally constrained by the scarcity of labelled ground-truth observations. While unlabelled geospatial data in dif-ferent modalities (satellite imagery, geotagged photographs, encyclopaedic text) is available at scale, supervised models cannot exploit it without labels. Earth embedding models close this gap by learning transferable vector representations of geospatial data at specific locations from unlabelled data [1]. Earth embeddings can be learnt explicitly, by extracting them from raw data such as satellite imagery, or implicitly, by mapping geographic coordinates, e.g., via a location encoder, to an embedding. Those location encoders store the location information within the model weights. Therefore, they are particularly attractive for transfer to arbitrary downstream tasks without modality-specific input at inference time [2]. By providing rich, learnt representations of geographic loca-tions, these embeddings enable better predictions even when only a limited number of labelled observations are available for a given task. Contrastive learning (CL) is currently the dominant paradigm for pre-training location encoders [1], [3], [4], [5], [6]. Existing methods pair geographic coordinates with a single        
+
+> 1Computational Methods Lab, HafenCity Univer-sity Hamburg, Germany.
+
+{lukas.arzoumanidis, youness.dehbi }@hcu-hamburg.de                 
+
+> 2Dept. of Operations &Technology, Technical University of Mu-nich; Heilbronn Data Science Center; Munich Data Science Institute.
+
+ziyue.li@tum.de 
+
+> 3Institute of Geodesy and Geoinformation, University of Bonn, Germany.
+
+jhecht@uni-bonn.de 
+
+modality, which is mostly trained via NT-Xent loss. The two-modality paradigm captures only the pairwise information between a location and a single modality, thereby limiting the entropy that can be extracted from geographic data. While one modality might carry spectral reflectance, others provide distinct semantic and/or visual contexts. By including multi-ple modalities, the objective should ideally force the encoder to combine these disparate signals into a unified embedding. Thereby attempting to maximise the synergistic information from the multiple views. To the best of our knowledge, no prior work has studied this empirically in the context of implicit earth embeddings. Related work on explicit earth embedding models, such as ALPHA EARTH [7], has incorporated multiple modalities but does so via modality-specific encoders without a shared geographic anchor. This paper addresses this gap by proposing two multimodal CL architectures for training location encoders. These archi-tectures use geographic location as the shared anchor across unpaired modalities, eliminating the need for synchronised multimodal observations. Our contributions are as follows:   
+
+> •MELT
+
+(Multimodal Embedding via Location Tying): a batch-construction approach that jointly trains all modalities in each step via a shared contrastive objec-tive.   
+
+> •SALT
+
+(Sequential Alternating Location Training): an epoch-level schedule that alternates the active non-location modality while keeping the location encoder permanently active.  
+
+> •
+
+An empirical finding that the location encoder itself, rather than modality diversity, constitutes the perfor-mance ceiling, which can direct future architecture choices. II. RELATED WORK Geodata has characteristics that distinguish it from other types of data. These differences must be explicitly addressed within the model accordingly. One example is spatial auto-correlation, which describes the tendency for nearby loca-tions to share similar attribute values. This aligns with To-bler’s First Law of Geography, which states that near things are more related than distant things. This phenomenon has historically motivated the development of spatial extensions to standard models, e.g. Kriging or spatial regression variants [8], [9]. Established approaches encode spatial structure through explicit geometric relationships. In contrast, recent work in GeoAI argues for learning such structure directly from data [10]. This shift motivates the development of earth 
+
+> arXiv:2606.20167v1 [cs.LG] 18 Jun 2026
+
+embedding models as a flexible and learnable alternative. Within the wider discourse of Geospatial Foundation Models, two primary paradigms are discussed [11]. On the explicit side, models such as S AT MAE [12] or R EMOTE CLIP [13] build general-purpose representations from remote sensing imagery, requiring image input at inference time. In contrast, this work focuses on the implicit side, where a location encoder maps raw geographic coordinates x ∈ R2 into a high-dimensional embedding z ∈ Rd that can be consumed by arbitrary downstream models. With that, no modality-specific input is required at inference time. Following [2], such an encoder should preserve spatial distance, support inductive generalisation to unseen coordinates, and remain task-agnostic. Those properties make it a uniquely flexible building block for various spatial prediction tasks. As already indicated, location encoders are most often pro-posed and trained using CL. In this approach, geographic coordinates are paired with a single additional modality. For instance, S AT CLIP [3] aligns global Sentinel-2 satellite patches with coordinates via a spherical-harmonic-based encoder. G EO CLIP [4] pairs coordinates with geotagged natural images using random Fourier features and hierar-chical scale representations. CSP [5] similarly uses either natural images or remote sensing imagery, whereas RANGE [6] extends this line of work by proposing an additional processing step for the location encoder. Besides approaches which produce earth embeddings, related ideas incorporate spatial data and follow a similar research direction. For example, [14] combines spatial image, text and sound data via a combined loss. Both [15] and [16] build on the I MAGE BIND [17] logic, in which a new embedding space is not created via alignment, but rather additional modalities are connected to an existing space. To the best of our knowledge, no existing work has ex-tended the implicit model setup beyond two modalities. The potential of utilising additional data sources such as text, natural images, and satellite imagery simultaneously has been noted theoretically [2], [3], [18], but has not yet been empirically studied. This gap motivates the present work, which proposes and assesses two architectures, MELT and 
+
+> SALT
+
+, for training a location encoder within a multimodal CL framework using location as the tying element across more than two modalities. III. METHODOLOGY 
+
+A. Problem Definition 
+
+Let M = {m0, m 1, . . . , m K−1} denote a set of K
+
+data modalities, with each modality mk corresponding to a particular type of geospatial information. In this setup, 
+
+m0 is designated as the location modality, which encodes geographic coordinates. The goal is to pre-train a task-agnostic location encoder h(m0) 
+
+> θ
+
+, parametrised by learnable weights θ, which maps coordinates from a sphere S2 on a 
+
+d-dimensional continuous representation, 
+
+h(m0) 
+
+> θ
+
+: S2 → Rd, x = ( λ, ϕ ) ∈ S2, (1) with x denoting the geographic location defined by its lon-gitude λ and latitude ϕ. Pre-training aligns h(m0) 
+
+> θ
+
+with addi-tional modalities via contrastive learning. For each modality 
+
+m ∈ M , a backbone h(m) 
+
+> θ
+
+and a modality-specific projection head k(m) 
+
+> γ
+
+: Rd → Rd′
+
+produce the contrastive embedding [19]: 
+
+z(m) 
+
+> i
+
+= k(m)
+
+> γ
+
+ h(m) 
+
+> θ
+
+(x(m) 
+
+> i
+
+), (2) where x(m) 
+
+> i
+
+is the i-th input sample of modality m, γ is the learnable parameters of the projection head, and z(m) 
+
+> i
+
+∈
+
+Rd′
+
+is the resulting contrastive embedding in a shared d′-dimensional space. Another important aspect of our approach concerns the nature of the modality datasets. A key design constraint is that the modality datasets are unpaired: there is no direct one-to-one correspondence between non-location modalities, nor is one assumed. This reflects the practical reality of geospatial data, where different modalities are collected inde-pendently at different locations and resolutions. Rather than requiring synchronised multi-modal observations, we exploit geographic location as a natural bridge between modalities: spatial co-location serves as a proxy for semantic relatedness. Concretely, for each sample i from modality m̸ = m0, its sole positive counterpart is its co-located location projection 
+
+z(m0) 
+
+> i
+
+:
+
+Pi =   z(m) 
+
+> i
+
+, z (m0)
+
+> i
+
+ . (3) Through this tying mechanism, the location encoder acts as a shared anchor that implicitly aligns all modalities in a common embedding space, without requiring direct cross-modal pairing. 
+
+B. MELT : Multimodal Embedding via Location Tying 
+
+The location tying construction defined in (3) naturally suggests a joint training regime. In this setup, every non-location sample already has a designated positive (its co-located location projection). All modalities can therefore be trained simultaneously within a single batch, pulling their embeddings towards a common anchor. MELT realises this idea directly. 
+
+Batch construction: In every step of the training process, 
+
+N samples are drawn from each non-location modality m ∈M \ { m0}, and each sample is paired with its co-located location embedding. Let B(m) = {z(m)1 , . . . , z (m) 
+
+> N
+
+} denote the resulting set of contrastive embeddings for modality m
+
+within a batch. The batch therefore contains (K −1) ·N con-trastive pairs. For each anchor, the loss contrasts its positive location embedding against all other location embeddings in 
+
+B(m0).
+
+Objective: Given the positive pairs Pi from (3), the training signal is a symmetric NT-Xent loss [19] aggregated over all non-location modalities: 
+
+LMELT = 1
+
+|M| − 1
+
+X
+
+> m∈M\{ m0}
+
+LNT-Xent 
+
+ B(m), B(m0), (4) where, for anchor i from modality m, the per-sample loss contrasts its positive location embedding against all location MELT SALT                                                  
+
+> Exemplary Batch Construction Modality Encoding Modality Encoding Separted Emb. Spaces Multi-modal Data
+> Airport Opera
+> ˆhL ˆhL
+> Emb. Space II Emb. Space I
+> ˆh1
+> ˆh2
+> LE2E1L·E2L·E2L·E2L·E2L·E1L·E1L·E1L·E1L·E1L·E1L·E1L·E1L·E2L·E2L·E2L·E2
+> 1, 3, 5 ... 2, 4, 6 ...
+> Positive Pairs Negative Pairs
+> Enc L
+> Enc 2
+> Enc 1
+> Enc L
+> Enc 2
+> Enc 1
+> Fig. 1. Overview of MELT and SALT approaches. Both start with some multimodal data sources, which is encoded. For MELT on the left side, it can be seen that one batch is constructed directly with an equal number of pairs from Enc 1and Enc 2. For the SALT approach, depending on the epoch, always two modalities are paired directly. Indirectly the alignment is conducted via Enc L.
+
+embeddings in the batch: 
+
+ℓ(i) = − log exp  sim( z(m) 
+
+> i
+
+, z (m0) 
+
+> i
+
+)/τ X 
+
+> z(m0)
+> j∈B (m0)
+
+exp  sim( z(m) 
+
+> i
+
+, z (m0) 
+
+> j
+
+)/τ  , (5) where ℓ(i) denotes the directional loss for anchor i from modality m towards m0. The symmetric loss is then com-puted as the average of the directional loss ℓm→m0 and 
+
+ℓm0→m. The cosine similarity is represented as sim( ·, ·)
+
+and a learnable temperature τ > 0. All encoder parameters 
+
+{θ(m), γ (m)}m∈M are updated jointly. This results in a single shared embedding space emerging from a single training pass. Alternating updates are not needed. An overview of the architecture is shown in Fig. 1. 
+
+C. SALT : Sequential Alternating Location Training  
+
+> SALT
+
+uses the same loss and encoder, but does not jointly train all modalities. Instead, it exposes the location encoder to a single non-location modality at a time, alternating modalities at each epoch. A deterministic schedule σ : N →
+
+2M selects the active modality set per epoch e:
+
+σ(e) = m0, m (e mod ( K−1))+1 . (6) The constraint m0 ∈ σ(e) ∀ e ensures the location encoder receives a gradient signal at every epoch. Only the parameters of the currently active modality are updated: 
+
+min 
+
+> θ(m), γ (m), m ∈σ(e)
+
+LNT-Xent (B(me), B(m0)), m e = σ(e) \ { m0}
+
+(7) This approach allows for adding modalities without architec-tural change. However, it introduces only indirect inter-modal information flow. Modalities ma and mb are never directly compared. They are only linked via a shared training signal with m0. Fig. 1 provides an illustration. 
+
+D. Encoders and Training Setup 
+
+The location encoder follows [20] and uses spherical harmonic basis functions up to tenth degree as positional encoding, combined with a SIREN MLP [21] ( 2 blocks, 512 
+
+hidden dimension, 445 K parameters). For the non-location modalities, pre-trained backbones are kept frozen, with only a trainable linear adapter added on top. Satellite imagery uses a MoCo-pre-trained ResNet-18 (∼131 K trainable parameters) [22], natural images a DINO-pre-trained Vision Transformer ( ∼99 K trainable parameters) [23], and text a BGE encoder [24] ( ∼165 K trainable pa-rameters). All projection heads map to d′=256 . Training uses AdamW (lr = 1 × 10 −4, weight decay = 1 × 10 −2) over 
+
+50 epochs with an accumulated batch size of 2048 and a learnable temperature initialised at τ =0 .07 .IV. EXPERIMENTAL SETUP 
+
+A. Pre-training Data 
+
+Three non-location modalities are used for pre-training. Each modality targets ∼ 100 K globally sampled land mass locations, using a 90 /10 train/validation split. 
+
+Satellite imagery: The S2-100K dataset from [3] provides 86 648 Sentinel-2 L2A patches (12 bands, 10 m resolution, 
+
+256 ×256 pixels), sampled approximately uniformly across global land mass with <20% cloud cover. 
+
+Natural images: 100 000 geotagged images are drawn from the MP-16 subset [25] of YFCC100M [26], comprising user-uploaded Flickr imagery with diverse semantic content. 
+
+Text: 100 000 English Wikipedia articles with geographic coordinates (Wikidata property P625) are concatenated per spatial cell, each cell covering ≈2560 m ×2560 m .Since both the natural-image and text datasets show strong spatial concentration towards western countries and urban areas, kernel density inverse weighting is applied during sam-pling to reduce geographic bias. Geographic coordinates are augmented via random jitter ( r=0 .01 ◦). Images also receive random flips, cropping, brightness/contrast adjustments, and Gaussian blur. 
+
+B. Pre-training Variants 
+
+Each architecture ( MELT , SALT ) comprises twelve model configurations, defined by the combination of modalities (S = Satellite, T = Text, N = Natural image) and the data regime. Dual-modality baselines (S AT CLIP, NAT CLIP, TEXT CLIP) are trained under the same protocol to isolate the effect of additional modalities. Three data regimes are used to control for pre-training vol-ume. In the -10 regime, 10 000 training pairs are distributed equally across active modalities, simulating limited data availability. In the -50 regime, 100 000 pairs are provided in total, creating a high-data comparison at constant volume. The -100 regime uses all available data per modality: up to 
+
+100 000 for dual-modality models, up to 200 000 for three-modality, and ∼261 000 for the full four-modality setup (bounded by the 86 648 satellite patches, since MELT requires equal modality counts per batch). 
+
+C. Downstream Tasks 
+
+All models are evaluated on four geographically global tasks: Elevation (metres above sea level, abbr. Elev., [27]), 
+
+population density (log-transformed, log(1+ x), abbr. Pop., GPW v4 [28]), country codes (185 classes, abbr. Ctry., [29]), and biomes (14 classes, abbr. Bio., [30]). Regression is evaluated with R2, and classification with top-1 accuracy. Downstream training sets use sizes n ∈{3, 4, . . . , 10 }(= 243 , 1 024 , . . . , 100 000 ), uniformly sam-pled from the land mask via rejection sampling, with 20 %held out for validation. The test set always contains 100 000 
+
+independent samples. The frozen location embedding is fed to a downstream MLP. The hyperparameters are tuned via random search (10 trials, 
+
+100 epochs) over hidden size ∈ { 32 , 64 , 128 , 256 }, layers ∈{1, 2, 3, 4}, learning rate ∈ { 10 −4, 10 −3, 10 −2}, and weight decay ∈ { 0, 10 −2, 10 −4}. The best configuration is retrained for 500 epochs over ten random initialisations. We report the mean of the metrics and its standard deviation. 
+
+D. Baselines 
+
+We compare against six external models in two categories. As alternative location encoders, we use S AT CLIP-O RG [3] (the published 500 -epoch weights), G EO CLIP [4], CSP-
+
+INAT and CSP-FMOW [5], and R ANGE [6]. It should be noted that these are pre-trained on different datasets. As non-learned baselines, we include MOSAIKS , which combine pre-computed random convolutional features from satellite imagery ( 0.1◦ grid, 4000 -dim) [31]. We also include IDENTITY , which passes raw normalised coordinates directly to the downstream MLP. 243 1024 3125 7776 16807 32768 59049 100000   
+
+> Amount of Downstream Samples
+> 23 43 63 83 103
+> Accuracy (%)
+> IDENTITY
+> RANGE (β= 0 .6)
+> RANGE (β= 0 .3)
+> CSP-INAT
+> CSP-FMOW
+> GEO CLIP
+> MOSAIKS
+> Downstream Task Performance based on Number of Samples for Countries
+
+Fig. 2. Accuracy for different amounts for the countries’ downstream task. Black lines depict all the different baseline models, and the combined variants of SALT and MELT are shown in grey.                
+
+> 2.0
+> 2.5
+> 3.0
+> 3.5
+> 4.0
+> 4.5
+> 5.0
+> Loss
+> Combined Train Loss SALT -STN -10 Combined Train Loss SALT -STN -50
+> 010 20 30 40 50
+> Epoch
+> 2.0
+> 2.5
+> 3.0
+> 3.5
+> 4.0
+> 4.5
+> 5.0
+> Loss
+> Combined Train Loss SALT -STN -100
+> 010 20 30 40 50
+> Epoch
+> Validation Loss SALT -STN -10
+> Mean
+> Nat
+> Text
+> Sat
+
+Fig. 3. Exemplary training behaviour of SALT . Each coloured line highlights the raw combined training loss of a single representative run. All remaining runs are shown in grey and exhibit the similar pattern. The periodic loss spikes visible in every curve coincide with epoch boundaries at which the active modality encoder is switched, partly resulting in terminated runs, e.g. SALT -STN -50. The validation loss (lower-right inset) is unaffected by this alternation. 
+
+V. RESULTS 
+
+A. Quantitative Results 
+
+In Tab. I we show representative results for all baselines, dual modality models, as well as MELT and SALT on low training data amounts. For each model the mean metric i.e. 
+
+R2 for Elev. and Pop. and top-1 accuracy for Ctry. and Bio. plus the standard deviation is shown. Based on the numerical results and supported by additional investigations, three patterns emerge consistently. 
+
+Self-trained vs baselines: All self-trained models out-perform the weaker baselines (CSP, M OSAIKS , R ANGE ,IDENTITY ) by a margin on classification tasks for low and high data regimes. Among baselines, only S AT CLIP-O RG ,which is using the same location encoder, is competitive across the board. An exemplary case can be seen for all downstream data amounts on the countries task in Fig. 2. For both regression tasks, the pattern is similar, but not as TABLE I SELECTED RESULTS : B ASELINES VS . P ROPOSED MELT/SALT V ARIANTS . T HE BEST AND SECOND -BEST RESULTS ARE HIGHLIGHTED .
+
+243 samples 1 024 samples 3 125 samples 
+
+Model Elev. Ctry. Pop. Bio. Elev. Ctry. Pop. Bio. Elev. Ctry. Pop. Bio. 
+
+Baselines 
+
+SAT CLIP-O RG .57 ±.03 65.4 ±0.9 .47 ±.02 66.8 ±0.7 .74 ±.00 79.5 ±0.5 .62 ±.01 78.1 ±0.1 .80 ±.01 88.4 ±0.1 .68 ±.01 82.3 ±0.4 
+
+GEO CLIP .34 ±.00 53.8 ±1.3 .47 ±.01 62.4 ±1.3 .54 ±.01 71.6 ±0.7 .48 ±.01 69.4 ±0.5 .62 ±.01 79.1 ±0.5 .56 ±.01 75.5 ±0.2 
+
+IDENTITY .18 ±.03 61.6 ±1.7 .39 ±.03 63.1 ±1.6 .23 ±.13 68.4 ±1.4 .59 ±.02 72.0 ±1.0 .64 ±.04 81.9 ±0.5 .61 ±.03 78.5 ±0.3 
+
+RANGE .37 ±.03 36.4 ±1.7 .41 ±.12 55.7 ±1.9 .72 ±.12 51.2 ±2.7 .47 ±.32 67.2 ±5.2 .71 ±.11 67.6 ±8.0 .64 ±.02 71.0 ±11.7 
+
+CSP-FMOW .22 ±.04 42.5 ±3.1 .26 ±.05 58.6 ±0.5 .34 ±.01 48.1 ±2.8 .37 ±.04 62.1 ±1.4 .39 ±.03 65.5 ±1.8 .39 ±.06 66.2 ±0.9 
+
+CSP-INAT .01 ±.06 31.7 ±3.2 .02 ±.03 42.5 ±3.1 .19 ±.03 38.9 ±0.9 .35 ±.03 57.3 ±1.3 .20 ±.02 60.9 ±0.5 .41 ±.02 63.5 ±0.5 
+
+MOSAIKS .04 ±.09 30.0 ±0.7 .30 ±.03 53.0 ±3.2 .34 ±.03 33.6 ±1.3 .33 ±.23 65.3 ±0.5 .41 ±.01 42.7 ±1.4 .47 ±.05 68.7 ±0.3 
+
+Dual Modality 
+
+SAT CLIP-100 .48 ±.01 65.1 ±0.9 .57 ±.00 69.1 ±0.3 .71 ±.01 81.2 ±0.4 .60 ±.01 76.9 ±0.3 .79 ±.02 89.0 ±0.2 .67 ±.01 82.3 ±0.3 
+
+TEXT CLIP-100 .26 ±.11 70.2 ±0.9 .46 ±.01 67.3 ±0.6 .70 ±.01 83.5 ±0.2 .57 ±.02 76.2 ±0.2 .79 ±.01 89.1 ±0.1 .68 ±.02 81.9 ±0.7 
+
+NAT CLIP-100 .46 ±.00 64.6 ±0.6 .32 ±.11 66.7 ±0.6 .68 ±.01 82.5 ±0.2 .60 ±.01 75.9 ±0.3 .78 ±.01 89.2 ±0.2 .66 ±.01 81.8 ±0.3 
+
+MELT (Ours) 
+
+STN-10 .56 ±.01 67.4 ±0.8 .57 ±.01 67.5 ±0.6 .73 ±.00 81.1 ±0.6 .63 ±.01 77.2 ±0.2 .80 ±.00 89.3 ±0.2 .66 ±.02 82.3 ±0.4 
+
+STN-50 .44 ±.11 67.2 ±1.5 .57 ±.00 69.6 ±0.5 .72 ±.01 82.7 ±0.3 .58 ±.02 76.5 ±0.3 .80 ±.01 88.6 ±0.2 .67 ±.01 82.2 ±0.4 
+
+STN-100 .56 ±.01 67.4 ±0.8 .57 ±.01 69.2 ±0.2 .73 ±.00 81.1 ±0.6 .63 ±.01 77.2 ±0.2 .80 ±.00 89.3 ±0.2 .66 ±.02 82.3 ±0.2 
+
+TN-100 .51 ±.04 68.8 ±0.4 .37 ±.04 65.5 ±0.5 .71 ±.01 83.2 ±0.2 .57 ±.01 76.1 ±0.3 .79 ±.01 89.0 ±0.1 .67 ±.03 81.8 ±0.2 
+
+SN-100 .53 ±.02 65.4 ±0.8 .33 ±.04 70.1 ±0.6 .73 ±.00 81.3 ±0.2 .61 ±.01 77.4 ±0.2 .80 ±.01 88.0 ±0.2 .67 ±.01 81.6 ±0.7 
+
+ST-100 .35 ±.06 68.8 ±0.7 .45 ±.02 69.9 ±0.6 .72 ±.00 81.3 ±0.4 .63 ±.00 77.4 ±0.2 .80 ±.01 89.6 ±0.1 .66 ±.01 82.2 ±0.7 
+
+SALT (Ours) 
+
+STN-10 .48 ±.01 64.5 ±0.6 .32 ±.03 66.5 ±0.4 .69 ±.01 82.2 ±0.2 .60 ±.01 76.7 ±0.2 .77 ±.01 89.2 ±0.1 .66 ±.02 81.7 ±0.3 
+
+STN-50 .39 ±.03 65.3 ±1.3 .47 ±.01 67.9 ±0.1 .69 ±.01 78.8 ±0.8 .60 ±.01 76.8 ±0.1 .78 ±.01 89.0 ±0.1 .67 ±.01 82.2 ±0.1 
+
+STN-100 .48 ±.01 65.9 ±0.7 .50 ±.02 66.6 ±3.4 .69 ±.00 82.5 ±0.3 .62 ±.01 77.2 ±0.2 .78 ±.01 89.1 ±0.1 .67 ±.01 82.3 ±0.1 
+
+TN-100 .50 ±.00 69.3 ±0.6 .38 ±.03 66.9 ±0.4 .70 ±.01 80.7 ±0.5 .59 ±.02 76.6 ±0.2 .79 ±.01 89.0 ±0.3 .68 ±.01 81.7 ±0.3 
+
+SN-100 .56 ±.01 65.8 ±0.8 .38 ±.03 67.3 ±0.7 .69 ±.01 82.3 ±0.1 .57 ±.03 76.9 ±0.7 .79 ±.01 89.1 ±0.2 .65 ±.01 82.5 ±0.1 
+
+ST-100 .45 ±.06 67.3 ±1.1 .52 ±.01 68.9 ±0.5 .71 ±.00 82.4 ±0.3 .59 ±.01 77.2 ±0.2 .79 ±.01 89.2 ±0.4 .67 ±.01 81.9 ±0.4 
+
+strong as for the classification tasks. Some of the self-trained models (T EXT CLIP-100, SALT -SN -100) are surpassed by the baselines under low-data regimes. 
+
+Effect of additional modalities: Comparing variants of 
+
+MELT and SALT across different modalities amount, but the same amount of downstream training data, reveals no consistent gain from the modality. To substantiate this obser-vation statistically, we conduct paired t-tests on the popula-tion density task, comparing the best- and worst-performing model variants within each configuration across ten random initialisations (Tab. II). Of all four tested pairs, only MELT -
+
+STN -100 vs. MELT -SN -50 at 243 samples yields a significant difference ( t=12 .13 , p< 0.001 ). All remaining pairs are non-significant ( p ≥ 0.138 ), confirming that performance dif-ferences are attributable to random initialisation rather than model design. 
+
+Effect of pre-training data volume: Scaling pre-training data likewise produces no reliable improvement. Within the 
+
+MELT -STN group, downstream elevation R2 at 243 samples varies non-monotonically across the -10, -50, -100 variants. At 100 000 downstream samples, virtually all self-trained models converge to within one standard deviation of each other and of S AT CLIP-O RG . These two null results – no gain from modality diversity, no gain from pre-training volume – jointly indicate that the location encoder, rather than input amount and richness, constitutes the effective performance ceiling. 
+
+B. Qualitative Results 
+
+A first qualitative difference between the two architectures emerges from pre-training dynamics. Fig. 3 shows training and validation loss curves for an exemplary SALT run. As is clearly visible in the training behaviour, highlighted SALT 
+
+variants exhibit characteristic loss spikes at epoch boundaries where the active encoder switches. This is accompanied by early terminations for some model variants. Such patterns were not observed in the joint batch construction of MELT . Despite this instability, SALT models achieve final downstream metrics comparable to MELT .The exemplary prediction maps for the elevation task SALT -TN -100  MELT -STN -100 
+
+> RANGE ( β = 0 .3)CSP-INAT
+> TEXT CLIP
+
+Example Individual Component Analysis Example Prediction Elevation 
+
+> IDENTITY
+> Ground Truth IDENTITY
+> MELT -ST -50 SALT -TN -100
+> CSP-FMOW
+> NAT CLIP
+
+BB
+
+CCAA
+
+AA
+
+AA   
+
+> Fig. 4. The left side shows prediction maps for the elevation task with 3125 training samples. From the example of the Andes, it can be observed that the self-trained models produce spatially coherent predictions (A), whereas the baselines show either uniform regions (B) or excessive granularity (C). The right side shows ICA embedding visualisations (RGB). Similar structures to those in the prediction map can also be visualised even before, based on the embeddings.
+
+(Fig. 4) show a consistent structural contrast between self-trained and reference models. MELT and SALT variants produce spatially coherent predictions with large, contiguous areas. In contrast, the different baseline models tend towards either coarse or fine spatial granularity. Notably, prediction patterns appear visually indistinguishable across modality combinations within the self-trained group. This may reflect the quantitative convergence seen above. Independent component analysis (ICA) can be used to visualise the pre-trained embeddings (Fig. 4). This technique helps verify the findings described above in another way. The self-trained encoders produce geographically consistent colour gradients. Ecologically similar regions, e.g. the tropical forests in South America and Central Africa, tend to share similar embedding colours. In contrast, baseline embeddings show grid artefacts (CSP), equatorial discontinuities (I DENTITY ), or high variance over regions (R ANGE , M OSAIKS ). VI. DISCUSSION 
+
+Why do additional modalities not improve downstream performances?: The synergistic information hypothesised in Sec. I, that knowledge arises only from the combination of multiple views, appears inaccessible under the present setup. The location encoder, constrained by its fixed architecture and low-dimensional coordinate input, appears to saturate early in training: once it has learnt a stable coordinate-to-region mapping, additional modalities provide no gradient signal that the encoder can exploit. In other words, the contrastive objective collapses to a low-complexity alignment task not because the modalities lack complementary infor-mation, but because the encoder cannot represent the finer-grained distinctions that such information would require. The disconnect between pre-training loss and downstream quality is further supported through statistical analysis in Tab. II. Of the four examples, only one shows a significant difference. This verifies that the performance changes are a result of random initialisation and not the modality de-sign. Linear probing offers one diagnostic to confirm this hypothesis. Since a single linear layer yields stagnant per-formance among all modality combinations, the bottleneck is unambiguously located in the encoder. Rather than in the downstream model’s ability to compensate for capacity.  
+
+> MELT
+
+vs SALT : Despite reaching comparable final down-stream metrics, the two architectures differ substantially in their training behaviour. Simultaneous batch construction in  
+
+> MELT
+
+provides a constant, balanced gradient signal to all encoders at every step. This produces smooth loss curves and no early terminations across all twelve variants. SALT ’s epoch-level switching introduces representational discontinu-ities at each encoder transition: the location encoder must re-adapt to a new modality distribution at the start of every epoch cycle, leading to the characteristic loss spikes observed in Fig. 3 and to premature termination. Despite its instability, SALT reaches similar downstream performance. This is further evidence for the bottleneck interpretation. If the alignment task were high in complexity, the representational disruptions caused by encoder switching should produce embeddings that are measurably worse. The observation that the location encoder recovers within a few epochs suggests the target solution is low-dimensional and easy to re-attain — but at the cost of additional computational overhead and reduced reproducibility. MELT is therefore the preferred foundation for scaling to more modalities or longer pre-training schedules. 
+
+Limitations: Four constraints bound the generalisability of the results and should therefore be considered as highly relevant future experiments to validate the findings. First, a fixed one-size-fits-all hyper-parameter strategy (batch size 
+
+2048 , learning rate 1 × 10 −4, 50 epochs) was applied across all variants, whereby per-architecture tuning would likely sharpen quantitative differences between MELT and SALT ,and between modality combinations. Especially, the batch size directly impacts the number of negative pairs and therefore creates a limitation on the possible contrast given. Second, only a single location encoder architecture was tested. Thus, the bottleneck hypothesis rests on inductive ev-idence from a single encoder family and cannot be confirmed without ablating alternative encoders, such as G EO CLIP or RANGE .Third, the evaluation is restricted to four global tasks. Ge-ographically stratified or few-shot evaluations may reveal advantages of richer multimodal embeddings that the cur-rent protocol does not detect. Moreover, deeper embedding inspection methods, such as intrinsic dimensionality [11], could clarify the (location) encoders’ capacity limits. Lastly, the choice of the NT-Xent objective can be seen as a limiting factor. It has already been argued in this section that the objective leads to a low-complexity alignment task. Whilst the NT-Xent loss is commonly used, its effectiveness must be confirmed using alternative loss functions. At this point, reference can also be made to loss functions in the LeJEPA direction [32]. Unlike NT-Xent, which shapes the embedding distribution only implicitly through its negative-sampling term, LeJEPA [32] imposes an explicit, maximum-entropy target distribution and is shown to be minimax-optimal with respect to downstream prediction risk across a broad class of probes. This is expected for the transfer be-haviour of a (multimodal) foundation model. Their suitability for geodata has yet to be demonstrated. VII. CONCLUSION We proposed MELT and SALT as multimodal contrastive learning frameworks for the location encoder, extending beyond two modalities. Using location as the tying element for unpaired geospatial data. Both are technically viable and match the strongest two-modality baselines S AT CLIP-O RG 
+
+across four downstream tasks. Our main finding is that the location encoder, not modal-ity count or data volume, limits the performance. Neither adding modalities nor scaling pre-training data consistently improved downstream performance beyond that of a two-modality baseline. This points to two complementary limita-tions. Firstly, the location encoder itself limits the representa-tional potential to create richer multimodal signals. Second, the training objective may be ill-suited for this setting: by pulling all modality embeddings towards a single shared location anchor. Thereby, encouraging the encoder to learn what modalities have in common, but discarding precisely those modality-specific features that would distinguish, for instance, spectral land-cover signatures from semantic tex-tual context. Alternative objectives that preserve modality-specific structure may be necessary to unlock the comple-mentary information provided by additional modalities. Thus, the focus of the upcoming work should be on both. First, alternative encoder architectures that raise the repre-sentational ceiling should be tested and second, alignment objectives that move beyond global instance-level similarity should be explored. Beyond these two principal directions, the further constraints discussed in our limitations (hyper-parameter tuning, broader evaluation) equally warrant atten-tion. Given its training reliability, MELT provides the stronger practical foundation for these investigations. APPENDIX                               
+
+> TABLE II PAIRED t-TEST RESULTS ON POPULATION DENSITY :BEST VS .WORST MODEL VARIANT PER CONFIGURATION ,TEN INITIALISATIONS EACH .
+> NBest Worst tp¯∆
+> 100K SALT -TN -10 SALT -STN -10 −0.09 0.933 −0.001
+> 100K MELT -STN -10 MELT -TN -100 1.63 0.138 0.017
+> 243 SALT -STN -100 SALT -ST -100 −0.33 0.750 −0.002
+> 243 MELT -STN -100 MELT -SN -50 12 .13 <0.001 0.129
+
+REFERENCES [1] K. Klemmer et al., ”Earth Embeddings: Towards ai-centric represen-tations of our planet,” EarthArXiv, Dec. 2025. [Online]. Available: https://doi.org/10.31223/X5HX9S [2] G. Mai et al., ”A review of location encoding for GeoAI: Methods and applications,” Int. J. Geogr. Inf. Sci., vol. 36, no. 4, pp. 639–673, 2022. [3] K. Klemmer, E. Rolf, C. Robinson, L. Mackey, and M. Rußwurm, ”SatCLIP: Global, general-purpose location embeddings with satellite imagery,” in Proc. 39th AAAI Conf. Artificial Intelligence (AAAI), 2025. [4] V. V. Cepeda, G. K. Nayak, and M. Shah, ”GeoCLIP: CLIP-inspired alignment between locations and images for effective worldwide geo-localization,” in Proc. 37th Int. Conf. Neural Information Processing Systems (NeurIPS), 2023. [5] G. Mai, N. Lao, Y. He, J. Song, and S. Ermon, ”CSP: Self-supervised contrastive spatial pre-training for geospatial-visual representations,” in Proc. 40th Int. Conf. Machine Learning (ICML), 2023. [6] A. Dhakal, S. Sastry, S. Khanal, A. Ahmad, E. Xing, and N. Jacobs, ”RANGE: Retrieval augmented neural fields for multi-resolution geo-embeddings,” in Proc. IEEE/CVF Conf. Computer Vision and Pattern Recognition (CVPR), 2025, pp. 24680–24689. [7] C. F. Brown et al., ”AlphaEarth foundations: An embedding field model for accurate and efficient global mapping from sparse label data,” arXiv:2507.22291 [cs.CV], Sep. 2025. [8] M. J. de Smith, M. F. Goodchild, and P. Longley, Geospatial analysis: A comprehensive guide to principles, techniques and software tools, 7th ed. Drumlin Security, 2024. [9] W. Li et al., ”GeoAI for science and the science of GeoAI,” J. Spatial Inf. Sci., no. 29, pp. 1–17, 2024. [10] K. Janowicz, S. Gao, G. McKenzie, Y. Hu, and B. Bhaduri, ”GeoAI: Spatially explicit artificial intelligence techniques for geographic knowledge discovery and beyond,” Int. J. Geogr. Inf. Sci., vol. 34, no. 4, pp. 625–636, 2020. [11] A. Rao, M. Rußwurm, K. Klemmer, and E. Rolf, ”Measuring the in-trinsic dimension of earth representations,” arXiv:2511.02101 [cs.LG], 2026. [12] Y. Cong et al., ”SatMAE: Pre-training transformers for temporal and multi-spectral satellite imagery,” in Proc. 36th Int. Conf. Neural Information Processing Systems (NeurIPS), 2022. [13] F. Liu et al., ”RemoteCLIP: A vision language foundation model for remote sensing,” IEEE Trans. Geosci. Remote Sens., vol. 62, pp. 1–16, 2024. [14] S. Khanal, S. Sastry, A. Dhakal and N. Jacobs, ”Learning tri-modal embeddings for zero-shot soundscape mapping”, in Proc. British Machine Vision Conference, 2023, pp. 1-13 [15] A. Dhakal, S. Khanal, S. Sastry, A. Ahmad and N. Jacobs, ”GeoBind: Binding text, image, and audio through satellite images”, IGARSS 2024 - 2024 IEEE International Geoscience and Remote Sensing Symposium, Athens, Greece, 2024, pp. 2729-2733 [16] S. Sastry, S. Khanal, A. Dhakal, A. Ahmad and N. Jacobs, ”Tax-aBind: A unified embedding space for ecological applications,” 2025 IEEE/CVF Winter Conference on Applications of Computer Vision (WACV), Tucson, AZ, USA, 2025, pp. 1765-1774 [17] R. Girdhar et al., ”ImageBind: One embedding space to bind them all,” in Proc. IEEE/CVF Conf. Computer Vision and Pattern Recognition (CVPR), June 2023, pp. 15180–15190. [18] G. Mai et al., ”SRL: Towards a general-purpose framework for spatial representation learning,” in Proc. 32nd ACM Int. Conf. Advances in Geographic Information Systems (SIGSPATIAL), 2024, pp. 465–468. [19] T. Chen, S. Kornblith, M. Norouzi, and G. Hinton, ”A simple frame-work for contrastive learning of visual representations,” in Proc. 37th Int. Conf. Machine Learning (ICML), 2020. [20] M. Rußwurm, K. Klemmer, E. Rolf, R. Zbinden, and D. Tuia, ”Geographic location encoding with spherical harmonics and sinu-soidal representation networks,” in Proc. International Conference on Learning Representations (ICLR), 2024, pp. 1746–1759. [21] V. Sitzmann, J. N. P. Martel, A. W. Bergman, D. B. Lindell, and G. Wetzstein, ”Implicit neural representations with periodic activation functions,” in Proc. 34th Int. Conf. Neural Information Processing Systems (NeurIPS), 2020. [22] K. He, H. Fan, Y. Wu, S. Xie, and R. Girshick, ”Momentum Contrast for Unsupervised Visual Representation Learning,” in Proc. IEEE/CVF Conf. Computer Vision and Pattern Recognition (CVPR), 2020, pp. 9729–9738. [23] M. Caron et al., ”Emerging Properties in Self-Supervised Vision Trans-formers,” in Proc. IEEE/CVF Int. Conf. Computer Vision (ICCV), 2021, pp. 9650–9660. [24] S. Xiao, Z. Liu, P. Zhang, N. Muennighoff, D. Lian, and J.-Y. Nie, ”C-Pack: Packed resources for general Chinese embeddings,” in Proc. 47th Int. ACM SIGIR Conf. Research and Development in Information Retrieval, 2024, pp. 641–649. [25] M. Larson, M. Soleymani, G. Gravier, B. Ionescu, and G. J. Jones, ”The benchmarking initiative for multimedia evaluation: MediaEval 2016,” IEEE MultiMedia, vol. 24, no. 1, pp. 93–96, 2017. [26] B. Thomee, D. A. Shamma, G. Friedland, B. Elizalde, K. Ni, D. Poland, D. Borth, and L.-J. Li, ”YFCC100M: The new data in multimedia research,” Commun. ACM, vol. 59, no. 2, pp. 64–73, 2016. [27] Global Administrative Areas (GADM), ”GADM database of global administrative areas, Version 4.1,” 2022. [Online]. Available: https://gadm.org/download world.html. [Accessed: 07-May-2025]. [28] Center for International Earth Science Information Network (CIESIN), ”Documentation for the gridded population of the world, Ver-sion 4 (GPWv4), Revision 11 Data Sets,” Columbia Uni-versity, Palisades, NY, Tech. Rep., 2018. [Online]. Available: https://doi.org/10.7927/H45Q4T5F. [Accessed: 09-Sep-2025]. [29] Mapzen and Sentinel Hub, ”Mapzen terrain tiles — digital el-evation model,” Sentinel Hub Collections, 2017. [Online]. Avail-able: https://collections.sentinel-hub.com/mapzen-dem/. [Accessed: 07-May-2025]. [30] D. M. Olson et al., ”Terrestrial ecoregions of the world: A new map of life on earth,” BioScience, vol. 51, no. 11, pp. 933–938, 2001. [31] E. Rolf et al., ”A generalizable and accessible approach to machine learning with global satellite imagery,” Nature Commun., vol. 12, no. 1, 2021. [32] R. Balestriero and Y. LeCun, ”LeJEPA: Provable and Scalable Self-Supervised Learning Without the Heuristics,” arXiv:2511.08544 [cs.LG], 2025.
