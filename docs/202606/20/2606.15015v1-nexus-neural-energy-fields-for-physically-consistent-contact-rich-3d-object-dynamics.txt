@@ -1,0 +1,510 @@
+Title: NEXUS: Neural Energy Fields for Physically Consistent Contact-Rich 3D Object Dynamics
+
+URL Source: https://arxiv.org/pdf/2606.15015v1
+
+Published Time: Tue, 16 Jun 2026 00:36:11 GMT
+
+Number of Pages: 18
+
+Markdown Content:
+# NEXUS: Neural Energy Fields for Physically Consistent Contact-Rich 3D Object Dynamics 
+
+Qizhen Ying †
+
+Department of Engineering Science University of Oxford 
+
+qizhen.ying@eng.ox.ac.uk 
+
+Guangming Wang 
+
+Department of Engineering University of Cambridge 
+
+gw462@cam.ac.uk 
+
+Yangchen Pan 
+
+Department of Engineering Science University of Oxford 
+
+yangchen.pan@eng.ox.ac.uk 
+
+Victor Adrian Prisacariu 
+
+Department of Engineering Science University of Oxford 
+
+victor.prisacariu@eng.ox.ac.uk 
+
+Yixiong Jing †
+
+Department of Engineering Science University of Cambridge 
+
+yj401@cam.ac.uk 
+
+# Abstract 
+
+Physics-grounded video generation requires controllable 3D object dynamics that remain physically consistent under contact, deformation, and external forcing. Existing trajectory-based methods provide physical control, but they often model isolated physical effects rather than deriving dynamics from a unified physical structure, making it difficult to compose conservative and non-conservative effects while preserving controllability in contact-rich 3D scenes. We present NEXUS, a neural energy-field framework for contact-rich 3D object dynamics. NEXUS repre-sents each object as a structural graph and constructs dynamic contact graphs for object–object and object–environment interactions. Inspired by Hamiltonian Neu-ral Network (HNN) energy-based dynamics, NEXUS formulates motion through scalar energy and dissipation terms rather than directly predicting states or ac-celerations. Conservative effects, such as gravity and elastic deformation, are composed as additive energy terms over the scene. To handle non-conservative effects beyond standard HNNs, NEXUS learns dissipation functions for damping and impact-induced energy loss. Forces are derived by differentiating the energy and dissipation functions and rolled out with a multi-substep semi-implicit in-tegrator. NEXUS provides a stable and controllable physics reasoning module for contact-rich 3D object dynamics, improving long-horizon accuracy over rep-resentative learned and physics-structured dynamics baselines across controlled rollouts with varying mechanical properties and physical-effect compositions. Our contributions are: (i) an HNN-inspired energy-dissipation dynamics formulation that unifies conservative and non-conservative scene effects; (ii) a graph-based 3D representation for contact-rich object dynamics, which improves long-horizon rollout accuracy over the baselines across different mechanical settings; and (iii) a trajectory-guided video generation study showing that physically consistent motion improves downstream physical plausibility while maintaining competitive visual quality. 
+
+> †Corresponding authors: Yixiong Jing and Qizhen Ying. Preprint.
+> arXiv:2606.15015v1 [cs.CV] 12 Jun 2026
+
+# 1 Introduction 
+
+Recent diffusion and autoregressive models have greatly improved the visual quality of video generation [ 1, 2, 3 ], and large video/world models can synthesize compelling rollouts from language, images, or actions [ 4 , 5 , 6]. However, visual realism does not guarantee physical realism. Generated objects can float, penetrate, rebound incorrectly, or ignore force and material controls, limiting use in downstream settings such as robotics where planning requires physically consistent rollouts [7, 8]. To improve physical fidelity, some methods learn motion priors from physically rich data [ 9, 10 , 7 , 11 ]. Another line of work obtains trajectories from simulators or learned dynamics modules, and uses them to guide rendering or video synthesis [ 12 , 13 , 14 , 15 , 16 , 17 , 18 ]. Such methods are promising because it separates physical motion generation from visual synthesis and provide explicit control over the generated video. However, existing methods often focus on isolated physical effects or simplified 2D trajectory prediction. Existing 3D trajectory generators remain limited in representing complex 3D physical interactions. They are often designed for one object interacting with an environment, rather than scenes where multiple deformable objects collide, deform, and exchange momentum [ 18 ]. They also tend to inject physical effects such as gravity or external control as separate conditioning signals [ 18 , 19 ], instead of composing them within a shared physical formulation. Finally, direct state or acceleration prediction lacks an explicit conservation structure, so numerical and prediction errors can accumulate as energy drift over long rollouts. The central challenge is therefore not only to provide trajectory guidance, but to represent contact-rich 3D dynamics through a unified physical interface where conservative and non-conservative effects can be composed, differentiated, and rolled out stably. HNNs provide a principled energy-based alternative by learning scalar functions whose gradients define dynamics [ 20 ]. HNN improves long-horizon rollout by moving beyond unconstrained state pre-diction. However, standard HNNs mainly target conservative systems with fixed and low-dimensional states. Extensions introduce dissipation and external forcing [ 21 , 22 ], but remain focused on con-strained mechanical settings. Contact-rich 3D object dynamics require a scene-level formulation that jointly represents deformable geometry, changing contact topology, external control, and impact-induced energy loss. To address these limitations, we propose NEXUS, a neural energy-field model for contact-rich 3D object dynamics (Figure 1). NEXUS represents each object as a structural graph and builds dynamic object–environment and object–object contact graphs during rollout. It formulates conservative effects as additive scalar energy terms and models non-conservative impact loss with Rayleigh-style dissipation. Forces are obtained by differentiating the energy–dissipation functions and advanced with a multi-substep semi-implicit integrator. This turns contact-rich motion into energy exchange and dissipation under a shared scene-level dynamics interface, rather than independent object-wise trajectory prediction. Our main contributions are following: • An energy–dissipation formulation for contact-rich 3D dynamics. We derive forces from additive conservative energy terms and Rayleigh-style dissipation terms, giving a unified interface for structural elasticity, contact, external control, and impact-induced energy loss. • A graph-based point-cloud realization for multi-object interaction. NEXUS uses inferred structural graphs and dynamic object–environment/object–object contact graphs, with shared encoder and energy–dissipation heads across objects and contact types. • Controlled evidence for long-horizon physical consistency and video control. NEXUS improves long-horizon rollout accuracy across different mechanical settings and varied contact scene tests over the baselines, and video-generation studies validate the resulting physical control. 
+
+# 2 Related Work 
+
+Physics-grounded video generation with trajectory control. Trajectory-guided generation decou-ples motion generation from visual synthesis, enabling explicit control through learned or simulated motion [ 23 , 24 , 25 , 26 , 27 , 28 , 29 , 30 , 14 , 31 , 32 , 33 , 34 , 13 , 35 ]. Recent 3D systems reconstruct 2Figure 1: NEXUS overview. A 2D-to-3D model reconstructs object and environment point clouds from an input image. NEXUS predicts physically consistent trajectories through graph-based energy– dissipation reasoning. The inferred trajectory then guides a diffusion model for controllable physics-grounded video generation. or generate geometry and then simulate dynamics using MPM, spring–mass systems, or learned point-trajectory generators [ 36 , 37 , 15 , 38 , 39 , 40 , 16 , 17 , 18 ]. These methods motivate explicit trajectory control, but the underlying dynamics are often simulator-dependent or learned as direct trajectories rather than as a compositional energy–dissipation model. 
+
+Neural physical dynamics. Learned simulators represent physical systems as objects, parti-cles, meshes, or point clouds and predict state updates with neural networks. Interaction Net-works [ 41 ], graph simulators [ 42 , 43 , 44 ], and recent geometric dynamics models [ 39 , 45 ] scale to high-dimensional states and complex geometry. However, most are trained as direct transition, acceleration, or displacement predictors. This flexibility comes without an explicit decomposition of conservative forces, contact, external work, and dissipation, making long-horizon stability and physical-effect composition difficult. 
+
+Energy-based Hamiltonian neural dynamics. Hamiltonian and Lagrangian neural networks learn scalar mechanical functions and recover dynamics by differentiation, improving structure preservation in conservative systems [ 20 , 46 , 47 , 48 , 22 ]. Dissipative and port-Hamiltonian variants introduce smooth energy loss [ 49 , 50 , 51 ], and contact-aware extensions adapt differentiable contact handling to low-dimensional multi-object systems [ 21 ]. NEXUS moves this energy-based view to contact-rich 3D point-cloud dynamics by combining structural graphs, dynamic contact graphs, additive potentials, and learned Rayleigh-style impact dissipation. 
+
+# 3 Method 
+
+3.1 Problem Setup Scene state and controls. We model a scene with M dynamic objects. Object a contains Na
+
+particles, and all dynamic particles are concatenated into positions xt ∈ RN ×3 and velocities 
+
+vt ∈ RN ×3, where N = PMa=1 Na (as shown in Figure 2(a)). The undeformed object geometry is x0
+
+at time t = 0 , with xi 
+
+> 0
+
+denoting the initial position of particle i. The static environment is represented as a point cloud xenv ∈ RNe×3 with normals nenv ∈ RNe×3, where Ne is the number of environment points. Each dynamic particle has three properties, i.e., an object id, type attribute τi, and mass mi.3Figure 2: NEXUS architecture. Overview of the NEXUS architecture. (a) NEXUS predicts rollouts from scene states and physical controls using an energy–dissipation forward solver. (b) Structural graphs represent object geometry, while dynamic contact graphs model object–environment and object–object interactions. (c) Conservative and non-conservative effects are represented as composable scalar terms. (d) A shared GNN encoder parameterizes the energy and dissipation modules. (e) Differentiated forces are advanced with a multi-substep semi-implicit integrator for rollout prediction. The physical inputs at time t are stiffness k, gravity g, and masked external control/force f ext  
+
+> i,t
+
+. Given 
+
+(xt, vt, x0, xenv , nenv , k, g, f ext  
+
+> t
+
+) with f ext  
+
+> t
+
+∈ RN ×3, the goal is to predict {(xt+h, vt+h)}Hh=1 in closed loop for length H as shown in Figure 2(a). 
+
+Energy/Rayleigh dynamics. NEXUS represents objects and environment with structural and con-tact graphs, and evaluates conservative energy and Rayleigh-style dissipation terms whose derivatives define forces: 
+
+Fθ (x, v) = − ∂ (Uθ (x, v; k, g) + Uext (x; f ext )) 
+
+∂x − ∂R θ (x, v; k)
+
+∂v . (1) The conservative energy terms Uθ compose gravity, structural elasticity, and contact potential in a single scalar interface. The external-force input is represented by Uext and combined with Rθ as the non-conservative part. The dissipation terms Rθ follow a Rayleigh-style form and are differentiated with respect to velocity to produce non-conservative damping and impact energy loss. 
+
+3.2 Graph Construction and Encoding Shared encoder: node/edge inputs and outputs. We use a single shared graph encoder as shown in Figure 2(d). For particle i, the node input is defined as: 
+
+zi = [ xi − xi
+
+> 0
+
+, vi, τ i, log mi, ˜k, g, f ext  
+
+> i,t
+
+], (2) where zi ∈ Rdz and ˜k is the normalized log-stiffness. The encoder also receives local edge geometry 
+
+ηij ∈ Rdη and produces shared node embeddings hi, hj ∈ Rdh and edge embeddings eij ∈ Rde .For E0, ηij includes relative displacement and rest length; for Eo-e(t) and Eo-o(t), it includes relative displacement, gap or distance, contact normal when available, relative normal velocity, and type indicators. Additional GNN architecture choices are provided in Appendix A.2. 
+
+Structural graph. For each object, NEXUS infers a time-invariant structural graph G0 =(Vobj , E0, ℓ 0) from x0 (representing undeformed objects) as shown in Figure 2(b), where Vobj and E0
+
+represent the nodes and edges of G0. E0 connects particles only within the same object and stores 4their rest length ℓ0 
+
+> ij
+
+= x0 
+
+> i
+
+− x0 
+
+> j2
+
+. E0 encode internal elastic structure and G0 remains unchanged at all rollout steps. For multi-object scenes, NEXUS uses one structural graph per object while sharing the same edge functions across objects. 
+
+Dynamic contact graph. At each time step t, NEXUS defines a contact graph from xt (Figure 2(b)): 
+
+Gcon (t) = ( Vobj ∪ V env , Eo-e(t) ∪ E o-o(t)) . (3) Object–environment edges Eo-e(t) connect object particles to nearby environment points. Object– object edges Eo-o(t) are built for every unordered object pair ( a and b): 
+
+Eo-o(t) = [
+
+> a<b
+
+kNN( x(a) 
+
+> t
+
+, x(b) 
+
+> t
+
+) ∪ kNN( x(b) 
+
+> t
+
+, x(a) 
+
+> t
+
+). (4) The neighbor selection is conducted discretely at each step t. Thus, the selected topology is piecewise constant when deriving the force. After the topology is selected, all contact features (e.g., gaps, distances, normals, and relative velocities between contact points) remain differentiable with respect to the continuous dynamic state. The topology is rebuilt before each integration substep, allowing contact edges to appear, disappear, and move as the predicted geometry evolves. Implementation settings for graph construction are listed in Appendix A.2. 
+
+3.3 Energy Decomposition Intuition 
+
+Given the structural graph E0 and contact graphs Eo-e(t), Eo-o(t) defined above, NEXUS evaluates scalar potential and Rayleigh-style dissipation terms on their edges. Gradients are taken with respect to xt and vt. xenv , nenv , k, g, and f ext  
+
+> i,t
+
+are treated as fixed inputs within each force evaluation. This gives contact, deformation, external control, and dissipation a shared differentiable force interface. 
+
+Conservative energy terms. NEXUS decomposes Uθ into different terms to account for varied physical effects, as shown in Figure 2(c): 
+
+Uθ (x, v; k, g) = Ug(x; g) + Ustr ,θ (x, v; k) + Ucon ,θ (x, v; k), (5) where Ug, Ustr ,θ , and Ucon ,θ represent gravity, structural, and contact conservative terms (e.g., elastic spring energy), respectively. Ucon ,θ can be further decomposed into Uo-e,θ and Uo-o,θ for object–environment and object–object contact potentials. The conservative gravity potential is 
+
+Ug(x; g) = −
+
+> N
+
+X
+
+> i=1
+
+(mig)⊤ xi, (6) so that −∂U g/∂ xi = mig.For (i, j ) ∈ E 0, the current length at t is rij = ∥xi − xj ∥2, where Ustr ,θ is defined as a learned-coefficient spring energy: 
+
+Ustr ,θ = X
+
+> (i,j )∈E 0
+
+12 keff  
+
+> ij
+
+(eij , k )( rij − ℓ0 
+
+> ij
+
+)2, keff  
+
+> ij
+
+> 0. (7) The coefficient keff  
+
+> ij
+
+is predicted from the edge embedding eij produced by the shared encoder and the physical stiffness input k, so it can use the current state (x, v) when parameterizing structural elasticity. For (i, j ) ∈ {E o-e(t) ∪ E o-o(t)}, NEXUS defines a penetration margin δij from point-plane distance for object–environment contact and from radial point-point distance for object–object contact. With ϕ(δ) = max(0 , δ ), the contact potential is: 
+
+Ucon ,θ = X
+
+> (i,j )∈E o-e(t)∪E o-o(t)
+
+wij 
+
+12 kcon  
+
+> ij
+
+(eij , k )ϕ(δij )2, kcon  
+
+> ij
+
+> 0, (8) where wij is a fixed normalization weight for the contact edge, and kcon  
+
+> ij
+
+is a positive contact stiffness predicted from eij and the physical stiffness input k, allowing contact response to depend on local geometry, contact type, and material stiffness. The same definition of contact energy is used for 
+
+{E o-e(t) ∪ E o-o(t)}, with type-specific geometric features and weights wij . For object–object contact, bidirectional k-NN edges are normalized so that the two directed queries represent one unordered pair interaction and do not double-count scalar contact contributions. 5Non-conservative forcing and energy dissipation. The non-conservative external-force input is represented by 
+
+Uext (x; f ext ) = −
+
+> N
+
+X
+
+> i=1
+
+ f ext 
+
+> i,t
+
+⊤ xi. (9) Thus −∂U ext /∂ xi = f ext  
+
+> i,t
+
+.As shown in Figure 2(c), NEXUS models dissipative non-conservative effects with two Rayleigh terms: 
+
+Rθ (x, v; k) = Rstr ,θ (x, v; k) + Rcon ,θ (x, v; k), Rcon ,θ = Ro-e,θ + Ro-o,θ . (10) where Rstr ,θ represents damping along all edge pairs (i, j ) ∈ E 0. Ro-e,θ and Ro-o,θ are contact dissipation terms on active object–environment and object–object contact edges, respectively. Here 
+
+Rθ is a Rayleigh dissipation function: a scalar function whose negative velocity gradient gives dissipative forces. It is determined by the graph-conditioned edge embeddings together with geometry-dependent quantities, including structural edge directions, dynamic contact topology, penetration margins, contact normals, active-contact indicators, and the resulting damping coefficients. Let ˆdij (x) = ( xi − xj )/(∥xi − xj ∥2 + ε) denote the current structural edge direction, and let 
+
+Acon (x) = {(i, j ) ∈ E o-e(t) ∪ E o-o(t) : ϕ(δij (x)) > 0} (11) be the active contact set. We then write the Rayleigh terms as 
+
+Rstr ,θ = X
+
+> (i,j )∈E 0
+
+12 cstr  
+
+> ij
+
+(eij )
+
+
+
+(vi − vj )⊤ ˆdij (x)
+
+2
+
+,Rcon ,θ = X
+
+> (i,j )∈A con (x)
+
+wij 
+
+2 ccon  
+
+> ij
+
+(eij ) ReLU( −vnij )2 ,cstr  
+
+> ij
+
+, c con  
+
+> ij
+
+≥ 0. (12) where cstr  
+
+> ij
+
+(eij ) and ccon  
+
+> ij
+
+(eij ) are non-negative damping coefficients predicted from eij , and vnij =(vi − vj )⊤nij is the relative normal velocity, using zero environment velocity for object–environment contact. The two squared velocity modes in Eq. (12) correspond to structural stretch/compression along ˆdij and approaching contact along nij . Since damping forces use −∂R θ /∂ v, these non-negative quadratic modes remove kinetic energy along those directions when the local coefficients are fixed. The ReLU( −vnij ) gate activates contact damping only for closing contacts, avoiding damping of tangential or separating motion. 
+
+3.4 Integration and Closed-loop Training 
+
+Given Fθ from Eq. (1) , NEXUS updates dynamic particles with S semi-implicit substeps of size 
+
+∆t/S , corresponding to the rollout module in Figure 2(e): 
+
+vq+1 = vq + ∆tS M −1Fθ (xq , vq ), xq+1 = xq + ∆tS vq+1 , (13) where the mass matrix is represented as M = diag( m1, . . . , m N ) ⊗ I3. Each numerical integration update in substep follows the same loop: rebuild Gcon from the predicted state, encode nodes and edges, compute Uθ and Rθ , differentiate them to obtain Fθ , and integrate. Thus contact topology is inferred from the model’s own rollout during both training and evaluation. The training objective is defined as a horizon-weighted rollout loss: 
+
+L =
+
+> H
+
+X
+
+> h=1
+
+γh−1 
+
+λxℓ(h) 
+
+> x
+
++ λv ℓ(h)
+
+> v
+
+
+
+, (14) where ℓx and ℓv are Huber losses on predicted positions and velocities. We use a rollout curriculum from short to longer horizons; optimization details are provided in Appendix A.3. 64 Experiments 
+
+We evaluate NEXUS in three stages. First, a controlled single-object benchmark compares long-horizon rollout accuracy under matched inputs, i.e., graphs, physical controls, and training budgets. Second, to measure generalization to object–object contact, we evaluate NEXUS on mixed-contact scenes with two, three, and five interacting objects. Third, we use the predicted trajectories as physical guidance for contact-rich video generation. 
+
+4.1 Experimental Setup Simulation benchmark. Our main quantitative benchmark contains a single dynamic object interacting with a static environment under g, masked fext , object–environment contact, and internal structural forces. For each object and external-force schedule, we apply six different k values (e.g., k ∈ { 10 , 20 , 50 , 100 , 200 , 500 }) to evaluate controlled material response. We then evaluate mixed-contact generalization on two-, three-, and five-object scenes with both object–object and object–environment contact in Section 4.4. Details regarding the dataset generation, particle counts, splits, and simulator settings are provided in Appendix A.1. 
+
+Metrics. The primary trajectory metric is rollout error at horizon H:
+
+RE@H = 1
+
+|O| 
+
+X
+
+> i∈O
+
+ˆxH,i − xgt   
+
+> H,i 2
+
+. (15) For the single-object benchmark, we report H ∈ { 1, 6, 12 , 24 , 48 } aggregated over all stiffness bins and evaluated episodes. For the multi-object benchmark, we use the same reported horizons, including the final long-horizon setting H = 48 . We use long-horizon rollout error as the primary ranking metric, and report Strain deformation error on the inferred structural graph, Max Pen. environment penetration, and Speed ratio ∥ˆv∥ / ∥vgt ∥ as complementary physical diagnostics. For the speed ratio, values closer to 1 are better. Max Pen. is not used as the primary ranking metric because small penetration can also arise from under-driven or over-damped motion. All contact graphs and contact diagnostics during evaluation are computed from predicted states. 
+
+Baselines. We evaluate all baselines under the same experimental settings whenever the architec-tures can run within the available memory budget. We first include three self-developed baselines: 
+
+Explicit KNN Energy , a physics-structured baseline with hand-specified structural and contact en-ergies on the same inferred graph; Direct-State , which predicts the next state directly; and Direct-Acceleration , which predicts accelerations before integration. To compare with representative neural simulators, we also include Interaction Network [ 41 ], GNS [ 43 ], EGNN dynamics [ 52 ], and Point Transformer dynamics [ 53 ]. Details of the self-developed baselines are provided in Appendix A.3. Single-object dynamics results are averaged over three random seeds, reported in Appendix Table 5. 
+
+4.2 Single-object Rollout Prediction 
+
+Table 1 shows that NEXUS achieves the lowest rollout error among all horizons (RE@1/6/12/24/48), while preserving low strain error and a near-unit speed ratio. At RE@1, several direct-prediction and graph-based baselines are comparable, but their errors grow more quickly under closed-loop rollout. Among the physics-structured baselines, Explicit KNN Energy benefits from an explicit contact prior but drifts at longer horizons because fixed-form energies cannot adapt to geometry-dependent contact and deformation. 7Table 1: Rollout prediction under matched inputs, controls, graphs, and training budgets. For the speed ratio, 1 denotes perfect agreement, and values closer to 1 are better.                                                                                  
+
+> Model RE@1 ↓RE@6 ↓RE@12 ↓RE@24 ↓RE@48 ↓Strain ↓Max Pen. ↓Speed (→1)
+> Explicit KNN Energy 0.001 0.011 0.045 0.160 0.306 0.096 0.314 1.439 Direct-State GNN 0.003 0.018 0.040 0.135 0.231 0.157 0.032 0.662 Direct-Acceleration GNN 0.001 0.013 0.038 0.124 0.217 0.159 0.022 0.761 Interaction Network [41] 0.001 0.014 0.041 0.125 0.219 0.168 0.028 0.754 Graph Network Simulator (GNS) [43] 0.001 0.011 0.034 0.124 0.213 0.159 0.025 0.758 EGNN Dynamics [52] 0.001 0.013 0.041 0.124 0.219 0.158 0.023 0.765 Point Transformer Dynamics [53] 0.002 0.017 0.044 0.137 0.227 0.220 2.302 0.694
+> NEXUS 0.001 0.005 0.022 0.087 0.137 0.066 0.145 1.020
+
+4.3 Ablations and Controlled Behavior 
+
+Table 2: Ablations of NEXUS.                                                   
+
+> Variant RE@24 ↓RE@48 ↓Strain Max Pen. ↓Speed
+> (→1)
+> Full NEXUS 0.087 0.137 0.066 0.145 1.020 No contact 1.683 7.349 0.059 7.868 5.743 No dissipation 0.095 0.154 0.084 0.130 1.137 No structural energy 0.235 0.353 1.151 0.077 1.100 No stiffness k0.190 0.177 0.091 0.087 1.055 No extra force 0.102 0.218 0.068 0.132 1.009 Point-point contact 0.864 3.666 0.077 7.511 3.112 Local graph only 0.114 0.173 0.069 0.154 1.040
+
+Table 2 isolates the role of each component. Re-moving contact, or replacing point-plane con-tact with point-point contact, causes catastrophic rollout failure. Removing structural energy strongly worsens rollout and strain consistency. Removing stiffness input hurts controlled gen-eralization across k, and removing Rayleigh dis-sipation increases long-horizon error and yields a less realistic speed ratio. The local-graph abla-tion further shows that non-local structure helps long-horizon deformation. Together, these re-sults support the full energy–dissipation decom-position rather than any single module alone. Extra ablation regarding stiffness-conditioned behavior can be seen at Appendix A.4. 
+
+4.4 Multi-object Mixed-contact Generalization 
+
+Table 3: Multi-object rollout evaluation. We report results for two-, three-, and five-objects scenes. RE is mean position rollout error; lower is better. GNS and EGNN dynamics are omitted as they ran out of memory on both 24&48GB GPUs under this multi-object graph construction. 
+
+Objects Model RE@6 ↓ RE@12 ↓ RE@24 ↓ RE@48 ↓ Strain@24 ↓
+
+2Explicit KNN Energy 0.004 0.013 0.068 0.194 0.034 Direct-State GNN 0.008 0.015 0.083 0.206 0.077 Direct-Acceleration GNN 0.004 0.012 0.078 0.202 0.077 Interaction Network [41] 0.005 0.013 0.063 0.175 0.057 Point Transformer Dynamics [53] 0.003 0.011 0.077 0.202 0.077 NEXUS 0.003 0.007 0.057 0.166 0.030 
+
+3Explicit KNN Energy 0.004 0.017 0.081 0.209 0.036 Direct-State GNN 0.011 0.022 0.091 0.215 0.084 Direct-Acceleration GNN 0.005 0.017 0.087 0.211 0.080 Interaction Network [41] 0.004 0.013 0.070 0.190 0.062 Point Transformer Dynamics [53] 0.005 0.017 0.087 0.211 0.080 NEXUS 0.003 0.009 0.067 0.169 0.031 
+
+5Explicit KNN Energy 0.005 0.025 0.096 0.231 0.042 Direct-State GNN 0.006 0.026 0.107 0.236 0.093 Direct-Acceleration GNN 0.006 0.027 0.108 0.238 0.087 Interaction Network [41] 0.007 0.025 0.092 0.220 0.070 Point Transformer Dynamics [53] 0.006 0.027 0.107 0.238 0.086 NEXUS 0.004 0.017 0.078 0.185 0.035 
+
+We further test the same formulation in mixed object–environment and object–object contact. For each scene cardinality, all completed methods use the same inferred per-object structural graphs 8and rebuild dynamic contact graphs from their own predicted states during closed-loop rollout. Table 3 reports mean rollout error over two-, three-, and five-object episodes for all methods that completed successfully. These experiments were run on a 24GB RTX 5090. Because some graph-heavy baselines (e.g., GNS and EGNN dynamics) exceeded the available memory under the same multi-object closed-loop protocol, we report only the methods that completed successfully. NEXUS achieves the lowest RE@24 and RE@48 for every object count, and the advantage is largest in the five-object setting where object–object contact creates denser dynamic interaction graphs. Figure 3 visualizes representative top-view rollouts from the single-object reference case to two-, three-, and five-object mixed-contact scenes. 
+
+Figure 3: Rollouts from single-object to mixed-contact scenes. Representative top-view rollouts for one, two, three, and five dynamic objects over time in different stage. The increase of objects numbers brings more object–object interactions. 
+
+4.5 Application: Video Generation 
+
+Beyond trajectory prediction, we evaluate NEXUS as a physics-grounded trajectory module for controllable video generation using the trajectory-conditioned video pipeline of PhysCtrl [ 18 ]. We keep the downstream image-to-video generator and dense 2D tracking-map interface fixed, and replace the PhysCtrl diffusion trajectory generator with NEXUS. Given an input image and physical controls, we reconstruct object/environment point clouds and use NEXUS to predict 3D trajectories; these trajectories are projected to the image plane and used as dense tracking maps for the video generator. Implementation details are provided in Appendix A.5. 
+
+Baselines. We compare with Wan2.2 [ 54 ], CogVideoX-5B [ 55 ], DragAnything [ 56 ], ObjCtrl-2.5D [ 57 ], Veo3 [ 58 ], and PhysCtrl [ 18 ]. Sparse-control methods receive a centroid or single-point trajectory according to their interface; NEXUS uses dense projected multi-point trajectories. 
+
+Evaluation. We evaluate 6 contact-rich test cases with GPT-based scoring and a blind human study with 10 non-author raters. Videos are scored on 5-point Semantic Adherence (SA), Physical Commonsense (PC), and Video Quality (VQ), using full videos as primary evidence with sampled frames as reference. Prompts, evaluator instructions, and per-case settings are in Appendix A.5. 
+
+Results. Table 4 shows that NEXUS achieves the best SA and PC while remaining competitive in VQ, and the blind human study follows the same trend and ranks NEXUS highest on all three averages. 9Figure 4: Contact-rich video comparison with PhysCtrl. NEXUS trajectory guidance yields clearer collision, rebound, and settling under the same control intent. Table 4: Video generation evaluation.                                                  
+
+> GPT Human Method SA ↑PC ↑VQ ↑SA ↑PC ↑VQ ↑
+> Wan2.2 3.5 2.2 3.8 3.0 2.4 2.6 CogVideoX-5B 3.3 2.5 3.5 2.8 1.8 2.2 DragAnything 2.0 1.0 2.7 1.3 1.1 1.3 ObjCtrl-2.5D 2.3 1.5 3.3 1.8 1.5 1.3 Veo3 3.3 2.3 4.3 2.6 2.0 2.3 PhysCtrl 3.0 2.7 4.0 2.6 1.8 2.0 NEXUS 3.8 3.7 4.0 3.8 3.2 3.7
+
+Compared with text/image-only and sparse-control baselines, dense physics trajectories better preserve drop–contact–rebound–settle intent, reduce floating or identity-drift failures, and produce clearer post-impact damping. Veo3 attains the strongest GPT-rated visual fidelity, but NEXUS provides a stronger semantics–physics trade-off by substantially improving PC with high VQ. Figure 4 shows representative cases where NEXUS-guided videos exhibit more explicit collision, rebound, and settling behavior than PhysCtrl [ 18 ] under the same control settings. 
+
+# 5 Discussion and Limitations 
+
+NEXUS demonstrates that an energy–dissipation structure is a useful inductive bias for contact-rich point-cloud dynamics. Our main quantitative benchmark focuses on one dynamic object interacting with a static environment, where the controlled setting allows direct evaluation of long-horizon rollout accuracy, deformation consistency, stiffness response, and contact behavior. More broadly, our results suggest that physically grounded video generation can benefit from separating the physical trajectory generator from the visual renderer. Instead of requiring an image-to-video model to infer physical dynamics and synthesize appearance jointly, NEXUS provides a trajectory-level interface whose errors can be inspected and measured before visual synthesis. This separation makes the physics module more interpretable, replaceable, and reusable across downstream video generators. The multi-object experiments further show that NEXUS can extend to object–object and object– environment contact without redesigning the architecture for multiple objects. By representing objects with structural graphs and constructing dynamic contact graphs at rollout time, the same formulation can be applied to scenes with different interaction patterns. This supports the scalability of the proposed scene-level energy formulation, although larger and more diverse multi-object benchmarks are still needed. The experiments also reveal several limitations. NEXUS has the best performance across varied metrics, but it does not minimize maximum penetration in isolation. The current setting also uses simplified contact and limited frictional effects. Future work should incorporate richer contact-event metrics, explicit frictional and rolling contact, larger multi-object suites, higher-resolution particle representations, and broader video-generation studies to validate downstream perceptual gains. 10 6 Conclusion 
+
+We introduced NEXUS, a neural energy-field framework for physically grounded 3D generation. Instead of directly predicting trajectories or forces, NEXUS formulates scene dynamics through different energy terms and learned dissipation on structural and contact graphs. This enables forces to be derived by scalar differentiation and rolled out with a multi-substep semi-implicit integrator. Across controlled trajectory benchmarks, NEXUS improves long-horizon prediction over representa-tive learned and physics-structured baselines, with ablations confirming the importance of contact modeling, structural energy, stiffness conditioning, and non-local geometry. We further show that the predicted 3D trajectories provide effective guidance for contact-rich video generation, improving collision, rebound, deformation, and settling behavior while maintaining competitive visual quality. 
+
+# References 
+
+[1] Jonathan Ho, Ajay Jain, and Pieter Abbeel. Denoising diffusion probabilistic models. In H. Larochelle, M. Ranzato, R. Hadsell, M.F. Balcan, and H. Lin, editors, Advances in Neural Information Processing Systems , volume 33, pages 6840–6851. Curran Associates, Inc., 2020. [2] Yaron Lipman, Ricky T. Q. Chen, Heli Ben-Hamu, Maximilian Nickel, and Matt Le. Flow Matching for Generative Modeling. arXiv e-prints , page arXiv:2210.02747, October 2022. [3] Jing Xiong, Gongye Liu, Lun Huang, Chengyue Wu, Taiqiang Wu, Yao Mu, Yuan Yao, Hui Shen, Zhongwei Wan, Jinfa Huang, Chaofan Tao, Shen Yan, Huaxiu Yao, Lingpeng Kong, Hongxia Yang, Mi Zhang, Guillermo Sapiro, Jiebo Luo, Ping Luo, and Ngai Wong. Autoregressive Models in Vision: A Survey. arXiv e-prints , page arXiv:2411.05902, November 2024. [4] OpenAI. Sora 2 video generator, 2024. Accessed: 2026-05-02. [5] Anssi Kanervisto, Dave Bignell, and Katja Hofmann. World and human action models towards gameplay ideation. Nature , 638(8051):656–663, 2025. [6] Thaddäus Wiedemer, Yuxuan Li, Paul Vicol, Shixiang Shane Gu, Nick Matarese, Kevin Swersky, Been Kim, Priyank Jaini, and Robert Geirhos. Video models are zero-shot learners and reasoners. arXiv e-prints ,page arXiv:2509.20328, September 2025. [7] Wenlong Huang, Yu-Wei Chao, Arsalan Mousavian, Ming-Yu Liu, Dieter Fox, Kaichun Mo, and Li Fei-Fei. PointWorld: Scaling 3D World Models for In-The-Wild Robotic Manipulation. arXiv e-prints , page arXiv:2601.03782, January 2026. [8] Philipp Wu, Alejandro Escontrela, Danijar Hafner, Ken Goldberg, and Pieter Abbeel. DayDreamer: World Models for Physical Robot Learning. arXiv e-prints , page arXiv:2206.14176, June 2022. [9] Michael McCabe, Payel Mukhopadhyay, Tanya Marwah, Bruno Regaldo-Saint Blancard, Francois Rozet, Cristiana Diaconu, Lucas Meyer, Kaze W. K. Wong, Hadi Sotoudeh, Alberto Bietti, Irina Espejo, Rio Fear, Siavash Golkar, Tom Hehir, Keiya Hirashima, Geraud Krawezik, Francois Lanusse, Rudy Morel, Ruben Ohana, Liam Parker, Mariel Pettee, Jeff Shen, Kyunghyun Cho, Miles Cranmer, and Shirley Ho. Walrus: A Cross-Domain Foundation Model for Continuum Dynamics. arXiv e-prints , page arXiv:2511.15684, November 2025. [10] Zijun Wang, Panwen Hu, Jing Wang, Terry Jingchen Zhang, Yuhao Cheng, Long Chen, Yiqiang Yan, Zutao Jiang, Hanhui Li, and Xiaodan Liang. ProPhy: Progressive Physical Alignment for Dynamic World Simulation. arXiv e-prints , page arXiv:2512.05564, December 2025. [11] Qiyuan Zhang, Biao Gong, Shuai Tan, Zheng Zhang, Yujun Shen, Xing Zhu, Yuyuan Li, Kelu Yao, Chunhua Shen, and Changqing Zou. PhysRVG: Physics-Aware Unified Reinforcement Learning for Video Generative Models. arXiv e-prints , page arXiv:2601.11087, January 2026. [12] Boyuan Chen, Hanxiao Jiang, Shaowei Liu, Saurabh Gupta, Yunzhu Li, Hao Zhao, and Shenlong Wang. Physgen3d: Crafting a miniature interactive world from a single image. In 2025 IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR) , pages 6178–6189, 2025. [13] Xiangyu Bai, He Liang, Bishoy Galoaa, Utsav Nandi, Shayda Moezzi, Yuhang He, and Sarah Ostadabbas. MoReGen: Multi-Agent Motion-Reasoning Engine for Code-based Text-to-Video Synthesis. arXiv e-prints ,page arXiv:2512.04221, December 2025. 
+
+11 [14] Yu Yuan, Xijun Wang, Tharindu Wickremasinghe, Zeeshan Nadir, Bole Ma, and Stanley H. Chan. New-tonGen: Physics-Consistent and Controllable Text-to-Video Generation via Neural Newtonian Dynamics. 
+
+arXiv e-prints , page arXiv:2509.21309, September 2025. [15] Tianyi Xie, Zeshun Zong, Yuxing Qiu, Xuan Li, Yutao Feng, Yin Yang, and Chenfanfu Jiang. Physgaussian: Physics-integrated 3d gaussians for generative dynamics. In Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition , pages 4389–4398, 2024. [16] Tianyuan Zhang, Hong-Xing Yu, Rundi Wu, Brandon Y Feng, Changxi Zheng, Noah Snavely, Jiajun Wu, and William T Freeman. Physdreamer: Physics-based interaction with 3d objects via video generation. In 
+
+European Conference on Computer Vision , pages 388–406. Springer, 2024. [17] Hanxiao Jiang, Hao-Yu Hsu, Kaifeng Zhang, Hsin-Ni Yu, Shenlong Wang, and Yunzhu Li. Phystwin: Physics-informed reconstruction and simulation of deformable objects from videos. ICCV , 2025. [18] Chen Wang, Chuhao Chen, Yiming Huang, Zhiyang Dou, Yuan Liu, Jiatao Gu, and Lingjie Liu. PhysCtrl: Generative Physics for Controllable and Physics-Grounded Video Generation. arXiv e-prints , page arXiv:2509.20358, September 2025. [19] Minh-Quan Le, Yuanzhi Zhu, Vicky Kalogeiton, and Dimitris Samaras. What about gravity in video generation? post-training newton’s laws with verifiable rewards. arXiv preprint arXiv:2512.00425 , 2025. [20] Sam Greydanus, Misko Dzamba, and Jason Yosinski. Hamiltonian Neural Networks. arXiv e-prints , page arXiv:1906.01563, June 2019. [21] Yaofeng Desmond Zhong, Biswadip Dey, and Amit Chakraborty. Extending lagrangian and hamiltonian neural networks with differentiable contact models. Advances in Neural Information Processing Systems ,34:21910–21922, 2021. [22] Congyue Deng, Brandon Y Feng, Cecilia Garraffo, Alan Garbarz, Robin Walters, William T Freeman, Leonidas Guibas, and Kaiming He. Denoising hamiltonian network for physical reasoning. arXiv preprint arXiv:2503.07596 , 2025. [23] Zhengqi Li, Richard Tucker, Noah Snavely, and Aleksander Holynski. Generative image dynamics. In 
+
+Proceedings of the IEEE/CVF conference on computer vision and pattern recognition , pages 24142–24153, 2024. [24] Xindi Yang, Baolu Li, Yiming Zhang, Zhenfei Yin, Lei Bai, Liqian Ma, Zhiyong Wang, Jianfei Cai, Tien-Tsin Wong, Huchuan Lu, et al. Vlipp: Towards physically plausible video generation with vision and language informed physical prior. In Proceedings of the IEEE/CVF International Conference on Computer Vision , pages 12360–12370, 2025. [25] Jing Wang, Ao Ma, Ke Cao, Jun Zheng, Zhanjie Zhang, Jiasong Feng, Shanyuan Liu, Yuhang Ma, Bo Cheng, Dawei Leng, et al. Wisa: World simulator assistant for physics-aware text-to-video generation. 
+
+arXiv preprint arXiv:2503.08153 , 2025. [26] Ke Zhang, Cihan Xiao, Yiqun Mei, Jiacong Xu, and Vishal M Patel. Think before you diffuse: Llms-guided physics-aware video generation. arXiv e-prints , pages arXiv–2505, 2025. [27] Hila Chefer, Uriel Singer, Amit Zohar, Yuval Kirstain, Adam Polyak, Yaniv Taigman, Lior Wolf, and Shelly Sheynin. Videojam: Joint appearance-motion representations for enhanced motion generation in video models. arXiv preprint arXiv:2502.02492 , 2025. [28] Karran Pandey, Yannick Hold-Geoffroy, Matheus Gadelha, Niloy J Mitra, Karan Singh, and Paul Guerrero. Motion modes: What could happen next? In Proceedings of the computer vision and pattern recognition conference , pages 2030–2039, 2025. [29] Tao Feng, Xianbing Zhao, Zhenhua Chen, Tien Tsin Wong, Hamid Rezatofighi, Gholamreza Haffari, and Lizhen Qu. Physics-grounded motion forecasting via equation discovery for trajectory-guided image-to-video generation. arXiv preprint arXiv:2507.06830 , 2025. [30] Ye Yuan, Jiaming Song, Umar Iqbal, Arash Vahdat, and Jan Kautz. Physdiff: Physics-guided human motion diffusion model. In Proceedings of the IEEE/CVF International Conference on Computer Vision (ICCV) , pages 16010–16021, October 2023. [31] Jiaxi Lv, Yi Huang, Mingfu Yan, Jiancheng Huang, Jianzhuang Liu, Yifan Liu, Yafei Wen, Xiaoxin Chen, and Shifeng Chen. Gpt4motion: Scripting physical motions in text-to-video generation via blender-oriented gpt planning. In Proceedings of the IEEE/CVF conference on computer vision and pattern recognition ,pages 1430–1440, 2024. 
+
+12 [32] Shaowei Liu, Zhongzheng Ren, Saurabh Gupta, and Shenlong Wang. Physgen: Rigid-body physics-grounded image-to-video generation. In European Conference on Computer Vision , pages 360–378. Springer, 2024. [33] Antonio Montanaro, Luca Savant Aira, Emanuele Aiello, Diego Valsesia, and Enrico Magli. Motioncraft: Physics-based zero-shot video generation. Advances in Neural Information Processing Systems , 37:123155– 123181, 2024. [34] Tianyi Xie, Yiwei Zhao, Ying Jiang, and Chenfanfu Jiang. Physanimator: Physics-guided generative cartoon animation. In Proceedings of the Computer Vision and Pattern Recognition Conference , pages 10793–10804, 2025. [35] Zizhang Li, Hong-Xing Yu, Wei Liu, Yin Yang, Charles Herrmann, Gordon Wetzstein, and Jiajun Wu. Wonderplay: Dynamic 3d scene generation from a single image and actions. In Proceedings of the IEEE/CVF International Conference on Computer Vision , pages 9080–9090, 2025. [36] Xuan Li, Yi-Ling Qiao, Peter Yichen Chen, Krishna Murthy Jatavallabhula, Ming Lin, Chenfanfu Jiang, and Chuang Gan. PAC-neRF: Physics augmented continuum neural radiance fields for geometry-agnostic system identification. In The Eleventh International Conference on Learning Representations , 2023. [37] Yutao Feng, Yintong Shang, Xuan Li, Tianjia Shao, Chenfanfu Jiang, and Yin Yang. Pie-nerf: Physics-based interactive elastodynamics with nerf. In Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition , pages 4450–4461, 2024. [38] Licheng Zhong, Hong-Xing Yu, Jiajun Wu, and Yunzhu Li. Reconstruction and simulation of elastic objects with spring-mass 3d gaussians. In European Conference on Computer Vision , pages 407–423. Springer, 2024. [39] Mingtong Zhang, Kaifeng Zhang, and Yunzhu Li. Dynamic 3d gaussian tracking for graph-based neural dynamics modeling. In 8th Annual Conference on Robot Learning , 2024. [40] Zhiyuan Gao, Jiageng Mao, Hong-Xing Yu, Haozhe Lou, Emily Yue-ting Jia, Jernej Barbic, Jiajun Wu, and Yue Wang. Seeing the wind from a falling leaf. In The Thirty-ninth Annual Conference on Neural Information Processing Systems , 2025. [41] Peter Battaglia, Razvan Pascanu, Matthew Lai, Danilo Jimenez Rezende, et al. Interaction networks for learning about objects, relations and physics. Advances in neural information processing systems , 29, 2016. [42] Yunzhu Li, Jiajun Wu, Russ Tedrake, Joshua B Tenenbaum, and Antonio Torralba. Learning particle dynamics for manipulating rigid bodies, deformable objects, and fluids. arXiv preprint arXiv:1810.01566 ,2018. [43] Alvaro Sanchez-Gonzalez, Jonathan Godwin, Tobias Pfaff, Rex Ying, Jure Leskovec, and Peter Battaglia. Learning to simulate complex physics with graph networks. In International conference on machine learning , pages 8459–8468. PMLR, 2020. [44] Tobias Pfaff, Meire Fortunato, Alvaro Sanchez-Gonzalez, and Peter W Battaglia. Learning mesh-based simulation with graph networks. arXiv preprint arXiv:2010.03409 , 2020. [45] Chanho Kim and Li Fuxin. Object dynamics modeling with hierarchical point cloud-based representations. In Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition , pages 20977– 20986, 2024. [46] Miles Cranmer, Sam Greydanus, Stephan Hoyer, Peter Battaglia, David Spergel, and Shirley Ho. La-grangian neural networks. arXiv preprint arXiv:2003.04630 , 2020. [47] Yaofeng Desmond Zhong, Biswadip Dey, and Amit Chakraborty. Symplectic ode-net: Learning hamiltonian dynamics with control. arXiv preprint arXiv:1909.12077 , 2019. [48] Marc Finzi, Ke Alexander Wang, and Andrew G Wilson. Simplifying hamiltonian and lagrangian neural networks via explicit constraints. Advances in neural information processing systems , 33:13880–13889, 2020. [49] Yaofeng Desmond Zhong, Biswadip Dey, and Amit Chakraborty. Dissipative symoden: Encoding hamiltonian dynamics with dissipation and control into deep learning. arXiv preprint arXiv:2002.08860 ,2020. 
+
+13 [50] Shaan A Desai, Marios Mattheakis, David Sondak, Pavlos Protopapas, and Stephen J Roberts. Port-hamiltonian neural networks for learning explicit time-dependent dynamical systems. Physical Review E ,104(3):034312, 2021. [51] Andrew Sosanya and Sam Greydanus. Dissipative hamiltonian neural networks: Learning dissipative and conservative dynamics separately. arXiv preprint arXiv:2201.10085 , 2022. [52] Vıctor Garcia Satorras, Emiel Hoogeboom, and Max Welling. E (n) equivariant graph neural networks. In 
+
+International conference on machine learning , pages 9323–9332. PMLR, 2021. [53] Hengshuang Zhao, Li Jiang, Jiaya Jia, Philip HS Torr, and Vladlen Koltun. Point transformer. In 
+
+Proceedings of the IEEE/CVF international conference on computer vision , pages 16259–16268, 2021. [54] Team Wan, Ang Wang, Baole Ai, Bin Wen, Chaojie Mao, Chen-Wei Xie, Di Chen, Feiwu Yu, Haiming Zhao, Jianxiao Yang, et al. Wan: Open and advanced large-scale video generative models. arXiv preprint arXiv:2503.20314 , 2025. [55] Zhuoyi Yang, Jiayan Teng, Wendi Zheng, Ming Ding, Shiyu Huang, Jiazheng Xu, Yuanming Yang, Wenyi Hong, Xiaohan Zhang, Guanyu Feng, et al. Cogvideox: Text-to-video diffusion models with an expert transformer. In International Conference on Learning Representations , volume 2025, pages 83048–83077, 2025. [56] Weijia Wu, Zhuang Li, Yuchao Gu, Rui Zhao, Yefei He, David Junhao Zhang, Mike Zheng Shou, Yan Li, Tingting Gao, and Di Zhang. Draganything: Motion control for anything using entity representation. In 
+
+European Conference on Computer Vision , pages 331–348. Springer, 2024. [57] Zhouxia Wang, Yushi Lan, Shangchen Zhou, and Chen Change Loy. Objctrl-2.5 d: Training-free object control with camera poses. International Journal of Computer Vision , 134(5):249, 2026. [58] Google DeepMind. Veo, 2026. Accessed: 2026-05-06. [59] Matt Deitke, Ruoshi Liu, Matthew Wallingford, Huong Ngo, Oscar Michel, Aditya Kusupati, Alan Fan, Christian Laforte, Vikram Voleti, Samir Yitzhak Gadre, et al. Objaverse-xl: A universe of 10m+ 3d objects. 
+
+Advances in Neural Information Processing Systems , 36:35799–35813, 2023. 
+
+14 A Additional Implementation Details 
+
+A.1 Dataset and Simulation Benchmark 
+
+We construct a controlled point-cloud dynamics benchmark by running physics simulation on high-quality 3D objects curated from ObjaverseXL [ 59 ]. Each episode contains object particles, an environment point cloud, per-frame object states, and control signals. The state at time t consists of particle positions xt ∈ RN ×3 and velocities vt ∈ RN ×3. The dataset contains 587 unique objects and 35 ,172 simulated trajectories. Each sample uses 256 object particles and 1024 environment/floor particles, resulting in 1280 particles in total. Each trajectory has 48 frames with a time step of approximately 0.0417 seconds, corresponding to about 24 FPS. The evaluated stiffness values are 
+
+k ∈ { 10 , 20 , 50 , 100 , 200 , 500 }.
+
+Scene composition. The main benchmark contains object–environment contact with floor and environment geometry; multi-object contact is reported separately in Section 4.4. For each episode, the object geometry is represented by a point cloud and the environment is represented by points with normals for contact evaluation. The same observable inputs are provided to all dynamics models. 
+
+Controls. Each rollout is conditioned on gravity, stiffness, and optional masked external forces. External forces are applied to selected object particles or regions according to the force mask. For a fixed object and force schedule, we evaluate multiple stiffness values to test whether each method captures stiffness-conditioned behavior rather than memorizing a single trajectory family. 
+
+Splits and episode counts. We use a held-out object split based on shape_index , with 90% of ob-jects used for training and 10% used for validation/testing. The training split contains 533 objects and 
+
+31 ,932 trajectories, while the validation/test split contains 54 objects and 3,240 trajectories. Across the six stiffness values, this corresponds to 5,322 training trajectories and 540 validation/test trajecto-ries per stiffness value. Each full trajectory contains 48 frames. During training, we use a rollout curriculum with rollout windows up to 24 steps; evaluation reports horizons H ∈ { 1, 6, 12 , 24 , 48 }.
+
+A.2 NEXUS Implementation Details Shared GNN encoder architecture. The main text reports only the shared encoder-plus-heads abstraction. Here we provide implementation-level details: all learned scalar heads use the shared node/edge embeddings from a message-passing GNN encoder, with hidden width 128 , MLP depth 2,and 4 message-passing steps unless otherwise stated. Structural/contact energy heads and Rayleigh heads are separate MLPs on top of the shared embeddings, while positivity constraints are enforced by softplus or exponential parameterizations as described below. 
+
+Structural graph preset. The default solid-graph preset builds object-internal local kNN edges with kobj = 18 , adds a minimum-spanning-tree connection to avoid disconnected components, and augments the graph with non-local geometric edges. The non-local edges use klong = 8 evenly selected neighbors from rank 12 to 96 in the initial point cloud. Structural edges never connect particles from different dynamic objects. 
+
+Contact graph preset. Object–environment contact connects each object particle to kcon = 8 
+
+nearest environment points. When environment normals are available, the signed point-plane gap for object particle i and environment point e is gie = ( xi −xe)⊤ne; otherwise we use point-point contact. For object–object contact, each particle selects ko-o = 4 nearest particles from the other object in each pair, in both directions. Object–object contact uses normal nij = ( xi − xj )/(∥xi − xj ∥2 + ε)
+
+and penetration margin δij = 2 rpαo-o − ∥ xi − xj ∥2, where rp is the particle contact radius and 
+
+αo-o = 1 by default. We use mean-k edge normalization; bidirectional object–object edges receive an additional factor of 0.5 to avoid double counting in both contact energy and contact Rayleigh terms. 
+
+Positive coefficients. Learned stiffness and damping coefficients are constrained to be non-negative by softplus or exponential parameterizations. For structural stiffness, we scale the positive coefficient by the user stiffness k and a rest-length factor so that the same network can represent different material controls. The main text omits these scale constants because they do not change the energy/Rayleigh formulation; they are fixed across all ablations unless explicitly removed. 15 A.3 Baseline Comparison Settings 
+
+All dynamics baselines are evaluated under matched observable inputs, controls, graph construction, rollout horizon, and training budget whenever their architectures permit. The comparison is designed to isolate the effect of the dynamics parameterization rather than differences in input information. 
+
+Matched inputs. All graph-based dynamics models receive object positions, velocities, stiffness control, gravity/external-force controls, and environment/contact information. Contact graphs used at evaluation time are built from predicted states so that errors accumulated during rollout affect subsequent contact reasoning for all methods. 
+
+Rollout protocol. Models are trained and evaluated autoregressively over the same rollout horizons. The main trajectory metric is RE@H for H ∈ { 1, 6, 12 , 24 , 48 }, with H = 48 clipped to the final available frame when needed. All methods are evaluated across the same stiffness bins and test episodes. 
+
+Baseline families. We evaluate three baseline groups under the same rollout setting and matched observables, controls, inferred graph pipeline, optimization budget, and evaluation metrics. First, we include direct predictors : Direct-State , which predicts next-state transitions directly, and Direct-Acceleration , which predicts accelerations and integrates forward; these test unconstrained transition and acceleration-regression parameterizations. Second, we include standard neural simulators —Interaction Network [ 41 ], Graph Network Simulator (GNS) [ 43 ], EGNN dynamics [ 52 ], and Point Transformer dynamics [ 53 ]—to test whether generic message passing and geometric point-cloud inductive biases are sufficient without our energy–dissipation decomposition. Third, we include a 
+
+physics-structured baseline : Explicit KNN Energy , which uses the same inferred structural/contact graphs but hand-specified structural/contact energy forms instead of geometry-conditioned neural scalar potentials. This baseline isolates whether fixed-form physical approximations can account for long-horizon performance without fully learned scalar energy parameterization. 
+
+Training details. All learned dynamics models are trained with AdamW using a learning rate of 
+
+10 −4 and weight decay of 10 −6. We use a ReduceLROnPlateau scheduler with decay factor 0.5.Models are trained for 20 epochs, with 3072 rollout windows sampled per training epoch and 256 
+
+rollout windows sampled per validation epoch. The batch size is one trajectory/window sample because graph sizes and rollout windows are handled with custom collation. We use Huber loss with delta 1.0, gradient clipping at 0.5, and no state noise for either positions or velocities. Training uses closed-loop rollout supervision with a curriculum: epochs 0–3 use 6 rollout steps, epochs 4–11 use 
+
+12 rollout steps, and epochs 12 –20 use 24 rollout steps. Experiments were run on an NVIDIA RTX 5090 GPU. For the initial 6-step rollout stage, one training epoch takes approximately 16 minutes for the single-object setting and increases with the number of interacting objects in the two-, three-, and five-object mixed-contact settings. 
+
+Model capacity. Unless otherwise specified, learned models use hidden dimension 128 , MLP depth 
+
+2, and 4 message-passing steps. We adjust message-passing depth for standard baseline conventions: Interaction Network uses 2 message steps, the GNS-style model uses 6 message steps, and the Point Transformer acceleration baseline uses 2 message steps. Most other baselines use 4 message steps. 
+
+Fairness controls. All baselines use the same graph construction procedure and the same rollout substep count of 4. The rollout loss uses λx = 1 .0 for position and λv = 0 .25 for velocity, matching the main training objective. Reported results are averaged over three random seeds. 16 Table 5: Three-seed uncertainty for the primary long-horizon rollout metrics. We report mean ±
+
+standard deviation over random seeds.                                                                                              
+
+> Model / Variant RE@24 RE@48 Full NEXUS 0.0873 ±0.0033 0.1367 ±0.0061
+> No dissipation 0.0947 ±0.0031 0.1536 ±0.0216 No extra force 0.1024 ±0.0018 0.2177 ±0.0038 Local graph only 0.1139 ±0.0031 0.1731 ±0.0038 Direct-Acceleration GNN 0.1237 ±0.0027 0.2169 ±0.0021 EGNN Dynamics 0.1239 ±0.0026 0.2188 ±0.0042 Graph Network Simulator (GNS) 0.1244 ±0.0010 0.2126 ±0.0019 Interaction Network 0.1250 ±0.0007 0.2190 ±0.0019 Direct-State GNN 0.1350 ±0.0052 0.2315 ±0.0181 Point Transformer Dynamics 0.1367 ±0.0017 0.2274 ±0.0020 Explicit KNN Energy 0.1601 ±0.0038 0.3062 ±0.0028 No stiffness k0.1899 ±0.0005 0.1769 ±0.0026 No structural energy 0.2351 ±0.0031 0.3532 ±0.0010 Point-point contact 0.8643 ±0.0387 3.6664 ±0.1934 No contact 1.6834 ±0.0001 7.3486 ±0.0004
+
+A.4 Stiffness-Conditioned Results 
+
+Table 6 breaks down the main RE@24 metric by stiffness value for representative methods and the no-stiffness ablation. Table 6: RE@24 by stiffness value.                                       
+
+> Model k= 10 20 50 100 200 500
+> NEXUS 0.078 0.083 0.079 0.077 0.093 0.116
+> Direct-Acceleration GNN 0.110 0.121 0.120 0.126 0.131 0.135 Graph Network Simulator (GNS) 0.105 0.119 0.125 0.129 0.133 0.139 Point Transformer Dynamics 0.130 0.140 0.140 0.141 0.138 0.141 No stiffness k0.197 0.133 0.136 0.181 0.229 0.262
+
+A.5 Video Generation Implementation 
+
+We use NEXUS as a trajectory-generation module upstream of a trajectory-conditioned image-to-video generator. The purpose of this experiment is to test whether improved physical rollout quality transfers to video synthesis through explicit motion control. 
+
+Pipeline. Given an input image, we estimate an object mask, reconstruct an object point cloud and an environment point cloud, and apply user-specified physical controls. NEXUS rolls out 3D object trajectories under gravity, stiffness, contact, and optional external forces. The resulting 3D trajectories are projected to the image plane and converted into dense 2D track maps used by the video generator. 
+
+Compared methods. We compare with text/image-conditioned and motion-controlled video-generation baselines: Wan2.2 [ 54 ], CogVideoX-5B [ 55 ], DragAnything [ 56 ], ObjCtrl-2.5D [ 57 ], Veo3 [ 58 ], and PhysCtrl [ 18 ]. For methods that accept only sparse motion control, we provide a centroid or single-point trajectory according to the method interface. For NEXUS, we use dense projected multi-point trajectories from the physics rollout. 
+
+Test cases. The main paper reports results on six contact-rich cases: car, cardboard box, duck, football, pig, and sponge. The prompts are: • Car: A miniature red toy SUV falls from the air, hits the wooden floor, bounces, slides forward, and finally settles, in a warm cozy living room with soft depth of field, realistic collision and motion. 17 • Cardboard box: A cardboard box drops onto the table, collides, bounces slightly, and then settles with realistic motion. • Duck: A toy duck drops onto the bathroom floor, collides, bounces, and settles with realistic plastic toy motion. • Football: A football drops onto the grass, collides, rebounds, and then rolls to a stop with realistic motion. • Pig: A toy pig falls to the bedroom floor, collides, rebounds slightly, and comes to rest with realistic motion. • Sponge: A sponge-like object drops onto the floor, collides, and settles with realistic elastic motion. 
+
+Evaluation protocol. We use GPT-5.5 as a 5-point Likert evaluator over Semantic Adherence (SA), Physical Commonsense (PC), and Video Quality (VQ), with evaluations conducted on May 1, 2026. For each method and case, the evaluator receives the full generated video as primary evidence and ten uniformly sampled frames as reference. The evaluator is instructed to use full-video motion as the primary evidence, use the frame grid only as reference, apply the same standard across methods, and not favor methods by name. The evaluator prompt is:   
+
+> You are evaluating physics-grounded video generation. For this test case, I provide: 1. The case prompt (scene + physical interaction intent). 2. Method videos (one video per method) in the same folder. 3. A 10-frame reference grid image ( combined_grid.jpg ). Please score each method on a 5-point Likert scale: 1 = poor, 2 = fair, 3 = acceptable, 4 = good, 5 = excellent. Criteria: Semantic Adherence (SA): whether generated content and motion match the text prompt, input scene, object identity, physical condition, and intended interaction. Physical Commonsense (PC): whether motion is physically plausible, including force response, contact, rebound, damping, stiffness behavior, and absence of severe penetra-tion/floating/teleportation. Video Quality (VQ): visual quality and temporal consistency. Penalize flicker, disappearance, identity drift, severe artifacts, unrealistic hallucinations, broken geometry, and static motion when motion is expected. Important: Use full video motion as primary evidence. Use combined_grid.jpg only as reference. Use the same standard across all methods. Do not favor methods by name. A visually good video can still receive low PC if physics is implausible.
+> case_id : [case id] Prompt: [case prompt]
+
+Human evaluation. To complement the GPT-based scores, we conducted a blind human evaluation with 10 non-author volunteer raters. The raters used the same case prompts, full method videos, 
+
+10 -frame reference grids, and 5-point SA/PC/VQ scoring criteria as the GPT evaluator. Method names were anonymized and presentation order was randomized. Raters were informed that the task was an anonymous research evaluation of synthetic object videos, participation was voluntary, and responses would be reported only in aggregate. No personal, sensitive, or biometric data was collected from raters, and no compensation was provided. The aggregate human scores averaged over cases and raters are reported together with the GPT-based scores in Table 4. 
+
+Generation settings. All generated videos are evaluated at 720 × 480 resolution, 24 FPS, and 48 
+
+frames. 18

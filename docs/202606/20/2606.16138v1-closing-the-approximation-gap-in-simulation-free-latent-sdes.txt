@@ -1,0 +1,3528 @@
+Title: Closing the Approximation Gap in Simulation-free Latent SDEs
+
+URL Source: https://arxiv.org/pdf/2606.16138v1
+
+Published Time: Tue, 16 Jun 2026 02:02:51 GMT
+
+Number of Pages: 59
+
+Markdown Content:
+# Closing the Approximation Gap in Simulation-free Latent SDEs 
+
+Henry D. Smith Brian L. Trippe ∗ Scott W. Linderman ∗
+
+Stanford University 
+
+{smithhd,btrippe,swl1}@stanford.edu 
+
+# Abstract 
+
+Recovering dynamical systems from noisy observations is a recurring challenge across scientific domains, including neuroscience and physics. Latent stochastic differential equations (SDEs) address this by modeling the system as an unobserved state that evolves according to a learnable SDE and generates the observations. Variational inference (VI) provides a tractable objective for fitting latent SDEs. Traditional VI algorithms evaluate this objective by numerical simulation over a time discretization, trading fidelity for computational cost. A recent class of algo-rithms, simulation-free VI, sidesteps this tradeoff by parameterizing the posterior through its instantaneous marginals rather than its drift. In this work, we show that the efficiency of existing simulation-free VI algorithms comes at a price: their pa-rameterizations restrict the approximate posterior to a subset of the SDEs available to simulation-based methods, degrading posterior inference and parameter learning. We propose Helmholtz-SDE, a simulation-free VI algorithm that closes this gap by optimizing over path laws compatible with a prescribed collection of marginals. Helmholtz-SDE recovers dynamics more faithfully than prior simulation-free meth-ods, with the largest gains under high posterior uncertainty. It further matches the performance of simulation-based VI at a fraction of the runtime. 
+
+# 1 Introduction 
+
+Latent stochastic differential equations (SDEs) enable the unsupervised discovery of dynamical systems from noisy, irregularly sampled time series, a setting common across scientific domains. They posit an unobserved latent state that evolves continuously in time and generates observations at a finite set of time points [ 1, 2]. Latent SDEs have been applied to neuroscience [ 3 , 4], disease modeling [5], and reduced-order fluid dynamics [6]. Fitting these models requires both learning the latent dynamics and approximating the posterior over continuous trajectories. Variational inference (VI) translates the problem of fitting latent SDEs into an optimization problem. However, evaluating the variational objective (ELBO) requires computing an integral over the full time horizon (a path-space KL divergence). Simulation-based VI algorithms estimate this term by sweeping across a time discretization at each gradient step, either by integrating an ODE to compute the posterior marginals or by simulating sample trajectories from the variational SDE. A recent line of work, simulation-free VI [ 6–8 ], sidesteps sequential simulation using stochastic VI. Rather than integrating, they compute an unbiased estimate of the objective by sampling a random time together with a state at that time. They make this estimate efficient by parameterizing the posterior through its one-time marginal distributions, i.e., the distribution of the latent state at each time, allowing states to be sampled directly without simulating the preceding trajectory. In this work, we show that the family of approximate posterior distributions over which simulation-free VI optimizes is strictly smaller than that available to simulation-based VI. One-time marginals do not determine a path law. Existing simulation-free methods choose a single compatible drift from                 
+
+> ∗Equal advising Preprint.
+> arXiv:2606.16138v1 [stat.ML] 15 Jun 2026 BA
+> 𝑞 (𝒙 !,4)𝑞 (𝒙 !,5)
+> 𝒙 !
+> Reference posterior drift 𝒇 "Residual field 𝒓 =𝒇 #–𝒇 "Corrected drift C
+> 𝑞 (𝒙 !,4)𝑞 (𝒙 !,5)
+> 𝒙 !
+> True posterior
+> Reference drift Helmholtz -SDE
+> 𝒙 !𝒙 !𝒙 !
+> 𝒙 $
+
+Figure 1: Overview of Helmholtz-SDE. A: Existing simulation-free VI algorithms commit to a single drift (red) for each set of one-time marginals (black). This choice induces transition distributions that can differ from those of the true posterior (purple), even when the one-time marginals agree. B:Helmholtz-SDE takes a drift consistent with a set of one-time marginals, then corrects it by a vector field that preserves the marginals. C: The resulting approximation (blue) better matches the posterior. many possibilities, implicitly restricting the variational posterior. When observations are sparse or noisy, this arbitrary choice can substantially degrade both posterior inference and learned dynamics. We propose Helmholtz-SDE , a simulation-free VI algorithm that removes this restriction. Starting from any drift compatible with the prescribed marginals, we compute a Helmholtz correction that preserves those marginals while optimizing the ELBO. The resulting posterior family remains simulation-free but spans a larger class of path laws, closing the gap to simulation-based VI. 
+
+# 2 Problem Statement 
+
+Model. We study latent stochastic differential equation (SDE) models, in which a K-dimensional latent state x(t) evolves over the interval 0 ≤ t ≤ T and gives rise to D-dimensional observa-tions y(tn) at times {tn}Nn=1 . Let θ denote the full collection of model parameters, including the parameters of the prior and the likelihood. The prior over the latent state is the solution to an SDE 
+
+Pθ: dx(t) = fp(x(t)|θ)dt + Σ(θ)1/2dw(t), x(0) ∼ p(x, 0|θ), 0 ≤ t ≤ T, (1) where fp(·| θ) : RK → RK is the drift function, Σ(θ)1/2 is the diffusion coefficient, (w(t)) 0≤t≤T is a standard K-dimensional Brownian motion, and p(x, 0|θ) is the initial state distribution. We denote the marginal density of Pθ at time t by p(x, t |θ). For simplicity of presentation, we restrict notation to a time-independent drift and a state- and time-independent diffusion coefficient. We observe data D = {(tn, y(tn)) }Nn=1 representing noisy readouts of the latent state. These observations are conditionally independent given the latent state: p(y|(x(t)) 0≤t≤T , θ) =
+
+QNn=1 p(y(tn)|x(tn), θ), where y = {y(tn)}Nn=1 . We describe our technical assumptions on the generative model in Appendix A.1. There are two goals in latent SDE models: (i) to learn the parameters θ that maximize log p(y|θ);and (ii) to infer an approximate posterior over the latent trajectory (x(t)) 0≤t≤T given the data D and parameters θ. In practice, one may have multiple trials {y(m)}Mm=1 , each representing an independent sample from the probabilistic model. In this case, the model parameters θ are learned using all trials, and the posterior factorizes over trials. For simplicity, we suppress the trial index m.
+
+Intractability. Both goals of learning and inference are generally intractable. For learning, evaluat-ing the marginal likelihood p(y|θ) involves marginalizing over the prior on latent trajectories (1) ; this integral cannot be evaluated in closed form. For inference, the posterior law is the solution to an SDE with the same diffusion coefficient Σ1/2 as the prior and drift obtained by solving a linear partial differential equation [ 9 –12 ]. In nonlinear or non-Gaussian settings, the posterior drift is unavailable in closed form, and solving the associated PDE can be computationally prohibitive even for small K.
+
+# 3 Background 
+
+Variational inference (VI) provides a tractable framework for joint learning and inference in latent SDEs. We first describe the variational objective and survey existing VI algorithms. We then identify a class of stochastic VI algorithms that avoid sequential simulation, the setting of our method. 23.1 Variational inference for latent SDE models 
+
+Variational inference (VI) approximates the intractable posterior with a distribution belonging to a tractable family, known as a variational family [13 , 14 ]. For latent SDEs, we consider the family Q
+
+comprised of diffusion processes 
+
+Qϕ: dx(t) = fq (x(t), t |ϕ)dt + Σ(θ)1/2dw(t), x(0) ∼ q(x, 0|ϕ), 0 ≤ t ≤ T, (2) where the variational parameters ϕ specify the posterior drift fq (·| ϕ) and the initial state distribution 
+
+q(x, 0|ϕ). This family is chosen because, when fq (·| ϕ) and q(x, 0|ϕ) are sufficiently expressive, the exact posterior will be in Q [see, e.g., 15]. We minimize the negative evidence lower bound (ELBO) over distributions in Q,
+
+L(θ, ϕ) = 
+
+> N
+
+X
+
+> n=1
+
+−EQϕ log p(y(tn)|x(tn), θ)
+
+| {z }
+
+> Lrec
+
++ DKL (q(x, 0|ϕ) ∥ p(x, 0|θ)) 
+
+| {z }
+
+> Linit
+
++12
+
+Z T
+
+> 0
+
+EQϕ ∥Σ(θ)−1/2{fq (x(t), t |ϕ) − fp(x(t)|θ)}∥ 2dt 
+
+| {z }
+
+> Lpath
+
+,
+
+(3) where Lrec is the reconstruction loss, Linit is the KL divergence to the prior initial distribution, and 
+
+Lpath is the path-space KL divergence to the prior. The negative ELBO is an upper bound on the negative marginal log likelihood − log p(y|θ), and the gap is the KL divergence between Qϕ and the exact posterior. Therefore, when the exact posterior is contained in Q it is the unique minimizer of eq. (3). Appendix A.2 gives a derivation. However, unlike the negative log likelihood, the ELBO provides a tractable objective for learning model parameters, which we seek to estimate by jointly optimizing with respect to ϕ and θ.Existing VI algorithms for latent SDEs fall into two broad classes based on how they evaluate the negative ELBO eq. (3): simulation-based and simulation-free. We describe each in turn. 
+
+3.2 Simulation-based VI 
+
+Simulation-based algorithms evaluate the path KL Lpath over a discretization of the interval [0 , T ] at each gradient step. When Qϕ is restricted to a tractable family, such as a Gaussian process with affine 
+
+fq and state-independent Σ, the marginals of Qϕ can be computed by integrating an ODE [ 1, 15 – 22 ]. When fq is parameterized more flexibly, e.g., by a neural network [ 2, 23 – 26 ], samples x(t) ∼ Qϕ
+
+are obtained by simulating the variational SDE (2) . In both cases, the time complexity per gradient step scales with the discretization of [0 , T ], introducing a tradeoff between approximation fidelity and computational cost. 
+
+3.3 Simulation-free VI 
+
+Simulation-free VI algorithms introduce two ideas to avoid discretizing the variational SDE and accelerate optimization of L(θ, ϕ). The first is to optimize a Monte Carlo estimate of eq. (3) 
+
+bL(θ, ϕ) = −N log p(y(tn)|x(tn))+log q(x(0) , 0|ϕ)
+
+p(x(0) , 0|θ) + T
+
+2 ∥Σ(θ)−1/2(fq (x(t), t |ϕ)−fp(x(t)|θ)) ∥2.
+
+Here, n ∼ U ({1, . . . , N }) is a random observation index, t ∼ U ([0 , T ]) is a random time, and 
+
+x(0) , x(tn), x(t) ∼ Qϕ are posterior samples. The estimate bL(θ, ϕ) avoids the sum over all observations in Lrec , the integral over the full trajectory in Lpath , and the expectations over Qϕ in all three terms of L(θ, ϕ). Compared to optimizing the negative ELBO, this approach introduces variance that is managed by averaging across Monte Carlo samples. Because the estimate samples random times rather than full paths, optimization amounts to a stochastic VI algorithm [27]. The second idea is to parameterize the drift fq that defines Qϕ implicitly through its one-time marginal distributions. In order for optimizing bL(θ, ϕ) to provide runtime benefits over optimizing the negative ELBO, we must be able to draw samples x(t) ∼ Qϕ without simulating the variational 3SDE eq. (2). This is achieved by reversing the usual construction of Qϕ: we first prescribe the marginal distribution of the posterior at any single time {q(x, t |ϕ)}0≤t≤T and then choose a drift fq
+
+compatible with those marginals. One can sample x(t) from the posterior with time complexity that does not depend on t.For example, SDE Matching (Bartosh et al. [8] ) parameterizes the posterior as having Gaus-sian marginals, q(x, t |ϕ) = N (m(t|ϕ), S(t|ϕ)) and show that a time-dependent, affine drift 
+
+fq (x, t |ϕ) = Aq (t|ϕ)x + bq (t|ϕ) defines a variational SDE with precisely these marginals. 2
+
+A compatible drift is readily computed from m(t|ϕ) and S(t|ϕ)) as            
+
+> fq(x, t |ϕ) =
+>  ddt S(t|ϕ)1/2
+> 
+> S(t|ϕ)−1/2−12Σ(θ)S(t|ϕ)−1
+> 
+> [x(t)−m(t|ϕ)] + ddt m(t|ϕ),(4)
+
+where S(t|ϕ)1/2 is the symmetric square root of S(t|ϕ). SVISE (Course and Nair [6 , 7] ) also consider Gaussian marginals and a time-dependent affine drift, but they instead choose Aq (t|ϕ) to be symmetric. We provide background on both algorithms in Appendix A.5. In both cases, unbiased gradient estimates of bL(θ, ϕ) with respect to θ and ϕ can be obtained via the reparameterization trick, without backpropagating through a simulated trajectory [28]. 
+
+# 4 Helmholtz-SDE: Augmented simulation-free variational inference 
+
+The simulation-free VI framework we described in Section 3.3 leaves an important ambiguity unresolved: the one-time marginal distributions {q(x, t |ϕ)}0≤t≤T do not uniquely determine the variational path law Qϕ. In general, many drifts fq realize the same collection of marginals, and existing simulation-free VI algorithms resolve this ambiguity by selecting a particular compatible drift for each set of marginals, independently of the variational objective in eq. (3). This choice is not a benign implementation detail: drifts with identical one-time marginals can induce different path laws, including different multi-time joint distributions (x(s), x(t)) for s̸ = t (Figure 1). When posterior uncertainty is high, fixing a single compatible drift can therefore substantially degrade both posterior inference and learned dynamics. We introduce Helmholtz-SDE, a simulation-free VI algorithm that removes this restriction by optimiz-ing over path laws sharing the same one-time marginals. We first characterize the path-law ambiguity left unresolved by marginal-based parameterizations: drifts realizing the same marginals differ by divergence-free vector fields, which can be added without altering those marginals (Section 4.1). We then show that the variational objective selects an optimal drift among this class (Section 4.2). Finally, we turn this characterization into a practical algorithm for Gaussian one-time marginals and state-independent diffusion (Section 4.3). 
+
+4.1 The Fokker-Planck equation and divergence-free vector fields 
+
+The Fokker-Planck equation characterizes the ambiguity in the posterior path-law that arises from parameterizing the one-time marginals. Let Qϕ ∈ Q be a variational distribution with drift fq and one-time marginals {q(x, t |ϕ)}0≤t≤T . The marginals evolve according to the PDE 
+
+∂∂t q(x, t |ϕ) = −∇ x · q(x, t |ϕ)fq (x, t |ϕ) + 12
+
+X
+
+> i,j
+
+Σij (θ)∂xixj q(x, t |ϕ), 0 ≤ t ≤ T, (5) known as the Fokker-Planck equation , where ∇x · f = P 
+
+> i
+
+∂xi fi(x) is the divergence operator. Equation (5) depends on the variational drift fq only through the divergence of q(x, t |ϕ)fq (x, t |ϕ).Consequently, any vector field v satisfying ∇x · [q(x, t |ϕ)v(x, t )] = 0 for all (x, t ) leaves the marginals unchanged when added to fq . We call such vector fields q-divergence-free . The following proposition shows that divergence-free vector fields are the only source of non-uniqueness. 
+
+Proposition 1: Consider two diffusions having drifts f and ˜f and common diffusion coefficient. They induce the same one-time marginals {q(x, t )}0≤t≤T iff f − ˜f is q-divergence-free. 
+
+Proof. One analyzes the Fokker-Planck equations for the two diffusions. See Appendix A.3. □  
+
+> 2The framework proposed by Bartosh et al. [8] can in principle support non-Gaussian one-time marginals, but the method is instantiated and evaluated only with Gaussian marginals. See Appendix A.5 for further discussion.
+
+44.2 Optimizing over path laws at fixed marginals 
+
+In Section 4.1, we identified the family of drifts compatible with a given set of one-time marginal distributions. Existing simulation-free VI algorithms commit to a single member, independent of the ELBO. We show next that optimizing the ELBO over this family produces an optimal drift. 
+
+Problem formulation. Fix a collection of one-time marginal distributions {q(x, t |ϕ)}0≤t≤T . We call a drift fq (x, t |ϕ) a reference drift for these marginals if the SDE with drift fq and diffusion coefficient Σ1/2 induces one-time marginals {q(x, t |ϕ)}0≤t≤T . For Gaussian one-time marginals, eq. (4) provides an example of a reference drift. By Proposition 1, every other drift with the same one-time marginals can be written as fq + v, where v(x, t ) is q-divergence-free. Thus, optimizing over all path laws compatible with these marginals is equivalent to optimizing over all divergence-free perturbations to the reference drift. In the ELBO, the reconstruction loss and the initial-time KL are unchanged by v, so the only dependence on the path law is through the path KL. The optimal compatible drift solves 
+
+inf  
+
+> v
+
+EQ∥Σ(θ)−1/2{fp(x(t)|θ) − fq (x(t), t |ϕ) − v(x(t), t )}∥ 2, (6) subject to ∇x · [v(x, t )q(x, t |ϕ)] = 0 , (x, t ) ∈ RK × [0 , T ]. Since modifying v at time s does not affect the marginal distribution at time t, the problem decouples over times 0 ≤ t ≤ T .
+
+Solution via the Helmholtz decomposition. Define the residual vector field r(x, t |θ, ϕ) = 
+
+fp(x|θ) − fq (x, t |ϕ) which measures the gap between the prior and the reference posterior drifts. Intuitively, we would like to choose v = r so that eq. (6) becomes zero. However, the divergence-free constraint prevents us from adding the part of r that would alter the marginals. To isolate the part of r that alters the marginals, we appeal to the q-weighted Helmholtz decomposition 
+
+r(x, t |θ, ϕ) = Σ(θ)∇xψ(x, t ) + h(x, t ), (7) where ∇xψ is a gradient field and h is a q-divergence-free vector field [ 29 ]. Σ∇xψ points in directions that alter the one-time marginals, while h points in directions that leave them invariant. The q-weighted Helmholtz decomposition thus separates r into exactly the two components we care about: the part we must leave alone to preserve marginals, and the part we are free to add. Substituting r = fp − fq into eq. (6) and using the q-weighted Helmholtz decomposition yields 
+
+EQ∥Σ(θ)−1/2{h(x(t), t ) − v(x(t), t )}∥ 2 + EQ∥Σ(θ)1/2∇xψ(x(t), t )∥2. (8) The cross term vanishes by integration by parts, using that h and v are q-divergence-free. The second term in eq. (8) does not depend on v, so the optimum of eq. (6) is achieved by v⋆ = h.In other words, among all diffusions sharing the prescribed marginals, the negative ELBO is min-imized by adding the q-divergence-free component of r(x, t |θ, ϕ) to the reference drift. While previous simulation-free VI algorithms commit to a single drift consistent with a set of marginals, we have shown that it is possible to optimize over all such drifts. 
+
+Computing the Helmholtz decomposition. The remaining question is how to compute the q-weighted Helmholtz decomposition of the residual vector field, eq. (7). Multiplying both sides of eq. (7) by q(x, t |ϕ) and computing the divergence yields 
+
+∇x · [q(x, t |ϕ)r(x, t |θ, ϕ)] = ∇x · [q(x, t |ϕ)Σ(θ)∇xψ(x, t )] (9) since h is q-divergence-free. In Appendix B.1, we show that eq. (9) can be further rewritten in terms of a Stein operator [ 30 , 31 ], and by inverting this operator we obtain a probabilistic representation for the Helmholtz decomposition. In general, this expression must be approximated via Monte Carlo. 
+
+4.3 A variational inference algorithm for Gaussian one-time marginals 
+
+Next, we translate our insights into a simulation-free VI algorithm that optimizes over multiple path laws for each collection of one-time marginals. We follow prior works [ 6– 8] and take the variational family to have Gaussian one-time marginals q(x, t |ϕ) = N (m(t|ϕ), S(t|ϕ)) with m(t|ϕ) and 5Algorithm 1: Helmholtz-SDE training 
+
+Require : data D; prior drift fp; Gaussian marginals (m, S); reference drift fq ; order ℓ
+
+for gradient iterations do 
+
+▷ Sample observation times, states to estimate bLrec ; compute closed-form Gaussian KL Linit 
+
+▷ Sample KL times sj ∼ Unif[0 , T ] and states xj,k ∼ N (m(sj ), S(sj )) 
+
+▷ Compute reference drift (fq )j,k ← fq (xj,k ) and order-ℓ Helmholtz correction 
+
+hj,k ← h(xj,k ) via Algorithm 2 
+
+▷ Set (fq, full )j,k ← (fq )j,k + hj,k and estimate bLpath 
+
+▷ Update (θ, ϕ) by a gradient step 
+
+end 
+
+S(t|ϕ) continuously differentiable in t and S(t|ϕ) positive definite. We further restrict to state- and time-independent diffusion Σ(θ)1/2.To leverage the simulation-free stochastic VI framework from Section 3.3, we must compute the variational drift for each collection of marginals {q(x, t |ϕ)}. By Section 4.2, the optimal such drift is given by the q-weighted Helmholtz decomposition of the residual r = fp − fq , where we choose the reference drift to be that in eq. (4). We now describe a tractable approximation to this decomposition and then state the resulting theoretical guarantee. Algorithm 1 summarizes Helmholtz-SDE. 
+
+Polynomial approximation. As we discussed in Section 4.2, the q-weighted Helmholtz decom-position admits a probabilistic solution that can be approximated via Monte Carlo. However, in our preliminary experiments, we observed that this approximation produced high variance gradient estimates. We therefore approximate r(x, t |θ, ϕ) by a low-order Taylor expansion about the posterior mean m(t|ϕ) and compute the q-weighted Helmholtz decomposition of the polynomial exactly. As a simple example, let ˜r(1) (x, t |θ, ϕ) denote the linearization of r about m(t|ϕ):
+
+˜r(1) (x, t |θ, ϕ) = r(m(t|ϕ), t |θ, ϕ) + Dxr(x, t |θ, ϕ)|x=m(t|ϕ)(x − m(t|ϕ)) , (10) where Dxr is the Jacobian of r. In the setting of Gaussian marginals, the q-weighted Helmholtz decomposition of a polynomial produces gradient and divergence-free components of the same degree. The decomposition of ˜r(1) is therefore linear, and its coefficients can be obtained by solving a linear system. The computation scales cubically in the latent dimension. Since the reference drift fq is also linear, the corrected SDE has linear drift, and its path law is a Gaussian process. More generally, for an order-ℓ polynomial approximation ˜r(ℓ)(x, t ), the Helmholtz decomposition incurs time complexity O(K2+ ℓ), which is tractable for linear and quadratic approximations in moderate latent dimensions; see Appendix B.3 for details. Corrections with ℓ ≥ 2 leave the Gaussian process family, allowing non-Gaussian multi-time joint distributions while preserving Gaussian marginals. All experiments in Section 6 use ℓ = 1 ; we observed no notable improvements with ℓ > 1.
+
+Optimality of Helmholtz-SDE. When the prior is linear and the observation model is linear-Gaussian, the true posterior is a Gaussian process given by the Kalman–Bucy smoother [ 32 ]. Existing simulation-free VI algorithms commit to a single posterior drift for each (m(t|ϕ), S(t|ϕ)) and, as we show in Appendix C.1, can incur an unbounded KL gap to the true posterior even in this conjugate setting. Helmholtz-SDE provably closes the gap: 
+
+Theorem 1 (Optimality of Helmholtz-SDE in the conjugate setting): Suppose the prior Pθ
+
+is linear and the observation model is linear and Gaussian. Let Q be the family of path laws induced by Helmholtz-SDE applied to all continuously differentiable m(t) and positive-definite 
+
+S(t). Then inf Q∈Q DKL (Q ∥ Q⋆) = 0 , where Q⋆ is the true posterior. 
+
+Proof. Linearity of the residual makes the Helmholtz decomposition exact; see Appendix B.2. □
+
+6Aobservation noise    
+
+> number of observations
+> Sym KL to true posterior (strong spira l)
+> number of observations
+> 𝑥 !𝑥 !
+> 𝑥 "
+
+## B
+
+> true prior
+> square root
+> true prior
+> Helmholtz
+
+## C     
+
+> observation noise
+> number of observations number of observations
+> Sym KL to true prior (strong spiral)
+> observation noise
+> number of observations number of observations
+
+## D        
+
+> Helmholtz square root
+> Learned dynamics (strong spiral) Sym KL to true prior (no spiral)
+> Helmholtz square root
+> Helmholtz square root
+
+Figure 2: Comparison of Helmholtz-SDE and the square root gauge on two OU spiral datasets: strong spiral, ω=2 π (A-C), and no spiral, ω=0 (D). A: The symmetric KL distance (nats) to the posterior across observation noise and number of observations. B: The symmetric KL distance to the true prior. C: The dynamic learned by Helmholtz-SDE and the square root gauge against the true prior drift at noise σ = 0 .3 and N = 10 observations. D: Same as B, but for the no spiral dataset. 
+
+# 5 Related Work 
+
+Dynamical systems models. Beyond the VI algorithms for latent SDEs discussed in Section 3, several adjacent works model continuous-time, irregularly sampled data. Neklyudov et al. [33] and Zhang et al. [34] propose simulation-free methods inspired by score-based generative modeling [ 35 –38 ], but model the process directly in observation space rather than via a latent SDE. Daems et al. [39] study latent SDEs driven by fractional Brownian motion. Kiyohara et al. [40] develop a VI algorithm permitting simulation-free sampling from both prior and posterior but with a mean-field variational family. A separate line of work replaces the SDE with a latent ODE [ 41 – 44 ]. None of these works address the path-law non-uniqueness arising from marginal-based posterior parameterizations. 
+
+Divergence-free constraints. Divergence-free vector fields and Helmholtz decompositions appear across machine learning in problems with physical or geometric structure: as parameterizations encoding continuity [ 45 ] or incompressibility [ 46 , 47 ], and in methods that model or decompose non-gradient vector-field structure [ 48 –52 ]. Our use is different: rather than imposing a divergence-free condition on the dynamics, we use the Helmholtz decomposition to characterize, at fixed one-time marginals, the family of compatible path laws and the optimal correction to a reference drift. 
+
+# 6 Experiments 
+
+We validate experimentally that Helmholtz-SDE shrinks the expressivity gap between simulation-free and simulation-based VI, with downstream improvements in dynamics learning. We begin with a linear, conjugate setting where the posterior is tractable and the gap can be quantified directly (Section 6.1), then move to nonlinear synthetic dynamics (Section 6.2) and two real-world systems: predator-prey cycles (Section 6.3) and reduced-order fluid dynamics (Section 6.4). Throughout, we match implementation choices across methods. In particular, existing VI algorithms differ in how they amortize the posterior approximation: across time, by representing it as a function of t, and across trials, by using an encoder to produce trial-specific parameters. Both strategies reduce memory at some cost to expressivity. We use the same amortization scheme whenever a method supports it. Full experimental details are in Appendices C and D. 7SING                                                                     
+
+> Latent -SDE
+> Helmholtz -SDE
+> SDE -Matching
+> SVISE
+> negative ELBO  ↓
+> simulation -based
+> simulation -free latents LL "sym KL #autocorr error #autocorr (lobe) #
+> SING  0.32 ±0.04 0.23 ±0.08 0.045 ±0.009 0.137 ±0.015
+> Latent-SDE  0.28 ±0.24 1.20 ±0.88 0.021 ±0.004 0.064 ±0.005
+> Helmholtz-SDE  0.09 ±0.00 0.06 ±0.01 0.024 ±0.003 0.052 ±0.004
+> SDE Matching  0.28 ±0.02 0.25 ±0.02 0.056 ±0.001 0.182 ±0.005
+> SVISE  0.31 ±0.02 0.33 ±0.02 0.050 ±0.002 0.174 ±0.003
+
+Figure 3: Helmholtz-SDE closes the gap between simulation-based and simulation-free VI algorithms on the noisy Lorenz attractor. Negative ELBO and LL of true latents under the posterior are averaged over trials; sym KL is averaged over one-time marginals. Autocorr error is the entrywise RMSE of the global 3×3 autocorrelation matrix, averaged over horizon t=2 . Errors are ±2SE over 5 replicates. 
+
+6.1 Ornstein-Uhlenbeck (OU) spiral 
+
+We first study the impact of augmenting the variational family in the conjugate setting, where the suboptimality of both the variational posterior and the learned prior can be analyzed directly. We consider the two-dimensional OU spiral 
+
+P : dx(t) = ( −αI2 + ωJ)x(t)dt + dw(t), p(x, 0) = N  0, 12α I2
+
+ , J =   0 −11 0
+
+ (11) whose drift decomposes into a contracting gradient field −αx and a p-divergence-free rotational field 
+
+ωJx . Observations follow the linear-Gaussian model p(y(ti)|x(ti)) = N (Cx (ti) + d, σ 2CC ⊤).
+
+Suboptimality of inference. Theorem 1 establishes that Helmholtz-SDE has zero KL gap to the posterior in this setting. In Appendix C.1, we show that the choices of variational drift made by SDE Matching [ 8] and SVISE [ 6 , 7], referred to as the “square root” and “symmetric” gauges, respectively, incur KL gap that grows linearly in ω. We validate this in simulation. Fixing Tmax = 5 and α = 0 .2,we vary observation noise σ, number of observations N , and rotational speed ω. Figure 2A shows that when circulatory probability current is strong under the prior, Helmholtz-SDE achieves a variational approximation orders of magnitude closer in symmetric KL to the true posterior than the square root gauge, with the largest gains at sparse observations and large noise. When ω = 0 (Figure 6), the posterior covariance is isotropic, in which case the square root gauge can represent the posterior drift (zero gap). Results for the symmetric gauge and ω ∈ { π/ 4, π/ 2, π } are in Appendix C.2. 
+
+Degradation in learning. We next test whether posterior misspecification degrades learning. Using the same grid of (σ, N, ω ) values, we jointly learn the prior (parameterized by a neural network drift) and observation model from 1024 independent trials. Figure 2B and D show that the regimes where the square root gauge yields the worst posterior approximation are also where prior learning degrades most. In many cases, the divergence-free correction is the difference between recovering the correct drift and learning an incorrect one (Figure 2C). However, consistent with previous work [ 53 ], better variational approximations do not translate monotonically to improvements in learning. 
+
+6.2 Noisy Lorenz attractor 
+
+In the following three subsections, we demonstrate that the advantages from Section 6.1 extend to nonlinear dynamics. We first consider Lorenz attractor dynamics, a classical chaotic system. The standard setup of Li et al. [2] uses small process noise and dense, low-noise observations; in this regime the posterior concentrates tightly around the true latent trajectory (Figure 11A). To simulate a setting with non-trivial posterior uncertainty, we sample latents on [0 , 5] with increased process noise and observe them every ∆t = 0 .25 (Figure 11B). We perform joint inference and learning using 
+
+1024 trials with K=4 latent dimensions, evaluating both one-time (symmetric KL to the true prior) and multi-time (lagged autocorrelation error) statistics of the prior. We compare Helmholtz-SDE to simulation-free (SDE Matching [ 8], SVISE [ 6 , 7 ]) and simulation-based (SING [ 15 ], Latent-SDE [ 2 ]) baselines (Figure 3). Among simulation-free methods, Helmholtz-SDE achieves a ∼20 nat smaller path KL than the alternatives, reflecting the inability of a pre-specified drift to represent the posterior path law. As a result, only Helmholtz-SDE accurately learns 8A
+
+D algae population (10 6 cells/ml) 
+
+> rotifer population (animals/ml) Helmholtz -SDE
+> SDE Matching
+
+B
+
+> rotifer population
+> algae population
+> Helmholtz -SDE
+> SDE Matching
+> rotifer population
+
+Crotational period                      
+
+> density
+> rotational period
+> algae
+> rotifers
+> Helmholtz -SDE
+> SDE Matching
+> Days
+> period lag rot prop "forecast MSE #
+> Blasius et al., 2020 6.7 1.7 ——
+> Helmholtz-SDE 6.93 (0 .07) 1.66 (0 .02) 0.71 (0 .01) 1.03 (0 .02)
+> SDE Matching 13 .33 (0 .31) 3.23 (0 .11) 0.46 (0 .01) 1.11 (0 .03)
+> SVISE 13 .46 (0 .19) 3.26 (0 .04) 0.49 (0 .01) 1.10 (0 .02)
+
+Figure 4: Helmholtz-SDE recovers predator-prey dynamics more faithfully than SDE Matching. 
+
+A: Posterior mean ±2 SD over a representative window. B: Phase portraits of learned dynamics: Helmholtz-SDE recovers a limit cycle, SDE Matching decays to a fixed point. C: Peak-period distribution across 100-day forward simulations from the learned prior; dashed line marks the empirical period of 6.7 days. D: Rotation period, predator lag, and proportion of time in coherent rotation computed per replicate as the median across forward simulations using the wavelet analysis of Blasius et al. [54] ; forecast MSE, in log coordinates. Values are median (IQR) across 10 replicates. the outward-spiraling dynamics within each lobe of the attractor (Figure 12). Helmholtz-SDE also matches or exceeds simulation-based methods in dynamics recovery. SING attains a slightly tighter nELBO but at substantially higher cost: on an H100 GPU, Helmholtz-SDE reaches per-trial nELBO below 50 nat in 157 .7 ± 9.6 s, whereas SING requires 3525 .7 ± 697 .5 s, over 20 × slower. 
+
+6.3 Predator-prey system 
+
+Predator-prey systems exhibit cyclic dynamics in which the predator population lags the prey, and recovering this lag structure is important to ecological interpretation [ 55 – 59 ]. Because the lag is a multi-time statistic, it directly probes the path law approximation made by simulation-free algorithms. We study the dataset of Blasius et al. [54] , who cultivate rotifers ( B. calyciflorus , a freshwater zooplankton) feeding on algae in a controlled environment and measure both populations daily for up to 374 days. The system exhibits persistent cycles with a mean period of 6.7 days, in which the rotifer population lags the algae by approximately 1.7 days. Rather than imposing a biological model on dynamics [60], we aim to learn a generative model of the dynamics directly from data. To this end, we consider the longest trial and restrict to windows of coherent oscillation following Blasius et al. [54] , yielding 255 days of data across 4 subtrials. We hold out the last 8 days of each ( ∼1 cycle) for forecasting. We then fit Helmholtz-SDE, SDE Matching, and SVISE on the log-transformed rotifer and algae populations with K=2 latent dimensions. All methods produce plausible posterior approximations over the observed populations (Figure 4A). However, the learned generative dynamics differ qualitatively: Helmholtz-SDE yields a stable limit cycle, while SDE Matching decays to a fixed point (Figure 4B). Moreover, the rotational dynamics learned by Helmholtz-SDE closely match the true biological system, with median period 6.93 days and predator-prey lag 1.66 days, both close to the estimates from Blasius et al. [54] (Figure 4C,D). SDE Matching, in contrast, recovers a period twice as long ( 13 .33 days) and a correspondingly inflated lag ( 3.23 days). We provide details on our wavelet analysis in Appendix D.2. 
+
+6.4 Reduced order models of fluid dynamics 
+
+As a final case study, we apply Helmholtz-SDE to a problem in computational fluid dynamics: modeling a two-dimensional incompressible flow past a circular cylinder at Reynolds number 2 · 10 3,a regime with strong, persistent vortices in the wake (Figure 5A). We use the dataset of Course and Nair [6] , in which the Navier–Stokes equations are discretized and solved on a grid of nearly 6 · 10 5
+
+points using the immersed boundary projection method [61]. 9Velocity field (38 POD modes), 𝑡 = 260 .2   
+
+> Mean forecasted velocity field, 𝑡 =260 .2
+> speed
+
+A B Space -time autocorrelation along wake   
+
+> time lag 𝛥𝑡
+> streamwise lag  𝛥 𝒛 !
+> streamwise direction 𝒛 !
+> transverse direction  𝒛 "
+> Helmholtz -SDE
+> SDE Matching
+> True dynamics
+
+Figure 5: Helmholtz-SDE learns coherent wake dynamics in high-dimensional fluid flow past a 2D cylinder. A: True and forecasted mean velocity fields at 4 time units into the forecast window. B: Joint space–time autocorrelation along the streamwise direction in the vortex region [1 , 10] × [−0.1, 0.1] ,from prior samples at the true t=0 initial condition. Diagonal banding indicates vortices being advected downstream at a coherent speed; rapid decay reflects loss of temporal coherence. Reduced-order modeling (ROM) provides a toolkit for representing such high-dimensional systems with low-dimensional surrogates. Classical projection-based approaches require explicit access to the discretized PDE [ 62 ]. Data-driven approaches instead learn reduced dynamics directly from snapshots of the time series, sidestepping projection of the PDE. Following Course and Nair [6] ,we apply dimensionality reduction (POD, [ 63 , 64 ]) to velocity snapshots and retain K = 38 modes capturing 90% of the kinetic energy. We observe each POD coefficient, perturbed by Gaussian noise, every ∆t = 0 .3 time units over an interval of length 195 .2. We hold out 10 time units for forecasting. Helmholtz-SDE successfully learns a ROM of the cylinder dynamics (Figure 5A). The space– time autocorrelation along the wake reveals that, compared to SDE Matching, Helmholtz-SDE better recovers the traveling-wave structure of vortex advection (Figure 5B). This translates to a 20 .4% reduction in integrated MSE ( 18 .9% for SVISE) over the 10-unit forecast window, at modest additional training cost (approx. 3 × larger per-iteration cost on H100 GPU). This example demonstrates that even for moderate latent dimensions K, our approximation to the Helmholtz decomposition remains tractable and yields improvements in dynamics learning. 
+
+# 7 Discussion 
+
+Simulation-free variational inference promises the accuracy of simulation-based algorithms at a fraction of the cost, but only when the variational family is rich enough to represent the posterior. We have shown that under high posterior uncertainty, existing simulation-free algorithms fall short: by committing to an arbitrary drift consistent with their one-time marginals, they restrict the posterior to a subset of the path laws available to simulation-based methods. Helmholtz-SDE removes this restriction. Starting from any reference drift, it adds a closed-form correction that preserves the prescribed marginals while optimizing over a larger family of path laws. The result is a simulation-free algorithm that closes the expressivity gap to simulation-based VI and yields more faithful recovery of the underlying dynamics. Two limitations point to natural extensions. First, the analytical form for the Helmholtz correction depends on the state independence of the diffusion coefficient and Gaussianity of the marginals. Relaxing either assumption, for example by learning the divergence-free correction, would broaden the algorithm’s applicability. Second, higher-order polynomial corrections to the residual scale unfavorably as the latent dimension grows; in our experiments we did not observe gains beyond the linear approximation, but more efficient parameterizations may be beneficial in settings we have not explored. More broadly, we view simulation-free VI as a promising path toward scalable unsupervised discovery of dynamical systems, and Helmholtz-SDE as a step toward making that path competitive with, and ultimately preferable to, its simulation-based counterpart. 
+
+# Acknowledgments and Disclosure of Funding 
+
+HDS is supported by the NSF Graduate Research Fellowship (DGE-2146755) and the Knight-Hennessy graduate fellowship. HDS and SWL are supported by grants from the NIH BRAIN Initiative (U19NS113201, R01NS131987, R01NS113119, & RF1MH133778), the NSF/NIH CRCNS 10 Program (R01NS130789), and the Sloan, Simons, and McKnight Foundations. The authors have no competing interests to declare. We thank Amber Hu, Cole Citrenbaum, Hannah Lee, Joshua Lunger, and Renato Berlinghieri for their helpful feedback on the manuscript. We thank Peter Pao-Huang for discussions at the beginning of the project regarding divergence-free vector fields. 11 References 
+
+[1] Cédric Archambeau, Dan Cornford, Manfred Opper, and John Shawe-Taylor. Gaussian process approximations of stochastic differential equations. In Gaussian Processes in Practice , 2007. [2] Xuechen Li, Ting-Kam Leonard Wong, Ricky TQ Chen, and David K Duvenaud. Scalable gradients and variational inference for stochastic differential equations. In Symposium on Advances in Approximate Bayesian Inference , 2020. [3] Ahmed ElGazzar and Marcel van Gerven. Universal differential equations as a common modeling language for neuroscience. arXiv preprint arXiv:2403.14510 , 2024. [4] Amber Hu, David Zoltowski, Aditya Nair, David Anderson, Lea Duncker, and Scott Linderman. Modeling latent neural dynamics with Gaussian process switching linear dynamical systems. 
+
+Advances in Neural Information Processing Systems , 2024. [5] Joshua Durso-Finley, Berardino Barile, Jean-Pierre Falet, Douglas L Arnold, Nick Pawlowski, and Tal Arbel. Probabilistic temporal prediction of continuous disease trajectories and treatment effects using neural SDEs. In International Conference on Medical Image Computing and Computer-Assisted Intervention . Springer, 2024. [6] Kevin Course and Prasanth B Nair. State estimation of a physical system with unknown governing equations. Nature , 2023. [7] Kevin Course and Prasanth Nair. Amortized reparametrization: Efficient and scalable variational inference for latent SDEs. Advances in Neural Information Processing Systems , 2023. [8] Grigory Bartosh, Dmitry Vetrov, and Christian A Naesseth. SDE Matching: scalable and simulation-free training of latent stochastic differential equations. In International Conference on Machine Learning , 2025. [9] Harold J Kushner. On the differential equations satisfied by conditional probability densities of Markov processes, with applications. Journal of the Society for Industrial and Applied Mathematics, Series A: Control , 1964. [10] Ruslan Leont’evich Stratonovich. Conditional Markov processes. In Non-linear transformations of stochastic processes . Elsevier, 1965. [11] Etienne Pardoux. Équations du filtrage non linéaire de la prédiction et du lissage. Stochastics ,1982. [12] Cédric Archambeau and Manfred Opper. Approximate inference for continuous-time Markov processes. Bayesian time series models , 2011. [13] Michael I Jordan, Zoubin Ghahramani, Tommi S Jaakkola, and Lawrence K Saul. An introduc-tion to variational methods for graphical models. Machine learning , 1999. [14] David M Blei, Alp Kucukelbir, and Jon D McAuliffe. Variational inference: A review for statisticians. Journal of the American Statistical Association , 2017. [15] Amber Hu, Henry Smith, and Scott Linderman. SING: SDE inference via natural gradients. 
+
+Advances in Neural Information Processing Systems , 2025. [16] Cédric Archambeau, Manfred Opper, Yuan Shen, Dan Cornford, and John Shawe-Taylor. Variational inference for diffusion processes. Advances in Neural Information Processing Systems , 2007. [17] Lea Duncker, Gergo Bohner, Julien Boussard, and Maneesh Sahani. Learning interpretable continuous-time models of latent stochastic dynamical systems. In International Conference on Machine Learning , 2019. [18] Prakhar Verma, Vincent Adam, and Arno Solin. Variational Gaussian process diffusion pro-cesses. In International Conference on Artificial Intelligence and Statistics , 2024. 12 [19] Lukas Köhs, Bastian Alt, and Heinz Koeppl. Variational inference for continuous-time switching dynamical systems. Advances in Neural Information Processing Systems , 2021. [20] Christian Wildner and Heinz Koeppl. Moment-based variational inference for stochastic differential equations. In International Conference on Artificial Intelligence and Statistics ,2021. [21] Byoungwoo Park, Hyungi Lee, and Juho Lee. Amortized control of continuous state space Feynman-Kac model for irregular time series. In International Conference on Learning Repre-sentations , 2025. [22] Joonhyeong Park, Byoungwoo Park, Chang-Bae Bang, Jungwon Choi, Hyungjin Chung, Byung-Hoon Kim, and Juho Lee. Stochastic optimal control for continuous-time fMRI representation learning. In International Conference on Learning Representations , 2026. [23] Tom Ryder, Andrew Golightly, A Stephen McGough, and Dennis Prangle. Black-box variational inference for stochastic differential equations. In International Conference on Machine Learning ,2018. [24] Belinda Tzen and Maxim Raginsky. Neural stochastic differential equations: Deep latent Gaussian models in the diffusion limit. arXiv preprint arXiv:1905.09883 , 2019. [25] Patrick Kidger, James Foster, Xuechen Chen Li, and Terry Lyons. Efficient and accurate gradients for neural SDEs. Advances in Neural Information Processing Systems , 2021. [26] YongKyung Oh, Dong-Young Lim, and Sungil Kim. Stable neural stochastic differential equations in analyzing irregular time series data. In International Conference on Learning Representations , 2024. [27] Matthew D Hoffman, David M Blei, Chong Wang, and John Paisley. Stochastic variational inference. Journal of Machine Learning Research , 2013. [28] Diederik P Kingma and Max Welling. Auto-encoding variational Bayes. In International Conference on Learning Representations , 2014. [29] Harsh Bhatia, Gregory Norgard, Valerio Pascucci, and Peer-Timo Bremer. The Helmholtz-Hodge decomposition—a survey. IEEE Transactions on visualization and computer graphics ,2012. [30] Andrew D Barbour. Stein’s method for diffusion approximations. Probability theory and related fields , 1990. [31] Jackson Gorham and Lester Mackey. Measuring sample quality with Stein’s method. Advances in Neural Information Processing Systems , 2015. [32] Rudolph E Kalman and Richard S Bucy. New results in linear filtering and prediction theory. 
+
+Journal of Basic Engineering , 1961. [33] Kirill Neklyudov, Rob Brekelmans, Daniel Severo, and Alireza Makhzani. Action matching: Learning stochastic dynamics from samples. In International Conference on Machine Learning ,2023. [34] Xi Zhang, Yuan Pu, Yuki Kawamura, Andrew Loza, Yoshua Bengio, Dennis L Shung, and Alexander Tong. Trajectory flow matching with applications to clinical time series modelling. 
+
+Advances in Neural Information Processing Systems , 2024. [35] Aapo Hyvärinen and Peter Dayan. Estimation of non-normalized statistical models by score matching. Journal of Machine Learning Research , 2005. [36] Yang Song, Jascha Sohl-Dickstein, Diederik P Kingma, Abhishek Kumar, Stefano Ermon, and Ben Poole. Score-based generative modeling through stochastic differential equations. In 
+
+International Conference on Learning Representations , 2021. 13 [37] Yaron Lipman, Ricky TQ Chen, Heli Ben-Hamu, Maximilian Nickel, and Matt Le. Flow matching for generative modeling. In International Conference on Learning Representations ,2023. [38] Michael Albergo, Nicholas M Boffi, and Eric Vanden-Eijnden. Stochastic interpolants: A unifying framework for flows and diffusions. Journal of Machine Learning Research , 2025. [39] Rembert Daems, Manfred Opper, Guillaume Crevecoeur, and Tolga Birdal. Variational inference for SDEs driven by fractional noise. In International Conference on Learning Representations ,2024. [40] Naoki Kiyohara, Edward Johns, and Yingzhen Li. Neural stochastic flows: Solver-free mod-elling and inference for SDE solutions. Advances in Neural Information Processing Systems ,2025. [41] Markus Heinonen, Cagatay Yildiz, Henrik Mannerström, Jukka Intosalmi, and Harri Lähdesmäki. Learning unknown ODE models with Gaussian processes. In International Conference on Machine Learning , 2018. [42] Ricky TQ Chen, Yulia Rubanova, Jesse Bettencourt, and David K Duvenaud. Neural ordinary differential equations. Advances in Neural Information Processing Systems , 2018. [43] Yulia Rubanova, Ricky TQ Chen, and David K Duvenaud. Latent ordinary differential equations for irregularly-sampled time series. Advances in Neural Information Processing Systems , 2019. [44] Cagatay Yildiz, Markus Heinonen, and Harri Lahdesmaki. ODE 2VAE: Deep generative second order ODEs with Bayesian neural networks. Advances in Neural Information Processing Systems , 2019. [45] Jack Richter-Powell, Yaron Lipman, and Ricky TQ Chen. Neural conservation laws: A divergence-free perspective. Advances in Neural Information Processing Systems , 35, 2022. [46] Jonathan Tompson, Kristofer Schlachter, Pablo Sprechmann, and Ken Perlin. Accelerating eulerian fluid simulation with convolutional networks. In International Conference on Machine Learning , 2017. [47] Xigui Li, Hongwei Zhang, Ruoxi Jiang, Deshu Chen, Chensen Lin, Limei Han, Yuan Qi, Xin Guo, and Yuan Cheng. Project and generate: Divergence-free neural operators for incompress-ible flows. arXiv preprint arXiv:2603.24500 , 2026. [48] Renato Berlinghieri, Brian L Trippe, David R Burt, Ryan James Giordano, Kaushik Srinivasan, Tamay Özgökmen, Junfei Xia, and Tamara Broderick. Gaussian processes at the helm (holtz): A more fluid model for ocean currents. In International Conference on Machine Learning , 2023. [49] Hao Xu and Jia Pan. HHD-GP: Incorporating Helmholtz-Hodge decomposition into Gaussian processes for learning dynamical systems. Advances in Neural Information Processing Systems ,37, 2024. [50] Miao Qi, Ramzi Idoughi, and Wolfgang Heidrich. HDNet: physics-inspired neural network for flow estimation based on Helmholtz decomposition. arXiv preprint arXiv:2406.08570 , 2024. [51] Christian Horvat and Jean-Pascal Pfister. On gauge freedom, conservativity and intrinsic dimensionality estimation in diffusion models. In International Conference on Learning Representations , 2024. [52] Katarina Petrovi´ c, Lazar Atanackovic, Viggo Moro, Kacper Kapu´ sniak, Ismail Ilkan Ceylan, Michael Bronstein, Avishek Joey Bose, and Alexander Tong. Curly flow matching for learning non-gradient field dynamics. Advances in Neural Information Processing Systems , 2025. [53] Richard Turner and M. Sahani. Two problems with variational expectation maximisation for time-series models. Bayesian Time Series Models , 2011. [54] Bernd Blasius, Lars Rudolf, Guntram Weithoff, Ursula Gaedke, and Gregor F Fussmann. Long-term cyclic persistence in an experimental predator–prey system. Nature , 2020. 14 [55] Alfred James Lotka. Elements of physical biology . Williams & Wilkins, 1925. [56] Vito Volterra. Fluctuations in the abundance of a species considered mathematically. Nature ,1926. [57] Charles Elton and Mary Nicholson. The ten-year cycle in numbers of the lynx in canada. The Journal of Animal Ecology , 1942. [58] Syunro Utida. Cyclic fluctuations of population density intrinsic to the host-parasite system. 
+
+Ecology , 1957. [59] Alan Berryman. Population cycles: the case for trophic interactions . Oxford University Press, 2002. [60] Edward McCauley, Roger M Nisbet, Andre M De Roos, William W Murdoch, and William SC Gurney. Structured population models of herbivorous zooplankton. Ecological monographs ,1996. [61] Kunihiko Taira and Tim Colonius. The immersed boundary method: a projection approach. 
+
+Journal of Computational Physics , 2007. [62] Steven L Brunton, Bernd R Noack, and Petros Koumoutsakos. Machine learning for fluid mechanics. Annual review of fluid mechanics , 2020. [63] Lawrence Sirovich. Turbulence and the dynamics of coherent structures. Parts I–III. Quarterly of Applied Mathematics , 1987. [64] Gal Berkooz, Philip Holmes, and John L Lumley. The proper orthogonal decomposition in the analysis of turbulent flows. Annual review of fluid mechanics , 1993. [65] Bernt Øksendal. Stochastic Differential Equations: An Introduction with Applications . Springer Science & Business Media, 2013. [66] David Nualart. The Malliavin calculus and related topics . Springer, 2006. [67] Ioannis Karatzas and Steven Shreve. Brownian motion and stochastic calculus . Springer, 2014. [68] Jackson Gorham, Andrew B Duncan, Sebastian J Vollmer, and Lester Mackey. Measuring sample quality with diffusions. The Annals of Applied Probability , 2019. [69] Qiang Liu, Lester Mackey, and Chris Oates. Probabilistic inference and learning with Stein’s method. arXiv preprint arXiv:2603.07467 , 2026. [70] Etienne Pardoux and A Yu Veretennikov. On the Poisson equation and diffusion approximation. 
+
+The Annals of Probability , 2005. [71] David Gilbarg, Neil S Trudinger, David Gilbarg, and NS Trudinger. Elliptic partial differential equations of second order . Springer, 1998. [72] Simo Särkkä and Lennart Svensson. Bayesian filtering and smoothing . Cambridge University Press, 2023. [73] Diederik P Kingma and Jimmy Ba. Adam: A method for stochastic optimization. In Interna-tional Conference on Learning Representations , 2014. [74] Xuerong Mao, Glenn Marion, and Eric Renshaw. Environmental Brownian noise suppresses explosions in population dynamics. Stochastic Processes and their Applications , 2002. [75] Christopher Torrence and Gilbert P Compo. A practical guide to wavelet analysis. Bulletin of the American Meteorological society , 1998. 15 Appendix 
+
+Appendix A: Background on variational inference for latent SDEs 
+
+– A.1: Technical assumptions 
+
+– A.2: ELBO derivation 
+
+– A.3: Divergence-free vector fields 
+
+– A.4: Gaussian one-time marginals 
+
+– A.5: SVISE (Course and Nair [6]) and SDE-Matching (Bartosh et al. [8]) Appendix B: Helmholtz-SDE 
+
+– B.1: Computing the Helmholtz decomposition 
+
+– B.2: The Helmholtz decomposition for Gaussian marginals 
+
+– B.3: Polynomial approximation to residual vector field 
+
+– B.4: Algorithm summary Appendix C: Linear SDE experiments: Ornstein-Uhlenbeck spiral 
+
+– C.1: Theoretical results for OU spiral 
+
+– C.2: Simulation experiment details Appendix D: Nonlinear SDE experiments 
+
+– D.1: Noisy Lorenz attractor 
+
+– D.2: Experimental predator-prey system 
+
+– D.3: Reduced order models for fluid dynamics 16 A Background on variational inference for latent SDEs 
+
+In this section, we provide additional background on variational inference for latent SDEs. First, in Appendix A.1 we describe our formal assumptions necessary for the probabilistic model and variational inference objective to be well-posed. Thereafter in Appendix A.2 we derive the evidence lower bound (ELBO) to the observed data log likelihood. In Appendix A.3 we provide further discussion of divergence-free vector fields. In particular, we prove Proposition 1 as well as a characterization of divergence-free vector fields for the setting of Gaussian one-time marginals (Proposition 2). We conclude in Appendix A.5 by discussing SVISE (Course and Nair [6 , 7] ) and SDE Matching (Bartosh et al. [8] ). For each algorithm we derive the choice of posterior drift, and we discuss how this choice relates to Helmholtz-SDE. For full generality, we allow the prior drift fp to be time-dependent and for the diffusion coefficient 
+
+Σ to be both space- and time-dependent. For ease of notation, we drop the dependence of the prior and likelihood on the model parameters θ, as well as the dependence of the variational posterior on its parameters ϕ.
+
+A.1 Technical Assumptions 
+
+In this subsection, we detail our formal assumptions made on the prior (1) and posterior (2) processes. 
+
+Existence and uniqueness. For the SDEs eq. (1) and eq. (2) to admit unique strong solutions, we follow the classical route of imposing Lipschitz continuity and linear growth on the drifts and diffusion (see, e.g., Øksendal [65, Theorem 5.2.1]). 
+
+Assumption (A1) (Drift and Diffusion Regularity): There exist constants C1, C 2 ≥ 0 such that, for all t ∈ [0 , T ] and all x, y ∈ RK ,
+
+∥f (x, t ) − f (y, t )∥ + ∥Σ(x, t )1/2 − Σ(y, t )1/2∥F ≤ C1∥x − y∥, (Lipschitz) 
+
+∥f (x, t )∥ + ∥Σ(x, t )∥F ≤ C2(1 + ∥x∥). (linear growth) The condition is required of every fp and Σ associated with θ, and of every fq associated with ϕ.
+
+Densities. We additionally require that, for every 0 ≤ t ≤ T , the one-time marginals of P and of any Q ∈ Q are absolutely continuous with respect to the K-dimensional Lebesgue measure. The corresponding densities are written {p(x, t )}0≤t≤T and {q(x, t )}0≤t≤T . Uniform ellipticity of Σ
+
+provides a sufficient condition (see Nualart [66, Theorem 2.3.1]). 
+
+Assumption (A2) (Uniform ellipticity): The initial laws p(x, 0) and q(x, 0) admit Lebesgue densities, and there exists λ > 0 such that Σ(x, t ) ⪰ λIK for every (x, t ) ∈ RK × [0 , T ]. We impose this condition for all θ.
+
+Absolute continuity. Finally, the prior and posterior path laws are taken to be mutually absolutely continuous, i.e., they admit densities with respect to each other. 
+
+Assumption (A3) (Absolute continuity): The prior SDE eq. (1) and posterior SDE eq. (2) are mutually absolutely continuous. The condition is imposed for every θ and every ϕ.Mutual absolute continuity is a result of Girsanov’s theorem (Øksendal [65 , Theorem 8.6.4 ]) whenever its hypotheses hold. Novikov’s criterion (Karatzas and Shreve [67 , Corollary 3.5.13 ]) provides one sufficient condition. We restate the SDE form of Girsanov’s theorem below for later reference. 
+
+Theorem 2 (Girsanov’s theorem for SDEs): Let the SDEs 
+
+ν1 : dx(t) = b1(x(t), t )dt + Σ(x, t )1/2dw(t), 0 ≤ t ≤ Tν2 : dx(t) = ( b1(x(t), t ) + b2(x(t), t )) dt + Σ(x, t )1/2dw(t), 0 ≤ t ≤ T
+
+share an initial law, ν1(x(0)) = ν2(x(0)) , and satisfy Assumption (A1). Then ν1 and ν2 are mutually absolutely continuous, with Radon–Nikodym derivative      
+
+> dν 2
+> dν 1
+> (x) = exp
+> (ZT
+> 0
+> KX
+> i=1
+> h
+> Σ−1/2b2(x(t), t )
+> i
+> i
+> dwν1
+> i(t)−12
+> ZT
+> 0
+> KX
+> i=1
+> h
+> Σ−1/2b2(x(t), t )
+> i2
+> i
+> dt
+> )
+> ,
+
+17 where (wν1 (t)) 0≤t≤T denotes a Brownian motion under ν1. Consequently, for every bounded functional Φ defined on continuous functions, 
+
+Eν2 [Φ( x)] = Eν1
+
+
+
+Φ( x) dν 2
+
+dν 1
+
+(x)
+
+
+
+.
+
+A direct corollary of Theorem 2 expresses the KL divergence between Q ∈ Q and P as DKL (Q ∥ P) = EQ
+
+
+
+log 
+
+ q(x(0) , 0) 
+
+p(x(0) , 0) · dQ(·| x(0)) 
+
+dP(·| x(0)) (x)
+
+ 
+
+= DKL (q(x, 0) ∥ p(x, 0)) + 12
+
+Z T
+
+> 0
+
+EQ∥Σ(x(t), t )−1/2(fp(x(t), t ) − fq (x(t), t )) ∥2dt. (12) The expectation of the stochastic integral term vanishes since it is a martingale. The first term is the KL divergence between the initial distributions and the second is the “path-space” KL divergence. 
+
+Fokker-Planck equation. Since P and Q ∈ Q are solutions to SDEs eq. (1) and eq. (2), they satisfy the Fokker-Planck equation. Without making further regularity assumptions on the drift function and diffusion coefficient, this equation can be stated in its weak formulation 
+
+ddt 
+
+Z
+
+φ(x)p(x, t )dx =
+
+Z 
+
+f (x, t ) · ∇ xφ(x) + 12 tr( Σ(x, t )∇2
+
+> x
+
+φ(x)) 
+
+
+
+p(x, t )dx, a.e. t, 
+
+(13) where φ : RK → R is any infinitely differentiable function having compact support. 
+
+A.2 ELBO derivation 
+
+In this subsection, we derive the evidence lower bound (ELBO) in the latent SDE model. Adopting the notation from Theorem 2, we have 
+
+log p(y) = log 
+
+Z
+
+p(y|x)P(dx)
+
+> (i)
+
+= log 
+
+Z
+
+p(y|x) p(x(0) , 0) 
+
+q(x(0) , 0) · dP(·| x(0)) 
+
+dQ(·| x(0)) Q(dx)
+
+> (ii )
+
+≥
+
+Z
+
+log 
+
+
+
+p(y|x) p(x(0) , 0) 
+
+q(x(0) , 0) · dP(·| x(0)) 
+
+dQ(·| x(0)) 
+
+
+
+Q(dx)= EQ[log p(y|x)] − DKL (Q ∥ P)= EQ[log p(y|x)] − DKL (q(x, 0) ∥ p(x, 0)) − 12
+
+Z T
+
+> 0
+
+EQ∥Σ−1/2{fp(x(t), t ) − fq (x(t), t )}∥ 2dt. 
+
+Equality (i) is a consequence of Girsanov’s theorem, and inequality (ii) is an application of Jensen’s inequality. Taking the negative of this expression yields the negative ELBO eq. (3). Notice that each term in the negative ELBO depends both on the parameters of the generative model 
+
+θ and on the parameters of the variational posterior ϕ.
+
+A.3 Divergence-free vector fields 
+
+In this subsection, we discuss the role of q-divergence-free vector fields in determining the expressivity of the variational family Q. We prove Proposition 1, which characterizes the non-uniqueness in path law that arises from marginal-based parameterizations of the variational posterior. 
+
+Divergence-free vector fields. In eq. (5), the Fokker-Planck equation is stated as a pointwise equality for (x, t ) ∈ RK × [0 , T ]. As mentioned we in Appendix A.1, this is only valid under additional regularity assumptions on the posterior SDE. Nonetheless, we can still state the divergence-free condition using the weak form of the Fokker-Planck equation 
+
+Z
+
+v(x, t ) · ∇ xφ(x)q(x, t )dx = 0 a.e. t (14) 18 for all test functions φ (infinitely differentiable, having compact support). Indeed, if v(x, t ) and 
+
+q(x, t ) are sufficiently smooth then the integration by parts identity implies 
+
+0 = 
+
+Z
+
+v(x, t ) · ∇ xφ(x)q(x, t )dx = −
+
+Z
+
+∇x · [q(x, t )v(x, t )] φ(x)dx a.e. t
+
+for all test functions φ. By Fubini’s theorem, this implies ∇ · [q(x, t )v(x, t )] = 0 a.e. (x, t ).Having stated the divergence-free condition in its weak form, we are prepared to prove Proposition 1, which states that among diffusion processes having a shared diffusion coefficient Σ1/2, the only degree freedom is the choice of divergence-free vector field. 
+
+Proof of Proposition 1. Let Q and eQ be two diffusion processes having drifts f and ˜f , respectively, common diffusion coefficient Σ1/2, and common initial marginal density q(x, 0) .
+
+Q and eQ induce the same one-time marginals {q(x, t )}0≤t≤T if and only if the two diffusions satisfy the same weak Fokker–Planck equation (13) for the common marginals. Since the diffusion coefficients are equal, this statement becomes 
+
+Z
+
+f (x, t ) · ∇ φ(x)q(x, t )dx =
+
+Z
+
+˜f (x, t ) · ∇ φ(x)q(x, t )dx a.e. t
+
+=⇒
+
+Z
+
+(f (x, t ) − ˜f (x, t )) · ∇ φ(x)q(x, t )dx = 0 a.e. t (15) for all test functions φ. Equation (15) is precisely the statement that f − ˜f is q-divergence free, in the weak formulation eq. (14). There are also diffusion processes with different diffusion coefficients that share the same one-time marginals. This fact is leveraged by Bartosh et al. [8] to learn the shared prior and posterior diffusion coefficient. However, for a fixed prior SDE eq. (1), the diffusion coefficient of the posterior eq. (2) must be equal to that of the prior. This is because, by Girsanov’s Theorem (Theorem 2), diffusion processes whose diffusion coefficients differ are generally not mutually absolutely continuous. In other words, the diffusion coefficient must be viewed as a parameter of the generative model, rather than a degree of freedom in the posterior process. On the other hand, any two diffusion processes with shared diffusion coefficient (and drifts that differ only by a divergence-free vector field) will be mutually absolutely continuous. 
+
+A.4 Gaussian one-time marginals 
+
+In the case of Gaussian one-time marginals, the non-uniqueness of the path law described in Ap-pendix A.3 can be made explicit. In this subsection, we construct an infinite collection of (distinct) path laws whose one-time marginals are identical. Throughout, we assume q(x, t ) = N (m(t), S(t)) ,where m(t), S(t) are continuously differentiable on [0 , T ] and S is positive definite. We first characterize these path laws in terms of the solution to a matrix Lyapunov equation. 
+
+Proposition 2: Let q(x, t ) = N (m(t), S(t)) , 0 ≤ t ≤ T be a family of Gaussian one-time marginal distributions, with (m(t), S(t)) 0≤t≤T continuously differentiable in t and S(t) positive definite. Let (K(t)) 0≤t≤T be any solution to the matrix Lyapunov equation 
+
+ddt S(t) = K(t)S(t) + S(t)K(t)⊤, 0 ≤ t ≤ T. (16) Then the SDE with drift fq (x, t ) = Aq (x, t )x + bq (x, t ) + 12
+
+P 
+
+> j
+
+∂xj Σ·,j (x, t ),
+
+Aq (x, t ) = K(t) − 12 Σ(x, t |θ)S(t)−1, bq (x, t ) = ddt m(t) − Aq (x, t )m(t), (17) and diffusion coefficient Σ(x, t )1/2 has marginals q(x, t ) = N (m(t), S(t)) , 0 ≤ t ≤ T .The Lyapunov equation (16) has infinitely many solutions K(t), so a single collection of Gaus-sian one-time marginals {q(x, t )} corresponds to infinitely many compatible diffusions. Note that 19 Proposition 2 does not characterize the complete set of diffusions consistent with Gaussian one-time marginals. For example, when Σ is state-independent, Proposition 2 only describes Gaussian pro-cesses i.e., stochastic process whose multi-time joint distributions are multivariate Gaussian. There exist stochastic processes with Gaussian one-time marginals that are not Gaussian processes. The explicit construction is obtained by plugging the drift from Proposition 2 into the Fokker-Planck equation, which yields the continuity equation eq. (18) for Gaussian marginals distributions and a linear vector field. Unlike the Fokker-Planck equation, the continuity equation does not depend on the diffusion coefficient Σ1/2, which is a consequence of the two terms in the posterior drift cancelling with the diffusion term in the Fokker-Planck equation. The same strategy is used to convert between ODE and SDE samplers for diffusion and flow matching models [8, 36, 38].See also Appendix A.5. 
+
+Proof of Proposition 2. Note that since q(x, t ) and fq are sufficiently differentiable, we can work directly with the strong form of the Fokker–Planck equation eq. (5). Starting first with the diffusion term, we have by the chain rule and the formula for the Gaussian density 
+
+12
+
+X
+
+> i,j
+
+∂xi,xj [q(x, t )Σij (x, t )] = 12
+
+X
+
+> i
+
+∂xi
+
+"
+
+q(x, t ) X
+
+> j
+
+∂xj Σij (x, t ) − [S(t)−1(x − m(t))] j Σij (x, t )
+
+#
+
+= 12 ∇x ·
+
+"
+
+−q(x, t )Σ(x, t )S(t)−1(x − m(t)) + q(x, t ) X
+
+> j
+
+∂xj Σ·,j (x, t )
+
+#
+
+.
+
+Notice that the same terms with the opposite sign appear in the drift term of the Fokker–Planck equation, by our definition of the drift fq . Indeed, 
+
+− ∇ x · [fq (x, t )q(x, t )] = 
+
+− ∇ x ·
+
+ 
+
+K(t)( x − m(t)) + ddt m(t) − 12 Σ(x, t )S(t)−1(x − m(t)) + 12
+
+X
+
+> j
+
+∂xj Σ·,j (x, t )
+
+
+
+q(x, t )
+
+
+
+,
+
+where we used 
+
+Aq (x, t )x + bq (x, t ) = Aq (x, t )( x − m(t)) + ddt m(t).
+
+Canceling these terms, this shows that the Fokker–Planck equation reduces to the continuity equation 
+
+∂q (x, t )
+
+∂t = −∇ x ·
+
+ 
+
+K(t)( x − m(t)) + ddt m(t)
+
+
+
+q(x, t )
+
+
+
+, 0 ≤ t ≤ T. (18) Next, computing both sides of Equation (18) explicitly and dividing by q(x, t ), we obtain 
+
+− 12
+
+
+
+tr 
+
+
+
+S(t)−1 ddt S(t)
+
+
+
+− (x − m(t)) ⊤S(t)−1 ddt S(t)S(t)−1(x − m(t)) − 2 ddt m(t)⊤S(t)−1(x − m(t)) 
+
+
+
+= −
+
+"
+
+tr( K(t)) −
+
+
+
+K(t)( x − m(t)) + ddt m(t)
+
+⊤
+
+S(t)−1(x − m(t)) 
+
+#
+
+.
+
+The linear terms involving ddt m(t) cancel, so this further simplifies to 
+
+− 12
+
+
+
+tr 
+
+
+
+S(t)−1 ddt S(t)
+
+
+
+− (x − m(t)) ⊤S(t)−1 ddt S(t)S(t)−1(x − m(t)) 
+
+
+
+= − tr( K(t)) − (x − m(t)) ⊤K(t)⊤S(t)−1(x − m(t))  .
+
+(19) Now, we must determine conditions on (K(t)) 0≤t≤T under which equality (19) holds. If K(t)
+
+solves the Lyapunov equation (16), then 
+
+S(t)−1 ddt S(t)S(t)−1 = S(t)−1K(t) + K(t)⊤S(t)−1
+
+=⇒ (x − m(t)) ⊤S(t)−1 ddt S(t)S(t)−1(x − m(t)) = 2( x − m(t)) ⊤K(t)⊤S(t)−1(x − m(t)) .
+
+Moreover, tr( S(t)−1 ddt S(t)) = 2tr( K(t)) . Hence, whenever K(t) solves the Lyapunov equation, the diffusion process with drift fq and diffusion coefficient Σ1/2 satisfies the Fokker–Planck equation. 20 To conclude this subsection, we provide an alternate (but equivalent) characterization of the Lyapunov equation eq. (16) for SDEs that induce the same one-time Gaussian marginals. We do so via square root factorizations of S(t).
+
+Proposition 3: Fix any continuously differentiable square root factorization L(t) satisfying 
+
+L(t)L(t)⊤ = S(t). Then K(t) solves the Lyapunov equation (16) if and only if 
+
+K(t) = 
+
+ ddt L(t)
+
+
+
+L(t)−1 + L(t)Ω(t)L(t)−1, 0 ≤ t ≤ T (20) for some skew-symmetric matrix-valued function Ω(t) = −Ω(t)⊤.
+
+Proof. Sufficiency. Suppose is K defined as in eq. (20). Substituting this expression into the right-hand side of the Lyapunov equation eq. (16) yields 
+
+KS + SK ⊤ =
+
+ ddt L
+
+
+
+L−1 + LΩL−1
+
+
+
+LL ⊤ + LL ⊤ L−⊤ 
+
+ ddt L
+
+⊤
+
++ L−⊤ Ω⊤L⊤
+
+!
+
+=
+
+ ddt L
+
+
+
+L⊤ + LΩL⊤ + L
+
+ ddt L
+
+⊤
+
++ LΩ⊤L⊤
+
+> (⋆)
+
+=
+
+ ddt L
+
+
+
+L⊤ + L
+
+ ddt L
+
+⊤
+
+= ddt (LL ⊤) = ddt S.
+
+Equality (⋆) holds by skew-symmetry Ω + Ω⊤ = 0.
+
+Necessity. Now suppose K solves the Lyapunov equation. Solving eq. (20) for Ω yields Ω =
+
+L−1  K −   ddt L L−1 L. Hence, we need to show Ω is skew-symmetric. A direct calculation reveals 
+
+Ω + Ω⊤ = L−1
+
+
+
+KS −
+
+ ddt L
+
+
+
+L⊤
+
+
+
+L−⊤ + L−1 SK ⊤ − L
+
+ ddt L
+
+⊤!
+
+L−⊤ 
+
+= L−1
+
+
+
+KS + SK ⊤ − ddt S
+
+
+
+L−⊤ = 0.
+
+The two terms in (20) have distinct roles. ( ddt L)L−1 depends on the chosen square root and is itself a solution to the Lyapunov equation. Arbitrarily changing L will change LL ⊤ and hence the one-time marginals. On the other hand, LΩL−1 is allowed to vary as Ω takes different values in the  K
+
+> 2
+
+-dimensional vector space of skew-symmetric matrices. For fixed L, each choice of Ω yields the same one-time marginals. 
+
+A.5 SVISE (Course and Nair [6]) and SDE Matching (Bartosh et al. [8]) 
+
+In this subsection, we explain how existing simulation-free VI methods SVISE [ 6 , 7] and SDE Matching [ 8 ] select a single drift function that realizes a given collection of one-time Gaussian marginal distributions q(x, t ) = N (m(t), S(t)) , where m(t), S(t) are continuously differentiable on [0 , T ] and S(t) is positive definite. We refer to these choices as the symmetric and square root gauges, respectively. Before describing each choice of posterior drift, we recall Proposition 2 from Appendix A.4, which tells us that 
+
+fq (x, t ) = Aq (x, t )x +
+
+ ddt m(t) − Aq (x, t )m(t)
+
+
+
++ 12
+
+X
+
+> j
+
+∂xj Σ·,j (x, t )
+
+Aq (x, t ) = K(t) − 12 Σ(x, t |θ)S(t)−1
+
+21 attains the marginals q(x, t ) whenever K(t) is a solution to the Lyapunov equation eq. (16). As we will see, SVISE and SDE Matching select the drift fq for different K.
+
+Symmetric gauge. Suppose Σ(t) = Σ(x, t ) is state-independent and fq is defined as in Proposi-tion 2. Then Aq (t) = Aq (x, t ) also satisfies a Lyapunov equation 
+
+ddt S(t) − Σ(t) = Aq (t)S(t) + S(t)Aq (t)⊤, 0 ≤ t ≤ T. (21) In SVISE [ 6, 7], the authors choose the posterior drift Aq (t) to be unique symmetric solution to eq. (21). They write this solution in closed-form using the Kronecker sum. Unlike the square root gauge, the symmetric gauge does not naturally extend to the case of a state-dependent diffusion coefficient. This is because, in general, the matrix K for which Aq (x, t ) = 
+
+K − 12 Σ(x, t )S(t)−1 is symmetric cannot be chosen to be independent of the state x.
+
+Square root gauge. Bartosh et al. [8] instead identify the one-time Gaussian marginals with the drift function fq defined as in Proposition 2 for K(t) =   ddt S(t)1/2S(t)−1/2. Here, S(t)1/2 denotes the symmetric square root of S(t). It is straightforward to verify that this choice of K satisfies the matrix Lyapunov equation (16). This choice of K is valid even for state-dependent diffusion coefficient. The SDE Matching framework, in theory, allows for any square root σ(t) such that S(t) = 
+
+σ(t)σ(t)⊤, to be chosen. However, in their implementation, σ(t) is chosen to be diagonal, which yields the symmetric square root S(t)1/2. At the end of this section, we discuss an extension of SDE Matching that represents all square roots simultaneously. The authors arrive at the choice of variational drift by converting from a probability flow ODE [ 36 ]to an SDE. In particular, suppose ε ∼ N (0, IK ) and F (ε, t ) = m(t) + S(t)1/2ε. F can be viewed as a map that takes as input a sample ε as well as a time t and produces a sample from q(x, t ). If 
+
+˜x(t) = F (ε, t ), then each particle ˜x(t) evolves according to the ODE 
+
+ddt ˜x(t) = ddt m(t) + 
+
+ ddt S(t)1/2
+
+
+
+ε
+
+= ddt m(t) + 
+
+ ddt S(t)1/2
+
+
+
+{S(t)−1/2( ˜ x(t) − m(t)) }, 0 ≤ t ≤ T
+
+(22) with ˜x(0) d
+
+= F (ε, 0) .From the ODE (22) , the authors construct an SDE with diffusion coefficient Σ(x, t |θ)1/2. Astraightforward manipulation of the Fokker-Planck equation (see e.g., Song et al. [36 , Appendix D.1 ])shows that the solution to the SDE 
+
+dx(t) = 
+
+ ddt m(t) + 
+
+ ddt S(t)1/2
+
+
+
+{S(t)−1/2(x(t) − m(t)) } + 12 Σ(x, t )∇x log q(x(t), t )+ (1 /2) X
+
+> j
+
+∂xj Σ·,j (x(t), t )
+
+
+
+dt + Σ(x(t), t )1/2dw(t), x(0) d
+
+= q(x, 0) 
+
+has the same one-time marginal distributions as ˜x(t). Substituting in the Gaussian score and grouping terms yields the drift 
+
+ ddt S(t)1/2
+
+
+
+S(t)−1/2 − 12 Σ(x(t), t )S(t)−1
+
+
+
+x(t)+ 
+
+ddt m(t) −
+
+ ddt S(t)1/2
+
+
+
+S(t)−1/2 − 12 Σ(x(t), t )S(t)−1
+
+
+
+m(t).
+
+Once we identify K(t) =   ddt S(t)1/2 S(t)−1/2, the resulting drift is exactly of the form given in Proposition 2. Although the construction in Bartosh et al. [8] allows the marginals q(x, t ) to be non-Gaussian (e.g., by parameterizing F as a normalizing flow), the paper itself evaluates the method only in the Gaussian marginal setting. We therefore restrict our discussion to that case. 22 An extension of SDE Matching. The framework of SDE Matching [ 8] can in principle be extended to span every solution to the Lyapunov equation (16) . This is not discussed or implemented by the authors. As described in the previous paragraph, their parameterization S(t) = σ(t)σ(t)⊤ induces the linear coefficient K(t) = ( ddt σ(t)) σ(t)−1. Fixing σ to a specific square root selects a single path law for each set of one-time marginals. By Proposition 3, the full set of solutions to the Lyapunov equation is parameterized by an additional skew-symmetric matrix Ω(t) via 
+
+K(t) = 
+
+ ddt σ(t)
+
+
+
+σ(t)−1 + σ(t)Ω(t)σ(t)−1, 0 ≤ t ≤ T. 
+
+Augmenting SDE Matching with a learned Ω(t) would in principle allow the posterior to span the full  K
+
+> 2
+
+-dimensional space of compatible linear drifts. This extension has two limitations. First, it requires introducing and optimizing over Ω(t), sacrificing the closed-form structure of SDE Matching’s original parameterization. Helmholtz-SDE, by contrast, 
+
+computes the optimal correction in closed form via the Helmholtz decomposition of the residual vector field (Section 4). Second, for state-independent diffusion coefficient, the resulting path law remains a Gaussian process. Proposition 2 characterizes only diffusions with linear drift consistent with the prescribed Gaussian marginals; non-linear drifts can also yield Gaussian one-time marginals while inducing non-Gaussian multi-time joint distributions. Helmholtz-SDE’s polynomial extension (Appendix B.3) leverages this freedom, expressing corrections outside the Gaussian-process family. 
+
+# B Helmholtz-SDE 
+
+In this section, we provide further explanation of our algorithm, Helmholtz-SDE. First, in Appendix B.1 we describe how the q-weighted Helmholtz decomposition can be obtained for arbitrary smooth, strictly positive marginal densities q by inverting a Stein operator. This yields a probabilistic solution that can be estimated via Monte Carlo. In Appendix B.2, we provide sufficient conditions under which, for Gaussian one-time marginals, the Helmholtz decomposition exists uniquely. As a corollary, we obtain the optimality of Helmholtz-SDE. In Appendix B.3 we translate this theoretical result into a practical formula using a polynomial approximation to the residual vector field r = fp − fq . Lastly, in Appendix B.4 we provide pseudocode of our algorithm. 
+
+B.1 Computing the Helmholtz decomposition 
+
+We first discuss how the Helmholtz decomposition can be computed for an arbitrary smooth, strictly positive density q as the inverse of a Stein operator. The resulting probabilistic expression can be approximated via Monte Carlo. For ease of notation, we consider state-independent diffusion coefficient, although the same construction holds in the state-dependent setting. 
+
+The Helmholtz decomposition and diffusion Stein operator. As described in Section 4.2, the op-timal correction to the reference drift fq (x, t |ϕ) is obtained by computing the q-weighted Helmholtz decomposition of the residual vector field r(x, t |θ, ϕ) = fp(x, t |θ) − fq (x, t |ϕ) and taking the 
+
+q-divergence-free vector field. In particular, we want to find a decomposition of r as 
+
+r(x, t |θ, ϕ) = Σ(t|θ)∇xψ(x, t ) + h(x, t ), (x, t ) ∈ RK × [0 , T ], (23) where ∇xψ(x, t ) is a gradient field and h(x, t ) is a q-divergence-free vector field. Suppose q(x, t |ϕ) is a smooth, strictly positive density. To obtain such a decomposition, observe that if eq. (23) holds, then multiplying both sides by q(x, t |ϕ) and computing the divergence yields 
+
+∇x · [q(x, t |ϕ)Σ(t|θ)∇xψ(x, t )] = ∇x · [q(x, t |ϕ)r(x, t |θ, ϕ)] , (x, t ) ∈ RK × [0 , T ], (24) since h is q-divergence-free. Dividing both sides by q and expanding the left-hand side yields 
+
+tr( Σ(t|θ)∇2
+
+> x
+
+ψ(x, t ))+ ∇x log q(x, t |ϕ)·Σ(t|θ)∇xψ(x, t ) = 1
+
+q(x, t |ϕ) ∇x·[q(x, t |ϕ)r(x, t |θ, ϕ)] .
+
+(25) From eq. (25), we make two observations. First, the left-hand side can be written as [LΣ 
+
+> t
+
+∇xψ(·, t )]( x),where LΣ 
+
+> t
+
+is the differential operator 
+
+[LΣ 
+
+> t
+
+f ]( x) = tr( Σ(t|θ)Dxf (x, t )) + Σ(t|θ)∇x log q(x, t |ϕ) · f (x, t ) (26) 23 defined for differentiable vector fields f : RK → RK , where Dxf represents the Jacobian of f .This is the diffusion Stein operator corresponding to the density q(x, t |ϕ) and constant covariance coefficient Σ(t|θ) [30, 68]. When Σ(t|θ) = IK , it reduces to the Langevin Stein operator 
+
+[Ltf ]( x) = ∇x · f (x) + ∇x log q(x, t |ϕ) · f (x).
+
+We refer the reader to Gorham et al. [68] for background on diffusion Stein operators. Second, whenever r(x, t |θ, ϕ) and LΣ 
+
+> t
+
+[r(·, t |θ, ϕ)]( x) are integrable, the right-hand side of eq. (25) has expectation 
+
+EQϕ
+
+ 1
+
+q(x, t |ϕ) ∇x · [q(x, t |ϕ)r(x, t |θ, ϕ)] 
+
+
+
+=
+
+Z
+
+∇x · [q(x, t |ϕ)r(x, t |θ, ϕ)] dx = 0 
+
+The final equality holds by the Divergence theorem [69, Theorem 3.1]. Overall, we have reduced computing the Helmholtz decomposition to solving 
+
+[LΣ 
+
+> t
+
+∇xψ(·, t )]( x) = η(x, t ), (x, t ) ∈ RK × [0 , T ],η(x, t ) = 1
+
+q(x, t |ϕ) ∇x · [q(x, t |ϕ)r(x, t |θ, ϕ)] (27) where η(x, t ) has mean zero under q(x, t |ϕ). Intuitively, in order to solve eq. (27), we need to find an inverse of the diffusion Stein operator LΣ 
+
+> t
+
+. Doing so has been the subject of prior literature, namely Barbour [30], Pardoux and Veretennikov [70], Gorham et al. [68]. 
+
+Inverting the diffusion Stein operator. Fix t ∈ [0 , T ]. Consider the time-homogeneous diffusion in an auxiliary time variable s with diffusion coefficient Σ(t|θ)1/2:
+
+dz(t)(s) = 12 Σ(t|θ)∇x log q(z(t)(s), t |ϕ)ds + Σ(t|θ)1/2dw(s). (28) When Σ(t|θ) = IK , eq. (28) is recognizable as the overdamped Langevin diffusion. In particular, eq. (28) has invariant density q(x, t |ϕ). Its infinitesimal generator is 
+
+[Atu]( z) = 12q(z, t |ϕ) ∇x · [q(z, t |ϕ)Σ(t|θ)∇z u(z)] = 12 tr( Σ(t|θ)∇2 
+
+> z
+
+u(z)) + 12 Σ(t|θ)∇z log q(z, t |ϕ) · ∇ z u(z)
+
+(29) for u : RK → R twice continuously differentiable and satisfying integrability conditions [ 67 ]. This implies, by eq. (26), Atu = LΣ 
+
+> t
+
+( 12 ∇xu). Hence, solving eq. (27) is equivalent to solving 
+
+[Atu(·, t )]( x) = η(x, t ), (x, t ) ∈ RK × [0 , T ] (30) and then setting ∇xψ(x, t ) = 12 ∇xu(x, t ). Equation (30) is known as the Poisson equation [ 70 , 71 ]. Assume that, for each fixed t, η(x, t ) and the coefficients of the above diffusion satisfy the regularity conditions of Gorham et al. [68, Theorem 5]. Then Gorham et al. [68, Theorem 5] implies that 
+
+u(x, t ) = −
+
+Z ∞
+
+> 0
+
+E[η(z(t)(s), t )|z(t)(0) = x]ds (31) solves the Poisson equation. The integrand is computed by starting the diffusion eq. (28) from x and then running it forward until time s.Therefore, 
+
+∇xψ(x, t ) = − 12 ∇x
+
+Z ∞
+
+> 0
+
+E[η(z(t)(s), t )|z(t)(0) = x]ds (32) solves eq. (27). Consequently, defining h(x, t ) = r(x, t |θ, ϕ) − Σ(t|θ)∇xψ(x, t ) gives ∇x ·
+
+[q(x, t |ϕ)h(x, t )] = 0 . Thus h(·, t ) is the q-divergence-free component of the residual vector field. 24 B.2 The Helmholtz decomposition for Gaussian marginals 
+
+In Appendix B.1, we discussed the general recipe for computing the q-weighted Helmholtz decom-position of a vector field. In this subsection, we make this recipe fully rigorous for the setting of Gaussian one-time marginals and state-independent diffusion coefficient. As a consequence of the existence of the Helmholtz decomposition, we obtain a proof of Theorem 1. First, we describe conditions on the residual vector field under which we will show that the q-weighted Helmholtz decomposition exists uniquely. 
+
+Assumption (A4) (regularity of the residual vector field): Assume that the following hold: (i) (m(t), S(t)) 0≤t≤T is continuously differentiable in t, and S(t) is positive definite. (ii) r is twice differentiable in x, and its derivatives are continuous in (x, t ).(iii) r, Dxr, and D(2)  
+
+> x
+
+r have polynomial growth in x, uniformly on compact intervals in t.(iv) Σ(t|θ) is continuous and positive definite. 
+
+Dxr ∈ RK×K and D(2)  
+
+> x
+
+r ∈ RK×K×K represent the derivative tensors of the residual vector field 
+
+r : RK → RK .We are now prepared to state and prove our main existence and uniqueness result. 
+
+Theorem 3 (Existence and Uniqueness of Helmholtz decomposition): Assume that the residual vector field r(x, t |θ, ϕ) = fp(x, t |θ) − fq (x, t |ϕ) satisfies the smoothness and growth conditions in Assumption (A4). Then it admits a q-weighted Helmholtz decomposition 
+
+r(x, t |θ, ϕ) = Σ(t|θ)∇xψ(x, t ) + h(x, t ).Moreover, ∇xψ admits a closed-form probabilistic representation eq. (41). Among functions satisfying the same regularity conditions, the vector fields Σ∇xψ and h are unique. 
+
+Proof. Fix t ∈ [0 , T ]. Since S(t) is positive definite, q(x, t ) is a smooth, strictly positive density on 
+
+RK . Recall from Appendix B.1 that solving the Stein operator equation eq. (27) for ∇xψ reduces, via the identity Atu = LΣ 
+
+> t
+
+( 12 ∇xu), to solving the Poisson equation eq. (30) for u:
+
+[Atu(·, t )]( x) = 12q(x, t ) ∇x · [q(x, t )Σ(t)∇xu(x, t )] = η(x, t ), (33) where At is the infinitesimal generator of the Langevin diffusion eq. (28) and η(x, t ) is the source term in eq. (27). The gradient component of the Helmholtz decomposition is then recovered as 
+
+∇xψ(x, t ) = 12 ∇xu(x, t ).Our goal is to show that the candidate u(x, t ) in eq. (31) satisfies eq. (33) pointwise, and that u
+
+is twice continuously differentiable in x with derivatives continuous in (x, t ). Once eq. (33) is established, defining 
+
+h(x, t ) = r(x, t ) − Σ(t)∇xψ(x, t ) (34) gives ∇x · [q(x, t )h(x, t )] = 0 , yielding the desired Helmholtz decomposition. Our proof proceeds in four main steps: (i) Reexpress the candidate u in whitened coordinates, where the associated Langevin diffusion becomes an Ornstein–Uhlenbeck (OU) process. (ii) Prove that the candidate u is well-defined and satisfies the desired regularity conditions. (iii) Verify that u satisfies the Poisson equation eq. (33) pointwise. (iv) Show that Σ∇xψ and h are unique. 
+
+Step (i) : The candidate u proposed in Appendix B.1 (eq. (31)) is expressed as an integral of expectations along the Langevin diffusion eq. (28) with invariant law q(x, t ). We rewrite this candidate in whitened coordinates, in which the Langevin diffusion becomes an Ornstein–Uhlenbeck 25 (OU) process with invariant law N (0, IK ). This whitened representation simplifies the subsequent regularity estimates and the verification of the Poisson equation. Whiten the Gaussian marginals via the change of variables 
+
+˜x = S(t)−1/2(x − m(t)) , χ( ˜ x, t ) = u(m(t) + S(t)1/2 ˜x, t ),
+
+and define 
+
+ρ( ˜ x, t ) = S(t)−1/2r(m(t) + S(t)1/2 ˜x, t ), C(t) = S(t)−1/2Σ(t)S(t)−1/2.
+
+Since S(t) and Σ(t) are positive definite, C(t) is positive definite for each t.Applying the change of variables to the Langevin diffusion eq. (28), the whitened diffusion is the Ornstein–Uhlenbeck (OU) process 
+
+d ˜z(t)(s) = − 12 C(t) ˜ z(t)(s) ds + C(t)1/2 dw(s), ˜z(t)(0) = ˜ x, (35) whose invariant law is N (0, IK ) and whose infinitesimal generator is 
+
+( ˜Atf )( ˜ x) = 12 tr  C(t)∇2˜xf ( ˜ x) − 12 ˜x⊤C(t)∇˜xf ( ˜ x)
+
+for f : RK → R twice continuously differentiable with derivatives having polynomial growth. Define also the whitened source 
+
+g( ˜ x, t ) = ∇˜x · ρ( ˜ x, t ) − ˜x⊤ρ( ˜ x, t ). (36) A direct computation shows that g( ˜ x, t ) = η(m(t) + S(t)1/2 ˜x, t ), where η is the source term in eq. (27). Overall, we have shown that in ˜x coordinates, the Poisson equation becomes 
+
+( ˜Atχ(·, t ))( ˜ x) = g( ˜ x, t ). (37) By Assumption (A4), r is differentiable in x, and both r and Dxr have polynomial growth; the same therefore holds of ρ(·, t ) and D˜xρ(·, t ). Stein’s identity gives 
+
+E˜x∼N (0,IK )[∇˜x · ρ( ˜ x, t )] = E˜x∼N (0,IK )
+
+ ˜x⊤ρ( ˜ x, t ) ,
+
+so g(·, t ) has mean zero under the OU invariant law. In these whitened coordinates, the candidate from eq. (31) takes the form 
+
+χ( ˜ x, t ) = −
+
+Z ∞
+
+> 0
+
+(P ts g)( ˜ x) ds, (P ts g)( ˜ x) = E
+
+h
+
+g
+
+
+
+˜z(t)(s), t 
+
+
+
+˜z(t)(0) = ˜ x
+
+i
+
+, (38) where (P ts )s≥0 is the OU semigroup associated with eq. (35). Equivalently, u(x, t ) =
+
+χ(S(t)−1/2(x − m(t)) , t ).
+
+Step (ii) : We first justify that eq. (38) is well-defined. For all times 0 ≤ s < ∞, the marginal distribution of the OU process (35) satisfies 
+
+˜z(t)(s) d
+
+= At(s) ˜ x + Bt(s)ξ, ξ ∼ N (0, IK ),
+
+where 
+
+At(s) = e−sC(t)/2, Bt(s) = 
+
+
+
+IK − e−sC(t)1/2
+
+.
+
+Thus 
+
+(P ts g)( ˜ x) = Eξ∼N (0,IK ) [g(At(s) ˜ x + Bt(s)ξ, t )] .
+
+Using Eξ∼N (0,IK )[g(ξ, t )] = 0 , we may write 
+
+(P ts g)( ˜ x) = Eξ∼N (0,IK ) [g(At(s) ˜ x + Bt(s)ξ, t ) − g(ξ, t )] .
+
+Hence, 
+
+(P ts g)( ˜ x) ≤ Eξ∼N (0,IK ) |g(At(s) ˜ x + Bt(s)ξ, t ) − g(ξ, t )| .
+
+Now decompose 
+
+g(At(s) ˜ x + Bt(s)ξ, t ) − g(ξ, t ) = 
+
+
+
+g(At(s) ˜ x + Bt(s)ξ, t ) − g(Bt(s)ξ, t )
+
+
+
++
+
+
+
+g(Bt(s)ξ, t ) − g(ξ, t )
+
+
+
+.
+
+26 Applying the mean value theorem to each term and using that ∇˜xg has at most polynomial growth, there exist constants C, m > 0 such that 
+
+∥∇ ˜xg( ˜ x, t )∥ ≤ C(1 + ∥ ˜x∥m).
+
+Since ξ is Gaussian, all of its moments are finite. Moreover, 
+
+∥At(s)∥ ≤ Cte−cts, ∥Bt(s) − IK ∥ ≤ Cte−cts,
+
+for some constants Ct, c t > 0. It follows that 
+
+E
+
+h
+
+g
+
+
+
+˜z(t)(s), t 
+
+
+
+˜z(t)(0) = ˜ x
+
+i
+
+≤ C′
+
+> t
+
+(1 + ∥ ˜x∥m+1 )e−cts,
+
+for some constant C′ 
+
+> t
+
+> 0. In particular, eq. (38) is finite for every ( ˜ x, t ).We next show that χ is twice continuously differentiable in ˜x with derivatives continuous in ( ˜ x, t ).The estimates below also justify passage of the spatial derivatives, and hence of ˜At, under the integral sign in step (iii). Using the notation introduced above, we can rewrite eq. (38) as 
+
+χ( ˜ x, t ) = −
+
+Z ∞
+
+> 0
+
+Eξ∼N (0,IK ) [g(At(s) ˜ x + Bt(s)ξ, t )] ds. (39) We first study the gradient of χ. To do so, we must justify the exchange of the gradient and integral in eq. (39). Applying Stein’s identity to the integrand of eq. (39) yields 
+
+F ( ˜ x, t, s ) = ∇˜x(P ts g)( ˜ x) = At(s)Bt(s)−1Eξ∼N (0 ,IK ) [ξ g(At(s) ˜ x + Bt(s)ξ, t )] .
+
+The polynomial growth of g implies 
+
+∥F ( ˜ x, t, s )∥ ≤ ∥ At(s)Bt(s)−1∥Eξ∼N (0 ,IK ) [∥ξ∥ | g(At(s) ˜ x + Bt(s)ξ, t ) |]
+
+≤ C∥At(s)Bt(s)−1∥ (1 + ∥At(s) ˜ x∥m) ,
+
+where we used that ξ is Gaussian and Bt(s) is bounded. Now, as s ↓ 0, ∥At(s)Bt(s)−1∥ =
+
+O(s−1/2), while as s → ∞ ,
+
+∥At(s)∥ ≤ Cte−cts, ∥Bt(s)−1∥ ≤ Ct.
+
+Therefore 
+
+∥F ( ˜ x, t, s )∥ ≤ 
+
+C(1 + ∥ ˜x∥m)s−1/2, 0 < s ≤ 1,Ct(1 + ∥ ˜x∥m)e−cts, s ≥ 1,
+
+and the right-hand side is integrable on (0 , ∞). Moreover, for every compact set K ⊂ RK × [0 , T ],this integrable bound can be chosen uniformly for ( ˜ x, t ) ∈ K. By dominated convergence we deduce 
+
+∇˜xχ( ˜ x, t ) = −
+
+Z ∞
+
+> 0
+
+F ( ˜ x, t, s )ds. 
+
+We next study the Hessian of χ. Since g is continuously differentiable in ˜x, for each fixed s > 0 the map ( ˜ x, t ) 7 → F ( ˜ x, t, s ) is continuously differentiable in ˜x, and 
+
+∇˜xF ( ˜ x, t, s ) = ∇2˜x(P ts g)( ˜ x) = At(s)Bt(s)−1Eξ∼N (0 ,IK )
+
+h
+
+ξ (∇˜xg(At(s) ˜ x + Bt(s)ξ, t )) ⊤i
+
+At(s).
+
+Using that ∇˜xg has at most polynomial growth, we obtain 
+
+∥∇ ˜xF ( ˜ x, t, s )∥ ≤ ∥ At(s)Bt(s)−1∥ ∥ At(s)∥ Eξ∼N (0 ,IK ) [∥ξ∥ ∥∇ ˜xg(At(s) ˜ x + Bt(s)ξ, t ) ∥]
+
+≤ C∥At(s)Bt(s)−1∥ ∥ At(s)∥ (1 + ∥At(s) ˜ x∥m) .
+
+Hence, 
+
+∥∇ ˜xF ( ˜ x, t, s )∥ ≤ 
+
+C(1 + ∥ ˜x∥m)s−1/2, 0 < s ≤ 1,Ct(1 + ∥ ˜x∥m)e−cts, s ≥ 1,
+
+27 which is again integrable on (0 , ∞). Again, for every compact set K ⊂ RK × [0 , T ], this integrable bound may be chosen uniformly for ( ˜ x, t ) ∈ K, and dominated convergence yields 
+
+∇2˜xχ( ˜ x, t ) = −
+
+Z ∞
+
+> 0
+
+∇˜xF ( ˜ x, t, s ) ds. 
+
+Hence, χ is twice continuously differentiable in ˜x, for all t.For each fixed s > 0, the functions F ( ˜ x, t, s ) and ∇˜xF ( ˜ x, t, s ) are continuous in ( ˜ x, t ) by dominated convergence in the Gaussian expectation. Since t ∈ [0 , T ], continuity and positive definiteness of 
+
+S(t) and Σ(t) imply uniform spectral bounds for C(t) on [0 , T ]. Therefore the estimates above may be chosen locally uniformly jointly in ( ˜ x, t ), and dominated convergence in s shows that both 
+
+∇˜xχ( ˜ x, t ) and ∇2˜xχ( ˜ x, t ) are continuous in ( ˜ x, t ).Finally, by the chain rule and the identity u(x, t ) = χ(S(t)−1/2(x − m(t)) , t ) from step (i), 
+
+∇xu(x, t ) = S(t)−1/2∇˜xχ
+
+
+
+S(t)−1/2(x − m(t)) , t 
+
+
+
+,
+
+and 
+
+∇2
+
+> x
+
+u(x, t ) = S(t)−1/2∇2˜xχ
+
+
+
+S(t)−1/2(x − m(t)) , t 
+
+
+
+S(t)−1/2.
+
+By Assumption (A4)(i), t 7 → m(t) and t 7 → S(t)−1/2 are continuous, so ∇xu(x, t ) and ∇2
+
+> x
+
+u(x, t )
+
+are continuous in (x, t ). The same therefore holds of ∇xψ(x, t ) = 12 ∇xu(x, t ) and ∇2
+
+> x
+
+ψ(x, t ).
+
+Step (iii) : We now verify that u satisfies the Poisson equation eq. (33) pointwise. By step (i), it suffices to show that χ satisfies the Poisson equation in the whitened coordinates (37). The estimates established in step (ii) show that (P ts g)( ˜ x) is twice continuously differentiable in 
+
+˜x. And for each s > 0, (P ts g) is also continuously differentiable in s and satisfies the backward Kolmogorov equation 
+
+∂∂s (P ts g)( ˜ x) = ( ˜AtP ts g)( ˜ x), s > 0.
+
+Moreover, the spatial derivatives of (P ts g) admit integrable bounds in s, locally uniformly in ( ˜ x, t ).Therefore the operator ˜At may be passed under the integral sign in eq. (38), yielding 
+
+( ˜Atχ(·, t ))( ˜ x) = −
+
+Z ∞
+
+> 0
+
+( ˜AtP ts g)( ˜ x) ds 
+
+= −
+
+Z ∞
+
+> 0
+
+∂∂s (P ts g)( ˜ x) ds 
+
+= g( ˜ x, t ) − lim 
+
+> R→∞
+
+(P tRg)( ˜ x).
+
+By the tail estimate established in step (ii), 
+
+|(P tRg)( ˜ x)| ≤ C′
+
+> t
+
+(1 + ∥ ˜x∥m+1 )e−ctR → 0 as R → ∞ ,
+
+for each ( ˜ x, t ). Hence ( ˜Atχ(·, t ))( ˜ x) = g( ˜ x, t ) for all ( ˜ x, t ), and consequently u(x, t ) =
+
+χ(S(t)−1/2(x − m(t)) , t ) satisfies eq. (33) pointwise. The gradient component of the Helmholtz decomposition is then ∇xψ(x, t ) = 12 ∇xu(x, t ).
+
+Step (iv) : It remains to prove uniqueness of the vector fields Σ∇xψ and h within the same regularity class. Suppose that 
+
+r(x, t ) = Σ(t)∇xψ1(x, t ) + h1(x, t ) = Σ(t)∇xψ2(x, t ) + h2(x, t )
+
+are two q-weighted Helmholtz decompositions satisfying the same smoothness and growth conditions, with 
+
+∇x · [q(x, t )h1(x, t )] = ∇x · [q(x, t )h2(x, t )] = 0 .
+
+Let φ(x, t ) = ψ1(x, t ) − ψ2(x, t ). Subtracting the two decompositions gives 
+
+Σ(t)∇xφ(x, t ) = h2(x, t ) − h1(x, t ). (40) 28 Since h2 − h1 is also q-divergence-free, we have 
+
+∇x · [q(x, t ) ( h2(x, t ) − h1(x, t ))] = 0 .
+
+Multiplying by φ(x, t ) and integrating over RK , the integration by parts identity yields 
+
+Z
+
+∇xφ(x, t )⊤ (h2(x, t ) − h1(x, t )) q(x, t ) dx = 0 .
+
+The boundary term vanishes because the vector fields satisfy the assumed polynomial growth condi-tions. Using (40), we obtain 
+
+Z
+
+∇xφ(x, t )⊤Σ(t)∇xφ(x, t )q(x, t ) dx = 0 .
+
+Because Σ(t) is positive definite and q(x, t ) > 0, this implies ∇xφ(x, t ) = 0 , q(·, t ) a.e. Therefore, 
+
+Σ(t)∇xψ1(x, t ) = Σ(t)∇xψ2(x, t ), h1(x, t ) = h2(x, t ),
+
+for q(·, t )-a.e. x. Since this holds for a.e. t, Tonelli’s theorem gives uniqueness up to (x, t )-a.e. equal-ity. By continuity of Σ(t)∇xψ1(x, t ) and Σ(t)∇xψ2(x, t ), as well as h1(x, t ) and h2(x, t ), jointly in (x, t ), we conclude (pointwise) uniqueness. Finally, ∇x(ψ1 − ψ2) = 0 shows that ψ1 − ψ2 is constant in x, possibly depending on t.Theorem 3 implies that for the case of Gaussian marginals and state-independent diffusion coefficient, the Helmholtz decomposition exists and admits the probabilistic representation 
+
+∇xψ(x, t ) = 12 S(t)−1/2∇˜xχ
+
+
+
+S(t)−1/2(x − m(t)) , t 
+
+
+
+∇˜xχ( ˜ x, t ) = −
+
+Z ∞
+
+> 0
+
+At(s)Bt(s)−1Eξ∼N (0,IK )[ξ g(At(s) ˜ x + Bt(s)ξ, t )] ds 
+
+At(s) = e−sC(t)/2, Bt(s) = 
+
+
+
+IK − e−sC(t)1/2
+
+, C(t) = S(t)−1/2Σ(t)S(t)−1/2
+
+g( ˜ x, t ) = ∇˜x · ρ( ˜ x, t ) − ˜x⊤ρ( ˜ x, t ), ρ( ˜ x, t ) = S(t)−1/2r(m(t) + S(t)1/2 ˜x, t ).
+
+(41) As a corollary of Theorem 3, we obtain a proof of Theorem 1 from the main text, which states that the variational family implied by Helmholtz-SDE is arbitrarily close in KL distance to the true posterior whenever the prior is linear and the observation model is linear and Gaussian. 
+
+Proof of Theorem 1. When the prior SDE is linear and the observation model is linear-Gaussian, the true posterior Q⋆ is a Markovian Gaussian process (‘Gauss–Markov’ process) whose drift f ⋆(x, t ) is affine in x and is given by the Kalman-Bucy smoother [ 32 , 72 ]. The one-time marginals are Gaussian, 
+
+q⋆(x, t ) = N (m⋆(t), S⋆(t)) , with S⋆(t) positive definite. The functions m⋆(t) and S⋆(t) are continuous on [0 , T ] but only piecewise continuously differentiable : their derivatives jump at the observation times {tn}Nn=1 , since the smoother updates discontinuously when conditioning on each observation (see e.g., Hu et al. [15] Appendix J). By assumption, Q is the set of path laws produced by Helmholtz-SDE applied to any continuously differentiable m(t) and positive-definite S(t). Concretely, for each such input pair, Helmholtz-SDE selects a linear reference drift fq that realizes the marginals N (m(t), S(t)) (Proposition 2) and adds the q-divergence-free correction h obtained from the order-1 Helmholtz construction. The resulting diffusion has drift fq + h and one-time marginals N (m(t), S(t)) , and constitutes the corresponding element of Q. Since (m⋆, S⋆) is not continuously differentiable, the true posterior Q⋆ does not, in general, lie in Q. We argue instead that Q⋆ can be approximated arbitrarily closely in KL by Q.Fix ϵ > 0. Since m⋆ and S⋆ are continuous and piecewise C1, we may smooth them inside neighborhoods of the observation times whose total Lebesgue measure is at most ϵ. This gives continuously differentiable functions (mϵ, Sϵ) such that Sϵ(t) ≻ 0 for all t, the pair (mϵ, Sϵ) agrees with (m⋆, S⋆) outside these neighborhoods, and 
+
+sup  
+
+> t∈[0 ,T ]
+
+{∥ mϵ(t) − m⋆(t)∥ + ∥Sϵ(t) − S⋆(t)∥F } ≤ ϵ. 
+
+29 Positive definiteness is preserved for sufficiently small ϵ because λmin (S⋆(t)) is uniformly bounded away from zero on the compact interval. Let Qϵ ∈ Q denote the path law produced by Helmholtz-SDE on input (mϵ, Sϵ), with reference drift f ϵq and divergence-free correction hϵ.Since fp and f ϵq are both affine in x, the residual rϵ(x, t ) = fp(x, t ) − f ϵq (x, t ) is linear in x.Hence, its order-1 Taylor expansion is exact. Theorem 3 therefore yields a qϵ-weighted Helmholtz decomposition rϵ = Σ∇xψϵ + hϵ, in which the divergence-free component hϵ is exactly the correction added by Helmholtz-SDE. Hence the corrected drift f ϵq + hϵ differs from the prior drift 
+
+fp exactly by the gradient component Σ∇xψϵ.It remains to show that DKL (Qϵ ∥ Q⋆) → 0 as ϵ → 0. Both Qϵ and Q⋆ are diffusions with diffu-sion coefficient Σ1/2 and Gaussian initial distributions N (mϵ(0) , Sϵ(0)) and N (m⋆(0) , S⋆(0)) ,respectively, with drifts f ϵq + hϵ and f ⋆. Girsanov’s theorem (Theorem 2) therefore gives                    
+
+> DKL (Qϵ∥Q⋆) = DKL (N(mϵ(0) ,Sϵ(0)) ∥ N (m⋆(0) ,S⋆(0))) + 12
+> ZT
+> 0
+> EQϵ∥Σ−1/2(fϵq+hϵ−f⋆)∥2dt.
+
+The initial-time KL vanishes as ϵ → 0 by continuity of the Gaussian KL in its parameters, since 
+
+mϵ(0) → m⋆(0) and Sϵ(0) → S⋆(0) . For the path-KL term, recall that on the complement of the 
+
+ϵ-neighborhoods of {tn}, the smoothed and true marginals coincide: (mϵ, Sϵ) = ( m⋆, S⋆). Thus 
+
+f ϵq + hϵ is the Helmholtz solution of the fixed-marginal path-KL minimization problem for q⋆. The true posterior drift f ⋆ solves the same problem: once the one-time marginals are fixed to q⋆, the reconstruction and initial-KL terms are fixed, so optimality of Q⋆ reduces to minimizing the path KL. By strict convexity of the weighted L2(q⋆, Σ−1) objective, the minimizer is unique up to q⋆-a.e. equality. Hence f ϵq + hϵ = f ⋆ a.e. outside the smoothing neighborhoods. Indeed, if another drift with the same marginals had smaller path KL to the prior, replacing the posterior drift by that drift would leave the reconstruction and initial KL terms unchanged and would produce an ELBO strictly larger than that of the exact posterior, a contradiction. Inside the smoothing neighborhoods, the affine coefficients of f ϵq + hϵ and f ⋆ are uniformly bounded for small ϵ. Moreover, the uniform convergence of (mϵ, Sϵ) to (m⋆, S⋆) implies sup ϵ,t EQϵ ∥Xt∥2 <
+
+∞. Combining these two facts, there exists a constant C independent of ϵ such that 
+
+EQϵ Σ(t)−1/2{f ϵq (Xt, t ) + hϵ(Xt, t ) − f ⋆(Xt, t )} 2
+
+≤ C
+
+on these neighborhoods. The path-KL term is therefore O(ϵ). We conclude DKL (Qϵ ∥ Q⋆) → 0 as ϵ → 0, and hence 
+
+inf Q∈Q DKL (Q ∥ Q⋆) = 0 .
+
+B.3 Polynomial approximation to residual vector field 
+
+We now describe how to compute the order-ℓ polynomial approximation to the weighted Helmholtz decomposition used in our implementation. In addition to Gaussianity of the posterior marginals, we assume the regularity conditions in Assumption (A4). For an order ℓ > 2 approximation, we need to further assume that r has derivatives up to order ℓ with at most polynomial growth. Let r(x, t |θ, ϕ) = fp(x, t |θ) − fq (x, t |ϕ), and let us drop the dependence on θ and ϕ. We will consider the order-ℓ Taylor approximation of r(x, t ) about m(t)˜r(ℓ)(x, t ) = 
+
+r(m(t), t ) + Dxr(x, t )|x=m(t)(x − m(t)) + · · · + 1
+
+ℓ! D(ℓ) 
+
+> x
+
+r(x, t )|x=m(t)[( x − m(t)) ⊗ℓ] (42) where D(l) 
+
+> x
+
+r(x, t )ij 1,...,j l = ∂l 
+
+> ∂xj1,...,∂ xjl
+
+ri(x, t ), 1 ≤ i, j 1, . . . , j l ≤ k denotes the l-th derivative tensor for 1 ≤ l ≤ ℓ and D(l) 
+
+> x
+
+r(m(t), t )[( x − m(t)) ⊗l] denotes contraction of D(l) 
+
+> x
+
+r(m(t), t )
+
+with the order-l tensor product (x − m(t)) ⊗l. Equation (42) can be obtained by performing a multivariate Taylor expansion for each output dimension of r separately. Note that D(l) 
+
+> x
+
+r(x, t ) is 
+
+(l + 1) -dimensional. Moreover, each output dimension of ˜r(ℓ) is a polynomial in K variables of degree at most ℓ.30 The full l-th derivative tensor has Kl+1 entries. Thus, explicitly forming this tensor by automatic differentiation costs at least O(Kl+1 ) operations, and roughly O(Kl+1 Cr ) when Cr denotes the cost of a single evaluation of r.Our goal will be show that we can analytically compute the Helmholtz decomposition of ˜r(ℓ)(x, t )
+
+with computational complexity O(Kℓ+2 ). For latent spaces of moderate dimension, this is tractable for ℓ ∈ { 1, 2}, which we find work well in our experiments. 
+
+The Helmholtz decomposition as solving a linear system. From the proof of Theorem 3 in Appendix B.2, we know that it suffices to find a function ψ(·, t ) : RK → R that solves the Poisson equation 
+
+∇x · [q(x, t )Σ(t|θ)∇ψ(x, t )] = ∇x ·
+
+h
+
+q(x, t )˜ r(ℓ)(x, t |θ)
+
+i
+
+.
+
+Then, the Helmholtz decomposition of ˜r(ℓ) with respect to q is 
+
+˜r(ℓ)(x, t |θ) = Σ(t|θ)∇ψ(x, t ) + h(x, t ).
+
+To obtain such a solution, we first performed the whitening transformation z = S(t)−1/2(x − m(t)) ,in which case the Poisson equation became 
+
+tr  C(t)∇2 
+
+> z
+
+χ(z, t ) − z⊤C(t)∇z χ(z, t ) = g(z, t ) (43) where χ(z, t ) = ψ(m(t) + S(t)1/2z, t ) is the solution in whitened coordinates; g(z, t ) =
+
+∇z · u(z, t ) − z⊤u(z, t ) is the right-hand side in whitened coordinates; u(z, t ) =
+
+S(t)−1/2 ˜r(ℓ)(m(t) + S(t)1/2z, t |θ) is the residual vector field in whitened coordinates; and 
+
+C(t) = S(t)−1/2Σ(t)S(t)−1/2.From eq. (43) we observe that since each output dimension of ˜r(ℓ) is a degree ℓ polynomial in z, then the inner product of u(z, t ) with z implies that right-hand side of the Poisson equation eq. (43) will be a degree (ℓ + 1) polynomial in z. Moreover, since the gradient operator ∇z in the left hand side of eq. (43) reduces the degree of a polynomial by one, and the inner product with z increases it by one, then the solution χ(z, t ) to eq. (43) will also be a polynomial of degree (ℓ + 1) .Consider the monomials in K variables of total degree at most ℓ + 1 , namely 
+
+pα(z) = 
+
+> K
+
+Y
+
+> j=1
+
+zαj 
+
+> j
+
+, α ∈ N K,ℓ +1 , NK,ℓ +1 =
+
+α ∈ { 0, 1, . . . , ℓ + 1 }K
+
+> K
+
+X
+
+> j=1
+
+αj ≤ ℓ + 1 
+
+ .
+
+These monomials are a basis for the subspace of multivariate polynomials of order at most ℓ + 1 ,and there are  K+ℓ+1 
+
+> ℓ+1
+
+ = Ω( Kℓ+1 ) such monomials for fixed ℓ. One strategy for solving eq. (43) would be to expand g(z, t ) and χ(z, t ) in this monomial basis and then to solve a linear system. Indeed, we could construct a Ω( Kℓ+1 ) × Ω( Kℓ+1 ) matrix whose columns describe the action of the operator p(z) 7 → tr  C(t)∇2 
+
+> z
+
+p(z) − z⊤C(t)∇z p(z) on each pα(z), α ∈ N k,ℓ +1 . In general, this matrix will be dense. Then, solving eq. (43) amounts to solving a dense Ω( Kℓ+1 )-dimensional linear system; doing so via Gaussian elimination has computational complexity Ω( Kℓ+1 )3.The obvious downside to this approach is that the computational complexity scales poorly with the latent dimension. For example, with a K = 10 -dimensional latent space and an order ℓ = 2 
+
+polynomial approximation, Kℓ+2 = 10 4, whereas K3ℓ+3 = 10 9. This motivates us to develop a more efficient algorithm to solve the linear system. 
+
+Triangularizing the polynomial solver. The reason we could not efficiently solve the linear system was that the Ω( Kℓ+1 ) × Ω( Kℓ+1 ) matrix was dense. We will show that by performing an appropriate change-of-variable, the solution to eq. (43) can be obtained by a sparse linear solve. Indeed, let 
+
+C(t) = Q(t)diag( λ1(t), . . . , λ k(t)) Q(t)⊤, Q(t)Q(t)⊤ = IK ,
+
+be an eigendecomposition of C(t), and define the rotated coordinate system v = Q(t)⊤z. Writing 
+
+χ(z, t ) = ˜ χ(v, t ) and g(z, t ) = ˜ g(v, t ), the Poisson equation eq. (43) becomes 
+
+> K
+
+X
+
+> i=1
+
+λi(t)
+
+ ∂2
+
+∂v2
+
+> i
+
+− vi
+
+∂∂vi
+
+
+
+˜χ(v, t ) = ˜ g(v, t ). (44) 31 We now expand ˜χ and ˜g in the monomial basis. For a monomial pα(v), α ∈ N K,ℓ +1 the operator in eq. (44) acts as 
+
+> K
+
+X
+
+> i=1
+
+λi(t)
+
+ ∂2
+
+∂v2
+
+> i
+
+− vi
+
+∂∂vi
+
+
+
+pα(v)= −
+
+> K
+
+X
+
+> i=1
+
+λi(t)αi
+
+!
+
+pα(v) + 
+
+> K
+
+X
+
+> i=1
+
+λi(t)αi(αi − 1) pα−2ei (v),
+
+(45) where ei ∈ RK is the ith standard basis vector and we interpret αi − 2( ei)i = 0 whenever αi < 2.Thus, the operator maps a monomial of degree l to itself plus terms of degree l − 2.This implies that if the monomials are ordered by total degree, then the matrix representation of the operator in eq. (44) is block lower triangular. In particular, the coefficients of the degree-(ℓ + 1) 
+
+terms in ˜χ are uncoupled from all lower-degree terms. If we write 
+
+˜χ(v, t ) = X
+
+> α∈N K,ℓ +1
+
+aα(t)pα(v), ˜g(v, t ) = X
+
+> α∈N K,ℓ +1
+
+bα(t)pα(v),
+
+then for each vector α ∈ N K,ℓ +1 with P αj = ℓ + 1 ,
+
+−
+
+> K
+
+X
+
+> i=1
+
+λi(t)αi
+
+!
+
+aα(t) = bα(t) ⇒ aα(t) = −bα(t)/
+
+> K
+
+X
+
+> i=1
+
+λi(t)αi
+
+!
+
+. (46) Hence the top-degree coefficients are obtained by coefficient-wise division. Once these coefficients are known, the coefficients of degree ℓ − 1 can be obtained by subtracting off the contribution of the second derivative term in eq. (45) coming from the degree ℓ + 1 terms. Proceeding recursively over degrees ℓ + 1 , ℓ − 1, ℓ − 3, . . . yields the coefficients for half of the terms in the monomial basis expansion of ˜χ. An identical recursion over degrees ℓ, ℓ − 2, . . . yields the coefficients for the second half of the terms. 
+
+Recovering the decomposition in the original coordinates. After solving for ˜χ(v, t ), we compute 
+
+∇z χ(z, t ) = Q(t)∇v ˜χ(Q(t)⊤z, t ).
+
+Since z = S(t)−1/2(x − m(t)) , the chain rule gives 
+
+∇xψ(x, t ) = S(t)−1/2∇z χ(S(t)−1/2(x − m(t)) , t ).
+
+This yields the weighted Helmholtz decomposition of the polynomial surrogate ˜r(ℓ)(x, t ).
+
+Computational complexity of Helmholtz decomposition. The number of monomials of total degree at most ℓ + 1 is Ω( Kℓ+1 ) for fixed ℓ. Thus, after diagonalizing C(t), solving eq. (44) requires only Ω( Kℓ+1 ) coefficient updates rather than a dense solve of a Ω( Kℓ+1 ) × Ω( Kℓ+1 ) linear system. The diagonalization of C(t) costs O(K3), which is dominated by O(Kℓ+2 ) for fixed ℓ ≥ 1.Computing ∇v ˜χ(v, t ) contributes an additional factor of K. Therefore, the overall cost of computing the polynomial Helmholtz decomposition is O(Kℓ+2 ) for fixed ℓ.
+
+B.4 Algorithm summary 
+
+In this subsection, we summarize of our stochastic VI algorithm, Helmholtz-SDE (Algorithm 3), as well as our algorithm for computing the approximate q-weighted Helmholtz decomposition of the residual vector field (Algorithm 2). 32 Algorithm 2: HelmCorrection : polynomial approximation to the divergence-free correction 
+
+Require : polynomial order ℓ; prior drift fp; reference drift fq ; diffusion coefficient Σ1/2; model parameters θ; variational parameters ϕ; posterior mean m ∈ RK and covariance 
+
+S ∈ RK×K at time t; evaluation time t; evaluation state x ∈ RK
+
+# Form polynomial surrogate of residual about m
+
+▷ Define residual r(x, t |θ, ϕ) = fp(x, t |θ) − fq (x, t |m, S, ϕ)
+
+▷ Compute derivative tensors D(l) 
+
+> x
+
+r(m, t ) for l = 0 , 1, . . . , ℓ via automatic differentiation 
+
+▷ Form order-ℓ Taylor surrogate er(ℓ)(x, t ) ← Pℓl=0 1 
+
+> l!
+
+D(l) 
+
+> x
+
+r(m, t )(x − m)⊗l
+
+# Whiten coordinates and diagonalize 
+
+▷ Compute symmetric square root S1/2 and inverse S−1/2
+
+▷ Form whitened residual u(z, t ) ← S−1/2 er(ℓ)(m + S1/2z, t )
+
+▷ Form whitened diffusion C(t) ← S−1/2Σ(t|θ)S−1/2
+
+▷ Eigendecompose C(t) = Q diag( λ1, . . . , λ K ) Q⊤
+
+▷ Define rotated coordinates v = Q⊤z and rotated residual eu(v, t ) ← Q⊤u(Qv , t )
+
+# Build right-hand side eg(v, t ) = ∇v · eu − v⊤ eu in monomial basis 
+
+▷ Expand each component of eu(v, t ) as a polynomial in v of degree ≤ ℓ▷ Compute coefficients {bα}α∈N K,ℓ +1 of eg(v, t ) = P 
+
+> α
+
+bα
+
+QKj=1 vαj 
+
+> j
+
+, where 
+
+NK,ℓ +1 = {α ∈ { 0, . . . , ℓ + 1 }K : P 
+
+> j
+
+αj ≤ ℓ + 1 }
+
+# Solve recursively over degree 
+
+▷ Initialize coefficients {aα}α∈N K,ℓ +1 ← 0
+
+for degree d = ℓ + 1 , ℓ, . . . , 0 do for α with P 
+
+> j
+
+αj = d do 
+
+▷ Compute residual contribution from already-solved higher-degree terms: 
+
+cα ← bα − P 
+
+> i:αi≥0
+
+λi(αi + 2)( αi + 1) aα+2 ei # from eq. (45) 
+
+▷ Solve diagonal coefficient equation: aα ← − cα
+
+. PKi=1 λiαi # when P 
+
+> j
+
+αj > 0;set a0 ← 0 (constant has no gradient) 
+
+end end 
+
+# Recover gradient of potential in original coordinates 
+
+▷ Compute ∇v eχ(v, t ) symbolically from coefficients {aα}
+
+▷ Set z ← S−1/2(x − m) and v ← Q⊤z
+
+▷ Evaluate ∇xψ(x, t ) ← S−1/2 Q ∇v eχ(v, t )
+
+# Return divergence-free component evaluated at x
+
+▷ ¯h ← er(ℓ)(x, t ) − Σ(t|θ)∇xψ(x, t )
+
+return ¯h
+
+33 Algorithm 3: Helmholtz-SDE training 
+
+Require : dataset D = {y(m)(tn)}N,M n=1 ,m =1 ; prior drift fp(x, t |θ); diffusion coefficient 
+
+Σ(t|θ)1/2; observation model p(y(tn)|x(tn), θlik ); parameters θ = {θprior , θlik };parameters ϕ of posterior one-time marginals (m(m)(t|ϕ), S(m)(t|ϕ)) 0≤t≤T ;reference drift fq ; polynomial order ℓ; number of Monte Carlo samples Ntime , Nspace 
+
+for learning iterations do 
+
+# Compute initial KL divergence (closed-form) 
+
+▷ Linit ← P 
+
+> m
+
+DKL 
+
+ N (m(m)(0 |ϕ), S(m)(0 |ϕ)) ∥ N (μ0, V0), where 
+
+p(x(0) , 0|θ) = N (μ0, V0) is the prior initial distribution # Compute estimate of reconstruction loss 
+
+▷ Sample Ntime observation times sji.i.d. 
+
+∼ Unif {1, . . . , N }
+
+▷ Sample Nspace states from posterior at each time 
+
+xm,j,k i.i.d. 
+
+∼ N (m(m)(sj |ϕ), S(m)(sj |ϕ)) 
+
+▷ Compute per-trial expected log-likelihood estimate 
+
+ℓm ← NNtime Nspace 
+
+P 
+
+> j,k
+
+log p(y(sj )|xm,j,k )
+
+▷ bLrec ← PMm=1 ℓm
+
+# Compute estimate of path KL divergence 
+
+▷ Sample Ntime KL evaluation times sji.i.d. 
+
+∼ Unif[0 , T ]
+
+▷ Sample Nspace states from posterior at each time 
+
+xm,j,k i.i.d. 
+
+∼ N (m(m)(sj |ϕ), S(m)(sj |ϕ)) 
+
+▷ Compute an approximation to the optimal divergence free correction 
+
+¯hj,m,k ← HelmCorrection (ℓ, fp, fq , Σ, θ, ϕ, m(m)(sj |ϕ), S(m)(sj |ϕ), s j , xm,j,k )
+
+▷ Calculate full posterior drift at each time 
+
+(fq )full  
+
+> j,m,k
+
+← fq (xm,j,k , s j |m(m)(sj |ϕ), S(m)(sj |ϕ)) + ¯hj,m,k 
+
+▷ Compute per-trial KL estimate 
+
+KL m ← T
+
+> 2Ntime Nspace
+
+P 
+
+> j,k
+
+∥Σ(sj |θ)−1/2{fp(xm,j,k , s j |θ) − (fq )full 
+
+> j,m,k
+
+}∥ 2
+
+▷ bLpath ← P 
+
+> m
+
+KL m
+
+# Update model parameters 
+
+▷ L ← bLrec + Linit + bLpath 
+
+▷ θ, ϕ ← gradient-step (L, θ, ϕ)
+
+end 
+
+34 C Linear SDE experiments: the Ornstein-Uhlenbeck spiral 
+
+In this section, we study the linear SDE prior 
+
+P : dx(t) = ( −αI2 + ωJ)x(t)dt + dw(t), 0 ≤ t ≤ T, p(x, 0) = N (μ(0) , V (0)) , (47) and the linear, Gaussian observation model p(y(ti)|x(ti)) = N (Cx (ti) + d, R). We refer to this model as the Ornstein-Uhlenbeck (OU) spiral .The prior SDE P has stationary distribution N (0, 1/(2 α)I2). Moreover, the drift function of P is comprised of a gradient field −αI2x as well as a vector field ωJ that is divergence-free with respect to the stationary distribution. In the observation model, C ∈ R2×2 is a linear transformation having determinant 1, d ∈ R2 is an offset vector, and R = σ2CC ⊤ is the observation noise, where σ2 > 0.First, in Appendix C.1 we demonstrate that neither ARCTA [ 6, 7] nor SDE-Matching [ 8] can be expected to recover the true posterior in this model, even though it is tractable. Then, in Appendix C.2 we provide additional simulation results that validate our theoretical claim. 
+
+C.1 Theoretical results for OU spiral 
+
+In this subsection, we theoretically characterize the suboptimality of the symmetric and square root gauges when the prior and likelihood models are known and fixed. In other words, we quantify 
+
+d⋆ 
+
+> Q
+
+= inf  
+
+> Q∈Q
+
+DKL (Q ∥ Q⋆) , (48) where Q⋆ is the true posterior for the latent SDE model (Section 3.1). In the OU spiral model, since the prior SDE is linear and the likelihood model is linear and Gaussian, Q⋆ is a Gaussian process. Even though exact inference is possible, we show that existing simulation-free VI algorithms cannot be expected to recover the posterior . Specifically, consider prior initial distribution p(x, 0) equal to the stationary distribution N (0, 1/(2 α)I2) and all continuously differentiable marginal parameters 
+
+(m(t), S(t)) 0≤t≤T with S(t) positive definite. We show that d⋆ 
+
+> QF
+
+grows linearly with ω for the corresponding variational families defined by the symmetric and square root gauges. We denote them by Qsym and Qsqrt , respectively. 
+
+Theorem 4 (Suboptimality of simulation-free VI algorithms in the OU spiral): Consider the OU spiral model eq. (47), and let Q⋆ denote the (true) posterior SDE. Fix any c0 > 1 and ω ≥ c0α. Then every distribution Q ∈ Q sym ∪ Q sqrt satisfies DKL (Q ∥ Q⋆) ≥ min 
+
+(
+
+18 , 1 − 12c0
+
+2√2
+
+)
+
+T ω − 12√2 + COU 
+
+where 
+
+COU (ω, α, C, d, σ 2, T, y) = log p(y) + N log(2 πσ 2). (49) Moreover, if p(x, 0) = N (0, 12α I2), then COU is lower bounded by a constant COU −stationary 
+
+that does not depend on ω.
+
+Proof. Our proof consists of five key steps: (i) Express the KL divergence to Q⋆ at any pair (m(t), S(t)) 0≤t≤T as sum of two functions 
+
+fm and fS , where fm is a function of the marginal means (m(t)) 0≤t≤T and fS is a function of the marginal covariances (S(t)) 0≤t≤T .(ii) Justify that fm is minimized at the posterior mean (m⋆(t)) 0≤t≤T .(iii) Rewrite fS in terms of the eigendecomposition of S(t) at each time 0 ≤ t ≤ T .(iv) Use an occupation-time argument to show that either λ1(t) is often bounded away from zero, in which case the rotational mismatch term is large, or else λ1(t) is often close to zero, in which case keeping it small requires a large negative control and hence large control cost. 35 (v) Show that when p(x, 0) is the stationary distribution of the prior (47) , log p(y) is lower bounded by a constant not depending on ω. This is done using uniform (in ω) spectral bounds on the observation covariance matrix. 
+
+Step (i) : Let Q be an SDE with diffusion coefficient I2 and Gaussian marginals q(x, t ) =
+
+N (m(t), S(t)) , where (m(t)) 0≤t≤T is a differentiable mean function and (S(t)) 0≤t≤T is a differ-entiable and symmetric, positive definite covariance function. Moreover, suppose that Q has drift function of the form 
+
+fq (x, t ) = Aq (x, t )x + ddt m(t) − Aq (t)m(t) Aq (x, t ) = K(t) − 12 S(t)−1
+
+where K(t) is a solution to the Lyapunov equation eq. (16). In Proposition 2, we showed that this drift function induces the marginals q(x, t ).Using Girsanov’s Theorem (Theorem 2), the KL divergence to the posterior decomposes as DKL (Q ∥ Q⋆) = fm(m) + fS (S) + COU (ω, α, C, d, σ 2, T, y),
+
+where fm depends only on the mean path, fS depends only on the covariance path, and COU is a constant defined in eq. (49) not depending on Q.These functions are given by 
+
+fm(m) = 12 (m(0) − μ(0)) ⊤V (0) −1(m(0) − μ(0)) + 12
+
+Z T
+
+> 0
+
+ddt m(t) − (−αI2 + ωJ)m(t)
+
+> 22
+
+dt 
+
++ 12
+
+> N
+
+X
+
+> i=1
+
+ Cm (ti) + d − y(ti)TR−1 Cm (ti) + d − y(ti),fS (S) = 12
+
+"
+
+tr  V (0) −1S(0)  − log det  S(0) 
+
+det  V (0)  − 2
+
+#
+
++12
+
+Z T
+
+> 0
+
+tr 
+
+ (K(t) − 12 S(t)−1) − (−αI2 + ωJ)S(t) (K(t) − 12 S(t)−1) − (−αI2 + ωJ)T
+
+
+
+dt 
+
++ 12
+
+> N
+
+X
+
+> n=1
+
+tr  R−1CS (tn)CT . (50) Notice that fS does not depend on the observations {y(tn)}Nn=1 .Since R = σ2CC T, we have CTR−1C = σ−2I2, and therefore 
+
+12
+
+> N
+
+X
+
+> i=1
+
+tr  R−1CS (ti)CT = 12σ2
+
+> N
+
+X
+
+> i=1
+
+tr  S(ti) ≥ 0.
+
+The first term of fS is also nonnegative since the matrix A = V (0) −1/2S(0) V (0) −1/2 is positive definite and 
+
+tr  V (0) −1S(0)  − log det  S(0) 
+
+det  V (0)  − 2 = 
+
+> 2
+
+X
+
+> i=1
+
+λi(A) − log λi(A) − 1 ≥ 0.
+
+We will drop these two terms from fS when constructing our lower bound. The single remaining term is the path KL term. 
+
+Step (ii) : Because the posterior path law is Gaussian, the map m 7 → fm(m) is a strictly convex quadratic functional. Its unique minimizer is the posterior mean path (m⋆(t)) 0≤t≤T . Hence 
+
+fm(m) ≥ fm(m⋆),
+
+with equality if and only if m = m⋆. The optimal is ≥ 0 since each term in fm is nonnegative. Therefore, the suboptimality of the family is controlled entirely by the covariance term fS .
+
+Step (iii) : Let λ1(t) ≤ λ2(t) denote the ordered eigenvalues of S(t). Since S(·) is C1 and symmetric positive definite, Weyl’s perturbation inequality implies that λ1, λ 2 are Lipschitz, hence absolutely continuous and differentiable almost everywhere. 36 Define the sets 
+
+A = {t ∈ [0 , T ] : λ1(t) < λ 2(t)}, E = {t ∈ [0 , T ] : λ1(t) = λ2(t)}.
+
+We will decompose the integral in fS over each of these sets individually. We will start with A, the more involved case. A is an open subset of [0 , T ], and thus can be written as a countable union of disjoint open intervals. On each such interval, we can choose a C1 rotation matrix U (t) such that 
+
+S(t) = U (t)Λ(t)U (t)T, U (t) = 
+
+cos θ(t) − sin θ(t)sin θ(t) cos θ(t)
+
+
+
+, Λ(t) = diag  λ1(t), λ 2(t).
+
+Using this eigendecomposition, we rewrite the integrand appearing in fS as 
+
+tr 
+
+ e∆(t)Λ(t) e∆(t)T
+
+, e∆(t) = U (t)⊤ (K(t) − 12 S(t)−1) − (−αI2 + ωJ)U (t).
+
+Since U (t)⊤(−αI2 + ωJ)U (t) = −αI2 + ωJ, then we need to compute eAq (t) = U (t)⊤(K(t) − 
+
+> 12
+
+S(t)−1)U (t) for the symmetric and square root gauges. (a) Symmetric. Define the skew-symmetric matrix 
+
+Ω(t) = U (t)T ddt U (t) = 
+
+ 0 −w(t)
+
+w(t) 0
+
+
+
+, w(t) = ddt θ(t).
+
+By definition of the symmetric gauge, Aq (t) = K(t) − 12 S(t)−1 is the unique solution to 
+
+ddt S(t) − I2 = Aq (t)S(t) + S(t)Aq (t)⊤, 0 ≤ t ≤ T. (51) A simple algebraic calculation yields 
+
+U (t)⊤ ddt S(t)U (t) = ddt Λ(t) + Ω(t)Λ(t) + Λ(t)Ω(t)⊤. (52) Multiplying eq. (51) by U (t)⊤ on the left and U (t) on the right, and then substituting eq. (52) into eq. (51) yields 
+
+ddt Λ(t) + Ω(t)Λ(t) + Λ(t)Ω(t)⊤ − I2 = eAq Λ(t) + Λ(t) eA⊤ 
+
+> q
+
+, 0 ≤ t ≤ T. 
+
+Hence, the entries of eAq (t) are 
+
+( eAq (t)) ij =
+
+( ddt λi(t) − 1) /(2 λi(t)) if i = j
+
+Ωij (t)( λj (t) − λi(t)) /(λi(t) + λj (t)) if i̸ = j . (53) (b) Square root. The square root gauge sets K(t) = ( ddt S(t)1/2)S(t)−1/2, where S(t)1/2 =
+
+U (t)Λ(t)1/2U (t)⊤ is the symmetric square root. Rewriting K(t) in terms of U (t) and 
+
+Λ(t) yields 
+
+ ddt S(t)1/2
+
+
+
+S(t)−1/2 = ddt U (t)U (t)⊤ + (1 /2) U (t) ddt Λ(t)Λ(t)−1U (t)⊤+
+
+U (t)Λ(t)1/2Ω(t)⊤Λ(t)−1/2U (t)⊤.
+
+(54) Multiplying eq. (54) by U (t)⊤ on the left and U (t) on the right yields 
+
+eAq (t) = Ω(t) + (1 /2) ddt Λ(t)Λ(t)−1 − Λ(t)−1/2Ω(t)Λ(t)1/2 − (1 /2) Λ(t)−1.
+
+Hence, the entries of eAq (t) are 
+
+( eAq (t)) ij =
+
+( ddt λi(t) − 1) /2λi(t) if i = j
+
+Ωij (t)(1 − pλi(t)/λ j (t)) if i̸ = j . (55) 37 Overall, the integrand is equal to 
+
+tr 
+
+ e∆(t)Λ(t) e∆(t)T
+
+= λ1(t)( e∆(t)211 + e∆(t)221 ) + λ2(t)( e∆(t)212 + e∆(t)222 ), (56) where we have now computed e∆(t) for the symmetric and square root gauges. Next, we explicitly minimize eq. (56) with respect to w(t), for each of the symmetric and square root gauges. Note that only the off-diagonal entries of e∆(t) depend on w(t). In particular let 
+
+e∆(t)12 = aw (t) + ω and e∆(t)21 = bw (t) − ω for a, b ∈ R. Then the contribution of the off-diagonal terms to the integrand can be written as 
+
+λ1(t) e∆(t)221 +λ2(t) e∆(t)212 = ( λ1(t)b2+λ2(t)a2)w(t)2+2 ω(λ2(t)a−λ1(t)b)w(t)+( λ1(t)+ λ2(t)) ω2.
+
+Completing the square yields the optimal value of w(t)
+
+w(t)⋆ = −ω(λ2(t)a − λ1(t)b)/(λ1(t)b2 + λ2(t)a2).
+
+The contribution of the off-diagonal terms at this optimum is 
+
+(λ1(t) + λ2(t)) ω2 − ω(λ2(t)a − λ1(t)b)2/(λ1(t)b2 + λ2(t)a2)=ω2λ1(t)λ2(t)( a + b)2/(λ1(t)b2 + λ2(t)a2). (57) For the symmetric gauge, a = b = −(λ2(t) − λ1(t)) /(λ1(t) + λ2(t)) , so 
+
+λ1(t) e∆(t)221 + λ2(t) e∆(t)212 ≥ 4ω2λ1(t)λ2(t)/(λ1(t) + λ2(t)) ≥ 2ω2λ1(t).
+
+In the last inequality, we used the ordering of the eigenvalues λ2(t) ≥ λ1(t).And for the square root gauge, we have a = r(t) − 1, b = 1 − r(t)−1 where we have defined 
+
+r(t) = pλ1(t)/λ 2(t). This implies 
+
+(a + b)2 = ( r(t)2 − 1) 2/r (t)2,λ1(t)b2 + λ2(t)a2 = ( r(t) − 1) 2(λ1(t)/r (t)2 + λ2(t)) = 2 λ2(t)( r(t) − 1) 2
+
+λ1(t)λ2(t)( a + b)2/(λ1(t)b2 + λ2(t)a2) = 12 λ2(t)( r(t) + 1) 2 = 12 (pλ1(t) + pλ2(t)) 2.
+
+Hence, 
+
+λ1(t) e∆(t)221 + λ2(t) e∆(t)212 ≥ ω2
+
+2 (pλ1(t) + pλ2(t)) 2 ≥ 2ω2pλ1(t)λ2(t) ≥ 2ω2λ1(t).
+
+In both cases, we have proven that for each open interval that makes up A,
+
+min 
+
+> w(t)
+
+n
+
+λ1(t) e∆21 (t)2 + λ2(t) e∆12 (t)2o
+
+≥ 2ω2λ1(t), for a.e. t. 
+
+Therefore, for almost every t ∈ A,
+
+tr 
+
+ e∆(t)Λ(t) e∆(t)T
+
+≥
+
+  ddt λ1(t) − 1 + 2 αλ 1(t)2
+
+4λ1(t) + 2 ω2λ1(t).
+
+We now proceed to the second set E. On this set, the covariance is isotropic: S(t) = λ(t)I2, λ (t) = 
+
+λ1(t) = λ2(t). No eigenbasis is needed here. Since S − λI2 = 0 on E and both terms are absolutely continuous, we have ddt S(t) = ddt λ(t)I2
+
+for almost every t ∈ E. For the symmetric gauge, the linear drift coefficient Aq (t) solves 
+
+ddt λ(t)I2 = 2 λ(t)K(t) + I2,
+
+and in the symmetric square root gauge, 
+
+Aq (t) = 
+
+ ddt S(t)1/2
+
+
+
+S(t)−1/2 − 12 S(t)−1 = 
+
+> ddt
+
+λ(t) − 12λ(t) I2.
+
+38 Thus, in either gauge, 
+
+Aq (t) =  
+
+> ddt
+
+λ(t) − 12λ(t) I2 for a.e. t ∈ E. 
+
+A direct calculation then yields 
+
+tr 
+
+ Aq (t) − (−αI2 + ωJ)S(t) Aq (t) − (−αI2 + ωJ)T
+
+=
+
+  ddt λ(t) − 1 + 2 αλ (t)2
+
+2λ(t) + 2 ω2λ(t),
+
+which is stronger than the preceding bound. Combining both cases, we conclude that for almost every t ∈ [0 , T ],
+
+tr 
+
+ Aq (t) − (−αI2 + ωJ)S(t) Aq (t) − (−αI2 + ωJ)T
+
+≥ u(t)2
+
+4λ1(t) + 2 ω2λ1(t)
+
+u(t) = ddt λ1(t) − 1 + 2 αλ 1(t).
+
+Therefore, 
+
+fS (S) ≥ I =
+
+Z T
+
+> 0
+
+ u(t)2
+
+8λ1(t) + ω2λ1(t)
+
+
+
+dt. 
+
+Step (iv) : Fix c0 > 1 and assume ω ≥ c0α. Define the sets Eδ and Fδ that track the time λ1(t)
+
+spends above and below δ > 0, respectively: 
+
+δ = 14ω , Eδ = {t ∈ [0 , T ] : λ1(t) ≥ δ}, Fδ = [0 , T ] \ Eδ .
+
+We will argue that if either Eδ or Fδ is large, then I must be large. If |Eδ | ≥ T / 2, then 
+
+I ≥
+
+Z
+
+> Eδ
+
+ω2λ1(t) d t ≥ | Eδ | ω2δ ≥ T
+
+8 ω. 
+
+Suppose instead that |Fδ | > T / 2. Since λ1(t) < δ on Fδ ,
+
+2αλ 1(t) ≤ 2αδ = α
+
+2ω ≤ 12c0
+
+.
+
+Define 
+
+a0 = 1 − 12c0
+
+> 0.
+
+Then, for all t ∈ Fδ ,
+
+dλ 1(t)
+
+dt = 1 − 2αλ 1(t) + u(t) ≥ a0 + u(t).
+
+Since Fδ is open in [0 , T ], we can write it as a countable disjoint union of open intervals (aj , b j ).Integrating over a single interval, 
+
+λ1(bj ) − λ1(aj ) = 
+
+Z bj
+
+> aj
+
+dλ 1(t)
+
+dt dt ≥ a0(bj − aj ) + 
+
+Z bj
+
+> aj
+
+u(t) d t. 
+
+Rearranging yields 
+
+−
+
+Z bj
+
+> aj
+
+u(t) d t ≥ a0(bj − aj ) −  λ1(bj ) − λ1(aj ).
+
+If (aj , b j ) is an interior component, maximality and continuity imply 
+
+λ1(aj ) = λ1(bj ) = δ, 
+
+so the boundary term vanishes. If (aj , b j ) touches 0 or T , then both endpoint values lie in [0 , δ ], and therefore 
+
+λ1(bj ) − λ1(aj ) ≤ δ. 
+
+39 Since there are at most two boundary components, summing over all components gives 
+
+−
+
+Z
+
+> Fδ
+
+u(t) d t ≥ a0|Fδ | − 2δ. 
+
+By the AM-GM inequality, 
+
+u2
+
+8λ + ω2λ ≥ ω
+
+√2 |u| =⇒ I ≥ ω
+
+√2
+
+Z T
+
+> 0
+
+|u(t)| dt. 
+
+Therefore, we deduce 
+
+Z T
+
+> 0
+
+|u(t)| dt ≥
+
+Z
+
+> Fδ
+
+|u(t)| dt ≥ − 
+
+Z
+
+> Fδ
+
+u(t) d t ≥ a0|Fδ | − 2δ > a0T
+
+2 − 2δ
+
+=⇒ I ≥ ω
+
+√2
+
+ a0T
+
+2 − 2δ
+
+
+
+= 1 − 12c0
+
+2√2 T ω − 12√2 .
+
+Combining the two cases and the definition of fS in eq. (50), we conclude 
+
+fS (S) ≥ min 
+
+(
+
+18 , 1 − 12c0
+
+2√2
+
+)
+
+T ω − 12√2 .
+
+Step (v) : Lastly, we show that when p(x, 0) = N  0, 12α I2
+
+, then COU can be lower bounded by a constant independent of ω.Consider the vector of stacked observations 
+
+y1: N :=  y(t1)T, . . . , y(tN )TT ∈ R2N .
+
+Under the stationary OU spiral prior, the latent process is mean-zero Gaussian and 
+
+Cov( x(ti), x(tj )) = 12α e−α|ti−tj |Rω(ti−tj ),
+
+where Rθ ∈ R2×2 represents the 2 × 2 rotation matrix by angle θ.Therefore the stacked observation vector y1: N is Gaussian, 
+
+y1: N ∼ N   ¯d, Σω
+
+,
+
+with block covariance matrix Σω ∈ R2N ×2N
+
+(Σω )ij = 12α e−α|ti−tj |CR ω(ti−tj )CT + 1{i = j} σ2CC T.
+
+and mean ¯d =  dT, . . . , dTT ∈ R2N .
+
+We first derive an ω-uniform lower spectral bound. Since Σω is a covariance matrix, its latent contribution is positive semidefinite. Hence, 
+
+Σω ⪰ σ2 diag  CC T, . . . , CC T.
+
+It follows that 
+
+λmin (Σω ) ≥ σ2λmin (CC T) = m∗ > 0,
+
+uniformly in ω.Next we derive an ω-uniform upper spectral bound. Let 
+
+z =  zT 
+
+> 1
+
+, . . . , zT
+
+> N
+
+T ∈ R2N , zi ∈ R2.
+
+Then 
+
+zTΣω z = σ2
+
+> N
+
+X
+
+> i=1
+
+zT 
+
+> i
+
+CC Tzi + 12α
+
+> N
+
+X
+
+> i,j =1
+
+e−α|ti−tj |zT 
+
+> i
+
+CR ω(ti−tj )CTzj .
+
+40 Since Rω(ti−tj ) is orthogonal ∥CR ω(ti−tj )CT ≤ ∥ C∥2. Therefore 
+
+zTΣω z ≤ σ2∥C∥2
+
+> N
+
+X
+
+> i=1
+
+∥zi∥22 + ∥C∥2
+
+2α
+
+> N
+
+X
+
+> i,j =1
+
+∥zi∥2∥zj ∥2.
+
+Using 
+
+> N
+
+X
+
+> i,j =1
+
+∥zi∥2 ∥zj ∥2 =
+
+> N
+
+X
+
+> i=1
+
+∥zi∥2
+
+!2
+
+≤ N
+
+> N
+
+X
+
+> i=1
+
+∥zi∥22,
+
+we obtain 
+
+zTΣω z ≤ ∥ C∥2op 
+
+
+
+σ2 + N
+
+2α
+
+ NX
+
+> i=1
+
+∥zi∥22.
+
+Hence 
+
+λmax (Σω ) ≤ ∥ C∥2op 
+
+
+
+σ2 + N
+
+2α
+
+
+
+= M∗,
+
+again uniformly in ω.Thus, for every ω,
+
+m∗I2N ⪯ Σω ⪯ M∗I2N .
+
+Since y1: N ∼ N ( ¯d, Σω ), its density is 
+
+pω (y1: N ) = (2 π)−N det( Σω )−1/2 exp 
+
+
+
+− 12 (y1: N − ¯d)TΣ−1 
+
+> ω
+
+(y1: N − ¯d)
+
+
+
+.
+
+Using the spectral bounds above, 
+
+(y1: N − ¯d)TΣ−1 
+
+> ω
+
+(y1: N − ¯d) ≤ ∥y1: N − ¯d∥22
+
+m∗
+
+, det( Σω ) ≤ M 2N 
+
+> ∗
+
+.
+
+Therefore, 
+
+pω (y1: N ) ≥ (2 π)−N M −N 
+
+> ∗
+
+exp 
+
+
+
+− ∥y1: N − ¯d∥22
+
+2m∗
+
+
+
+.
+
+Taking logarithms yields 
+
+log pω (y1: N ) ≥ − N log(2 π) − N log M∗ − ∥y1: N − ¯d∥22
+
+2m∗
+
+.
+
+Thus the claimed bound holds with 
+
+COU −stationary = N log σ2 − N log M∗ − ∥y1: N − ¯d∥22
+
+2m∗
+
+.
+
+which is independent of ω.
+
+C.2 Simulation experiment details 
+
+In this subsection, we provide details regarding our OU spiral experiments. These experiments support the theoretical results in Appendix B.2 and Appendix C.1. In summary, these results state that Helmholtz-SDE achieves zero KL gap to the true posterior for all rotation speeds ω, while the symmetric [ 6, 7] and square root [ 8 ] gauges incur a KL gap that grows linearly in ω. These results characterize the variational families themselves, not the optimization problem solved in practice: with finite-capacity parameterizations of m(t|ϕ) and S(t|ϕ), and with stochastic gradient-based optimization, neither family attains its theoretical optimum. Our experiments test whether the theoretical separation between Helmholtz-SDE and the gauges translates into practical differences. For both our inference and learning experiments, we use the Adam optimizer [ 73 ] with initial learning rate 10 −3, final learning rate 10 −4, and exponential learning rate decay. We run experiments on an NVIDIA A100 or H100 GPU. We generate the OU dataset by sampling latents according the initial distribution p(x, 0) =
+
+N (0, 1/(2 α)I2) and prior dynamics eq. (47) on [0 , 5] . For all experiments we fix α = 0.2.41 We sample using Euler–Maruyama with stepsize 5 · 10 −4. To generate observations, we select a random subset of times {t(m) 
+
+> n
+
+}Nn=1 on the interval [0 , 5] for each trial m, and then we draw 
+
+y(m)(t(m) 
+
+> n
+
+) ∼ N (Ctrue x(m)(tn) + dtrue , σ 2Ctrue C⊤
+
+> true
+
+). Ctrue ∈ R2×2 and dtrue ∈ Rd are chosen to have standard normal entries, with Ctrue normalized to have determinant 1. In our experiments, we vary the rotation speed ω, the number of observation N , and the observation noise σ > 0.
+
+Inference. We first investigate the gap in expressivity of the variational family when the parameters of the generative model are held fixed at their true values. We do so by performing inference over 16 independent trials. For each trial, we can compute the true posterior by running the Kalman–Bucy smoother. We do so with the SING codebase, which Hu et al. [15] prove converges to the true posterior in a single step in the conjugate setting. We fix the time discretization of the posterior to stepsize 5 · 10 −4.To represent the variational posterior, we discretize [0 , 5] on a grid with constant separation 5 · 10 −3
+
+(1001 total grid points). At each point we parameterize the posterior mean and covariance, and we interpolate linearly between the grid times. This yields approximately 6 · 10 3 variational parameters to learn, per trial. Moreover, note that for a randomly sampled time, the unbiased estimate to the path KL depends only on the two neighboring grid points. For this reason, the variational posterior is slow to converge using a single Monte Carlo sample. Instead, we use Ntime = 1001 samples to compute each gradient update (i.e., on average, one sample per grid point). At each time point we draw Nspace = 1 spatial sample. Increasing the sample count this way adds minimal computational overhead, since both sampling and gradient computation parallelize across samples. We perform training for 6 · 10 5 iterations. To compute each direction (forward and backward KL divergence) of the symmetric KL divergence between the true and approximate posterior, we use Girsanov’s formula eq. (12). In particular, we discretize the interval [0 , 5] with stepsize 5 · 10 −4 and at each time evaluate the integrand of the path KL Lpath . Since both the true and approximate posterior drifts are affine, this can be done in closed form using Gaussian expectations. In the top row of Figures 6 to 10, we report the symmetric KL divergence between the approximate and true posterior for ω ∈ { 2π, π, π/ 2, π/ 4, 0}. Broadly, we see that the suboptimality of choosing a single posterior drift per one-time Gaussian marginals (either the symmetric or square root gauge) increases as the number of observations decreases, the observation noise increases, and the rotational speed increases. Even when the rotation speed is strong, choosing a single posterior drift suffices as long as posterior uncertainty is small, i.e., the observations are strongly informative of the latent trajectory. In settings where the posterior is weakly constrained by the data, we see order-of-magnitude differences between Helmholtz-SDE and the symmetric and square root gauges. 
+
+Joint inference and learning. Next, we study the impact of the constrained variational family imposed by prior simulation-free VI algorithms on dynamics learning. To do so, we parameterize the prior drift with a shallow neural network 
+
+(2) → Linear(2, 100) → Softplus → Linear(100, 2) → (2) .We learn prior dynamics together with the affine mapping {C, d} and output noise R that define the Gaussian likelihood model. We perform learning using 1024 trials. For our experiments, we considered numerous parameteriza-tions of the variational posterior, including a per-trial grid posterior as in our inference experiments and an encoder-based amortized posterior as in our Lorenz experiments. For the grid posterior, we observed very slow convergence, even with a large number of Monte Carlo samples Ntime . We hypothesize that this is because the parameter space is high dimensional (1001 grid points × 1024 trials × 6 parameters per grid point per trial ≈ 6 · 10 6 total parameters), and that each Monte Carlo sample only provides gradient signal at two neighboring grid points; moreover, the grid posterior does not benefit from a smoothness inductive bias. On the other hand, training the neural network posterior was unstable; it required choosing a large hidden dimension and performing aggressive gradient clipping. We did not observe that any parameterization preferred a specific gauge, i.e., the choice of posterior parameterization was independent of the gauge. We settled on the kernel-GLM posterior parameterization introduced by Course and Nair [6] , which can be viewed as a grid posterior augmented with a smoothness inductive bias and which couples 42 gradient updates across nearby times. At a high level, this parameterization chooses a grid of temporal inducing locations τ = {τn}Ninduce  
+
+> n=1
+
+that partition [0 , T ]. It then defines the posterior mean m(t|ϕ) at each time point 0 ≤ t ≤ T as M C k(τ , t |ϕ), where k(·, ·| ϕ) is a kernel function, 
+
+k(τ , t |ϕ) ∈ RNinduce ×1 is a gram vector, M ∈ R2×Ninduce contains the inducing values, and 
+
+C ∈ RNinduce ×Ninduce is a pre-conditioning matrix. If C were equal to the inverse gram matrix 
+
+k(τ , τ |ϕ)−1, then m(t|ϕ) would exactly recover the predictive mean of a multi-output Gaussian process regressor with pseudo-observations M at locations τ . However, this requires inverting an Ninduce × Ninduce matrix at each step; therefore, the authors fix it to a deterministic value at initialization (no gradient propagation). A similar parameterization is used for the covariance S(t|ϕ),which is chosen to be dense. See [6] for details. We use Ninduce = 200 inducing values and choose the kernel k(·, ·| ϕ) to be Matérn 5/2 kernel, following Course and Nair [6] . The learnable parameters of the kernel are the output scale, length scale, and warping function parameters (Kumaraswamy warping). The kernel parameters (but not the inducing values) are shared across all trials. We perform training for 3 · 10 4 iterations. At each iteration, we approximate the path KL for each trial using Ntime = 16 samples of [0 , 5] . At each sampled time point we use Nspace = 1 spatial sample. To compute the symmetric KL between the learned and true prior, we again use Girsanov’s theorem eq. (12). However, unlike in our inference experiments, the integrand cannot be computed in closed form, since the neural network prior is nonlinear and does not admit closed-form marginal distributions. Instead, we draw 2048 trials from both the learned and true prior using Euler–Maruyama with stepsize 5 · 10 −4, and approximate the path KL using Monte Carlo. In the bottom row of Figures 6 to 10, we report the symmetric KL divergence between the learned and true prior for ω ∈ { 2π, π, π/ 2, π/ 4, 0}. Generally, we observe that improved inference yields improved learning: the regimes in which the symmetric and square root gauges poorly approximate the posterior are the same regimes in which they poorly recover the prior dynamics. On the other hand, Helmholtz-SDE well approximates the posterior in regimes of high posterior uncertainty, which yields substantive improvements in dynamics recovery. 43 Helmholtz -SDE Square root gauge Symmetric gauge 
+
+> observation noise
+
+number of observations number of observations number of observations 
+
+number of observations number of observations number of observations 
+
+Symmetric KL to prior ( nats )
+
+Helmholtz -SDE Square root gauge Symmetric gauge 
+
+Symmetric KL to posterior ( nats )
+
+> observation noise
+
+Figure 6: OU spiral with ω = 2 π; top: symmetric KL to posterior; bottom: symmetric KL to prior. Helmholtz -SDE Square root gauge Symmetric gauge 
+
+> observation noise
+
+number of observations number of observations number of observations 
+
+number of observations number of observations number of observations 
+
+Symmetric KL to prior ( nats )
+
+Helmholtz -SDE Square root gauge Symmetric gauge 
+
+Symmetric KL to posterior ( nats )
+
+> observation noise
+
+Figure 7: OU spiral with ω = π; top: symmetric KL to posterior; bottom: symmetric KL to prior. 44 Helmholtz -SDE Square root gauge Symmetric gauge 
+
+> observation noise
+
+number of observations number of observations number of observations 
+
+number of observations number of observations number of observations 
+
+Symmetric KL to prior ( nats )
+
+Helmholtz -SDE Square root gauge Symmetric gauge 
+
+Symmetric KL to posterior ( nats )
+
+> observation noise
+
+Figure 8: OU spiral with ω = π/ 2; top: symmetric KL to posterior; bottom: symmetric KL to prior. Helmholtz -SDE Square root gauge Symmetric gauge 
+
+> observation noise
+
+number of observations number of observations number of observations 
+
+number of observations number of observations number of observations 
+
+Symmetric KL to prior ( nats )
+
+Helmholtz -SDE Square root gauge Symmetric gauge 
+
+Symmetric KL to posterior ( nats )
+
+> observation noise
+
+Figure 9: OU spiral with ω = π/ 4; top: symmetric KL to posterior; bottom: symmetric KL to prior. 45 Helmholtz -SDE Square root gauge Symmetric gauge 
+
+> observation noise
+
+number of observations number of observations number of observations 
+
+number of observations number of observations number of observations 
+
+Symmetric KL to prior ( nats )
+
+Helmholtz -SDE Square root gauge Symmetric gauge 
+
+Symmetric KL to posterior ( nats )
+
+> observation noise
+
+Figure 10: OU spiral with ω = 0 ; top: symmetric KL to posterior; bottom: symmetric KL to prior. 46 A Stochastic Lorenz attractor [ Li et al., 2021 ]    
+
+> 𝒙 !𝒙 "𝒙 #
+> 𝑡 𝑡 𝑡
+
+# B Stochastic Lorenz attractor (ours)     
+
+> 𝒙 !𝒙 "𝒙 #
+> 𝑡 𝑡 𝑡
+
+Figure 11: Visualization of three samples of stochastic Lorenz attractor dataset from Li et al. [2] (A) and this paper ( B). Grey curves represent the true latent trajectory and grey × represent regularly-spaced observations. Colored curves represents the posterior mean and shading represents 
+
+±2 posterior standard deviations obtained from the iterated extended Rauch-Tung-Striebel smoother (Särkkä and Svensson [72 , Chapter 13.3 ]). The Bayesian posterior in Li et al. [2] collapses to the true latent trajectory, whereas our dataset displays non-trivial posterior variance. 
+
+# D Nonlinear SDE experiments 
+
+In this section, we provide additional details on our three nonlinear SDE experiments: the stochastic Lorenz attractor (Appendix D.1), rotifer-algae predator-prey dynamics (Appendix D.2), and reduced-order models for fluid dynamics (Appendix D.3) For all experiments we use a Gaussian posterior approximation q(x, t ) = N (m(t|ϕ), S(t|ϕ)) with dense S ∈ RK×K . We also use the Adam optimizer [ 73 ] with exponential learning rate decay. We run experiments on an NVIDIA A100 or H100 GPU. 
+
+D.1 Noisy Lorenz attractor Data generation. We generate a dataset consisting of 1024 training samples and 2048 test samples according to the 3-dimensional Lorenz attractor dynamics 
+
+dx(t) = 
+
+α(x2(t) − x1(t)) 
+
+x1(t)( ρ − x3(t)) − x2(t)
+
+x1(t)x2(t) − βx3(t)
+
+!
+
+dt + σd w(t), x(0) ∼ N (0, I3), 0 ≤ t ≤ T (58) where (α, ρ, β ) = (10 , 28 , 8/3) and σ > 0 is the diffusion scaling. We do so using the Euler– Maruyama sampler with discretization 10 −3.Following Li et al. [2] , we make observations of the latent state every ∆t according to Ctrue x(t) + 
+
+dtrue + ϵ(t), ϵ(t) ∼ N (0, η 2I3), where Ctrue = diag( s−1) and dtrue = −m ⊙ s−1; m, s ∈ R3
+
+represent the empirical mean and standard deviation of the training trajectories, respectively, along each dimension and pooled across time. η > 0 is the observation standard deviation. In the standard stochastic Lorenz attractor, the authors choose T = 1 and parameters (∆ t, σ, η ) = (2 .5 · 10 −2, 1.5 · 10 −1, 10 −2). In the observation coordinates, the effective diffusion coefficient is 
+
+σs−1 ≈ (1 .7 · 10 −2, 1.3 · 10 −2, 9.8 · 10 −3), which is exceedingly small relative to the scale on 47 which the latents evolve. As a result of the small process noise, frequent observations, and small measurement noise, we observe that the posterior collapses to the true latent trajectory (Figure 11). Methods that differ substantially in how they represent or sample posterior uncertainty are therefore indistinguishable on this benchmark. We instead simulate the latents over a long interval T = 5 with larger process noise σ = 5 , less frequent observations ∆t = 2 .5 · 10 −1, and larger measurement noise η = 0 .3. In this case, the effective diffusion coefficient in the observation space is σs−1 ≈ (6 .0 · 10 −1, 5.2 · 10 −1, 5.2 · 10 −1).We find that this setting leads both to more interesting latent trajectories (frequent switching between lobes of the attractor, which is not demonstrated in the original dataset; Figure 12A) and nontrivial posterior uncertainty (Figure 11). 
+
+Generative model. Consistent with prior work, we learn a K = 4 dimensional latent dynamical system representing the Lorenz attractor. The prior initial state is modeled as Gaussian N (μ0, V0),
+
+μ0 ∈ R4, V0 ∈ R4×4; the prior drift function eq. (1) is a neural network; and the observation model is linear and Gaussian N (y(t)|Cx (t) + d, σ 2obs I), C ∈ R3×4, d ∈ R3, σobs > 0. We learn the parameters of the prior SDE and observation model jointly with those of the posterior. 
+
+Baselines. We compare Helmholtz-SDE to two simulation-free VI algorithms, ARCTA [ 7 ] and SDE-Matching [ 8 ], as well as two simulation-based VI algorithms, SING [ 15 ] and Latent-SDE [ 2]. Note that ‘ARCTA’ simply describes an amortization strategy for SVISE [ 6 ]. In particular, the variational drift, the symmetric gauge, remains the same. We aim to reproduce the original Lorenz attractor experimental setup as faithfully as possible to the original papers, with our modified data generation procedure. Among these algorithms, there are two noteworthy differences: (1) SDE Matching [ 8 ] and Latent-SDE [ 2] support state-dependent diffusion coefficient; and (2) SING does not support an amortized posterior approximation. For SING, we discretize the posterior on a grid of size 10 −3 and use mini-batches of 500 trials; mini-batching is necessary since the posteriors for all 1024 trials cannot fit simultaneously into memory (on a 80 GB GPU). We performed a small sweep over the SING mini-batch size and grid size. For Helmholtz-SDE, we adopt the same amortization strategy employed by SDE-Matching [ 8] and Latent-SDE [ 2] wherein for each trial, the sequence of observations is encoded by a GRU to produce an embedding. This embedding is then passed through an MLP to represent the posterior at each time. This strategy shares the posterior both across trials and across time. We used the ARCTA ( https://github.com/coursekevin/arlatentsde ), SDE-Matching (https://github.com/GrigoryBartosh/sde_matching ), SING (https://github.com/ lindermanlab/sing ), and Latent-SDE ( https://github.com/google-research/torchsde )codebases, with modifications as described below. • Helmholtz-SDE :
+
+– latent_dim = 4 , obs_dim = 3 , time_dim = 1 , hidden_dim = 100 
+
+– Prior drift: 
+
+(latent_dim) → Linear(latent_dim, hidden_dim) → Softplus →
+
+Linear(hidden_dim, latent_dim) → (latent_dim) 
+
+– Posterior encoder: 
+
+(n_obs, obs_dim) → GRU → (n_obs + 1, hidden_dim) 
+
+– Posterior MLP: for a specified time, aggregate embeddings from encoder using softmax, 
+
+(n_obs + 1, hidden_dim), (time_dim) → softmax → (hidden_dim) 
+
+then map to posterior at that time 
+
+(hidden_dim + time_dim) → Linear(hidden_dim + time_dim, hidden_dim) → SiLU → Linear(hidden_dim, hidden_dim) → SiLU 
+
+→ Linear(hidden_dim, output_dim) → (output_dim) 
+
+where output_dim is latent_dim (mean) + latent_dim · (latent_dim + 1) / 2 (covariance) 
+
+– Diffusion network: fixed Ilatent_dim 
+
+– Helmholtz correction: linear polynomial approximation ℓ = 1 (no parameters) 
+
+– Observation model: fixed covariance σ2obs = η2, learned C, d
+
+48 – LR: 10 −3 (constant) 
+
+– Gradient clipping: 5.0
+
+– Iterations: 3 · 10 4
+
+– Number MC samples (per iteration): Ntime = 1 sample over [0 , T ] to estimate each of the KL and reconstruction loss, per trial • SDE Matching :
+
+– latent_dim = 4 , obs_dim = 3 , time_dim = 1 , hidden_dim = 100 
+
+– Prior drift: 
+
+(latent_dim) → Linear(latent_dim, hidden_dim) → Softplus →
+
+Linear(hidden_dim, latent_dim) → (latent_dim) 
+
+– Posterior MLP: 
+
+(n_obs, obs_dim) → GRU → (n_obs, hidden_dim) 
+
+– Posterior MLP: for a specified time, aggregate embeddings from encoder using softmax, 
+
+(n_obs, hidden_dim), (time_dim) → softmax → (hidden_dim) 
+
+then map to posterior at that time 
+
+(hidden_dim + time_dim) → Linear(hidden_dim + time_dim, hidden_dim) → SiLU → Linear(hidden_dim, hidden_dim) → SiLU 
+
+→ Linear(hidden_dim, output_dim) → (output_dim) 
+
+where output_dim is latent_dim (mean) + latent_dim · (latent_dim + 1) / 2 (covariance) 
+
+– Diffusion network: state-dependent, diagonal diffusion coefficient; the input to each diagonal entry is a single hidden dimension 
+
+latent_dim × [(1) → Linear(1, hidden_dim) → Softplus →
+
+Linear(hidden_dim, 1) → Sigmoid → (1)] 
+
+– Observation model: fixed covariance σ2obs = η2, learned C, d
+
+– LR: 10 −3 (constant) 
+
+– Gradient clipping: 5.0
+
+– Iterations: 3 · 10 4
+
+– Number MC samples (per iteration): Ntime = 1 sample over [0 , T ] to estimate each of the KL and reconstruction loss, per trial • ARCTA : We found that the Gaussian process parameterization of the posterior described by Course and Nair [7] (see Appendix D therein) led to poor empirical performance. This is because, at a high level, the posterior defines the mean and covariance at each time as a linear combination of means and covariances at observation times. Since in our setting the observations occur sparsely in time, interpolating in the space of means and covariances directly is inappropriate. Instead, we adopt the posterior parameterization from SDE Matching, wherein interpolation occurs in the embedding space [8]. Moreover, Course and Nair [7] proposes chunking the full time series of observations into non-overlapping windows. For each observation within a given window, they produce an embedding using a specified number of future observations, and then they aggregate embeddings within the window. We find that choosing window size and number of obser-vation shorter than the full time series degrades performance. For this reason, we consider a window equal to the full time series and allow each embedding to depened on all future observations. 
+
+– latent_dim = 4 , obs_dim = 3 , time_dim = 1 , hidden_dim = 100 
+
+– Prior drift: 
+
+(latent_dim) → Linear(latent_dim, hidden_dim) → Softplus →
+
+Linear(hidden_dim, latent_dim) → (latent_dim) 
+
+– Posterior MLP: 
+
+(n_obs, obs_dim) → GRU → (n_obs, hidden_dim) 
+
+– Posterior MLP: for a specified time, aggregate embeddings from encoder using softmax, 
+
+(n_obs, hidden_dim), (time_dim) → softmax → (hidden_dim) 
+
+49 then map to posterior at that time 
+
+(hidden_dim + time_dim) → Linear(hidden_dim + time_dim, hidden_dim) → SiLU → Linear(hidden_dim, hidden_dim) → SiLU 
+
+→ Linear(hidden_dim, output_dim) → (output_dim) 
+
+where output_dim is latent_dim (mean) + latent_dim · (latent_dim + 1) / 2 (covariance) 
+
+– Diffusion network: fixed Ilatent_dim 
+
+– Observation model: fixed covariance σ2obs = η2, learned C, d
+
+– LR: 10 −3 (constant) 
+
+– Gradient clipping: 5.0
+
+– Iterations: 3 · 10 4
+
+– Number MC samples (per iteration): 1 sample over [0 , T ] to estimate the KL, per trial; use full set of per-trial observations at each step to estimate reconstruction loss (for consistency with ARCTA window algorithm) • SING :
+
+– latent_dim = 4 , obs_dim = 3 , hidden_dim = 100 , grid_size = 10 3 + 1 
+
+– Prior drift: 
+
+(latent_dim) → Linear(latent_dim, hidden_dim) → Softplus →
+
+Linear(hidden_dim, latent_dim) → (latent_dim) 
+
+– Posterior (non-amortized): tensors of shape (grid_size, latent_dim) (mean), 
+
+(grid_size, latent_dim, latent_dim) (covariance), (grid_size - 1, latent_dim, latent_dim) (cross-covariance) 
+
+– Diffusion network: fixed Ilatent_dim 
+
+– Observation model: fixed covariance σ2obs = η2, learned C, d
+
+– Mini-batch size: 500 
+
+– LR: * SING stepsize (i.e., natural gradient update): 10 −3 to 10 −2 on log-linear scale for first 10 iterations, constant after * M-step stepsize: 5 · 10 −3 (Adam) 
+
+– Gradient clipping: 5.0
+
+– Iterations: for each iteration perform 1 SING step, 1 M-step gradient update; 10 4 total iterations 
+
+– Number MC samples (per iteration): 1 sample to compute expectations under the prior • Latent-SDE :
+
+– latent_dim = 4 , obs_dim = 3 , time_dim = 1 , hidden_dim = 128 ,
+
+embedding_dim = 64 
+
+– Prior drift: 
+
+(latent_dim) → Linear(latent_dim, hidden_dim) → Softplus →
+
+Linear(hidden_dim, hidden_dim) → Softplus → Linear(hidden_dim, latent_dim) → (latent_dim) 
+
+– Posterior encoder: 
+
+(n_obs, obs_dim) → GRU → (n_obs, hidden_dim) →
+
+Linear(hidden_dim, embedding_dim) → (embedding_dim) 
+
+– Posterior drift network: for a specified latent state, use embedding to produce drift 
+
+(latent_dim + embedding_dim) → Linear(latent_dim + embedding_dim, hidden_dim) → Softplus → Linear(hidden_dim, hidden_dim) → Softplus → Linear(hidden_dim, latent_dim) →
+
+(latent_dim) 
+
+– Posterior initial distribution: use embedding to produce distribution (Gaussian) over initial latent state 
+
+(embedding_dim) → Linear(embedding_dim, latent_dim + latent_dim) 
+
+→ (latent_dim + latent_dim) 
+
+first latent_dim outputs represent mean, second latent_dim outputs represent log standard deviation 50 – Diffusion network: state-dependent, diagonal diffusion coefficient; the input to each diagonal entry is a single hidden dimension 
+
+latent_dim × [(1) → Linear(1, hidden_dim) → Softplus →
+
+Linear(hidden_dim, 1) → Sigmoid → (1)] 
+
+– Observation model: fixed covariance σ2obs = η2, learned C, d
+
+– Training discretization: 10 −3 (for posterior sampling) 
+
+– LR: initial 10 −3, final 10 −4 (exponential LR decay) 
+
+– Gradient clipping: None 
+
+– Iterations: 3 · 10 4
+
+– KL annealing iterations: 10 3
+
+– Number MC samples (per iteration): 1 path simulated from the posterior per trial 
+
+Metrics. 
+
+We evaluate the fidelity of the posterior and prior dynamics according to five metrics, which we explain below. 
+
+nELBO. Average per-trial negative ELBO (the variational objective). Smaller values are better but do not imply better posterior recovery or learning. 
+
+Posterior inference. To evaluate posterior quality, we use the log likelihood of the true latents under the posterior distribution averaged over time T and trials M , calculated as 
+
+1
+
+T M 
+
+X
+
+> m,t
+
+log ¯ q(y(m)(t), t ). (59) 
+
+¯q(y, t ) represents the posterior predictive density of ¯y(t) = Cx (t) + d + ϵ(t), ϵ(t) ∼ N (0, R)
+
+and y(t) = Cx (t) + d is the true latent at time t, passed through the output mapping. Note that for all cases except latent-SDE [ 2 ], q(x, t ) = N (m(t), S(t)) is Gaussian, in which case the posterior predictive distribution admits a closed form ¯q(y, t ) = N (Cm (t) + d, CS (t)C⊤ + R). For latent-SDE, we estimate ¯q(y(m)(t), t ) by drawing Ndensity = 64 samples x(k)(t) ∼ q(x, t ), computing 
+
+¯y(k)(t) = Cx (k)(t) + d, and then evaluating 
+
+1
+
+T M 
+
+X
+
+> m,t
+
+log 1
+
+Ndensity 
+
+X
+
+> k
+
+N (y| ¯y(k)(t), R)
+
+!
+
+. (60) Note that eq. (60) is a sensible approximation to eq. (59) since                 
+
+> ¯q(y, t ) =
+> Z
+> q(x, t )N(y|Cx +d,R)dx=Eq(x,t )[N(y|Cx +d,R)] ≈1
+> Ndensity
+> XN(y|¯y(k)(t),R).
+
+Prior learning. For evaluating the learned prior dynamics, we draw 2048 samples from the learned prior, starting from q(x, 0) and simulated using Euler–Maruyama with discretization 10 −3. We evaluate the learned output mapping at these samples, from which we compute the following metrics: (i) One-time symmetric KL divergence : symmetric KL divergence at a each time [0 , T ],averaged over times. For samples from two distributions p and q, we estimate the KL distance DKL (p ∥ q) by fitting two Gaussian kernel density estimates and computing a Monte Carlo average. We do so using the following procedure, which mirrors that of Kiyohara et al. [40]: (a) Using 5-fold CV, select the KDE bandwidth for q; fit the density estimate (on all samples) using the chosen bandwidth. (b) Split the samples from p into 10 folds. Holding out a single fold at a time, repeat the following subprocedure: i. Choose the kernel bandwidth for p using 5-fold CV; fit the density estimate (on all training folds) using the chosen bandwidth. ii. Compute a Monte Carlo estimate to the KL divergence using the held-out fold. 51 Importantly, the outer CV step for samples from p ensures that the negative entropy is not systematically downward biased. (ii) Global autocorrelation error : Using the samples from learned prior and true prior, we estimate the correlation matrix at lag 0 ≤ τ ≤ T , Corr( x(t), x(t + τ )) , for all t such that 
+
+t, t + τ lie on the sampling grid. At each such time, we compute the squared Frobenius norm difference between the two correlation matrices and average over all valid times. We repeat this procedure for all lags τ on a linear grid of [0 , 2] with spacing 5 · 10 −2, and we average over these lags. Finally, we normalize by the total number of entries in the correlation matrix (3 × 3 = 9 ) and take the square root of the result. (iii) Lobe-wise autocorrelation error : The Lorenz attractor produces trajectories that alternate between two “lobes” and exhibit local rotational motion within each lobe (Figure 12A). The global autocorrelation error averages over the full attractor and mixes errors in inter-lobe switching with errors in the within-lobe rotational dynamics. Therefore, we compute a separate “lobe-wise” autocorrelation error, which assesses whether the dynamics are learned accurately within each each lobe of the Lorenz attractor. We achieve this via the following procedure: (a) Assign each point to one of the two lobe centers, i.e., fixed points, according to Euclidean distance. (b) From these labels, fit 2D planes (using PCA) to the points belonging to each lobe. Choose the offset such that the lobe center lies on the plane. (c) Project the points within each lobe onto their respective planes. (d) Using these projections, identify contiguous time segments of minimum time > 5·10 −2
+
+(i.e., rapid transitions between lobes are dropped). (e) Using these segments within each lobe, compute the lagged autocorrelation error. If the segment is shorter than the lag, it is dropped. Note that we divide by 2 × 2 = 4 
+
+correlation matrix entries instead of 9.We report the lobe-wise autocorrelation error in Table 1. SING Latent-SDE Helmholtz-SDE SDE Matching SVISE Autocorr error ↓ 0.137 ± 0.015 0.064 ± 0.005 0.052 ± 0.004 0.182 ± 0.005 0.174 ± 0.003 
+
+Table 1: Lobe-wise autocorrelation error for Helmholtz-SDE and the four baselines. 
+
+Runtime comparison to SING [ 15 ]. We compare the runtime of Helmholtz-SDE to that of SING [ 15 ], which is the only other VI algorithm that achieves mean per trial negative ELBO <50 . We time both algorithms on an NVIDIA H100 GPU, and we exclude JIT compilation time and ELBO evaluation time from the runtime calculation. For both algorithms, we assess convergence using the ELBO eq. (3) calculated on a dense time grid (even though, during optimization, Helmholtz-SDE uses the Monte Carlo estimate of the ELBO). 
+
+Ablation of polynomial order. We report ablations over the polynomial approximation order for Helmholtz-SDE. See Appendix B.3 for a discussion of how we compute the Helmholtz decomposition of an order-ℓ approximation to the residual r = fp − fq . For this particular example, we observe that the negative ELBO decreases slightly by using a quadratic approximation ( ℓ = 2 ), but our metrics probing the quality of the learned dynamics do not. nELBO ↓ latents LL ↑ sym KL ↓ autocorr (global) ↓ autocorr (lobe) ↓
+
+Helmholtz-SDE ( ℓ=1 ) 47 .3 ± 0.2 −0.09 ± 0.00 0 .06 ± 0.01 0.005 ± 0.001 0.011 ± 0.002 
+
+Helmholtz-SDE ( ℓ=2 ) 46 .7 ± 0.4 −0.10 ± 0.00 0 .05 ± 0.01 0.006 ± 0.001 0.012 ± 0.002 
+
+Helmholtz-SDE ( ℓ=3 ) 46 .6 ± 0.3 −0.10 ± 0.00 0 .05 ± 0.01 0.006 ± 0.001 0.011 ± 0.002 
+
+Table 2: Ablations on the polynomial approximation order for Helmholtz-SDE in the Lorenz attractor dataset. Errors are ±2SE reported over 5 replicates. 52 A True prior B Helmholtz -SDE [ours] 
+
+C SDE Matching [Bartosh et al., 2025 ] D ARCTA/ SVISE [Course and Nair, 2023 ]
+
+> 𝒙 !
+> 𝒙 "
+> 𝒙 #
+> 𝒙 !
+> 𝒙 "
+> 𝒙 #
+> 𝒙 !
+> 𝒙 "
+> 𝒙 #
+> 𝒙 !
+> 𝒙 "
+> 𝒙 #
+
+Figure 12: Three random samples from the true prior ( A), the prior learned by Helmholtz-SDE ( B), SDE Matching ( C), and ARCTA/SVISE ( D). Helmholtz-SDE more faithfully learns the dynamics, particularly the outward spiral dynamics within each lobe of the attractor. 
+
+D.2 Experimental predator-prey dynamics 
+
+In this subsection, we provide details regarding our experiments with the algae-rotifer predator-prey system from Blasius et al. [54]. 
+
+Preprocessing. We obtain the dataset made public by the authors at https://figshare. com/articles/dataset/Time_series_of_long-term_experimental_predator-prey_ cycles/10045976/1 .In our analysis, we consider only the first trial, which is the longest and spans 374 days. We choose not to consider multiple trials ( 4 total in the same experimental condition) simultaneously since there are apparent differences between them, for example, the mean and standard deviation of population sizes. Modeling the dynamics across multiple trials using, for example, a hierarchical Bayesian model is interesting future work. Since we learn autonomous (non time-dependent) dynamics, we restrict each trial to periods of coherent oscillation as determined Blasius et al. [54] . Otherwise, the latent dynamics must explain both coherent and non-coherent (no systematic phase lag) oscillations. For the trial of interest, this yields four subtrials {[19 .5, 130 .5] , [159 .5, 240 .5] , [274 .5, 295 .5] , [314 .5, 370 .5] }.We next log transform the data. The reason for this decision is that, in stochastic models of population dynamics, modeling the noise as multiplicative in the state is a popular choice, particularly due to the stability properties it affords [ 74 ]. Log transforming the data then allows us to model the noise as state-independent, which is the setting in which Helmholtz-SDE operates. For example, consider the 53 Lotka-Volterra equations with state-dependent noise for predator y and prey xdx (t) = ( αx (t) − βx (t)y(t)) dt + σxxd w1(t)
+
+dy (t) = ( δx (t)y(t) − γy (t)) dt + σy yd w2(t) (61) with fixed initial distribution and α, β, δ, γ > 0. Applying Ito’s lemma to the map (x(t), y (t)) 7 →
+
+(log x(t), log y(t)) yields the dynamics in log coordinates 
+
+d(log x(t)) = 
+
+
+
+α − βy (t) − 12 σ2
+
+> x
+
+
+
+dt + σxdw1(t)
+
+d(log y(t)) = 
+
+
+
+δx (t) − γ − 12 σ2
+
+> y
+
+
+
+dt + σy dw2(t)
+
+. (62) Importantly, the diffusion coefficient appearing in eq. (62) does not depend on the state. Observe that if eq. (62) describes the prior of a latent SDE model and we choose a posterior approximation with Gaussian one-time marginals, then the one-time marginal distributions of x(t) become log-normal. We hold out the last 8 observations of each subtrial to compute forecasting MSE. 
+
+Generative model. We learn a K = 2 dimensional dynamical systems model of the predator-prey dynamics. The prior initial state is modeled as Gaussian N (μ0, V0), μ0 ∈ R2, V0 ∈ R2×2; the prior drift function eq. (1) is a neural network; and the observation model is linear and Gaussian 
+
+N (y(t)|Cx (t)+ d, σ 2obs I), C ∈ R2×2, d ∈ R2, σobs > 0. We perform joint inference and parameter learning. 
+
+Baselines. We compare Helmholtz-SDE to SDE Matching [ 8]. For this case study, we find that defining the posterior on a grid of size 0.1 days, as done in Appendix C.2, yields good performance. Other parameterizations, such as the kernel-GLM in SVISE [ 6 ] perform comparably. For SDE Match-ing, we consider modeling the diffusion coefficient as both state-dependent and state-independent, but we find no substantive difference between the results. Results reported are for state-dependent diffusion coefficient. • Helmholtz-SDE :
+
+– latent_dim = 2 , obs_dim = 2 , time_dim = 1 , hidden_dim = 64 
+
+– Prior drift: 
+
+(latent_dim) → Linear(latent_dim, hidden_dim) → Softplus →
+
+Linear(hidden_dim, latent_dim) → (latent_dim) 
+
+– Posterior: grid of means and covariances, with spacing 0.1 days; linear interpolation between grid points 
+
+– Diffusion network: fixed Ilatent_dim 
+
+– Helmholtz correction: linear polynomial approximation ℓ = 1 (no parameters) 
+
+– Observation model: learned C, d and σ2obs 
+
+– LR: 10 −2 initial, 10 −3 final (exponential LR decay) 
+
+– Gradient clipping: 5.0
+
+– Iterations: 3 · 10 4
+
+– Number MC samples (per iteration): Ntime = 10 4 samples over [0 , T ] to estimate each of the KL and reconstruction loss, per trial • SDE Matching :
+
+– latent_dim = 2 , obs_dim = 2 , time_dim = 1 , hidden_dim = 64 
+
+– Prior drift: 
+
+(latent_dim) → Linear(latent_dim, hidden_dim) → Softplus →
+
+Linear(hidden_dim, latent_dim) → (latent_dim) 
+
+– Posterior: grid of means and covariances, with spacing 0.1 days; linear interpolation between grid points 
+
+– Diffusion network: state-dependent, diagonal diffusion coefficient; the input to each diagonal entry is a single hidden dimension 
+
+latent_dim × [(1) → Linear(1, hidden_dim) → Softplus →
+
+Linear(hidden_dim, 1) → Sigmoid → (1)] 
+
+54 – Observation model: learned C, d and σ2obs 
+
+– LR: 10 −2 initial, 10 −3 final (exponential LR decay) 
+
+– Gradient clipping: 5.0
+
+– Iterations: 3 · 10 4
+
+– Number MC samples (per iteration): Ntime = 10 4 samples over [0 , T ] to estimate each of the KL and reconstruction loss, per trial • SVISE :
+
+– latent_dim = 2 , obs_dim = 2 , time_dim = 1 , hidden_dim = 64 
+
+– Prior drift: 
+
+(latent_dim) → Linear(latent_dim, hidden_dim) → Softplus →
+
+Linear(hidden_dim, latent_dim) → (latent_dim) 
+
+– Posterior: grid of means and covariances, with spacing 0.1 days; linear interpolation between grid points 
+
+– Diffusion network: fixed Ilatent_dim 
+
+– Observation model: learned C, d and σ2obs 
+
+– LR: 10 −2 initial, 10 −3 final (exponential LR decay) 
+
+– Gradient clipping: 5.0
+
+– Iterations: 3 · 10 4
+
+– Number MC samples (per iteration): Ntime = 10 4 samples over [0 , T ] to estimate each of the KL and reconstruction loss, per trial 
+
+Wavelet analysis. We assess the quality of the learned prior dynamics using the wavelet analysis from Blasius et al. [54] . In particular, we draw 1024 samples from the learned prior with stepsize 
+
+2 · 10 −3 days, each of length 100 days. From each sample, we downsample to a grid of 1 day and extract the peak cyclic period (Figure 4C), the lag of predator behind prey (Figure 4D), and the rotational coherence (Figure 4D). We then report the median and IQR of these statistics across 10 
+
+replicates of fitting the latent SDE model. We use the authors’ public codebase https://github.com/berndblasius/WaveletAnalysis 
+
+to perform our analyses. Next, we briefly discuss how we compute each of these statistics. We refer the interested reader to Blasius et al. [54 , supplementary methods ] as well as Torrence and Compo [75] for additional background on wavelet analysis. 
+
+1. The continuous wavelet transform. 
+
+The continuous wavelet transform of a one-dimensional signal (x(t)) 0≤t≤T is defined as the convo-lution of the signal with the complex-valued wavelet function, centered at time t and dilated by scale 
+
+s > 0
+
+Wx(s, t ) = 1
+
+√s
+
+Z T
+
+> 0
+
+x(t′)ψ∗
+
+ t′ − ts
+
+
+
+dt ′. (63) Here, ψ∗ represents the complex conjugate of ψ. While there are many possible choices of wavelet function, we consider the Morlet wavelet with ω0 = 6 :
+
+ψ(τ ) = π−1/4 exp {iω 0τ } exp {− τ 2/2}.
+
+To build intuition, consider what eq. (63) would compute if ψ were a pure complex exponential 
+
+ψ(τ ) = exp {2πiτ }. Then |Wx(s, t )| reduces to the magnitude of the Fourier transform of x at frequency 1/s : it measures how strongly the signal oscillates at period s, but the result does not depend on t and so carries no information about when in the time series this oscillation occurs. The Morlet wavelet recovers time localization by multiplying the complex exponential by a Gaussian envelope exp {− τ 2/2}, which restricts the integral in eq. (63) to a neighborhood of t. The price of this localization is that ψ no longer corresponds to a single frequency; instead, each scale s is associated with a Fourier period obtained by matching the dominant frequency of ψ to that of a complex exponential. For the Morlet wavelet, this correspondence is 
+
+T (s) = 4πs ω0 + p2 + ω20
+
+, (64) 55 so that T (s) ≈ 1.03 s when ω0 = 6 [ 75 ]. With this identification, |Wx(s, t )| measures the local oscillatory content of the signal at time t and period T (s).Following Blasius et al. [54] , we evaluate the wavelet transform on a logarithmic grid of scales. The smallest scale is s0 = 2 days, and the largest scale is s02J , where J = 5 is the number of octaves, and we use 100 grid points per octave. 
+
+2. Wavelet power spectrum and cross spectrum. 
+
+The local oscillatory content of a single signal is summarized by the wavelet power spectrum 
+
+(WPS), |Wx(s, t )|2. To compare two signals, x1 (algae) and x2 (rotifers), we form the wavelet cross-spectrum (WCS) Wx1x2 (s, t ) = Wx1 (s, t )W ∗ 
+
+> x2
+
+(s, t ), whose magnitude |Wx1x2 (s, t )| quantifies the joint oscillatory power at scale s and time t, and whose argument 
+
+ϕ(s, t ) = arg Wx1x2 (s, t ) (65) gives the local phase difference between the two signals at scale s and time t. A nonzero phase difference ϕ(s, t ) indicates that one signal leads the other; converting to a time lag at the corresponding Fourier period yields ∆t(s, t ) = ϕ(s, t )T (s)/(2 π). Following Blasius et al. [54] , we smooth both the WPS and WCS using a Gaussian temporal filter and a moving-average filter over scales; we denote this operator by S(·).A high value of |Wx1x2 (s, t )| does not by itself indicate that the two signals are oscillating coherently: it may simply reflect that both signals have large individual power at (s, t ), even if their phases drift independently. To distinguish coherent oscillation from coincident power, we use the wavelet coherence (WCO), defined as the normalized, locally smoothed cross-spectrum 
+
+R(s, t ) = |S (Wx1x2 (s, t )) |
+
+pS (|Wx1 (s, t )|2) · S (|Wx2 (s, t )|2) , (66) Coherence takes values in [0 , 1] and is invariant to the marginal amplitudes of x1 and x2: R2(s, t ) ≈ 1
+
+at points (s, t ) where the two signals oscillate with a stable phase relationship over a local neigh-borhood. As pointed out by Torrence and Compo [75] , smoothing is necessary since otherwise the wavelet coherence is identically 1 for all times and scales. 
+
+3. Cone of influence. 
+
+Because the wavelet transform eq. (63) is computed on a finite signal, the integral is implicitly zero-padded outside [0 , T ]. This padding contaminates Wx(s, t ) near the boundaries t = 0 and 
+
+t = T , with the contamination extending farther into the interior at larger scales s. The cone of influence (COI) is the region of the time-scale plane where this edge contamination is small; following Torrence and Compo [75], points (s, t ) outside the COI are discarded. 
+
+4. Extracted statistics. For each prior sample, we use the WCS, WCO, and per-signal WPS to extract three summary statistics matching those reported by Blasius et al. [54]. 1. Peak cyclic period : The peak period of each individual population (algae, rotifers) is obtained by averaging the WPS over the COI and selecting the period at which the time-averaged amplitude is maximized: 
+
+T ⋆xi = arg max 
+
+> s
+
+1
+
+|T COI (s)|
+
+Z
+
+> TCOI (s)
+
+|Wxi (s, t )| dt, (67) where TCOI (s) is the COI corresponding to scale s. This is mapped to a period via eq. (64). The peak period for a given sample is the average of the rotifer and algae peak periods. We report the median peak period across all samples, T ⋆
+
+> ensemble
+
+.2. Predator-prey phase lag : To estimate the phase lag, we restrict attention to scales in a neighborhood of the dominant joint period, computed as in eq. (67) but using the WCS instead of the WPS. We also restrict to time-scale points (s, t ) that lie within the COI and have wavelet coherence R2(s, t ) exceeding the significance threshold 0.83 used by Blasius et al. [54] . At each retained time t, we record the phase ϕ(s⋆(t), t ) at the scale s⋆(t) of locally maximal coherence within the band; times at which s⋆(t) falls at the band boundary are excluded. For each prior sample, we summarize these phases by their circular mean 
+
+¯ϕ(n) = arg 
+
+X 
+
+> t∈T (n)coh
+
+eiϕ (s⋆(t),t )
+
+ ,
+
+56 where T (n)coh is the set of retained times for sample n. The ensemble phase lag is the arithmetic mean of ¯ϕ(n) across prior samples with at least one retained time. We convert this angle to a lag in time units by multiplying by T ⋆
+
+> ensemble
+
+/(2 π), where T ⋆ 
+
+> ensemble
+
+is the corresponding ensemble peak period from the previous statistic. We report the lag computed from the median peak period T ⋆
+
+> ensemble
+
+.
+
+3. Rotational coherence : The rotational coherence is the fraction of all time points t
+
+whose within-band coherence argmax s⋆(t) lies inside the COI and whose coherence value 
+
+R2(s⋆(t), t ) exceeds the significance threshold 0.83 ,
+
+ρcoh = |T coh ||T | ,
+
+where T is the length of the full signal. This statistic measures the proportion of the trajectory over which algae and rotifers oscillate with a stable phase relationship near the dominant period, and is a sample-level analogue of the “rotational fraction” reported by Blasius et al. [54]. We report the median across prior samples. 
+
+D.3 Reduced-order models for fluid dynamics 
+
+In this subsection, we discuss our experiments modeling a two-dimensional incompressible flow past a circular cylinder. We obtain the public dataset from Course and Nair [6] at https://github. com/coursekevin/svise .The data is simulated on the domain [−0.98 , 28 .98] × [−1.98 , 1.98] with a circular cylinder of radius 0.5 placed at (0 , 0) (Figure 5). The velocity field is obtained by numerically solving the incompressible Navier–Stokes equation 
+
+∂ui(z, t )
+
+∂t + X
+
+> j
+
+uj (z, t ) ∂ui(z, t )
+
+∂zj
+
+= − ∂ ¯p(z, t )
+
+∂zi
+
++ 1Re 
+
+X
+
+> j
+
+∂2ui(z, t )
+
+∂z2
+
+> j
+
+X
+
+> i
+
+∂ui(z, t )
+
+∂zi
+
+= 0 , i ∈ { 1, 2}, (z, t ) ∈ R2 × R
+
+(68) where u : R2 × R → R2 and ¯p : R2 × R → R are the non-dimensionalized velocity and pressure, respectively, and Re is the Reynolds number. Re represents the ratio of inertial to viscous forces. For our experiments we use Re = 2 · 10 3, which yields strong vortices in the wake of the cylinder. Equation (68) is solved by discretizing the spatial domain on a grid of size 596602 , and solving the Navier–Stokes equation on this grid (in time), subject to the boundary conditions defined by the outer domain and 2D cylinder (Figure 5A). The dataset simulates the dynamics for 305 .1 time units with snapshots every 0.1 time units. 
+
+Preprocessing. We follow the same preprocessing steps as in Course and Nair [6] . Namely, we drop the first 20% of the snapshots representing transients in the system. We then use the interval 
+
+[61 , 256 .2] for training and the subsequent 10 time units [256 .2, 266 .2] for forecasting. From the training data, we perform the proper orthogonal decomposition (POD) [ 64 ] and retain the leading spatial modes that together capture 90% of the time-averaged kinetic energy; this amounts to 38 
+
+modes. We then project the snapshots onto these 38 POD modes to obtain a low-dimensional representation of the system. Lastly, we normalize the POD modes by the maximum standard deviation, computed along each dimension (i.e., normalization is by a scalar). Modeling the dynamics in the space of the top POD modes will yield a reduced-order model of the fluid dynamics. Given an initial condition, one can project the velocity field on the grid into the space of POD modes, roll forward the (stochastic) dynamics, and reconstruct the trajectory on the original grid. Mathematically, this is equivalent to taking the dynamics f defined in the space of POD modes and defining the dynamics ¯f = Φf (Φ⊤(zgrid − ¯zgrid )) in the original data space, where ¯zgrid is the mean of the velocity measurements across time and Φ is the matrix whose columns contain the top POD modes. Note that the dynamics ¯f live on a low-dimensional affine subspace. To generate observations, we subsample the POD modes to a grid of size ∆t = 0 .3. We observe that many of the higher-order modes oscillate at a smaller scale than the lower-order modes. In order to add Gaussian noise in such a way that the higher order modes do not have low signal-to-noise ratio, 57 we add noise proportional to the standard deviation along each dimension. And to demonstrate a setting with high posterior uncertainty, we choose noise standard deviation equal to the 0.3 times the standard deviation along each dimension (signal-to-noise ratio 3.33 ). We observe that with more frequent observations (e.g., ∆t = 0 .1) and smaller noise scale (e.g., 0.1 times the standard deviation along each dimension), the discrepancy between the learned dynamics is less apparent. 
+
+Generative model. We learn a K = 38 dimensional ROM of fluid flow past the cylinder. The prior initial state is modeled as Gaussian N (μ0, V0), μ0 ∈ R2, V0 ∈ R38 ×38 ; the prior drift function eq. (1) is a neural network; and the observation model is Gaussian N (y(t)|x(t), R). R is the diagonal observation noise, which we fix to its true value. 
+
+Baselines. To match the original experimental setup in Course and Nair [6] , we use the kernel-GLM posterior parameterization proposed by the authors. See Appendix C.2 for a discussion. For SDE Matching [ 8], we saw in our preliminary experiments that learning a state-dependent diffusion coefficient degraded learning. In order to separate the prior parameterization from posterior expressivity, we drop the state dependence from the diffusion parameterization. • Helmholtz-SDE :
+
+– latent_dim = 38 , obs_dim = 38 , time_dim = 1 , hidden_dim = 100 
+
+– Prior drift: 
+
+(latent_dim) → Linear(latent_dim, hidden_dim) → Tanh →
+
+Linear(hidden_dim, hidden_dim) → Tanh → Linear(hidden_dim, latent_dim) → (latent_dim) 
+
+– Kernel-GLM, with 500 evenly-spaced temporal inducing points; defined for both the posterior mean and covariance 
+
+– Diffusion network: learned diagonal Σ, state and time independent 
+
+– Helmholtz correction: linear polynomial approximation ℓ = 1 (no parameters) 
+
+– Observation model: fixed 
+
+– LR: 10 −3 initial, 10 −4 final (exponential LR decay) 
+
+– Gradient clipping: None 
+
+– Iterations: 3 · 10 4
+
+– Number MC samples (per iteration): Ntime = 512 samples over [0 , T ] to estimate each of the KL and reconstruction loss, per trial • SDE Matching :
+
+– latent_dim = 38 , obs_dim = 38 , time_dim = 1 , hidden_dim = 100 
+
+– Prior drift: 
+
+(latent_dim) → Linear(latent_dim, hidden_dim) → Tanh →
+
+Linear(hidden_dim, hidden_dim) → Tanh → Linear(hidden_dim, latent_dim) → (latent_dim) 
+
+– Kernel-GLM, with 500 evenly-spaced temporal inducing points; defined for both the posterior mean and covariance 
+
+– Diffusion network: learned diagonal Σ, state and time independent 
+
+– Observation model: fixed 
+
+– LR: 10 −3 initial, 10 −4 final (exponential LR decay) 
+
+– Gradient clipping: None 
+
+– Iterations: 3 · 10 4
+
+– Number MC samples (per iteration): Ntime = 512 samples over [0 , T ] to estimate each of the KL and reconstruction loss, per trial • SVISE :
+
+– latent_dim = 38 , obs_dim = 38 , time_dim = 1 , hidden_dim = 100 
+
+– Prior drift: 
+
+(latent_dim) → Linear(latent_dim, hidden_dim) → Tanh →
+
+Linear(hidden_dim, hidden_dim) → Tanh → Linear(hidden_dim, latent_dim) → (latent_dim) 
+
+58 – Kernel-GLM, with 500 evenly-spaced temporal inducing points; defined for both the posterior mean and covariance 
+
+– Diffusion network: learned diagonal Σ, state and time independent 
+
+– Observation model: fixed 
+
+– LR: 10 −3 initial, 10 −4 final (exponential LR decay) 
+
+– Gradient clipping: None 
+
+– Iterations: 3 · 10 4
+
+– Number MC samples (per iteration): Ntime = 512 samples over [0 , T ] to estimate each of the KL and reconstruction loss, per trial 
+
+Metrics. In Figure 5B, we compute the space–time autocorrelation of streamwise velocity fluctua-tions along the wake centerline. We draw samples from the prior starting at the true initial condition 
+
+x(0) at the beginning of the training window, and simulating forward for 10 time units using Euler– Maruyama with stepsize 5 · 10 −3. We observe that some trajectories begin to numerically diverge beginning at approximately 15 − 20 time units, so we only analyze the first 10 units. At each sampled trajectory, we reconstruct the velocity field on the original grid by projecting back through the POD modes, and we extract the streamwise velocity component u1(z, t ) along the strip 
+
+[1 , 10] × [−0.1, 0.1] in the near wake. We then compute the joint space–time autocorrelation 
+
+C(∆ z1, ∆t) = E [ ˜ u1(z1, t ) ˜ u1(z1 + ∆ z1, t + ∆ t)] 
+
+E [ ˜ u1(z1, t )2] ,
+
+where ˜u1 = u1 − E[u1] denotes the fluctuation about the sample mean and the expectation is approximated by averaging over reference points (z1, t ) along the strip and across prior samples. There are two apparent patterns in the space–time autocorrelation: (1) oscillation in streamwise lag (from the periodic vortex pattern in the wake) and (2) diagonal banding in time (vortices being carried downstream). The failure mode of simulation-free VI is specifically a loss of temporal coherence. This is because temporal correlations are those that depend on the joint posterior path law which, in turn, degrades the prior path law. The spatial correlations, on the other hand, exist within a single snapshot of time. We also report the MSE, integrated over the 10 -unit forecasting window. We compute this quantity by simulating 128 trajectories for 10 time units using Euler–Maruyama with stepsize 10 −4, starting from the ground truth POD modes at the end of the training window. We then transform the samples into the physical space by multiplying by the normalization constant and computing the linear combination with the top-38 POD vectors. Finally, we compute the MSE between the reconstructed velocity and the projection of the (true) velocity onto the top-38 POD modes. We normalize by the total grid size. We report results for 10 training replicates with ±2 SE. Helmholtz-SDE SDE Matching SVISE forecast MSE ↓ 3.24 ± 0.65 4.07 ± 0.52 3.99 ± 0.76 
+
+nELBO ↓ −2.58 ± 0.02 −2.11 ± 0.01 −2.13 ± 0.01 
+
+Table 3: Time integrated MSE computed over the 10 time unit forecasting window. nELBO is reported in units of 10 4, e.g., Helmholtz-SDE has nELBO −2.58 · 10 4 ± 0.02 · 10 4.59

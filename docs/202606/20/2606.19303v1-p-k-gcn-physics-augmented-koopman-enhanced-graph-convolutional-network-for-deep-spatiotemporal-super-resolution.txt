@@ -1,0 +1,1514 @@
+Title: P-K-GCN: Physics-augmented Koopman-enhanced Graph Convolutional Network for Deep Spatiotemporal Super-resolution
+
+URL Source: https://arxiv.org/pdf/2606.19303v1
+
+Published Time: Thu, 18 Jun 2026 01:21:15 GMT
+
+Number of Pages: 42
+
+Markdown Content:
+# P-K-GCN: Physics-augmented Koopman-enhanced Graph Convolutional Network for Deep Spatiotemporal Super-resolution 
+
+Xizhuo(Cici) Zhang 𝑎 , Zekai Wang 𝑏 , Fei Liu 𝑐 , and Bing Yao 𝑎 ∗
+
+> 𝑎
+
+Department of Industrial & Systems Engineering, The University of Tennessee, Knoxville, TN, USA, 37996  
+
+> 𝑏
+
+Charles F. Dolan School of Business, Fairfield University, Fairfield, USA 
+
+> 𝑐
+
+Department of Electrical Engineering & Computer Science, The University of Tennessee, Knoxville, TN, USA, 37996 June 18, 2026 
+
+Abstract 
+
+High-fidelity simulation of spatiotemporal dynamics is computationally prohibitive, necessitating efficient super-resolution techniques to reconstruct high-resolution data from coarse-grained inputs. Traditional data-driven methods often lack physical con-straints, and simple physics-informed learning struggles with irregular spatial geome-tries and intricately evolving temporal dynamics. To tackle these challenges, we propose a Physics-augmented Koopman-enhanced Graph Convolutional Network (P-K-GCN) for spatiotemporal super-resolution on irregular geometries. Specifically, a continuous spline-based GCN is first designed to extract spatial dependencies directly from coarse graph, and Koopman operator theory is incorporated to project the nonlinear dynam-ics into a compact latent space where temporal progression is linearized. Second, we augment the optimization objective with a physics-based loss to force the data-driven reconstructions to adhere to physical laws for improving predictive fidelity and robust-ness. Finally, we provide a rigorous theoretical analysis, establishing that the physics augmentation and Koopman regularization mathematically guarantees a reduction in super-resolution error by diminishing Rademacher complexity and tightening general-ization bounds. We evaluate our framework on reconstructing spatially high-resolution cardiac electrodynamics across a 3D heart geometry from sparse low-resolution mea-surements. Numerical experiments demonstrate that our method achieves superior accuracy compared to baseline models. 
+
+Keywords: High-resolution Reconstruction, Graph Convolutional Network, Koopman Op-erator, Physics-augmented Modeling, Cardiac Electrodynamics. 
+
+> ∗
+
+Corresponding author: Bing Yao, byao3@utk.edu 
+
+1
+
+> arXiv:2606.19303v1 [cs.LG] 17 Jun 2026
+
+# 1 Introduction 
+
+Spatiotemporal dynamics dictate essential processes across science and engineering, such as cardiac electrophysiology (Yang and Yao, 2023) and environmental pollution tracking (Liu and Yeo, 2023). These systems exhibit complex dependencies between spatial configurations and temporal evolution, typically characterized by nonlinear, high-dimensional dynamics. Modeling such systems at sufficiently fine spatiotemporal scales, i.e., high-resolution (HR), is essential for gaining detailed mechanistic insights and enabling reliable operational planning. For instance, high-fidelity simulations of cardiac electrodynamics provide unprecedented opportunities to evaluate treatment strategies and identify optimal ablation pathways for atrial fibrillation (Yao et al., 2025). Despite the importance of HR representations, direct access to HR spatiotemporal infor-mation is rarely feasible in real-world applications. Practical measurement systems are often fundamentally constrained by limited sensor coverage, acquisition cost, and invasive acces-sibility. For example, multi-channel electrocardiogram recordings obtained from the cardiac surface are typically sparse, noisy, and restricted to limited spatial sampling locations (Chen et al., 2019; Xie and Yao, 2022b; Yao and Yang, 2016). Although high-fidelity numerical sim-ulations can generate detailed HR solutions, accurately resolving complex nonlinear physical processes requires substantial computational resources and produces large-scale datasets, leading to prohibitive simulation, transmission, and storage costs (Ren et al., 2023). As such, many practical workflows rely on spatiotemporally downsampled, low-resolution (LR) representations for storage and analysis. These limitations create a critical need for robust super-resolution (SR) methodologies capable of reconstructing physically consistent HR dy-namics from LR observations. However, achieving spatiotemporal SR of complex dynamic systems presents several fundamental challenges: 
+
+(1) Ill-posed SR on complex geometries. Spatiotemporal SR is an ill-posed inverse problem because multiple HR solutions may correspond to the same LR observation. Re-covering fine-scale dynamics from sparse and noisy measurements is therefore intrinsically ambiguous, particularly in scientific systems governed by nonlinear physical processes (Chen et al., 2019; Xie and Yao, 2022b). The challenge becomes more severe when the underlying dynamics evolve over complex irregular geometries. In many real-world applications, spatial domains are represented by unstructured meshes, curved manifolds, irregular surfaces, or 2other non-Euclidean structures, such as anatomical tissues and biological organs (Zhang and Yao, 2026; Yao et al., 2016; Calandra et al., 2016; Mak et al., 2018; Xie and Yao, 2024; Chen et al., 2021). In such settings, the spatial relationships among measurement locations are highly heterogeneous and cannot be accurately characterized using regular-grid assump-tions. Accurate SR requires geometry-aware representations capable of recovering missing HR details while respecting the underlying mesh topology and anatomical structure. 
+
+(2) Temporally consistent SR under nonlinear dynamics. Unlike static im-age SR, spatiotemporal SR must reconstruct HR sequences that are not only accurate at each individual time step but also dynamically coherent across time. Complex physical systems often exhibit nonlinear and potentially unstable temporal evolution caused by en-vironmental, biological, and physical interactions (Liu et al., 2018; Yao, 2021). In cardiac electrophysiology, for example, electrical impulse propagation across excitable media can generate reentrant spiral waves and spatiotemporal chaos associated with arrhythmogenesis (Wijesurendra and Casadei, 2019; Xie et al., 2024). If SR is performed independently at each frame, small reconstruction errors may accumulate over time, producing temporally inconsistent HR dynamics. Thus, effective SR models must recover fine-scale spatial details while preserving the latent temporal evolution of the underlying physical system. 
+
+(3) Physical fidelity beyond statistical accuracy for SR. Many spatiotemporal processes are governed by well-established physical laws, such as reaction-diffusion PDEs for cardiac electrical propagation (Yang and Yao, 2023; Trayanova, 2011; Zhang and Yao, 2025) and heat conduction equations for transient temperature evolution in additive manufactur-ing (Guo et al., 2022). Purely data-driven SR methods may generate numerically accurate reconstructions that nevertheless violate physical constraints, especially under sparse-data or out-of-distribution settings (Karpatne et al., 2017). This issue is particularly critical in safety-sensitive applications such as cardiac modeling, where physically inconsistent HR reconstructions may lead to unreliable interpretation. Therefore, robust SR requires physics-augmented learning mechanisms that constrain the LR-to-HR mapping toward physically admissible solutions. To address these challenges, we propose a Physics-augmented Koopman-enhanced Graph Convolutional Network (P-K-GCN) tailored for the deep SR of spatiotemporal systems. The specific contributions are as follows: 3(1) Geometry-Aware Graph Convolution for Spatial Modeling: The foundation of the proposed architecture operates on graph-based representations of LR irregular spa-tial domains. By utilizing continuous graph convolutions, the network effectively captures complex spatial dependencies and extracts local geometric features. The learned geometry-aware latent representations are subsequently decoded to reconstruct the corresponding HR spatial fields while preserving geometric continuity and anatomically meaningful structures. 
+
+(2) Koopman-Enhanced Dynamics Learning for Temporal Consistency: To model the nonlinear temporal evolution of spatiotemporal systems, the proposed framework incorporates Koopman operator theory into the latent representation space learned by the GCN encoder. Specifically, nonlinear system dynamics are projected into a compact latent space in which temporal evolution can be approximated by linear operators. This Koopman-based linearization enables stable temporal modeling, and the latent Koopman dynamics act as a temporal regularizer that enforces dynamical consistency across reconstructed HR frames, thereby improving temporal coherence, stability, and predictive robustness. 
+
+(3) Physics-Augmented Regularization for Physical Fidelity: To ensure that reconstructed HR solutions remain physically plausible, our framework further incorporates governing physical principles into the learning objective as soft constraints. This formula-tion regularizes the solution space toward physically admissible reconstructions that satisfy underlying physics constraints, thereby improving reconstruction fidelity and suppressing nonphysical artifacts under sparse sensing and limited-data conditions. 
+
+(4) Theoretically-Grounded Bounds for Error Mitigation: To provide a rigorous mathematical foundation, the designed architecture is supported by definitive theoretical guarantees for error mitigation. Physics augmentation restricts the hypothesis space to physically valid mappings, which reduces Rademacher complexity and strictly bounds the reconstruction error. The Koopman operator linearizes the latent space, capping the expan-sion rate to suppress the temporal error explosion typical of standard recurrent networks. These components all guarantee tighter SR bounds, ensuring the framework yields inher-ently superior SR performance. We evaluate our framework on reconstructing spatially HR cardiac electrodynamics across a 3D heart geometry from sparse LR measurements. Experimental results and abla-tion studies demonstrate that P-K-GCN consistently outperforms state-of-the-art baselines 4in reconstruction accuracy and robustness, validating its effectiveness for physics-constrained SR on complex domains. 
+
+# 2 Research background 
+
+# 2.1 Spatiotemporal Super-resolution (SR) 
+
+SR aims to reconstruct HR information from LR observations and has been widely studied as an ill-posed inverse problem. Early SR approaches primarily relied on sparse signal and dictionary-based representations, where HR image patches were reconstructed by exploiting sparse correspondences between LR and HR feature spaces (Yang et al., 2010). Although these methods demonstrated the feasibility of recovering fine-scale structures from coarse observations, their performance was often limited by handcrafted priors and restricted rep-resentational capacity. With the rapid development of deep learning, convolutional neural networks (CNNs) substantially improved SR performance by learning nonlinear mappings from LR images to HR outputs directly from data (Dong et al., 2015). Subsequent studies further enhanced reconstruction quality through deeper residual learning, generative ad-versarial training, attention mechanisms, and sub-pixel convolution operations (Lim et al., 2017; Shi et al., 2016; Zhang et al., 2018). Extending SR from static images to dynamic visual data introduces the additional chal-lenge of preserving temporal coherence while recovering fine-scale spatial details. Video SR must recover both spatial details and temporal consistency. Existing methods commonly combine spatial upsampling with motion estimation, frame interpolation, or recurrent convo-lutional architectures to capture temporal dependencies across consecutive frames (Niklaus et al., 2017; Jiang et al., 2018; Sajjadi et al., 2018). Representative spatiotemporal deep architectures, such as ConvLSTM, extend recurrent neural networks with convolutional op-erators, where convolutional layers extract local spatial patterns within each frame and recurrent units model temporal evolution across frames (Shi et al., 2015). Such CNN- and ConvLSTM-based models have been widely adopted for structured spatiotemporal predic-tion tasks, including urban planning, transportation systems, and computer vision (Ma-jidizadeh et al., 2024; Wang et al., 2020b). In scientific and engineering domains, SR methods have been increasingly employed 5to recover fine-scale dynamics from LR observations generated by sparse measurements, coarse computational discretizations, or incomplete experimental sampling. Recent studies have demonstrated the effectiveness of deep learning-based SR frameworks in recovering unresolved structures in turbulence modeling, fluid dynamics, smoke simulation, and climate systems (Xie et al., 2018; Liu et al., 2020; Fukami et al., 2021; Stengel et al., 2020). However, unlike natural image SR, scientific SR imposes substantially more stringent reconstruction requirements, as the recovered HR fields must not only achieve agreement with reference observations but also remain consistent with governing physical laws, boundary conditions, and conservation principles of the spatiotemporal systems. To incorporate such prior knowledge, recent studies have explored physics-informed SR for dynamical systems governed by partial differential equations (PDEs). These methods augment data-fitting objectives with physics-based losses, hard or soft boundary-condition constraints, or differentiable numerical operators so that the reconstructed HR solutions remain consistent with the underlying physical model (Wang et al., 2020a; Gao et al., 2021). Existing physics-informed SR approaches can be broadly categorized into spatial SR, which reconstructs fine spatial fields from coarse snapshots (Wang et al., 2020a; Gao et al., 2021; Subramaniam et al., 2020); temporal SR, which synthesizes missing intermediate states (Ren et al., 2022, 2023); and spatiotemporal SR, which simultaneously enhances spatial and temporal resolution (Esmaeilzadeh et al., 2020; Ren et al., 2023). Nevertheless, most existing CNN-based and physics-informed SR methods are built around convolutional or recurrent operators on uniform Cartesian grids. This assumption limits their direct applicability to irregular domains, such as curved biological surfaces and unstructured finite-element meshes, where spatial connectivity is non-Euclidean and heterogeneous. 
+
+# 2.2 Geometry-aware Spatiotemporal Neural Networks 
+
+GCNs and graph neural networks (GNNs) generalize convolution to graph-structured data using adjacency matrices, graph Laplacians, or message-passing operators (Bronstein et al., 2017; Wang and Yao, 2025). This formulation enables neural networks to aggregate in-formation from neighboring nodes while respecting irregular spatial connectivity. As a re-sult, graph-based models provide a natural representation for non-Euclidean topologies. To model evolving dynamical systems on irregular geometries, spatiotemporal GNN (STGNNs) 6integrate graph-based spatial representation learning with temporal evolution modules such as gated temporal convolutions, recurrent units, or attention mechanisms (Yu et al., 2017; Ali et al., 2022; Wen et al., 2023). These models have shown strong potential for fore-casting and spatiotemporal representation learning on graph-structured data. Nevertheless, many existing approaches remain limited in modeling long-horizon nonlinear dynamics due to temporal instability, error accumulation, and the difficulty of learning highly nonlinear evolution operators directly in the observation space. Koopman operator theory provides an alternative dynamical systems perspective by transforming nonlinear system evolution into approximately linear dynamics within a learned latent observable space (Lusch et al., 2018; Takeishi et al., 2017; Wang and Yao, 2025). In this framework, nonlinear temporal behavior is represented through linear evolution op-erators acting on latent observables, enabling more stable long-term propagation and im-proved interpretability of dynamical evolution. When integrated with graph-based spatial encoders, Koopman-enhanced latent dynamics learning offers a promising mechanism for si-multaneously capturing non-Euclidean spatial dependencies and temporally coherent system evolution in spatiotemporal scientific applications. A growing body of work has further incorporated physical knowledge into graph learning on meshes and irregular domains. Graph-based physical simulators use graph connectivity to represent interactions among particles or mesh elements. Sanchez-Gonzalez et al. pro-posed Graph Network-based Simulators (GNS), where particles are treated as graph nodes and physical interactions are learned through message passing (Sanchez-Gonzalez et al., 2020). This framework successfully models complex systems such as fluids, rigid bodies, and deformable materials, demonstrating the ability of graph networks to capture local physical interactions on irregular particle systems. Pfaff et al. further extended this idea to mesh-based physical simulation through MeshGraphNets, which perform message pass-ing over mesh connectivity and support adaptive mesh representations (Pfaff et al., 2021). However, both GNS and MeshGraphNets are primarily designed for forward time evolution from known system states. They do not explicitly address the inverse problem of recovering HR spatiotemporal fields from sparse or coarse graph LR observations. Physics-informed GNNs incorporate physical laws or numerical operators into graph learning. Zhang et al. proposed a Physics-Informed GNN (PIGNN), which combines 7GNN-based representation learning with physical constraints and finite-difference approxi-mations for forward and inverse nonlinear PDE problems (Zhang et al., 2024). By replac-ing coordinate-based neural approximation with graph-based discrete operators, PIGNN extends PINN framework to irregular structures. Zeng et al. introduced PhyMPGN, a physics-encoded message-passing graph network for spatiotemporal PDE systems on ir-regular meshes (Zeng et al., 2025). PhyMPGN embeds graph message passing within a numerical integration framework, introduces a learnable Laplace block to encode diffusion-related physics, and uses boundary-condition padding to improve prediction accuracy. These methods show that physical constraints can improve graph-based PDE learning on irregular domains. Nevertheless, their main objective remains PDE solution approximation, param-eter inference, or forward temporal forecasting. They do not directly solve the ill-posed LR-to-HR reconstruction problem required by spatiotemporal SR. Geometry-aware PINNs and physics-constrained learning methods extend mechanistic regularization to complex domains. Costabal et al. proposed Δ-PINNs, which use Laplace– Beltrami eigenfunctions as geometry-aware positional encodings and finite-element operators to represent PDE constraints on complex geometries (Costabal et al., 2024). This method enables PINNs to account for intrinsic geometric distances and domain topology, improving performance when standard Euclidean coordinates are insufficient. In cardiac modeling, physics-constrained deep learning and active learning frameworks have incorporated elec-trophysiological PDE priors to infer cardiac electrodynamics from sparse observations (Yao, 2024; Xie and Yao, 2022a). However, they are mainly formulated as coordinate-based PDE solvers, and do not provide explicit graph-to-graph resolution enhancement. 
+
+# 3 Research Methodology 
+
+Fig. 1 illustrates the overall architecture of our P-K-GCN framework. Let 𝒒 (𝒙 , 𝑡 ) ∈ R𝐶 
+
+denote the system state at spatial location 𝒙 and time 𝑡 , where 𝐶 is the number of feature channels. The available LR observations are acquired at sparsely distributed spatial loca-tions X𝑙 = {𝒙 1, . . . , 𝒙 𝑁 s } and over a discrete set of time instances T = {𝑡 1, . . . , 𝑡 𝑁 t }, thereby forming the tensor ˜Q𝑙 ∈ R𝐶 × 𝑁 s × 𝑁 t . This observed tensor is the sum of the underlying noise-free data tensor Q𝑙 and a measurement noise term Ξmea . The objective of spatiotem-8Figure 1: Flowchart of the proposed methodology for spatiotemporal super-resolution. poral SR is to reconstruct the corresponding HR dynamics Qℎ ∈ R𝐶 × 𝑁 ∗   
+
+> s×𝑁 t
+
+, across a dense set of spatial locations Xℎ = {𝒙 1, . . . , 𝒙 𝑁 ∗ 
+
+> s
+
+}. To achieve this, the proposed framework first employs a graph-based encoder to map the LR observations ˜Q𝑙 defined on the irregular ge-ometry into a compact latent representation space that preserves the underlying geometric structure. The latent dynamics are subsequently propagated through a Koopman operator formulation, where the nonlinear temporal evolution is approximated by linear dynamics in the latent observable space, enabling stable modeling across the observation horizon. A decoder then performs spatial refinement and resolution upsampling to reconstruct the HR spatiotemporal fields Qℎ. To further improve reconstruction robustness, the training ob-jective incorporates physics-based regularization derived from the governing physical laws, thereby constraining the reconstructions to remain physically consistent with the underlying dynamical system. (A detailed notation table is available in Supplementary Material D.) 
+
+# 3.1 Geometry-Aware Graph Convolution Modeling 
+
+To effectively extract spatial features, we model the 3D complex geometry as an undirected graph, denoted by G = (V , E, W, 𝒒 )E ⊆ V ×V ,W∈ [ 0,1] 𝑁 × 𝑁 ×3 . Here, V represents the set of 𝑁 
+
+vertices, while the adjacency matrix E defines the binary connectivity between any two nodes 𝑖 and 𝑗 . The geometric relationships are captured by the edge attribute tensor W,9where each non-zero element 𝒘 (𝑖, 𝑗 ) ∈ R3 indicates the normalized spatial displacement between connected vertices 𝑖 and 𝑗 with E𝑖 𝑗 = 1. The SR mapping of a spatial snapshot from LR to HR graph domain at a specific time step 𝑡 is then formulated within a graph-based Encoder-Decoder framework: 
+
+G
+
+bQℎ (𝑡 )
+
+
+
+= D𝜃 
+
+
+
+E𝜃 
+
+ G
+
+ ˜Q𝑙 (𝑡 ) := Q𝑙 (𝑡 ) + Ξmea (𝑡 )
+
+
+
+(1) where bQℎ (𝑡 ) is the reconstructed HR field and ˜Q𝑙 (𝑡 ) is the LR observation. This graph learn-ing framework is defined based on continuous Spline Convolutiona (S-Conv) with residual connections and hierarchical graph coarsening and refinement, which are detailed as follows. 
+
+Continuous Spline Convolution (S-Conv). Following the SplineCNN approach (Fey et al., 2018; Wang and Yao, 2025), we leverage the local geometric information encoded in the edge attributes W to parameterize the adaptive convolutional kernels. Specifically, the edge-wise pseudo-coordinates 𝒘 (𝑖, 𝑗 ) act as dynamic controllers of how neighboring node features are aggregated, turning message passing into a geometry-aware process that fully exploits the structure of the graph. To achieve the geometric adaptivity, we employ continuous B-spline kernel functions, which parameterize convolutional weights as smooth, differentiable functions of the pseudo-coordinates. In particular, the kernel is constructed from tensor-product basis functions defined over a 𝐷 -dimensional pseudo-coordinate space (with 𝐷 = 3
+
+for 3D geometries). For each coordinate dimension 𝑖 ∈ { 1, . . . , 𝐷 }, we define a uniform knot vector and specify the kernel resolution via the vector 𝒓 = [𝑟 1, . . . , 𝑟 𝐷 ]⊤, where 𝑟 𝑖 defines the number of basis functions along the 𝑖 -th dimension. Let P = {1, . . . , 𝑟 1} × · · · × { 1, . . . , 𝑟 𝐷 }
+
+denote the Cartesian product of these basis indices across all 𝐷 dimensions, forming the basis grid. For a given edge attribute vector 𝒘 = [𝑤 1, . . . , 𝑤 𝐷 ]⊤ ∈ W, and a basis index 
+
+𝒑 = [ 𝑝 1, . . . , 𝑝 𝐷 ]⊤ ∈ P , the B-spline basis function is formulated as: 
+
+𝐵 𝒑 (𝒘 ) =
+
+> 𝐷
+
+Ö
+
+> 𝑖 =1
+
+𝑁 𝑖, 𝑝 𝑖 (𝑤 𝑖 ) (2) where 𝑁 𝑖, 𝑝 𝑖 (𝑤 𝑖 ) represents the 1D B-spline basis function parameterized by the index 𝑝 𝑖 
+
+and evaluated at the scalar coordinate 𝑤 𝑖 .To further translate the geometric relationships into convolution weights, the graph 10 convolutional kernel GΘ (𝒘 ) is constructed as a continuous function of the edge attributes. The convolution maps input node features of dimension 𝐶 in to output features of dimension 
+
+𝐶 out , which is formulated as a linear combination of the scalar basis products weighted by a set of trainable parameter matrices Θ = {Θ𝒑 }𝒑 ∈ P , Θ𝒑 ∈ R𝐶 out ×𝐶 in :
+
+GΘ (𝒘 ) =∑︁ 
+
+> 𝒑 ∈ P
+
+Θ𝒑 𝐵 𝒑 (𝒘 ) (3) Finally, the continuous graph convolution between the input node features 𝒒 (vectorized 
+
+Q + Ξmea ) and the learned kernel GΘ (·) is formulated as an aggregation over the local geometric neighborhood. For node 𝑖 , the updated feature vector is calculated by applying the evaluated kernel matrix to the features of its local geometric neighborhood N ( 𝑖 ):
+
+(𝒒 ∗ G)𝑖 = 1
+
+|N ( 𝑖 )| ∑︁ 𝑗 ∈ N ( 𝑖 )
+
+GΘ (𝒘 (𝑖, 𝑗 )) 𝒒 𝑗 (4) where 𝒒 𝑗 ∈ R𝐶 in is the input feature vector of node 𝑗 .
+
+Residual Spatial Feature Extraction. We further incorporate a residual connection to stabilize training and improve feature propagation within our spatial block (visualized in Fig. 2). Let 𝒒 (𝑘 ) denote the input features at layer 𝑘 , which are processed by an S-Conv layer to extract localized geometric information. Simultaneously, 𝒒 (𝑘 ) is propagated through a parallel residual pathway utilizing a 1 × 1 convolution (F-Conv) to map the features into the desired dimensional space. The outputs of both pathways are passed through non-linear activation functions, combined via element-wise addition, and subjected to a final activation. This composite structure facilitates effective gradient flow and mitigates gradient degradation (He et al., 2016). With 𝜌 (·) denoting the ELU activation, the residual operation is mathematically defined as: 
+
+𝒒 (𝑘 +1) = 𝜌 𝜌 
+
+
+
+S-Conv 
+
+
+
+𝒒 (𝑘 ) 
+
++ 𝜌 
+
+
+
+F-Conv 
+
+
+
+𝒒 (𝑘 ) !
+
+(5) 
+
+Hierarchical Graph Coarsening and Refinement. We employ a hierarchical graph coarsening strategy to capture multi-scale spatial features. Specifically, we first group the nodes using the Graclus algorithm (Dhillon et al., 2007) to extract intrinsic spatial features 11 of the LR graph G𝑙 , yielding a hierarchy of structurally simplified meshes. The clustering topology at any given coarsening level 𝑘 is then encoded within a binary matrix P𝑘 . Func-tionally, an element (P𝑘 )𝑖 𝑗 = 1 dictates that the 𝑗 -th node from the finer graph is a member of the 𝑖 -th coarsened cluster; otherwise, it is zero. The node features for the subsequent, lower-resolution level 𝑘 + 1 are computed by averaging the traits of the grouped nodes: 
+
+Qpool  
+
+> 𝑘 +1
+
+= 𝚫 𝑘 +1P𝑘 Q𝑘 (6) where diagonal matrix 𝚫 𝑘 +1 acts as a spatial normalization factor with diagonal elements defined as (𝚫 𝑘 +1)𝑖𝑖 = 1/Í 𝑗 (P𝑘 )𝑖 𝑗 . This operation yields multi-resolution feature represen-tations that encode progressively larger receptive fields while maintaining consistency with the underlying graph topology. For reconstruction of HR graph signals, the decoder D𝜃 performs a symmetric hierar-chical refinement process that reverses the coarsening procedure. At each stage, the coarse feature maps are unpooled by multiplying them with the transpose of the binary cluster assignment matrix, PT 
+
+> 𝑘
+
+:
+
+Qunpool  
+
+> 𝑘
+
+= PT 
+
+> 𝑘
+
+Qpool  
+
+> 𝑘 +1
+
+(7) This operation propagates each coarse node embedding to all fine nodes within its associated cluster, thereby preserving the hierarchical assignment structure induced during encoding. 
+
+# 3.2 Koopman-Enhanced Learning of Nonlinear Dynamics 
+
+The graph-based Encoder–Decoder architecture induces a compact low-dimensional latent representation that provides an efficient space for temporal dynamics modeling by mitigating the curse of dimensionality inherent in the spatiotemporal domain. Building upon this rep-resentation, we adopt an operator-theoretic framework based on Koopman theory, wherein the nonlinear spatiotemporal dynamics are approximated by a linear evolution operator act-ing on latent observables. Specifically, after the final graph coarsening and pooling stage, the resulting latent graph G𝑧 comprises 𝑁 𝑠,𝑧 nodes with 𝐶 𝑧 -dimensional feature embeddings. The corresponding latent state at time 𝑡 is defined as Z(𝑡 ) = E𝜃 ( ˜Q𝑙 (𝑡 )) ∈ R𝑁 𝑠,𝑧 ×𝐶 𝑧 .The latent state is then flattened into an observable state vector: 𝒛 (𝑡 ) = vec  Z(𝑡 ) ∈
+
+R𝑑 wher,e 𝑑 = 𝑁 𝑠,𝑧 𝐶 𝑧 . Building upon this vectorized representation, we introduce a 12 trainable matrix K ∈ R𝑑 ×𝑑 as a finite-dimensional approximation of the Koopman oper-ator. Although the Koopman operator is theoretically defined on an infinite-dimensional space of observables (Koopman, 1931; Brunton et al., 2022), practical implementations typ-ically rely on finite-dimensional approximations to enable tractable computation. Existing approaches construct such approximations either through predefined dictionary-based pro-jections (Williams et al., 2015), or through jointly learned neural encoders coupled with linear latent evolution operators (Lusch et al., 2018; Takeishi et al., 2017). These formula-tions provide computationally efficient surrogates for modeling high-dimensional nonlinear dynamical systems. By treating K as a trainable parameter, we can learn a linear latent transition model that captures the essential nonlinear evolution of the physical system. Specifically, this matrix K linearly advances the latent state in time: 
+
+𝒛 𝐾 (𝑡 + 1) ≈ K𝒛 (𝑡 ) (8) To recover the spatial structure, 𝒛 𝐾 (𝑡 + 1) is reshaped back into matrix form via b𝒁 𝐾 (𝑡 +
+
+1) = vec −1 𝒛 𝐾 (𝑡 + 1). The decoder D𝜃 subsequently maps this latent representation to the HR domain, yielding bQ𝐾 ℎ (𝑡 + 1) = D𝜃 (bZ𝐾 (𝑡 + 1)) .
+
+# 3.3 Physics-Augmented Model Optimization 
+
+To further embed prior physical knowledge into the modeling framework and enhance SR fidelity, we formulate parameter inference as a physics-augmented optimization problem with the loss function defined: 
+
+L = Ld + 𝑤 phy Lphy (9) where Ld denotes the data-driven loss quantifying empirical data fit, and Lphy enforces physical constraints derived from the governing equations, acting as a soft penalty modulated by the weight 𝑤 phy . The network components, i.e., the encoder E𝜃 , decoder D𝜃 , and Koopman matrix K, are optimized jointly with respect to L. The comprehensive training procedure is outlined in Algorithm 1. 
+
+Data-Driven Loss for LR Consistency. Given that training relies exclusively on sparse LR observations, we define a fixed projection matrix Pℎ→𝑙 ∈ R𝑁 ∗   
+
+> 𝑠 ×𝑁 𝑠
+
+to map the HR predic-13 Algorithm 1 P-K-GCN: Training Procedure 
+
+Require: LR observation block B𝑙 = { ˜Q𝑙 (𝑡 +𝑛 )} 𝐵 −1 
+
+> 𝑛 =0
+
+, downsampling projection matrix Pℎ→𝑙 ,temporal block size 𝐵 , physics penalty weight 𝑤 phy , learning rate 𝜂 .
+
+Ensure: Optimized spatial encoder E𝜃 , decoder D𝜃 , and Koopman matrix K 
+
+> 1:
+
+Initialize network parameters 𝜃 and Koopman matrix K 
+
+> 2:
+
+while stopping criteria not met do  
+
+> 3:
+
+Phase 1: Spatial Encoding and Direct Reconstruction  
+
+> 4:
+
+for 𝑛 = 0, . . . , 𝐵 − 1 do  
+
+> 5:
+
+Z(𝑡 + 𝑛 ) ← E𝜃 ( ˜Q𝑙 (𝑡 + 𝑛 )) ⊲ Encode to latent graph matrix  
+
+> 6:
+
+bQℎ (𝑡 + 𝑛 ) ← D𝜃 (Z(𝑡 + 𝑛 )) ⊲ Reconstruct instantaneous HR spatial matrix  
+
+> 7:
+
+end for  
+
+> 8:
+
+Phase 2: Koopman Latent Advancement and Prediction  
+
+> 9:
+
+for 𝑛 = 1, . . . , 𝐵 − 1 do  
+
+> 10:
+
+𝒛 (𝑡 + 𝑛 − 1) ← vec (Z(𝑡 + 𝑛 − 1)) ⊲ Flatten to observable state vector  
+
+> 11:
+
+𝒛 𝐾 (𝑡 + 𝑛 ) ← K𝒛 (𝑡 + 𝑛 − 1) ⊲ Advance latent vector linearly  
+
+> 12:
+
+bZ𝐾 (𝑡 + 𝑛 ) ← vec −1 (𝒛 𝐾 (𝑡 + 𝑛 )) ⊲ Reshape back to latent matrix  
+
+> 13:
+
+bQ𝐾 ℎ (𝑡 + 𝑛 ) ← D𝜃 (bZ𝐾 (𝑡 + 𝑛 )) ⊲ Predict future HR spatial matrix  
+
+> 14:
+
+end for  
+
+> 15:
+
+Phase 3: Loss Computation  
+
+> 16:
+
+Compute data-driven loss Ld (Eq. 10) using B𝑙 , bQℎ, and bQ𝐾 ℎ 
+
+> 17:
+
+Compute physics loss Lphy (Eq. 13)  
+
+> 18:
+
+Aggregate objective: L ← L d + 𝑤 phy Lphy  
+
+> 19:
+
+Phase 4: Backpropagation and Parameter Update  
+
+> 20:
+
+𝜃 ← 𝜃 − 𝜂 ∇𝜃 L ⊲ Update Encoder E𝜃 and Decoder D𝜃  
+
+> 21:
+
+K ← K − 𝜂 ∇KL ⊲ Update Koopman Operator K 
+
+> 22:
+
+end while  
+
+> 23:
+
+return E𝜃 , D𝜃 , K
+
+tions back to the observational domain. The data-driven loss over a temporal block B𝑙 of size 𝐵 is defined as: 
+
+Ld =
+
+> 𝐵 −1
+
+∑︁ 
+
+> 𝑛 =0
+
+P⊤ 
+
+> ℎ→𝑙
+
+bQℎ (𝑡 + 𝑛 ) − ˜Q𝑙 (𝑡 + 𝑛 ) 2 
+
+> 𝐹
+
++
+
+> 𝐵 −1
+
+∑︁ 
+
+> 𝑛 =1
+
+P⊤ 
+
+> ℎ→𝑙
+
+bQ𝐾 ℎ (𝑡 + 𝑛 ) − ˜Q𝑙 (𝑡 + 𝑛 ) 2 
+
+> 𝐹
+
+(10) where the first term functions as a static reconstruction loss, penalizing deviations in the instantaneous spatial mapping bQℎ (𝑡 + 𝑛 ) produced by the autoencoder; the second term is the Koopman dynamics loss, which evaluates the temporal predictions bQ𝐾 ℎ (𝑡 + 𝑛 ) derived from advancing the latent state via the Koopman operator before decoding. 
+
+Physics Loss on Reconstructed HR Fields. This study focuses the SR of a reaction-diffusion system evolving on a 3D surface manifold 𝑀 . The evolution dynamics is governed 14 by the following PDEs: 𝜕𝑢 𝜕𝑡 = 𝑒 1Δ𝑢 + 𝑔 1 (𝑢, 𝑣 ),𝜕𝑣 𝜕𝑡 = 𝑒 2Δ𝑣 + 𝑔 2 (𝑢, 𝑣 ),
+
+n · ∇ 𝑢 |𝑀 = 0,
+
+n · ∇ 𝑣 |𝑀 = 0
+
+(11) where 𝑢 and 𝑣 denote the spatiotemporal state variables, Δ represents the spatial Laplacian operator, 𝑒 1 and 𝑒 2 are the respective diffusion coefficients, 𝑔 1 (· , ·) and 𝑔 2 (· , ·) characterize the nonlinear reaction kinetics, the Neumann boundary conditions, expressed in terms of the outward unit normal vector n, enforce a zero-flux constraint across the domain boundary. To further enhance the physical consistency of the reconstructions, we incorporate physics-based regularization directly over the spatiotemporal domain. This is achieved by encouraging the physics-based residuals derived from the governing PDEs to approach zero. However, because the dynamics evolve on the 3D manifold 𝑀 , conventional Euclidean differ-ential operators cannot be directly applied to evaluate the PDE residuals. Instead, spatial derivatives are formulated intrinsically on the manifold using the Laplace–Beltrami operator 
+
+Δ𝑀 (Zhang and Yao, 2025), which generalizes the Euclidean Laplacian to curved surfaces. Under the Neumann boundary conditions defined in Eq. (11), the Laplace–Beltrami formu-lation is equivalent to the restriction of the Euclidean Laplacian to the manifold surface. Then, the physics-based residuals are defined as: 
+
+R𝑢 (·) := 𝜕 ˆ𝑢 𝜕𝑡 − 𝑒 1Δ𝑀 ˆ𝑢 − 𝑔 1 ( ˆ𝑢, ˆ𝑣 ),
+
+R𝑣 (·) := 𝜕 ˆ𝑣 𝜕𝑡 − 𝑒 2Δ𝑀 ˆ𝑣 − 𝑔 2 ( ˆ𝑢, ˆ𝑣 )
+
+(12) where ˆ𝑢 and ˆ𝑣 correspond to the channel components extracted from prediction bQℎ.The total physics loss aggregates the PDE residuals across the temporal sequence: 
+
+Lphy =
+
+> 𝐵 −1
+
+∑︁ 
+
+> 𝑛 =0
+
+
+
+R𝑢 (bQℎ (𝑡 + 𝑛 )) 2 
+
+> 𝐹
+
++ R𝑣 (bQℎ (𝑡 + 𝑛 )) 2
+
+> 𝐹
+
+
+
++
+
+> 𝐵 −1
+
+∑︁ 
+
+> 𝑛 =1
+
+
+
+R𝑢 (bQ𝐾 ℎ (𝑡 + 𝑛 )) 2 
+
+> 𝐹
+
++ R𝑣 (bQ𝐾 ℎ (𝑡 + 𝑛 )) 2
+
+> 𝐹
+
+ (13) By constraining both the static spatial reconstructions of the autoencoder and the temporal 15 predictions of the Koopman operator, this dual-penalty mechanism ensures that the network produces physically plausible HR fields from sparse LR observations. 
+
+# 4 Theoretical Analysis of SR Error 
+
+This section provides theoretical guarantees demonstrating how the proposed architecture inherently mitigates SR error through physics-informed constraints. Let ℎ∗ : R𝐶 × 𝑁 s →
+
+R𝐶 × 𝑁 ∗ 
+
+> s
+
+denote the true HR mapping, exactly satisfying the PDEs with the expected physics residual R ( ℎ∗) = 0. For a given observation snapshot Q𝑙 (𝑡 ), its relationship to the true HR state is modeled as: 
+
+˜Q𝑙 (𝑡 ) = P⊤ 
+
+> ℎ→𝑙
+
+ℎ∗ (Q𝑙 (𝑡 )) + Ξmea (𝑡 ) (14) where Pℎ→𝑙 maps the dense HR mesh onto the sparse LR space and Ξmea (𝑡 ) represents the matrix of zero-mean measurement noise. Correspondingly, let ℎ : R𝐶 × 𝑁 s → R𝐶 × 𝑁 ∗ 
+
+> s
+
+define the parameterized candidate mapping that attempts to reconstruct the HR field from the LR observations. The primary objective is to reconstruct an HR field bQℎ (𝑡 ) = ℎ( ˜Q𝑙 (𝑡 )) such that the predicted state is both consistent with the empirical measurements and physically plausible. The corresponding reconstruction error is quantified directly in the HR space as 
+
+EHR (ℎ) = E∥ℎ( ˜Q𝑙 (𝑡 )) − ℎ∗ (Q𝑙 (𝑡 ))∥ 2
+
+> 𝐹
+
+ (15) where ∥ · ∥ 𝐹 denotes the Frobenius norm evaluated over the dense HR mesh. Let H denote the hypothesis space encompassing all mappings ℎ : R𝐶 × 𝑁 s → R𝐶 × 𝑁 ∗ 
+
+> s
+
+by the unconstrained P-K-GCN (comprising encoder E𝜃 , Koopman matrix K, and decoder D𝜃 ). Given the high expressivity of over-parameterized neural networks, H possesses the capacity to fit unstructured noise. To mitigate overfitting, physical regularizers are introduced to constrain the optimization to a subset of mappings that adhere to the governing physics: 
+
+Definition 1 (Physics-constrained hypothesis space) . For a given tolerance 𝜖 ≥ 0, the constrained space is defined as 
+
+Hphy (𝜖 ) = ℎ ∈ H : R ( ℎ) ≤ 𝜖 
+
+16 where R ( ℎ) = E[L phy (ℎ( ˜Q𝑙 (𝑡 )))] is the expected PDE residual, with Lphy defined via 
+
+R𝑢 , R𝑣 in Eq. 12. The true mapping intrinsically satisfies R ( ℎ∗) = 0.Enforcing this physical consistency explicitly limits the functional capacity of the model, establishing a strict inclusion property: 
+
+Property 1 (Strict inclusion) . For sufficiently small 𝜖 > 0, Hphy (𝜖 ) ⊂ H , which implies there exists at least one unconstrained mapping ℎ ∈ H such that R ( ℎ) > 𝜖 .While Hphy (𝜖 ) restricts mappings in the HR domain, empirical training supervision oper-ates exclusively in the LR observational space. As such, analyzing the model generalization behavior requires defining the induced hypothesis classes within the LR space: 
+
+Definition 2 (Induced LR hypothesis class) . The induced class in the LR space is defined as: 
+
+H𝑙 =
+
+n
+
+ℎ𝑙 ( ˜Q𝑙 (𝑡 )) = P⊤ 
+
+> ℎ→𝑙
+
+ℎ( ˜Q𝑙 (𝑡 )) : ℎ ∈ H 
+
+o
+
+, H𝑙, phy (𝜖 ) = P⊤ 
+
+> ℎ→𝑙
+
+ℎ : ℎ ∈ H phy (𝜖 )
+
+It follows inherently that H𝑙, phy (𝜖 ) ⊆ H 𝑙 .
+
+# 4.1 Rademacher Complexity and Generalization Bound 
+
+To quantify the expressiveness of the hypothesis spaces, we employ the empirical Rademacher complexity (Bartlett and Mendelson, 2002; Mohri et al., 2018), which measures the capacity of a function class to fit random noise: 
+
+Definition 3 (Empirical Rademacher complexity) . For the full sequence of temporal observations over time points T with 𝑁 t steps, represented by the LR feature tensor 
+
+˜Q𝑙 = { ˜Q𝑙 (𝑡 𝑖 )} 𝑁 t 
+
+> 𝑖 =1
+
+and a data-driven loss function Ld bounded by a constant 𝑐 > 0, the empirical Rademacher complexity is defined as 
+
+ˆℜ ˜Q𝑙 (H 𝑙 ) = E𝝈 
+
+
+
+sup  
+
+> ℎ𝑙 ∈ H 𝑙
+
+1
+
+𝑁 t
+
+> 𝑁 t
+
+∑︁ 
+
+> 𝑖 =1
+
+𝜎 𝑖 Ld
+
+ ℎ𝑙 ( ˜Q𝑙 (𝑡 𝑖 )) , ˜Q𝑙 (𝑡 𝑖 )
+
+where 𝜎 𝑖 are i.i.d. Rademacher variables taking values ±1 with equal probability. 17 By restricting the hypothesis space to physically plausible mappings (Definition 1) , the model capacity to correlate with unstructured noise is inherently limited, as formalized in the following proposition: 
+
+Proposition 1 (Complexity reduction via physics constraint) . Assume that Ld is bounded and there exists at least one Rademacher sequence 𝝈 ∈ {− 1, +1}𝑁 t for which the unconstrained supremum 
+
+sup 
+
+> ℎ∈ H 𝑙
+
+1
+
+𝑁 t
+
+> 𝑁 t
+
+∑︁ 
+
+> 𝑖 =1
+
+𝜎 𝑖 Ld (ℎ( ˜Q𝑙 (𝑡 𝑖 )) , ˜Q𝑙 (𝑡 𝑖 )) 
+
+is achieved by some function ℎ∗ ∉ H𝑙, phy (𝜖 ). Then for sufficiently small 𝜖 > 0,
+
+ˆℜ ˜Q𝑙 (H 𝑙, phy (𝜖 )) < ˆℜ ˜Q𝑙 (H 𝑙 )
+
+To establish the aforementioned proposition, observe that for any fixed Rademacher sequence 𝝈 , the set inclusion H𝑙, phy (𝜖 ) ⊆ H 𝑙 yields 
+
+sup    
+
+> ℎ∈ H 𝑙, phy (𝜖 )
+
+1
+
+𝑁 t
+
+> 𝑁 t
+
+∑︁ 
+
+> 𝑖 =1
+
+𝜎 𝑖 Ld (ℎ( ˜Q𝑙 (𝑡 𝑖 )) , ˜Q𝑙 (𝑡 𝑖 )) ≤ sup 
+
+> ℎ∈ H 𝑙
+
+1
+
+𝑁 t
+
+> 𝑁 t
+
+∑︁ 
+
+> 𝑖 =1
+
+𝜎 𝑖 Ld (ℎ( ˜Q𝑙 (𝑡 𝑖 )) , ˜Q𝑙 (𝑡 𝑖 )) (16) Taking expectations over 𝝈 preserves the inequality, yielding ˆℜ ˜Q𝑙 (H 𝑙, phy (𝜖 )) ≤ ˆℜ ˜Q𝑙 (H 𝑙 ).To establish strictness, observe that by assumption there exists a set 𝑆 ⊆ {− 1, +1}𝑁 t of positive probability such that for every 𝝈 ∈ 𝑆 , the unconstrained supremum is attained by some ℎ∗ ∉ H𝑙, phy (𝜖 ). For these sequences, the inequality above is strict, leading to 
+
+ˆℜ ˜Q𝑙 (H 𝑙, phy (𝜖 )) < ˆℜ ˜Q𝑙 (H 𝑙 ). Following standard statistical learning theory, for each induced LR mapping ℎ𝑙 ∈ H 𝑙 , the expected data-driven risk ELR (ℎ𝑙 ) is bounded by its empirical counterpart ˆELR (ℎ𝑙 ) and the empirical Rademacher complexity ˆℜ ˜Q𝑙 (H 𝑙 ):
+
+Theorem 1 (Uniform convergence bound (Mohri et al., 2018) ) . For any 𝛿 ∈ ( 0, 1),with probability at least 1 − 𝛿 over the draw of ˜Q𝑙 , every ℎ𝑙 ∈ H 𝑙 satisfies 
+
+ELR (ℎ𝑙 ) ≤ ˆELR + 2 ˆℜ ˜Q𝑙 (H 𝑙 ) + 3𝑐 √︄ ln (2/𝛿 )
+
+2𝑁 t
+
+18 where ELR (ℎ𝑙 ) = E˜Q𝑙 (𝑡 ) [L d (ℎ𝑙 ( ˜Q𝑙 (𝑡 )) , ˜Q𝑙 (𝑡 ))] .Minimizing the LR risk (Theorem 1) does not deterministically guarantee a small HR reconstruction error because the linear projection Pℎ→𝑙 is not injective. To address this inherent ill-posedness issue, we leverage the regularizing effect of the physics constraint, which enforces conditional stability on the inverse SR problem. 
+
+Assumption 1 (Conditional stability) . There exists a constant 𝐶 stab > 0 such that for any ℎ1, ℎ 2 ∈ H phy (𝜖 ),
+
+∥ℎ1 − ℎ2 ∥𝐹 ≤ 𝐶 stab · ∥ P⊤ 
+
+> ℎ→𝑙
+
+(ℎ1 − ℎ2)∥ 𝐹 
+
+Assumption 1 establishes a standard well-posedness condition for PDE-constrained in-verse problems. It enables the HR reconstruction error to be strictly bounded by the ob-servable LR error as given in Lemma 1. 
+
+Lemma 1 (Stability bound) . According to Assumption 1, the reconstruction error satisfies: 
+
+EHR (ℎ) ≤ 𝐶 2 
+
+> stab
+
+ELR (P⊤ 
+
+> ℎ→𝑙
+
+ℎ) + O( 𝜖 )
+
+Applying Assumption 1 to the candidate mapping ℎ and the true mapping ℎ∗ for an observation ˜Q𝑙 (𝑡 ) yields: 
+
+∥ℎ( ˜Q𝑙 (𝑡 )) − ℎ∗ (Q𝑙 (𝑡 ))∥ 𝐹 ≤ 𝐶 stab ∥P⊤ 
+
+> ℎ→𝑙
+
+(ℎ( ˜Q𝑙 (𝑡 )) − ℎ∗ (Q𝑙 (𝑡 )))∥ 𝐹 (17) Applying the definition of EHR (ℎ) in Eq. (15) yields 
+
+EHR (ℎ) ≤ 𝐶 2 
+
+> stab
+
+E
+
+h
+
+∥P⊤ 
+
+> ℎ→𝑙
+
+(ℎ( ˜Q𝑙 (𝑡 )) − ℎ∗ (Q𝑙 (𝑡 )))∥ 2
+
+> 𝐹
+
+i
+
+(18) Under the observation model in Eq. (14), the independence of measurement noise 
+
+Ξmea (𝑡 ) yields: 
+
+E
+
+h
+
+∥P⊤ 
+
+> ℎ→𝑙
+
+ℎ( ˜Q𝑙 (𝑡 )) − ˜Q𝑙 (𝑡 )∥ 2
+
+> 𝐹
+
+i
+
+= E
+
+h
+
+∥P⊤ 
+
+> ℎ→𝑙
+
+(ℎ( ˜Q𝑙 (𝑡 )) − ℎ∗ (Q𝑙 (𝑡 )))∥ 2
+
+> 𝐹
+
+i
+
++ 𝜎 2 
+
+> mea
+
+(19) where 𝜎 2 
+
+> mea
+
+= E[∥ Ξmea (𝑡 )∥ 2 
+
+> 𝐹
+
+]. Rearranging this relationship isolates the projected structural 19 error, which can then be bounded by the expected LR loss, denoted as ELR :
+
+E
+
+h
+
+∥P⊤
+
+> ℎ→𝑙
+
+ ℎ( ˜Q𝑙 (𝑡 )) − ℎ∗ (Q𝑙 (𝑡 ))  ∥2
+
+> 𝐹
+
+i
+
+≤ E LR (P⊤ 
+
+> ℎ→𝑙
+
+ℎ) (20) where ELR (P⊤ 
+
+> ℎ→𝑙
+
+ℎ) = E[∥ P⊤ 
+
+> ℎ→𝑙
+
+ℎ( ˜Q𝑙 (𝑡 )) − ˜Q𝑙 (𝑡 )∥ 2 
+
+> 𝐹
+
+].A more detailed expansion of the LR loss reveals the presence of a coupling term 
+
+E⟨P⊤ 
+
+> ℎ→𝑙
+
+(ℎ − ℎ∗), Ξmea ⟩𝐹 
+
+ that does not vanish because ℎ depends on the input ˜Q𝑙 . The incorporation of physics-based constraints (i.e., R ( ℎ) ≤ 𝜖 ) mitigates this effect by restricting the admissible hypothesis space to physically consistent solutions. In particular, under the well-posedness assumptions of the governing PDE system, the physics residual R ( ℎ) pro-vides control over the deviation between the reconstructed solution and the true physical dynamics. Specifically, there exists a constant 𝐶 R such that for every ℎ ∈ H phy (𝜖 ),
+
+∥ℎ( ˜Q𝑙 ) − ℎ∗ (Q𝑙 )∥ 𝐹 ≤ 𝐶 R 𝜖 ∼ O( 𝜖 ) almost surely (21) Using this uniform bound and the submultiplicativity of the Frobenius norm, we estimate 
+
+E⟨P⊤ 
+
+> ℎ→𝑙
+
+(ℎ − ℎ∗), Ξmea ⟩𝐹 
+
+ ≤ E∥P⊤ 
+
+> ℎ→𝑙
+
+(ℎ − ℎ∗)∥ 𝐹 ∥Ξmea ∥𝐹 
+
+
+
+≤ ∥ P⊤ 
+
+> ℎ→𝑙
+
+∥op E∥ℎ − ℎ∗ ∥𝐹 ∥Ξmea ∥𝐹 
+
+ ∼ O( 𝜖 )
+
+(22) where ∥ · ∥ op denotes the operator norm (spectral norm) of the projection matrix. Inserting this bound into the following exact decomposition : 
+
+ELR (P⊤ 
+
+> ℎ→𝑙
+
+ℎ) = E∥P⊤ 
+
+> ℎ→𝑙
+
+(ℎ − ℎ∗)∥ 2
+
+> 𝐹
+
+ + 𝜎 2 
+
+> mea
+
+− 2E⟨P⊤ 
+
+> ℎ→𝑙
+
+(ℎ − ℎ∗), Ξmea ⟩𝐹 
+
+ (23) we obtain 
+
+E∥P⊤ 
+
+> ℎ→𝑙
+
+(ℎ − ℎ∗)∥ 2
+
+> 𝐹
+
+ = ELR (P⊤ 
+
+> ℎ→𝑙
+
+ℎ) − 𝜎 2 
+
+> mea
+
++ O( 𝜖 ) ≤ E LR (P⊤ 
+
+> ℎ→𝑙
+
+ℎ) + O( 𝜖 ) (24) Substituting Eq. (24) into Eq. (18) yields the theoretical bound in Lemma 1. 20 4.2 SR Error Bounds under Physics Augmentation 
+
+Integrating the LR generalization bound (Theorem 1) and the stability lemma (Lemma 1) yields the primary theoretical guarantee of the proposed framework: 
+
+Theorem 2 (Generalization bound for SR error) . Under Assumption 1, with proba-bility at least 1 − 𝛿 over the draw of ˜Q𝑙 , for every ℎ ∈ H phy (𝜖 ), we have 
+
+EHR (ℎ) ≤ 𝐶 2
+
+> stab
+
+©«
+
+ˆELR (P⊤ 
+
+> ℎ→𝑙
+
+ℎ) + 2 ˆℜ ˜Q𝑙 (H 𝑙, phy (𝜖 )) + 3𝑐 √︄ ln (2/𝛿 )
+
+2𝑁 t
+
+ª®¬
+
++ O( 𝜖 )
+
+Applying Theorem 1 to the induced LR mapping ℎ𝑙 = P⊤ 
+
+> ℎ→𝑙
+
+ℎ ∈ H 𝑙, phy (𝜖 ) bounds the expected LR risk ELR (P⊤ 
+
+> ℎ→𝑙
+
+ℎ):
+
+ELR (P⊤ 
+
+> ℎ→𝑙
+
+ℎ) ≤ ˆELR (P⊤ 
+
+> ℎ→𝑙
+
+ℎ) + 2 ˆℜ ˜Q𝑙 (H 𝑙, phy (𝜖 )) + 3𝑐 √︄ ln (2/𝛿 )
+
+2𝑁 t
+
+(25) Substituting this result into the Stability Bound (Lemma 1) concludes the proof. Theorem 2 provides the definitive theoretical evidence explaining how physics augmenta-tion mitigates SR error. By restricting the hypothesis space to mappings that adhere to the governing dynamics (Definition 1), the model capacity to overfit spurious noise is strictly re-duced, which mathematically manifests as a lower Rademacher complexity (Proposition 1). The diminished complexity tightens the generalization bound in the LR observable space (Theorem 1). Finally, through the conditional stability of the inverse problem (Assump-tion 1), Lemma 1 successfully translates the tightened LR boundary into a strictly bounded HR reconstruction error. Therefore, Theorem 2 mathematically guarantees that even if a purely data-driven network and the physics-augmented P-K-GCN achieve identical empirical training losses ( ˆELR ), the P-K-GCN will inherently yield superior and more robust SR per-formance due to the physics-driven reduction in the error bound. Similarly, Supplementary Material A provides theoretical analysis of error mitigation via Koopman regularization. 21 5 Experimental Design and Results 
+
+# 5.1 Model Architecture 
+
+Fig. 2 illustrates the P-K-GCN architecture, which processes spatiotemporal inputs on a coarse irregular mesh of 195 nodes with 2 channels and 1000 time steps. The encoder extracts spatial features using a combination of S-Conv and F-Conv layers alongside a pooling layer to generate a compact, 1648-dimensional latent vector. Furthermore, a learnable linear operator K systematically propagates the latent state forward. The predicted latent state is then fed into the decoder to reconstruct the HR field. Using F-Conv layers followed by a sequence of 6 S-F blocks, which combine unpooling with residual convolutions, the decoder progressively achieves SR of the LR input. This hierarchical upsampling produces a final HR output of 4370 spatial nodes. 
+
+Figure 2: The architecture detail of the proposed P-K-GCN framework 
+
+# 5.2 Data Preparation 
+
+We assess the performance of our P-K-GCN framework in reconstructing HR cardiac electro-dynamics within a 3D ventricular geometry from LR observations. The anatomical domain 22 is discretized into 4,370 nodes and 8,736 mesh elements, forming a refined computational mesh derived from the geometry dataset provided in the 2007 PhysioNet Computing in Cardiology Challenge (Goldberger et al., 2000). We simulate the propagation of cardiac electrical activity by numerically solving the Aliev-Panfilov (AP) model with the reaction functions defined as follows: 
+
+𝑔 1 (𝑢, 𝑣 ) = 𝐶 1𝑢 (𝑢 − 𝛼 )( 1 − 𝑢 ) − 𝐶 2𝑢𝑣, 𝑔 2 (𝑢, 𝑣 ) = 𝜉 (𝑢, 𝑣 )  −𝑣 − 𝐶 1𝑢 (𝑢 − 𝛼 − 1) ,𝜉 (𝑢, 𝑣 ) = 𝑒 0 + ( 𝜇 1𝑣 )/( 𝑢 + 𝜇 2)
+
+(26) where 𝑢 is the normalized transmembrane potential and 𝑣 is the recovery dynamics of the electrical excitation. Adopted from Ref. (Aliev and Panfilov, 1996), the AP model parameters are set to: 𝛼 = 0.1, 𝐶 1 = 8, 𝐶 2 = 1, 𝑒 0 = 0.002 , and 𝜇 1 = 𝜇 2 = 0.3; and diffusion parameters set to: 𝑒 1 = 6 and 𝑒 2 = 0. An additional ectopic activation source is introduced in the right ventricle, spatially separated from the primary pacing site, to induce self-sustained and spatially discordant propagation patterns that mimic the complex fibrillatory dynamics observed in cardiac arrhythmias. We denote the resulting simulation data as 𝒒 (𝒙 , 𝑡 ) = [𝑢 (𝒙 , 𝑡 ), 𝑣 (𝒙 , 𝑡 )] = [𝑢 (𝒙 𝑖 , 𝑡 𝑗 ), 𝑣 (𝒙 𝑖 , 𝑡 𝑗 )] 𝑖 ∈ X ℎ/𝑙 , 𝑗 ∈ T with |X ℎ | = 4370 , |X 𝑙 | = 195 ,and |T | = 1000 . Because measurement noise is inevitable in real-world data collection, we add different levels of noise to the simulation data to investigate prediction performance. Specifically, the physical measurements are generated as ˜𝒒 (𝒙 , 𝑡 ) = 𝒒 (𝒙 , 𝑡 ) + 𝝃 (𝒙 , 𝑡 ), where 
+
+𝝃 (x, 𝑡 ) ∼ 𝜎 𝜉 ·N ( 0, 1) denotes the noise term (which corresponds to the matrix noise Ξmea (𝑡 )), with 𝜎 𝜉 representing the noise level coefficient. We benchmark P-K-GCN against three widely adopted methods: (i) Traditional Neu-ral Network (NN) – A purely data-driven, standard deep learning architecture lacking geometry-aware spatial modeling, stable temporal modeling, and physical constraints; (ii) K-GCN – An ablated version of our framework that utilizes geometry-aware spatial model-ing and Koopman-enhanced temporal modeling, but omits the physics-based regularization; 
+
+(iii) PINN – A conventional physics-informed approach that encodes the AP equations directly into the loss function, but lacks both geometry-aware spatial mapping and stable 23 temporal modeling. We employ the relative error ( 𝑅𝐸 ) to assess the model performance: 
+
+𝑅𝐸 = ∥ ˆ𝒒 (𝒙 , 𝑡 ) − 𝒒 (𝒙 , 𝑡 )∥ ∥𝒒 (𝒙 , 𝑡 )∥ (27) where 𝒒 (𝒙 , 𝑡 ) and ˆ𝒒 (𝒙 , 𝑡 ) denote the reference and reconstructed dynamics, respectively. 
+
+# 5.3 Experiment Results Analysis 
+
+Fig. 3 presents a visual comparison of the reconstructed transmembrane potential 𝑢 at time step 35 (out of 1,000) across different methods and noise levels. From the visual compari-son, it is evident that our P-K-GCN achieves the best reconstruction accuracy, maintaining high fidelity to the ground truth across all noise conditions. This superior performance is achieved by integrating geometry-aware spatial graph modeling and Koopman-enhanced stable temporal modeling with physics-augmented regularization. In contrast, the standard NN performs the worst, consistently failing to recover fine-scale structural details of the electrodynamics. The PINN predictions capture the general wave patterns but yield overly smooth reconstructions that blur critical local features. The K-GCN successfully predicts the majority of the spatial features by utilizing its graph-based architecture and Koop-man operator to handle irregular geometries and stabilize temporal evolution. However, it exhibits significant visual artifacts across all noise levels because of the absence of physics-based constraints, leading to unstable dynamic evolution when interpolating from sparse or noisy inputs. It is worth noting that similar performance is observed for the recovery variable ( 𝑣 signal), as shown in Fig. 4. Fig. 5 compares the quantitative prediction performance of P-K-GCN with NN, K-GCN, and PINN under three noise levels ( 𝜎 𝜉 = 0, 0.01, 0.02), based on the aggregated relative error metric ( 𝑅𝐸 total := 12 (𝑅𝐸 𝑢 + 𝑅𝐸 𝑣 )) derived from triplicate experiments with randomized seeds. When 𝜎 𝜉 = 0, our P-K-GCN establishes a strong baseline with an 
+
+𝑅𝐸 total of 0.154 ±( 1.5×10 −4). This represents a substantial accuracy improvement, achieving error reductions of 50 .48% , 38 .15% , and 41 .67% over NN ( 0.311 ± ( 4.0 × 10 −3)), K-GCN (0.249 ±( 7.4×10 −4)), and PINN ( 0.264 ±( 3.7×10 −3)), respectively. As the noise level escalates from 0.01 to 0.02 , the predictive error of P-K-GCN remains remarkably stable at 0.159 (with minimal standard deviations of ±( 2.8 × 10 −5) and ±( 3.8 × 10 −4), respectively). P-K-GCN 24 Figure 3: Visual comparison of the reconstructed transmembrane potential ( 𝑢 ) at time step 35 under varying noise levels ( 𝜎 𝜉 = 0, 0.01 , 0.02 ). consistently maintains substantial performance margins, outperforming the baseline models by approximately 47% (NN), 36% (K-GCN), and 37% (PINN) across both noise levels. These results suggest that the integration of Koopman-based latent dynamics modeling and physics-constrained regularization effectively suppresses noise amplification and stabilizes the reconstruction process under corrupted measurement conditions. 
+
+# 6 Conclusions 
+
+This paper presents a novel Physics-augmented Koopman-enhanced Graph Convolutional Network (P-K-GCN) for the spatiotemporal super-resolution of complex dynamic systems on irregular domains. By integrating geometry-aware spatial modeling and Koopman-based temporal dynamics with physics-informed regularization, our framework addresses the fun-damental limitations of purely data-driven approaches in handling high-dimensional, nonlin-ear systems. Additionally, we mathematically demonstrate that the imposition of physical priors and Koopman temporal regularizers guarantees the mitigation of spatial SR error and 25 Figure 4: Visual comparison of the reconstructed recovery variable ( 𝑣 ) at time step 35 under varying noise levels ( 𝜎 𝜉 = 0, 0.01 , 0.02 ). 
+
+Figure 5: Bar chart comparing 𝑅𝐸 total of our P-K-GCN framework against benchmark methods (NN, K-GCN, PINN) under varying noise levels ( 𝜎 𝜉 = 0, 0.01, 0.02). prevents the exponential accumulation of temporal errors. We validated the P-K-GCN on reconstruction high-resolution 3D cardiac electrodynamics. Numerical experiments demon-strate that our method achieves superior reconstruction accuracy and noise resilience com-pared to existing methods commonly used in current practice. Owing to its ability to handle irregular geometries, sparse observations, and complex nonlinear dynamics, our P-K-GCN framework has broad potential applicability for reliable high-resolution reconstruction across 26 a wide range of scientific, engineering, and biomedical spatiotemporal systems. 
+
+# 7 Data Availability Statement 
+
+The mesh and geometry data supporting the findings of this study are openly available in the PhysioNet/Computing in Cardiology Challenge 2007 at https://physionet.org/content/ challenge-2007/1.0.0/, reference number (Goldberger et al., 2000). 
+
+# Acknowledgement 
+
+This research work was supported by the National Heart, Lung, And Blood Institute of the National Institutes of Health under Award Number R01HL172292. The content is solely the responsibility of the authors and does not necessarily represent the official views of the National Institutes of Health. 
+
+# References 
+
+Ali, A., Zhu, Y., and Zakarya, M. (2022). Exploiting dynamic spatio-temporal graph convo-lutional neural networks for citywide traffic flows prediction. Neural networks , 145:233– 247. Aliev, R. R. and Panfilov, A. V. (1996). A simple two-variable model of cardiac excitation. 
+
+Chaos, Solitons & Fractals , 7(3):293–301. Bartlett, P. L. and Mendelson, S. (2002). Rademacher and gaussian complexities: Risk bounds and structural results. Journal of Machine Learning Research , 3(Nov):463–482. Bronstein, M. M., Bruna, J., LeCun, Y., Szlam, A., and Vandergheynst, P. (2017). Geo-metric deep learning: going beyond euclidean data. IEEE Signal Processing Magazine ,34(4):18–42. Brunton, S. L., Budišić, M., Kaiser, E., and Kutz, J. N. (2022). Modern koopman theory for dynamical systems. SIAM Review , 64(2):229–340. Calandra, R., Peters, J., Rasmussen, C. E., and Deisenroth, M. P. (2016). Manifold gaus-sian processes for regression. In 2016 International joint conference on neural networks (IJCNN) , pages 3338–3345. IEEE. Chen, J., Mak, S., Joseph, V. R., and Zhang, C. (2021). Function-on-function kriging, with applications to three-dimensional printing of aortic tissues. Technometrics , 63(3):384–395. Chen, X., Wu, S., Su, L., Su, Y., and Huang, W. (2019). The characteristics of the elec-trocardiogram and the intracardiac electrogram in left bundle branch pacing. Journal of cardiovascular electrophysiology , 30(7):1096–1101. 27 Costabal, F. S., Pezzuto, S., and Perdikaris, P. (2024). 𝛿 -pinns: Physics-informed neu-ral networks on complex geometries. Engineering Applications of Artificial Intelligence ,127:107324. Dhillon, I. S., Guan, Y., and Kulis, B. (2007). Weighted graph cuts without eigenvectors a multilevel approach. IEEE transactions on pattern analysis and machine intelligence ,29(11):1944–1957. Dong, C., Loy, C. C., He, K., and Tang, X. (2015). Image super-resolution using deep convolutional networks. IEEE transactions on pattern analysis and machine intelligence ,38(2):295–307. Esmaeilzadeh, S. et al. (2020). Meshfreeflownet: A physics-constrained deep continuous space-time super-resolution framework. Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition , pages 4981–4990. Fey, M., Lenssen, J. E., Weichert, F., and Müller, H. (2018). Splinecnn: Fast geometric deep learning with continuous b-spline kernels. In Proceedings of the IEEE conference on computer vision and pattern recognition , pages 869–877. Fukami, K., Fukagata, K., and Taira, K. (2021). Machine-learning-based spatio-temporal super resolution reconstruction of turbulent flows. Journal of Fluid Mechanics , 909:A9. Gao, Z. et al. (2021). Super-resolution reconstruction of turbulent flows with physics-informed neural networks. Physics of Fluids .Goldberger, A. L., Amaral, L. A., Glass, L., Hausdorff, J. M., Ivanov, P. C., Mark, R. G., Mietus, J. E., Moody, G. B., Peng, C.-K., and Stanley, H. E. (2000). Physiobank, phys-iotoolkit, and physionet: components of a new research resource for complex physiologic signals. circulation , 101(23):e215–e220. Guo, S., Guo, W., Bian, L., and Guo, Y. (2022). A deep-learning-based surrogate model for thermal signature prediction in laser metal deposition. IEEE Transactions on Automation Science and Engineering , 20(1):482–494. He, K., Zhang, X., Ren, S., and Sun, J. (2016). Deep residual learning for image recognition. In Proceedings of the IEEE conference on computer vision and pattern recognition , pages 770–778. Jiang, H., Sun, D., Jampani, V., Yang, M.-H., Learned-Miller, E., and Kautz, J. (2018). Super slomo: High quality estimation of multiple intermediate frames for video interpola-tion. In Proceedings of the IEEE conference on computer vision and pattern recognition ,pages 9000–9008. Karpatne, A., Atluri, G., Faghmous, J. H., Steinbach, M., Banerjee, A., Ganguly, A., Shekhar, S., Samatova, N., and Kumar, V. (2017). Theory-guided data science: A new paradigm for scientific discovery from data. IEEE Transactions on knowledge and data engineering , 29(10):2318–2331. Koopman, B. O. (1931). Hamiltonian systems and transformation in hilbert space. Pro-ceedings of the National Academy of Sciences , 17(5):315–318. 28 Lim, B., Son, S., Kim, H., Nah, S., and Mu Lee, K. (2017). Enhanced deep residual networks for single image super-resolution. In Proceedings of the IEEE conference on computer vision and pattern recognition workshops , pages 136–144. Liu, W. et al. (2020). Deep learning approaches for recovering turbulence fields from low-resolution data. Physics of Fluids .Liu, X. and Yeo, K. (2023). Inverse models for estimating the initial condition of spatio-temporal advection-diffusion processes. Technometrics , 65(3):432–445. Liu, X., Yeo, K., and Kalagnanam, J. (2018). A statistical modeling approach for spatio-temporal degradation data. Journal of Quality Technology , 50(2):166–182. Lusch, B., Kutz, J. N., and Brunton, S. L. (2018). Deep learning for universal linear embeddings of nonlinear dynamics. Nature Communications , 9(1):4950. Majidizadeh, A., Hasani, H., and Jafari, M. (2024). Semantic segmentation of oblique uav video based on convlstm in complex urban area. Earth Science Informatics , 17(4):3413– 3435. Mak, S., Sung, C.-L., Wang, X., Yeh, S.-T., Chang, Y.-H., Joseph, V. R., Yang, V., and Wu, C. J. (2018). An efficient surrogate model for emulation and physics extraction of large eddy simulations. Journal of the American Statistical Association , 113(524):1443–1456. Mohri, M., Rostamizadeh, A., and Talwalkar, A. (2018). Foundations of Machine Learning .MIT Press, 2nd edition. Niklaus, S., Mai, L., and Liu, F. (2017). Video frame interpolation via adaptive convolution. In Proceedings of the IEEE conference on computer vision and pattern recognition , pages 670–679. Pfaff, T., Fortunato, M., Sanchez-Gonzalez, A., and Battaglia, P. W. (2021). Learning mesh-based simulation with graph networks. In International Conference on Learning Representations .Ren, P. et al. (2022). Phycrnet: Physics-informed convolutional-recurrent network for solv-ing spatiotemporal pdes. Computer Methods in Applied Mechanics and Engineering ,389:114399. Ren, P., Rao, C., Liu, Y., Ma, Z., Wang, Q., Wang, J.-X., and Sun, H. (2023). Physr: Physics-informed deep super-resolution for spatiotemporal data. Journal of Computa-tional Physics , 492:112438. Sajjadi, M. S., Vemulapalli, R., and Brown, M. (2018). Frame-recurrent video super-resolution. Proceedings of the IEEE conference on computer vision and pattern recognition ,pages 6626–6634. Sanchez-Gonzalez, A., Godwin, J., Pfaff, T., Yoon, J. W., Lusch, M., and Battaglia, P. W. (2020). Learning to simulate complex physics with graph networks. In International Conference on Machine Learning , pages 8459–8468. 29 Shi, W., Caballero, J., Huszár, F., Totz, J., Aitken, A. P., Bishop, R., Rueckert, D., and Wang, Z. (2016). Real-time single image and video super-resolution using an efficient sub-pixel convolutional neural network. In Proceedings of the IEEE conference on computer vision and pattern recognition , pages 1874–1883. Shi, X., Chen, Z., Wang, H., Yeung, D.-Y., Wong, W.-K., and Woo, W.-c. (2015). Convolu-tional lstm network: A machine learning approach for precipitation nowcasting. Advances in neural information processing systems , 28. Stengel, K., Glaws, A., Hettinger, D., and King, R. N. (2020). Adversarial super-resolution of climatological wind and solar data. Proceedings of the National Academy of Sciences ,117(29):16805–16815. Subramaniam, A. et al. (2020). Turbulence enrichment using physics-informed generative adversarial networks. arXiv preprint arXiv:2011.04728 .Takeishi, N., Kawahara, Y., and Yairi, T. (2017). Learning koopman invariant subspaces for dynamic mode decomposition. Advances in Neural Information Processing Systems ,30. Trayanova, N. A. (2011). Whole-heart modeling: applications to cardiac electrophysiology and electromechanics. Circulation research , 108(1):113–128. Wang, R. et al. (2020a). Physics-informed deep learning for super-resolution and denoising of fluid flow data. Journal of Computational Physics .Wang, T., Chen, K., Lin, W., See, J., Zhang, Z., Xu, Q., and Jia, X. (2020b). Spatio-temporal point process for multiple object tracking. IEEE transactions on neural networks and learning systems , 34(4):1777–1788. Wang, Z. and Yao, B. (2025). Transformer with koopman-enhanced graph convolutional network for spatiotemporal dynamics forecasting. arXiv preprint arXiv:2507.03855 .Wen, H., Lin, Y., Xia, Y., Wan, H., Wen, Q., Zimmermann, R., and Liang, Y. (2023). Diffstg: Probabilistic spatio-temporal graph forecasting with denoising diffusion models. In Proceedings of the 31st ACM International Conference on Advances in Geographic Information Systems , pages 1–12. Wijesurendra, R. S. and Casadei, B. (2019). Mechanisms of atrial fibrillation. Heart ,105(24):1860–1867. Williams, M. O., Kevrekidis, I. G., and Rowley, C. W. (2015). A data-driven approximation of the koopman operator: Extending dynamic mode decomposition. Journal of Nonlinear Science , 25:1307–1346. Xie, J., Stavrakis, S., and Yao, B. (2024). Automated identification of atrial fibrillation from single-lead ecgs using multi-branching resnet. Frontiers in Physiology , 15:1362185. Xie, J. and Yao, B. (2022a). Physics-constrained deep active learning for spatiotemporal modeling of cardiac electrodynamics. Computers in Biology and Medicine , 146:105586. 30 Xie, J. and Yao, B. (2022b). Physics-constrained deep learning for robust inverse ecg mod-eling. IEEE Transactions on Automation Science and Engineering .Xie, J. and Yao, B. (2024). Hierarchical active learning for defect localization in 3d systems. 
+
+IISE Transactions on Healthcare Systems Engineering , 14(2):115–129. Xie, Y., Franz, E., Chu, M., and Thuerey, N. (2018). Tempogan: A temporally coherent, volumetric gan for super-resolution fluid flow. ACM Transactions on Graphics (TOG) ,37(4):1–15. Yang, H. and Yao, B. (2023). Sensing, Modeling and Optimization of Cardiac Systems: A New Generation of Digital Twin for Heart Health Informatics . Springer Nature. Yang, J., Wright, J., Huang, T. S., and Ma, Y. (2010). Image super-resolution via sparse representation. IEEE transactions on image processing , 19(11):2861–2873. Yao, B. (2021). Spatiotemporal modeling and optimization for personalized cardiac simu-lation. IISE Transactions on Healthcare Systems Engineering , pages 1–16. Yao, B. (2024). Multi-source data and knowledge fusion via deep learning for dynamical sys-tems: applications to spatiotemporal cardiac modeling. IISE Transactions on Healthcare Systems Engineering , pages 1–14. Yao, B., Leonelli, F., and Yang, H. (2025). Simulation optimization of spatiotemporal dynamics in 3d geometries. IEEE Transactions on Automation Science and Engineering .Yao, B., Pei, S., and Yang, H. (2016). Mesh resolution impacts the accuracy of inverse and forward ecg problems. In 2016 38th Annual International Conference of the IEEE Engineering in Medicine and Biology Society (EMBC) , pages 4047–4050. IEEE. Yao, B. and Yang, H. (2016). Physics-driven spatiotemporal regularization for high-dimensional predictive modeling: A novel approach to solve the inverse ecg problem. 
+
+Scientific reports , 6(1):39012. Yu, B., Yin, H., and Zhu, Z. (2017). Spatio-temporal graph convolutional networks: A deep learning framework for traffic forecasting. arXiv preprint arXiv:1709.04875 .Zeng, B., Wang, Q., Yan, M., Liu, Y., Chengze, R., Zhang, Y., Liu, H., Wang, Z., and Sun, H. (2025). PhyMPGN: Physics-encoded message passing graph network for spatiotempo-ral PDE systems. In The Thirteenth International Conference on Learning Representa-tions .Zhang, H., Jiang, L., Chu, X., Wen, Y., Li, L., Xiao, Y., and Wang, L. (2024). Combining physics-informed graph neural network and finite difference for solving forward and inverse spatiotemporal PDEs. arXiv preprint arXiv:2405.20000 .Zhang, X. and Yao, B. (2025). Physics-augmented multi-task gaussian process for modeling spatiotemporal dynamics. arXiv preprint arXiv:2510.13601 .Zhang, X. and Yao, B. (2026). Geometry-aware active learning of spatiotemporal dynamic systems. IISE Transactions , pages 1–16. Zhang, Y., Li, K., Li, K., Wang, L., Zhong, B., and Fu, Y. (2018). Image super-resolution using very deep residual channel attention networks. arXiv preprint arXiv:1807.02758 .31 Supplementary Material 
+
+This supplementary document provides additional details, figures, and results that sup-port the main manuscript titled: " P-K-GCN: Physics-augmented Koopman-enhanced Graph Convolutional Network for Deep Spatiotemporal Super-resolution ". 
+
+# A Theoretical Analysis of Error Mitigation via Koopman Regularization 
+
+In standard dynamic modeling, the true nonlinear temporal evolution Q(𝑡 + 𝑛 ) = F 𝑛 (Q(𝑡 )) 
+
+is typically approximated by a learned nonlinear transition function M𝜃 . If M𝜃 possesses a local Lipschitz constant 𝐿 M > 1, any initial spatial reconstruction error or measurement noise 𝜖 (𝑡 ) compounds exponentially over time, scaling as O( 𝐿 𝑛  
+
+> M
+
+𝜖 (𝑡 )) (see Supplementary Material B for detailed derivation). To mitigate this explosive divergence, the P-K-GCN framework restricts the temporal transition to an approximately linear evolution within an optimized latent observable space, subject to explicit norm regularization. 
+
+# A.1 Koopman-Constrained Temporal Hypothesis Space and Er-ror Accumulation 
+
+The unconstrained temporal hypothesis space, Htemp , which encompasses arbitrary nonlin-ear recurrent mappings, is highly expressive but prone to overfitting temporal noise, leading to degraded long-term forecasting. To theoretically guarantee improved stability over an 
+
+𝑛 -step inference horizon, we define a constrained subset of temporal mappings governed exclusively by the linear Koopman operator: 
+
+Definition 4 (Koopman-constrained temporal space) . The temporal hypothesis space constrained by the Koopman operation is defined as: 
+
+HKoop =
+
+n
+
+ℎtemp : bQ𝐾 ℎ (𝑡 + 𝑛 ) = D𝜃 
+
+ bZ𝐾 (𝑡 + 𝑛 ), where bZ𝐾 (𝑡 + 𝑛 ) = vec −1 (K𝑛 𝒛 (𝑡 )) 
+
+o
+
+32 where 𝒛 (𝑡 ) = vec (E𝜃 ( ˜Q𝑙 (𝑡 ))) denotes the vectorized encoded observable state prior to the application of the Koopman operator. In practical optimization, the trainable matrix K is subjected to standard weight reg-ularization, which actively restricts its Frobenius norm, ∥K∥𝐹 . Because the spectral norm is strictly bounded by the Frobenius norm ( ∥K∥2 ≤ ∥ K∥𝐹 ), this structural prior explicitly restricts the operator’s expansiveness, leading to significantly attenuated error propagation rate compared to unconstrained nonlinear sequence models: 
+
+Proposition 2 (Attenuated Temporal Error Accumulation) . Assume that the Koop-man matrix K is regularized during training with ∥K∥𝐹 ≤ 𝛾 , where 𝛾 < 𝐿 M . Because 
+
+∥K∥2 ≤ ∥ K∥𝐹 , the temporal transition is bounded by a maximal expansion rate 𝛾 . For any initial latent representation error 𝑒 𝑧 (𝑡 ) = ∥𝒛 (𝑡 ) − 𝒛 ∗ (𝑡 )∥ 2 at time 𝑡 , and accumulated latent approximation error 𝜼 𝑛 , the error at inference step 𝑡 + 𝑛 is bounded by: 
+
+∥𝒛 𝐾 (𝑡 + 𝑛 ) − 𝒛 ∗ (𝑡 + 𝑛 )∥ 2 ≤ ∥ K∥𝑛  
+
+> 2
+
+𝑒 𝑧 (𝑡 ) + ∥ 𝜼 𝑛 ∥2 ≤ 𝛾 𝑛 𝑒 𝑧 (𝑡 ) + ∥ 𝜼 𝑛 ∥2
+
+The proof of Proposition 2 is provided in Supplementary Material C. By explicitly isolat-ing the approximation error 𝜼 𝑛 , this bound demonstrates that the propagation of the initial measurement error 𝑒 𝑧 (𝑡 ) is controlled by O( 𝛾 𝑛 ). Because the regularization guarantees 
+
+𝛾 ≪ 𝐿 M , this represents a massive, systematic reduction in accumulated error compared to the O( 𝐿 𝑛  
+
+> M
+
+𝜖 (𝑡 )) explosion in unconstrained nonlinear models. Furthermore, confining the trajectory space to linear transitions reduces the empirical Rademacher complexity of the model over the observation window as shown Lemma 2: 
+
+Lemma 2 (Temporal Complexity Reduction) . Let ˆℜ ˜Q𝑙 (H temp ) denote the Rademacher complexity of standard recurrent transitions over a temporal block B𝑙 . By restricting the temporal progression to linear transitions, we achieve a strict complexity reduction: 
+
+ˆℜ ˜Q𝑙 (H Koop ) < ˆℜ ˜Q𝑙 (H temp )
+
+Under Frobenius norm regularization ∥K∥𝐹 ≤ 𝛾 , the empirical Rademacher complexity of this linear hypothesis class over a temporal block B𝑙 of size 𝐵 scales as O( 𝛾 /√𝐵 ) (up to logarithmic factors) for bounded latent inputs (Bartlett and Mendelson, 2002). This 33 complexity is several orders of magnitude smaller than that typically associated with deep recurrent neural network architectures. This reduced complexity, together with the uniform convergence theorem (Theorem 1), guarantees that the LR error at the initial time step E (0)
+
+> LR
+
+tightly controls the expected reconstruction error, preventing overfitting (see Theorem 3). 
+
+# A.2 SR Error Bounds under Koopman Theory 
+
+Theorem 3 establishes the SR error bounds under Koopman theorey: 
+
+Theorem 3 (Generalization Bound for Koopman-enhanced Sequence Prediction) . For a temporal prediction block of size 𝐵 , assume the reconstruction mapping satisfies the conditional spatial stability with constant 𝐶 stab and a locally well-conditioned Encoder-Decoder mapping with constant 𝐶 Ψ𝐸 . Then, for a future inference step 𝑛 ∈ { 1, . . . , 𝐵 −1},the expected HR error is bounded by: 
+
+E (𝑛 ) 
+
+> HR
+
+(ℎ) ≤ 𝐶 2stab 𝐶 2 
+
+> Ψ𝐸
+
+∥K∥2𝑛  
+
+> 2
+
+E (0) 
+
+> LR
+
+(P⊤ 
+
+> ℎ→𝑙
+
+ℎ) + O( 𝜖 proj )
+
+where E (0) 
+
+> LR
+
+(P⊤ 
+
+> ℎ→𝑙
+
+ℎ) denotes the projected LR-domain error of the starting time step, and 
+
+O( 𝜖 proj ) absorbs the residual errors arising from projection mismatch, finite-dimensional Koopman approximation, and Encoder–Decoder reconstruction inaccuracies. Applying Assumption 1 to the predicted mapping at time step 𝑡 + 𝑛 , the HR error at step 𝑛 satisfies: 
+
+E (𝑛 ) 
+
+> HR
+
+(ℎ) ≤ 𝐶 2stab E
+
+h
+
+∥P⊤ 
+
+> ℎ→𝑙
+
+(ℎ( ˜Q𝑙 (𝑡 + 𝑛 )) − ℎ∗ (Q𝑙 (𝑡 + 𝑛 )))∥ 2
+
+> 𝐹
+
+i
+
+(28) where E (𝑛 ) 
+
+> HR
+
+(ℎ) = E
+
+h
+
+∥ℎ( ˜Q𝑙 (𝑡 + 𝑛 )) − ℎ∗ (Q𝑙 (𝑡 + 𝑛 ))∥ 2
+
+> 𝐹
+
+i
+
+. To evaluate the projected spatial error at step 𝑛 , we consider the Koopman linear transition 𝒛 𝐾 (𝑡 + 𝑛 ) = K𝑛 𝒛 (𝑡 ) together with the ideal latent evolution 𝒛 ∗ (𝑡 + 𝑛 ) = K𝑛 𝒛 ∗ (𝑡 ) + 𝜼 𝑛 , where 𝜼 𝑛 denotes the accumulated finite-dimensional Koopman truncation error. By using the Lipschitz continuity of the decoder-projection map and the local conditioning of the encoder, we establish the upper bound of 34 the projected spatial error at step 𝑛 :
+
+E
+
+h
+
+∥P⊤ 
+
+> ℎ→𝑙
+
+(ℎ( ˜Q𝑙 (𝑡 + 𝑛 )) − ℎ∗ (Q𝑙 (𝑡 + 𝑛 )))∥ 2
+
+> 𝐹
+
+i
+
+≤ 𝐶 2 
+
+> Ψ𝐸
+
+∥K∥2𝑛  
+
+> 2
+
+E
+
+h
+
+∥P⊤ 
+
+> ℎ→𝑙
+
+(ℎ( ˜Q𝑙 (𝑡 )) − ℎ∗ (Q𝑙 (𝑡 )))∥ 2
+
+> 𝐹
+
+i
+
++ O( 𝜖 proj )
+
+(29) where 𝐶 Ψ𝐸 is independent of the prediction horizon 𝑛 . The derivation of Eq. (29) is provided in Supplementary Material C. Additionally, as established in Lemma 1, the expected initial projected structural error is upper-bounded by the expected LR loss, E (0) 
+
+> LR
+
+(P⊤ 
+
+> ℎ→𝑙
+
+ℎ):
+
+E
+
+h
+
+∥P⊤
+
+> ℎ→𝑙
+
+ ℎ( ˜Q𝑙 (𝑡 )) − ℎ∗ (Q𝑙 (𝑡 ))  ∥2
+
+> 𝐹
+
+i
+
+≤ E (0) 
+
+> LR
+
+(P⊤ 
+
+> ℎ→𝑙
+
+ℎ) (30) Substituting Eq. (30) into Eq. (29) yields: 
+
+E
+
+h
+
+∥P⊤ 
+
+> ℎ→𝑙
+
+(ℎ( ˜Q𝑙 (𝑡 + 𝑛 )) − ℎ∗ (Q𝑙 (𝑡 + 𝑛 )))∥ 2
+
+> 𝐹
+
+i
+
+≤ 𝐶 2 
+
+> Ψ𝐸
+
+∥K∥2𝑛  
+
+> 2
+
+E (0) 
+
+> LR
+
+(P⊤ 
+
+> ℎ→𝑙
+
+ℎ) + O( 𝜖 proj ) (31) Finally, substituting Eq. (31) into Eq. (28) yields the claimed bound in Theorem 3. Theorem 3 mathematically proves that enforcing a linearized latent space via the regu-larized Koopman operator serves as an effective mechanism for error mitigation. Specifically, the dominant temporal error propagation is governed by ∥K∥2𝑛  
+
+> 2
+
+. By constraining ∥K∥𝐹 , the framework strictly caps the expansion rate ( ∥K∥2 ≤ 𝛾 < 𝐿 M ). Thus, ∥K∥2𝑛  
+
+> 2
+
+is systematically suppressed compared to the O( 𝐿 𝑛  
+
+> M
+
+) explosion characteristic of standard recurrent models. 
+
+# B Error Scale of Purely Data-driven Recurrent Models 
+
+Let Q(𝑡 ) denote the true state at time 𝑡 , and bQ(𝑡 ) denote the model-reconstructed state at time 𝑡 . We assume that, at the reference time 𝑡 from which temporal propagation starts, the prediction or spatial reconstruction error is bounded by 𝜖 (𝑡 ):
+
+∥bQ(𝑡 ) − Q(𝑡 )∥ ≤ 𝜖 (𝑡 )
+
+The true system evolves according to the underlying transition operator F , such that Q(𝑡 +
+
+1) = F ( Q(𝑡 )) . Meanwhile, the model advances the state using the learned nonlinear function 35 M𝜃 , yielding bQ(𝑡 + 1) = M𝜃 (bQ(𝑡 )) . Because M𝜃 is an approximation of the true dynamics 
+
+F , there exists a single-step structural approximation error (or model bias) bounded by a constant 𝜖 str ≥ 0 for any valid state: 
+
+∥M 𝜃 (Q(𝑡 )) − F ( Q(𝑡 ))∥ ≤ 𝜖 str 
+
+Now, consider the discrepancy between the predicted state and the true state at the next time step, 𝑡 + 1:
+
+∥bQ(𝑡 + 1) − Q(𝑡 + 1)∥ = ∥M 𝜃 (bQ(𝑡 )) − F ( Q(𝑡 ))∥ 
+
+= ∥M 𝜃 (bQ(𝑡 )) − M 𝜃 (Q(𝑡 )) + M 𝜃 (Q(𝑡 )) − F ( Q(𝑡 ))∥ ≤ ∥M 𝜃 (bQ(𝑡 )) − M 𝜃 (Q(𝑡 ))∥ + ∥M 𝜃 (Q(𝑡 )) − F ( Q(𝑡 ))∥ ≤ 𝐿 M ∥bQ(𝑡 ) − Q(𝑡 )∥ + 𝜖 str 
+
+where the first inequality is true due to the triangle inequality, the last inequality is true due to that M𝜃 is 𝐿 M -Lipschitz. Substituting the starting error bound 𝜖 (𝑡 ) yields the error at step 1: 
+
+𝜖 (𝑡 + 1) ≤ 𝐿 M 𝜖 (𝑡 ) + 𝜖 str 
+
+To evaluate the error after 𝑛 steps, we unroll this recurrence relation, and the accumulated error at time 𝑡 + 𝑛 is bounded by: 
+
+𝜖 (𝑡 + 𝑛 ) ≤ 𝐿 𝑛  
+
+> M
+
+𝜖 (𝑡 ) + 𝜖 str 
+
+> 𝑛 −1
+
+∑︁ 
+
+> 𝑖 =0
+
+𝐿 𝑖 
+
+> M
+
+For purely data-driven recurrent models dealing with complex, unstable nonlinear dy-namics, the learned operator is typically expansive, i.e., 𝐿 M > 1. As such, we have the following error bound: 
+
+𝜖 (𝑡 + 𝑛 ) ∼ O( 𝐿 𝑛  
+
+> M
+
+𝜖 (𝑡 )) 
+
+# C Details of Eq. (29) 
+
+To establish the inequality in Eq. (29), we must bridge the temporal error growth in the latent Koopman space with the spatial error in the observable LR domain. The derivation 36 proceeds in the following three main steps: 
+
+Error Propagation in the Latent Koopman Space. Let 𝒛 (𝑡 ) = vec (E𝜃 ( ˜Q𝑙 (𝑡 ))) denote the encoded latent state vector from the observations, and let 𝒛 ∗ (𝑡 ) be the ideal latent representation of the true system state. Based on the Koopman operator framework, the predicted latent state advances linearly over 𝑛 steps: 
+
+𝒛 𝐾 (𝑡 + 𝑛 ) = K𝑛 𝒛 (𝑡 )
+
+Because the finite-dimensional matrix K is only an approximation of the infinite-dimensional Koopman operator, this evolution introduces an accumulated truncation error 𝜼 𝑛 :
+
+𝒛 ∗ (𝑡 + 𝑛 ) = K𝑛 𝒛 ∗ (𝑡 ) + 𝜼 𝑛 
+
+Subtracting the true latent trajectory from the prediction yields the latent error at step 𝑛 :
+
+𝒛 𝐾 (𝑡 + 𝑛 ) − 𝒛 ∗ (𝑡 + 𝑛 ) = K𝑛  𝒛 (𝑡 ) − 𝒛 ∗ (𝑡 ) − 𝜼 𝑛 
+
+Applying the triangle inequality and the sub-multiplicativity of matrix norms yields: 
+
+∥𝒛 𝐾 (𝑡 + 𝑛 ) − 𝒛 ∗ (𝑡 + 𝑛 )∥ 2 ≤ ∥ K∥𝑛  
+
+> 2
+
+∥𝒛 (𝑡 ) − 𝒛 ∗ (𝑡 )∥ 2 + ∥ 𝜼 𝑛 ∥2 (32) 
+
+Connecting Latent Error to Projected Spatial Error. The decoder D𝜃 further maps the latent states back to the HR space, which is then projected to the LR space via Pℎ→𝑙 .Let us define the composite mapping as Ψ(𝒛 ) = P⊤ 
+
+> ℎ→𝑙
+
+D𝜃 (vec −1 (𝒛 )) . Because neural net-works with standard activation functions (such as ELU) and bounded weights are Lipschitz continuous, the composite function Ψ possesses a Lipschitz constant 𝐿 Ψ > 0. Therefore, the spatial error at step 𝑛 is bounded by the latent error at step 𝑛 :
+
+∥P⊤ 
+
+> ℎ→𝑙
+
+(ℎ( ˜Q𝑙 (𝑡 + 𝑛 )) − ℎ∗ (Q𝑙 (𝑡 + 𝑛 )))∥ 𝐹 ≤ 𝐿 Ψ ∥𝒛 𝐾 (𝑡 + 𝑛 ) − 𝒛 ∗ (𝑡 + 𝑛 )∥ 2 + 𝜖 𝐷 (33) where 𝜖 𝐷 represents the intrinsic structural approximation error of the decoder. Similarly, assuming the learned latent space is a well-conditioned observable space (bi-37 Lipschitz mapping), the initial latent error at 𝑡 is bounded by the corresponding projected spatial error scaled by a constant 𝐶 𝐸 :
+
+∥𝒛 𝐾 (𝑡 ) − 𝒛 ∗ (𝑡 )∥ 2 ≤ 𝐶 𝐸 ∥P⊤ 
+
+> ℎ→𝑙
+
+(ℎ( ˜Q𝑙 (𝑡 )) − ℎ∗ (Q𝑙 (𝑡 )))∥ 𝐹 + 𝜖 𝐸 (34) 
+
+Synthesis and Expectation. Substituting Eq. (34) into Eq. (32), and then substituting the resulting bound into Eq. (33), we relate the future projected spatial error directly to the current projected spatial error: 
+
+∥P⊤ 
+
+> ℎ→𝑙
+
+(ℎ( ˜Q𝑙 (𝑡 + 𝑛 )) − ℎ∗ (Q𝑙 (𝑡 + 𝑛 )))∥ 𝐹 ≤ 𝐶 Ψ𝐸 ∥K∥𝑛  
+
+> 2
+
+∥P⊤ 
+
+> ℎ→𝑙
+
+(ℎ( ˜Q𝑙 (𝑡 )) − ℎ∗ (Q𝑙 (𝑡 )))∥ 𝐹 + 𝜖 total 
+
+where 𝐶 Ψ𝐸 = 𝐿 Ψ𝐶 𝐸 is a finite constant determined by the decoder Lipschitz constant and the encoder conditioning, and 𝜖 total aggregates the scaled Koopman truncation error 𝜼 𝑛 ,encoder error 𝜖 𝐸 , and decoder error 𝜖 𝐷 . Squaring both sides and taking the expectation over the data distribution gives: 
+
+E
+
+h
+
+∥P⊤ 
+
+> ℎ→𝑙
+
+(ℎ( ˜Q𝑙 (𝑡 + 𝑛 )) − ℎ∗ (Q𝑙 (𝑡 + 𝑛 )))∥ 2
+
+> 𝐹
+
+i
+
+≤ 𝐶 2 
+
+> Ψ𝐸
+
+∥K∥2𝑛  
+
+> 2
+
+E
+
+h
+
+∥P⊤ 
+
+> ℎ→𝑙
+
+(ℎ( ˜Q𝑙 (𝑡 )) − ℎ∗ (Q𝑙 (𝑡 )))∥ 2
+
+> 𝐹
+
+i
+
++O( 𝜖 proj )
+
+Here, O( 𝜖 proj ) absorbs the expected contribution of the residual structural and approxi-mation errors. The constant 𝐶 2 
+
+> Ψ𝐸
+
+does not depend on the prediction horizon 𝑛 ; therefore, the temporal growth rate of the error is governed primarily by ∥K∥2𝑛  
+
+> 2
+
+. This completes the derivation of the error scaling in Eq. (29). 
+
+# D Summary of Notations 
+
+Throughout this paper, we adopt strict typographical conventions to explicitly distinguish mathematical entities by their dimensionality: 
+
+• Matrices and Tensors (2D arrays and higher) are denoted by bold, upright upper-case letters (e.g., Q, K, W). 
+
+• Vectors (1D arrays) are denoted by bold, italic lowercase letters (e.g., 𝒒 , 𝒛 , 𝒘 ). 
+
+• Scalars and Individual Elements (0D values) are denoted by standard italic letters (e.g., 𝑢, 𝑣, 𝜖 ). 38 Symbol Description 
+
+T , 𝑁 t Sequence of time points and number of time steps. 
+
+X𝑙 , 𝑁 s Set of LR spatial locations and its cardinality. 
+
+Xℎ, 𝑁 ∗ 
+
+> s
+
+Set of HR spatial locations and its cardinality. 
+
+B𝑙 , 𝐵 Short temporal block of LR observations and its size. 
+
+𝑁 Number of vertices in a generic graph G.
+
+𝑢, 𝑣 Normalized transmembrane potential and recovery variable. 
+
+𝐶 1, 𝐶 2, 𝛼, 𝑒 0, 𝜇 1, 𝜇 2 Parameters of the Aliev–Panfilov (AP) cardiac model. 
+
+𝑒 1, 𝑒 2 Diffusion coefficients for 𝑢 and 𝑣 .
+
+𝑔 1 (𝑢, 𝑣 ), 𝑔 2 (𝑢, 𝑣 ) Nonlinear reaction terms of the AP model. 
+
+𝑀 Complex 3D surface geometry manifold. 
+
+Δ𝑀 , ∇𝑀 Laplace–Beltrami operator (surface Laplacian) and surface gradient on 𝑀 .
+
+n Outward unit normal vector at the surface boundary. 
+
+𝝃 (𝒙 , 𝑡 ), 𝜎 𝜉 Gaussian measurement noise vector and its standard deviation. 
+
+Ξmea (𝑡 ) Matrix of zero-mean measurement noise corrupting LR observations. 
+
+𝜎 2 
+
+> mea
+
+Variance of the measurement noise Ξmea .
+
+G, V, E Undirected graph, its vertex set, and adjacency matrix. 
+
+W, 𝒘 (𝑖, 𝑗 ) Edge attribute tensor and the normalized spatial displacement vector between vertices 𝑖 and 𝑗 .
+
+N ( 𝑖 ) Local geometric neighborhood of node 𝑖 .
+
+P𝑘 Cluster assignment matrix for hierarchical graph pooling/unpooling at level 
+
+𝑘 .
+
+𝚫 𝑘 +1 Spatial normalization diagonal matrix used during hierarchical coarsening. 
+
+Pℎ→𝑙 Linear projection matrix mapping the HR mesh to the LR observation nodes. 
+
+E𝜃 , D𝜃 Spatial encoder and decoder networks with trainable parameters 𝜃 .
+
+𝐶 Number of feature channels in the system state. 
+
+𝐶 in , 𝐶 out Input and output feature dimensions for a graph convolution layer. 
+
+GΘ (𝒘 ) Continuous graph convolution kernel matrix (size 𝐶 out × 𝐶 in ) parameterized by edge attributes 𝒘 .
+
+Θ = {Θ𝒑 } Set of trainable parameter matrices for the B-spline convolution kernel. 
+
+𝐵 𝒑 (𝒘 ) Tensor-product B-spline basis function evaluated at edge attribute 𝒘 for basis index 𝒑 .
+
+𝑁 𝑖, 𝑝 𝑖 (𝑤 𝑖 ) 1D B-spline basis function of specified degree, evaluated at coordinate 𝑤 𝑖 .
+
+𝒓 = [𝑟 1, . . . , 𝑟 𝐷 ]⊤ Kernel resolution vector specifying the number of basis functions per pseudo-coordinate dimension. 
+
+P Cartesian product of the B-spline basis indices across all 𝐷 dimensions. 
+
+𝜌 (·) ELU (Exponential Linear Unit) activation function. Continued on next page 39 Table 1 – continued from previous page Symbol Description 
+
+𝒒 (𝒙 , 𝑡 ) Reference (ground-truth) vectorized features at location 𝒙 and time 𝑡 .
+
+ˆ𝒒 (𝒙 , 𝑡 ) Predicted vectorized features. 
+
+˜𝒒 (𝒙 , 𝑡 ) Noisy physical measurements used as input. 
+
+𝒒 (𝑘 ) Vectorized node features at layer 𝑘 within the residual S-F Box. 
+
+Q𝑘 Feature matrix at the 𝑘 -th hierarchical graph coarsening level. 
+
+Qpool  
+
+> 𝑘
+
+, Qunpool  
+
+> 𝑘
+
+Feature matrices after pooling/unpooling operations at level 𝑘 .
+
+Q𝑙 , ˜Q𝑙 , Qℎ Full spatiotemporal tensors for noise-free LR, noisy LR and reconstructed HR states. 
+
+Q𝑙 (𝑡 ), ˜Q𝑙 (𝑡 ) Feature matrix of the entire noise-free or noisy LR space at time 𝑡 .
+
+bQℎ (𝑡 ) Reconstructed HR feature matrix at time 𝑡 (direct autoencoder output). 
+
+bQ𝐾 ℎ (𝑡 ) Predicted HR feature matrix obtained by advancing the latent state via the Koopman operator. 
+
+G𝑧 , 𝑁 𝑠,𝑧 , 𝐶 𝑧 Latent graph after encoding, its number of nodes, and its feature dimension. 
+
+Z(𝑡 ), 𝒛 (𝑡 ) Latent feature matrix and its flattened observable state vector ( 𝒛 = vec (Z)). 
+
+𝒛 ∗ (𝑡 ), 𝒛 𝐾 (𝑡 ) True latent state vector and predicted latent state vector advanced via K.
+
+K Trainable matrix serving as a finite-dimensional approximation of the Koopman operator. 
+
+𝑑 Dimension of the flattened observable state vector ( 𝑑 = 𝑁 𝑠,𝑧 𝐶 𝑧 ). 
+
+𝐷 Dimensionality of the pseudo-coordinate space (e.g., 𝐷 = 3 for 3D geometries). 
+
+L, Ld, Lphy Total loss, data-driven reconstruction loss, and physics-based residual loss. 
+
+𝑤 phy Physics penalty weight modulating the contribution of Lphy .
+
+R𝑢 , R𝑣 Physics residuals quantifying PDE violations for variables 𝑢 and 𝑣 .
+
+𝑅𝐸 𝑢 , 𝑅𝐸 𝑣 , 𝑅𝐸 total Relative errors for 𝑢 , 𝑣 , and their aggregated metric. 
+
+𝜂 Learning rate for gradient-based optimization. 
+
+ℎ∗ Unknown true HR mapping that exactly satisfies the governing PDEs. 
+
+R ( ℎ∗) Expected physics residual of the true HR mapping (identically zero). 
+
+ℎ Parameterized candidate mapping for HR reconstruction. 
+
+EHR (ℎ) Expected HR reconstruction error (squared Frobenius norm). 
+
+∥ · ∥ 𝐹 Frobenius norm of a matrix or tensor. 
+
+⟨· , ·⟩ 𝐹 Frobenius inner product. 
+
+H Hypothesis space of all functions representable by the unconstrained P-K-GCN. 
+
+Hphy (𝜖 ) Physics-constrained hypothesis space with PDE residual tolerance 𝜖 .
+
+𝜖 Tolerance parameter defining Hphy (𝜖 ).
+
+H𝑙 Induced hypothesis class in the LR observational space. Continued on next page 40 Table 1 – continued from previous page Symbol Description 
+
+ℎ𝑙 Mapping in the induced LR class ( ℎ𝑙 = P⊤ 
+
+> ℎ→𝑙
+
+ℎ). 
+
+H𝑙, phy (𝜖 ) Physics-constrained induced hypothesis class in the LR space. 
+
+ˆℜ ˜Q𝑙 (H 𝑙 ) Empirical Rademacher complexity of the LR hypothesis class on noisy observations ˜Q𝑙 .
+
+𝜎 𝑖 , 𝝈 Rademacher random variables taking values ±1 with equal probability. 
+
+𝑐 Clipping bound for the data-driven loss in Rademacher analysis. 
+
+𝛿 Confidence parameter for uniform convergence bounds. 
+
+ELR (ℎ𝑙 ) Expected low-resolution risk (population loss over LR observations). 
+
+ˆELR (ℎ𝑙 ) Empirical low-resolution risk computed on the training block. 
+
+𝐶 stab Conditional stability constant linking HR deviations to their LR projections. 
+
+F True (unknown) nonlinear transition operator governing temporal evolution. 
+
+M𝜃 Parameterized nonlinear transition function learned by standard recurrent models. 
+
+𝐿 M Local Lipschitz constant of M𝜃 .
+
+𝜖 (𝑡 ) Initial spatial reconstruction error or measurement noise at time 𝑡 .
+
+Htemp Unconstrained temporal hypothesis space of arbitrary nonlinear recurrent mappings. 
+
+HKoop Koopman-constrained temporal space restricted to linear latent transitions via K.
+
+𝑒 𝑧 (𝑡 ) Initial latent representation error ∥𝒛 (𝑡 ) − 𝒛 ∗ (𝑡 )∥ 2.
+
+𝜼 𝑛 Accumulated approximation error of the true latent state evolution after 𝑛 
+
+steps. 
+
+𝜖 proj Cumulative projection and linearization error in the Koopman temporal bound. 
+
+E (𝑛 ) 
+
+> HR
+
+(ℎ) Expected HR spatiotemporal error for a future inference step 𝑛 .
+
+E (0) 
+
+> LR
+
+Empirical LR error at the initial time step 𝑡 .
+
+LHil Hilbert space of observables (e.g., 𝐿 2 over the dynamical manifold). 
+
+K Infinite-dimensional Koopman operator acting on observables. 
+
+F True evolution operator in the original state space. 
+
+Mo Dynamical state space manifold. 
+
+𝝍 Vector-valued observable function (the encoder mapping). 
+
+PLHil 
+
+> 𝑑
+
+Orthogonal projection onto the finite-dimensional observable subspace. 
+
+Kproj Galerkin projection of K onto the observable subspace. 
+
+𝜀 proj Projection error ∥K 𝑔 − P LHil 
+
+> 𝑑
+
+K𝑔 ∥.
+
+𝐿 Ψ Lipschitz constant of the composite spatial mapping Ψ.Continued on next page 41 Table 1 – continued from previous page Symbol Description 
+
+𝐶 𝐸 Lipschitz constant relating initial latent error to projected spatial error. 
+
+𝜖 𝐷 , 𝜖 𝐸 Intrinsic structural approximation errors of the decoder and encoder, respectively. 
+
+𝜖 total Aggregated residual error term in the temporal stability derivation. 42
