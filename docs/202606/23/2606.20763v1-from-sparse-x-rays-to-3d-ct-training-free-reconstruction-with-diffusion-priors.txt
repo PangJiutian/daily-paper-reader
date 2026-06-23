@@ -1,0 +1,327 @@
+Title: From Sparse X-rays to 3D CT: Training-Free Reconstruction with Diffusion Priors
+
+URL Source: https://arxiv.org/pdf/2606.20763v1
+
+Published Time: Tue, 23 Jun 2026 00:11:03 GMT
+
+Number of Pages: 15
+
+Markdown Content:
+# From Sparse X-rays to 3D CT: Training-Free Reconstruction with Diffusion Priors 
+
+Zhenkai Zhang, Markus Hiller, Krista A. Ehinger, Tom Drummond 
+
+School of Computing and Information Systems The University of Melbourne, Melbourne, Australia 
+
+zhenkaiz@student.unimelb.edu.au {m.hiller,kris.ehinger,tom.drummond}@unimelb.edu.au 
+
+Abstract. Solving 3D medical inverse problems typically requires train-ing dedicated supervised models for each specific task and measurement setting. To break this dependency, we present TF-PRDiT: a training-free conditional sampling framework that converts a frozen voxel-level 3D Diffusion Transformer prior into a versatile inverse medical prob-lem solver. Building on the posterior-sampling view of diffusion inverse solvers, TF-PRDiT enforces measurement consistency during sampling via a task-specific forward operator rather than updating model weights, enabling a single pretrained prior to be reused across diverse condi-tional settings. Our method combines a predictor-corrector sampler with likelihood-based guidance on the denoised prediction, providing stable data-fidelity correction while preserving the underlying 3D anatomical prior. We highlight our framework’s capability on the challenging task of X-ray-to-CT reconstruction by integrating a differentiable DRR projec-tor to allow gradients to propagate directly from projection space back to voxels without any retraining. Experiments on LIDC-IDRI demonstrate that TF-PRDiT achieves strong reconstruction quality and uniquely scales to an arbitrary number of input X-rays (1-12) under a unified model, with performance improving consistently as additional views are provided. Beyond X-ray-to-CT, we show that simply swapping the for-ward operator extends the same frozen model to 3D super-resolution, volumetric infilling, and deblurring without any task-specific retraining, demonstrating that a single 3D diffusion prior can serve as a universal solver for volumetric medical inverse problems. 
+
+Keywords: Training-free Conditional Generation · 3D Medical Inverse Problems · Gradient-Based Diffusion Guidance · Sparse X-ray to CT 
+
+## 1 Introduction 
+
+Recovering 3D medical volumes from sparse, incomplete, or degraded measure-ments is a central inverse problem in computational radiology. Fully sampled CT provides rich anatomical information, but its acquisition is constrained by scanner availability, clinical cost, specialized equipment, and radiation exposure. In contrast, 2D X-rays are widely available and low dose, yet mapping one or a  
+
+> arXiv:2606.20763v1 [eess.IV] 18 Jun 2026 2Z. Zhang et al.
+
+Fig. 1: Overview of TF-PRDiT. A frozen voxel-level 3D Diffusion Transformer prior is guided at inference by measurement-consistency gradients from a task-specific forward operator A. By replacing A, the same frozen model handles X-ray-to-CT reconstruction and volumetric restoration tasks without retraining. few projections to a full 3D volume is severely ill posed. A useful reconstruction framework should therefore enforce the available measurements while preserving anatomically plausible 3D structure. Most existing X-ray-to-CT methods learn a supervised mapping for a fixed measurement setting [5,13,7,8,4]. These models can work well under the view configuration used during training, but changing the geometry or number of views usually requires architectural changes or retraining. This rigidity is espe-cially limiting in clinical workflows, where imaging protocols vary and paired 3D training data are expensive. Training-free diffusion-based inverse solvers offer a different route: a pre-trained generative prior is kept fixed, and measurement consistency is imposed during sampling through a known forward operator [6,10,2,11]. This posterior-sampling view, most notably formalized in Diffusion Posterior Sampling (DPS) [2], allows the same prior to be reused across tasks without retraining. However, most prior work has focused on 2D images or relatively simple restoration operators. Extending this principle to native 3D medical volumes and projection-to-volume reconstruction remains challenging because volumetric generation is computa-tionally costly, sparse X-ray measurements are severely underdetermined, and latent compression can remove fine anatomical details. In this paper, we present TF-PRDiT, a training-f ree extension of pixel-level 
+
+residual di ffusion transformer for conditional sampling at test time to solve medical inverse problems. Our method follows the DPS-style idea of enforcing From Sparse X-rays to 3D CT: Training-Free Reconstruction 3
+
+measurements during sampling rather than retraining the generative model; our contribution is to adapt this idea to native 3D CT priors and differentiable medical forward models. For X-ray-to-CT, the forward operator is a differentiable DRR projector that maps a sampled 3D volume to one or more 2D projections. For other inverse problems, it can be replaced by a downsampling, masking, or blurring operator. This formulation makes the number of available X-rays a runtime input, rather than a training-time architectural assumption. Our contributions are: (1) a training-free sampler extending DPS to na-tive voxel-space 3D CT with differentiable volumetric forward operators, (2) denoised-prediction guidance with a cosine-decay schedule and k-step predic-tor–corrector for stable high-dimensional conditioning, and (3) a single frozen prior that scales to 1–12 X-ray views and transfers to super-resolution, infilling, and deblurring by swapping only A.
+
+## 2 Related Work 
+
+Sparse-view CT reconstruction. Learning 3D CT from sparse X-rays ob-servations is commonly formulated as a supervised image-to-image translation problem. X2CT-GAN [13] learns to fuse 2D X-ray features into a 3D gener-ator, while PerX2CT [7] further incorporate perspective projection geometry. More recent diffusion and Transformer-based approaches, such as DiffuX2CT [8] and DX2CT [4], improve reconstruction quality by learning stronger conditional mapping from fixed input views to CT volumes. However, these methods are tied to the view configuration used during training and cannot handle variable views without retraining. Another line of work avoids paired supervised train-ing by optimizing a patient-specific neural representation to match the observed projections. Neural Attenuation Fields [15] and related implicit-field methods can reconstruct CT from projection measurements, but they rely primarily on measurement consistency and lack an explicit anatomical generative prior. As a result, reconstruction becomes severely underconstrained when only one or two views are available. In contrast, TF-PRDiT treats each X-ray as a runtime measurement constraint while using a pretrained 3D diffusion prior to recover anatomically plausible structures. 
+
+Diffusion inverse solvers. Score-based inverse problem solvers and Diffusion Posterior Sampling (DPS) [10,2] show that pretrained diffusion models can be reused as generative priors by enforcing measurement consistency during sam-pling. Related training-free methods include DDRM [6], which leverages the singular-value structure of linear degradation operators, DDNM [11], which de-composes the solution into range- and null-space components, and FreeDOM [14], which extends test-time guidance to non-linear operators. These methods are mainly developed for 2D image restoration, where forward operators are lower-dimensional and often linear. Sparse-view X-ray-to-CT is more challenging be-cause the operator maps a high-dimensional 3D volume to 2D projections and becomes increasingly underconstrained as views decrease. TF-PRDiT follows the same posterior-sampling principle but instantiates it for native voxel-space 4 Z. Zhang et al. 
+
+Algorithm 1 Conditional Predictor-Corrector Sampler 
+
+1: Input: xT , timestep schedule, frozen prior fθ , predictor multiplier k, measurement 
+
+y, forward operator A, guidance scale η
+
+2: Initialize: X ← { xT }, βt ← π 
+
+> 2
+> tT
+
+▷ Angle for spherical transition 3: for t = T, T − 1, . . . , 1 do 
+
+4: xt ← last( X ), (ˆ ϵ, ˆx0) ← fθ (xt, t ) ▷ Predict noise and clean signal 5: ft ← sin( βt)ˆ x0 − cos( βt)ˆ ϵ ▷ Prior-induced update direction 6: Ldata ← ∥A (ˆ x0) − y∥22, gt ← ∇ ˆx0 Ldata  ▷ Data-consistency guidance 7: κt ← min( k, t ), ∆β (κt) ← βt − βt−κt ▷ Avoid t − k < 0
+
+8: ˜x ← xt − ∆β (κt)ft − ηgt ▷ Guided predictor step 9: Γ (κt) 
+
+> t
+
+← cos( βt−1)/ cos( βt−κt ) ▷ Variance-preserving scale 10: xt−1 ← Γ (κt) 
+
+> t
+
+˜x +
+
+q
+
+1 − (Γ (κt) 
+
+> t
+
+)2ϵ′, ϵ′ ∼ N (0 , I) ▷ Corrector step 11: X ← X ∪ { xt−1}
+
+12: end for 
+
+13: Return X
+
+3D CT, where each additional X-ray view contributes a residual term to the guidance objective. 
+
+Native 3D priors. Direct 3D diffusion is expensive because memory and com-putation scale cubically with resolution. Many 3D generative models therefore use compressed representations to improve scalability, including TCAM-Diff’s memory-efficient triplanes [17]. TF-PRDiT instead builds on PRDiT [18], a voxel-level residual diffusion Transformer prior, and combines it with differen-tiable measurement guidance to enable training-free conditional sampling across multiple inverse problems. 
+
+## 3 Method 
+
+TF-PRDiT solves inverse problems of the form y = A(x) + ξ, where x is the unknown 3D volume, y is the measurement, A is a known forward operator, and ξ is measurement noise. The same formulation covers X-ray projection, downsampling, masking, and deblurring by changing A.
+
+Relation to DPS. Our sampler follows the same posterior-sampling perspective as DPS [2]: an unconditional diffusion prior supplies the generative score, while a task-specific likelihood term enforces agreement with observed measurements. We therefore do not introduce a new posterior-guidance principle. Instead, TF-PRDiT specializes this principle for native 3D medical volumes by combining a voxel-level CT diffusion prior with differentiable volumetric forward operators. This specialization is important for sparse X-ray-to-CT because the forward model maps from a 3D volume to one or more 2D projections, so each additional X-ray can be incorporated by adding another projection-space residual to the same guidance loss. 
+
+Frozen 3D diffusion prior. We use a pretrained PRDiT model [18] as a frozen unconditional prior over chest CT volumes. PRDiT is a diffusion trans-former trained directly in voxel space on LIDC-IDRI CT volumes [1], avoid-From Sparse X-rays to 3D CT: Training-Free Reconstruction 5
+
+ing the compressed latent representation used by many latent diffusion models. This voxel-level formulation is important for medical reconstruction because fine anatomical boundaries and small structures may be weakened or lost during la-tent compression. Given a noisy volume xt and timestep t, the frozen network jointly predicts the noise component and the corresponding clean-volume es-timate: (ˆ ϵ, ˆx0) = fθ (xt, t ). During downstream reconstruction, all parameters of fθ remain fixed. Task adaptation is performed only through measurement-guided sampling, so the same prior can be reused across different view counts and inverse operators without retraining. 
+
+Predictor-corrector sampling. Following the cosine-sine parameterization [16], let βt = π 
+
+> 2
+> tT
+
+. The prior-induced update direction is 
+
+ft = sin( βt)ˆ x0 − cos( βt)ˆ ϵ. (1) We use a k-step predictor, 
+
+˜x = xt − ∆β (k)ft, ∆β (k) = βt − βt−k, (2) which produces ˜x ≈ xt−k at noise level t − k. Because the predictor strides k
+
+steps, the noise level of ˜x is βt−k, which differs from the target βt−1 when k > 1.A variance-preserving corrector rescales ˜x and injects fresh noise to reach the correct noise level at timestep t − 1:
+
+xt−1 = Γ (k) 
+
+> t
+
+˜x +
+
+q
+
+1 −  Γ (k)
+
+> t
+
+2 ϵ′, Γ (k) 
+
+> t
+
+:= cos( βt−1)cos( βt−k) , ϵ′ ∼ N (0 , I). (3) This keeps the marginal variance of xt−1 consistent with the forward process, preventing accumulated drift when k > 1. Larger k enables broader stochastic exploration, which is useful for ill-posed sparse-view reconstruction. 
+
+Likelihood guidance on the denoised estimate. Directly matching mea-surements on the noisy state can produce unstable gradients. We instead guide sampling through the denoised estimate ˆx0, using the data-consistency loss 
+
+Ldata = ∥A (ˆ x0) − y∥22. (4) The gradient ∇ˆx0 Ldata is computed by backpropagating only through A, treat-ing ˆx0 as the free variable and holding the denoiser fθ fixed. Following the DPS approximation [2], the Jacobian ∂ ˆx0/∂ xt is omitted for tractability; the result-ing voxel-space gradient is applied directly as a correction to the xt predictor update. For X-ray-to-CT, A is instantiated as a differentiable DRR projector using DiffDRR [3], allowing gradients to flow from projection space to voxels. With M available X-rays, the loss becomes 
+
+Lxray =
+
+> M
+
+X
+
+> i=1
+
+∥P gi (ˆ x0) − yi∥22, (5) where Pgi denotes projection under view geometry gi. Thus changing the number or geometry of views changes only the residual terms in the loss, not the network architecture or weights. 6 Z. Zhang et al. 
+
+Table 1: Quantitative comparison of 1-view and 2-view X-ray-to-CT reconstruc-tion on LIDC-IDRI. Results are mean ± std over three random seeds, where available. †indicates results reported in original papers. MSE is scaled by 10 3.
+
+Method #V MSE ↓ PSNR ↑ SSIM ↑ SNR ↑
+
+X2CT-GAN [13] * 1 17.41 ± 0.11 22.13 ± 0.03 0.518 ± 0.002 6.78 ± 0.03 
+
+X2CT-GAN [13] 1 18.91 ± 0.41 21.75 ± 0.10 0.509 ± 0.008 6.39 ± 0.10 
+
+TF-PRDiT (ours) 1 22.51 ± 1.46 21.34 ± 0.30 0.509 ± 0.012 6.01 ± 0.30 
+
+X2CT-GAN [13] * 2 6.55 ± 0.13 26.23 ± 0.09 0.656 ± 0.005 10.88 ± 0.09 
+
+X2CT-GAN [13] 2 6.80 ± 0.07 26.05 ± 0.05 0.647 ± 0.004 10.70 ± 0.05 
+
+PerX2CT [7] † 2 — 27.45 ± —– 0.732 ± —– —DiffuX2CT [8] † 2 — 26.35 ± —– 0.687 ± —– —DX2CT [4] † 2 — 28.36 ± —– 0.763 ± —– —TF-PRDiT (ours) 2 3.65 ± 0.12 29.06 ± 0.12 0.767 ± 0.002 13.72 ± 0.12  
+
+> *X-rays generated with Plastimatch [9]; †MSE/SNR & std not reported; code not publ. available.
+
+Cosine-decay guidance. We use a time-dependent guidance scale ηt = ηmax ·
+
+(1 − cos( πt/T )) /2. At high-noise timestep, ηt ≈ ηmax provides strong measure-ment guidance to shape global structure. As t → 1, ηt decays to zero, reducing over-correction and preserving fine anatomical details. This avoids the trade-off of fixed guidance, which can under-correct at high noise or over-correct at low noise. Algorithm 1 assembles the above components into the full conditional sam-pling procedure. At each timestep, the frozen prior predicts (ˆ ϵ, ˆx0), the predictor applies the prior-induced update together with measurement-consistency guid-ance, and the corrector restores the target noise level. Task adaptation is entirely controlled by A and y, while fθ remains fixed. 
+
+## 4 Experiments 
+
+Setup. We evaluate on LIDC-IDRI [1] using the split from X2CT-GAN [13] (916 train / 102 test). CT intensities are clamped to [0 , 2500] HU, and X-ray projections are generated with DiffDRR [3]. We report full-volume MSE, PSNR, SSIM [12], and SNR. 
+
+4.1 X-ray-to-CT Reconstruction Baseline comparisons. Table 1 summarizes both single-view and biplanar X-ray-to-CT reconstruction results on LIDC-IDRI. In the single-view setting, the problem is highly under-constrained, and TF-PRDiT remains competitive with X2CT-GAN despite using no task-specific training. In the biplanar setting, TF-PRDiT substantially improves reconstruction quality, achieving 29 .06 dB PSNR and 0.767 SSIM. Compared with prior biplanar methods, including PerX2CT [7], DiffuX2CT [8], and DX2CT [4], TF-PRDiT achieves the best PSNR and SSIM, From Sparse X-rays to 3D CT: Training-Free Reconstruction 7GT X2CT -GAN TF -PRDiT    
+
+> Axial Coronal Sagittal 3D Render
+
+Fig. 2: Comparison of bi-planar X-ray-to-CT reconstruction on LIDC-IDRI [1]. Table 2: Reconstruction quality with increasing X-ray views. TF-PRDiT im-proves monotonically from 1 to 12 views without retraining. 
+
+#Views MSE ↓ PSNR ↑ SSIM ↑ SNR ↑
+
+1 22.51 ± 1.46 21.34 ± 0.30 0.509 ± 0.012 6.01 ± 0.30 
+
+2 3.65 ± 0.12 29.06 ± 0.12 0.767 ± 0.002 13.72 ± 0.12 
+
+4 1.96 ± 0.02 31.71 ± 0.06 0.824 ± 0.000 16.37 ± 0.06 
+
+6 1.39 ± 0.02 33.20 ± 0.07 0.852 ± 0.000 17.86 ± 0.07 
+
+8 1.19 ± 0.01 33.89 ± 0.05 0.865 ± 0.000 18.55 ± 0.05 
+
+12 1.02 ± 0.02 34.61 ± 0.07 0.880 ± 0.000 19.27 ± 0.07 
+
+improving over DX2CT by 0.70 dB and 0.004 , respectively. Figure 2 further shows that these quantitative gains correspond to sharper anatomical boundaries across axial, coronal, and sagittal views. 
+
+Scaling to arbitrary views. Table 6 shows monotonic gains from 1 to 12 views (PSNR 21 .34 → 34 .61 dB, SSIM 0.509 → 0.880 ), the sharpest jump occurs at 2 views where the second projection resolves depth ambiguity. 
+
+4.2 Generalization and Ablation Other inverse problems. Beyond X-ray-to-CT reconstruction, TF-PRDiT also generalizes to 3D super-resolution, volumetric infilling, and deblurring by only replacing the forward operator A. As shown in Figure 3, the same frozen diffusion prior restores missing or degraded structures across different degrada-tion types without task-specific retraining. This supports the central motiva-tion of TF-PRDiT: once a strong unconditional 3D prior is learned, different inverse problems can be addressed through measurement-consistent sampling rather than separate supervised models. 
+
+Ablation. We set k = 4 for X-ray-to-CT and k = 2 for 2× super-resolution, reflecting the stronger ambiguity of sparse-view reconstruction. A larger k pro-8 Z. Zhang et al. Axial Coronal Sagittal   
+
+> GT Super -resolution Deblurring Infilling
+
+Fig. 3: Qualitative results on additional 3D inverse problems. By replacing only the forward operator A, TF-PRDiT handles super-resolution, volumetric infill-ing, and deblurring with the same frozen prior fθ .
+
+Fig. 4: Ablation study on guidance schedule. Cosine decay vs. fixed guidance on 3D volumetric infilling (left) and 2-view X-ray-to-CT (right). motes broader stochastic exploration, which helps resolve depth uncertainty when only limited projections are available, while a smaller k is sufficient for the more constrained super-resolution task. Cosine-decayed guidance further out-performs fixed guidance on both tasks: strong early guidance corrects global structure, whereas decay near t = 1 avoids over-correction and preserves fine anatomical details, as shown in Fig. 4. 
+
+## 5 Conclusion 
+
+We presented TF-PRDiT, a training-free framework that converts a frozen voxel-level diffusion prior into a versatile solver for 3D medical inverse problems by swapping only the forward operator. Without retraining, it scales to 1–12 X-ray views and transfers to super-resolution, infilling, and deblurring. Limitations in-clude slower inference than feed-forward models and dependence on an accurate forward operator. Broader validation across anatomies, scanners, and clinical settings remains future work. From Sparse X-rays to 3D CT: Training-Free Reconstruction 9
+
+## References 
+
+1. Armato III, S.G., McLennan, G., Bidaut, L., McNitt-Gray, M.F., Meyer, C.R., Reeves, A.P., Zhao, B., Aberle, D.R., Henschke, C.I., Hoffman, E.A., et al.: The lung image database consortium (lidc) and image database resource initiative (idri): a completed reference database of lung nodules on ct scans. Medical Physics 38 (2), 915–931 (2011) 2. Chung, H., Kim, J., Mccann, M.T., Klasky, M.L., Ye, J.C.: Diffusion posterior sam-pling for general noisy inverse problems. arXiv preprint arXiv:2209.14687 (2022) 3. Gopalakrishnan, V., Golland, P.: Fast auto-differentiable digitally reconstructed radiographs for solving inverse problems in intraoperative imaging. In: Workshop on Clinical Image-Based Procedures. pp. 1–11. Springer (2022) 4. Jeong, Y.S., Yoo, H.B., Chun, I.Y.: Dx2ct: Diffusion model for 3d ct reconstruction from bi or mono-planar 2d x-ray (s). In: ICASSP 2025-2025 IEEE International Conference on Acoustics, Speech and Signal Processing (ICASSP). pp. 1–5. IEEE (2025) 5. Jin, K.H., McCann, M.T., Froustey, E., Unser, M.: Deep convolutional neural network for inverse problems in imaging. IEEE transactions on image processing 
+
+26 (9), 4509–4522 (2017) 6. Kawar, B., Elad, M., Ermon, S., Song, J.: Denoising diffusion restoration models. Advances in neural information processing systems 35 , 23593–23606 (2022) 7. Kyung, D., Jo, K., Choo, J., Lee, J., Choi, E.: Perspective projection-based 3d ct reconstruction from biplanar x-rays. In: ICASSP 2023-2023 IEEE International Conference on Acoustics, Speech and Signal Processing (ICASSP). pp. 1–5. IEEE (2023) 8. Liu, X., Qiao, Z., Liu, R., Li, H., Zhang, J., Zhen, X., Qian, Z., Zhang, B.: Diffux2ct: Diffusion learning to reconstruct ct images from biplanar x-rays. In: European Conference on Computer Vision. pp. 458–476. Springer (2024) 9. Sharp, G.C., Li, R., Wolfgang, J., Chen, G., Peroni, M., Spadea, M.F., Mori, S., Zhang, J., Shackleford, J., Kandasamy, N.: Plastimatch: an open source software suite for radiotherapy image processing. In: Proceedings of the XVI’th Interna-tional Conference on the use of Computers in Radiotherapy (ICCR), Amsterdam, Netherlands. vol. 3 (2010) 10. Song, Y., Shen, L., Xing, L., Ermon, S.: Solving inverse problems in medical imag-ing with score-based generative models. arXiv preprint arXiv:2111.08005 (2021) 11. Wang, Y., Yu, J., Zhang, J.: Zero-shot image restoration using denoising diffusion null-space model. arXiv preprint arXiv:2212.00490 (2022) 12. Wang, Z., Bovik, A.C., Sheikh, H.R., Simoncelli, E.P.: Image quality assessment: from error visibility to structural similarity. IEEE transactions on image processing 
+
+13 (4), 600–612 (2004) 13. Ying, X., Guo, H., Ma, K., Wu, J., Weng, Z., Zheng, Y.: X2ct-gan: reconstructing ct from biplanar x-rays with generative adversarial networks. In: Proceedings of the IEEE/CVF conference on computer vision and pattern recognition. pp. 10619– 10628 (2019) 14. Yu, J., Wang, Y., Zhao, C., Ghanem, B., Zhang, J.: Freedom: Training-free energy-guided conditional diffusion model. In: Proceedings of the IEEE/CVF International Conference on Computer Vision. pp. 23174–23184 (2023) 15. Zha, R., Zhang, Y., Li, H.: NAF: Neural attenuation fields for sparse-view CBCT reconstruction. In: Medical Image Computing and Computer-Assisted Intervention – MICCAI 2022. pp. 442–452. Springer (2022) 10 Z. Zhang et al. 16. Zhang, Z., Ehinger, K.A., Drummond, T.: Improving denoising diffusion models via simultaneous estimation of image and noise. arXiv preprint arXiv:2310.17167 (2023) 17. Zhang, Z., Ehinger, K.A., Drummond, T.: TCAM-Diff: Triplane-aware cross-attention medical diffusion model. In: Proceedings of the AAAI Conference on Artificial Intelligence. vol. 39, pp. 22732–22740 (2025) 18. Zhang, Z., Hiller, M., Ehinger, K.A., Drummond, T.: Pixel-level residual diffusion transformer: Scalable 3d CT volume generation. In: The Fourteenth International Conference on Learning Representations (2026) From Sparse X-rays to 3D CT: Training-Free Reconstruction 11 
+
+## A Appendix 
+
+The appendix is organized to separate implementation detail from empirical evi-dence. This section records the common data, sampling, and evaluation protocol. Section A.2 specifies how the same conditional sampler is instantiated for each inverse problem. Section A.3 then documents the frozen 3D prior, after which Secs. A.4–A.6 provide the predictor ablation, arbitrary-view scaling results, and additional qualitative examples. 
+
+A.1 Overview and Reproducibility Details 
+
+Data and preprocessing. All experiments use LIDC-IDRI [1] and follow the X2CT-GAN split [13]: 916 volumes are used to train the unconditional prior and 102 held-out volumes are used for evaluation. CT intensities are clamped to 
+
+[0 , 2500] HU and normalized before being passed to the 128 3 voxel-space prior. Sparse X-ray measurements are generated with the differentiable DiffDRR pro-jector [3]. No test volume, projection, or paired reconstruction target is used to update the prior. 
+
+Inference protocol. Every reconstruction starts from Gaussian noise and uses the frozen network fθ to predict both ˆϵ and ˆx0. The data-consistency gradient is evaluated with respect to ˆx0 and backpropagated only through the selected forward operator A; model parameters remain outside the optimization graph. Guidance follows the cosine schedule 
+
+ηt = ηmax 
+
+1 − cos( πt/T )2 ,
+
+which emphasizes global measurement agreement early in sampling and reduces over-correction as the sample approaches the clean volume. Unless otherwise stated, the predictor multiplier is k = 4 for sparse X-ray-to-CT and k = 2 for 
+
+×2 super-resolution, as selected by the ablation in Table 5. 
+
+Evaluation protocol. MSE, PSNR, SSIM [12], and SNR are computed on the complete reconstructed volume rather than on selected slices. Reported X-ray-to-CT statistics are mean ± standard deviation over three random seeds. Visual figures show matched axial, coronal, and sagittal locations, so the displayed slices test cross-plane consistency rather than a single favorable plane. Results copied from prior publications are identified as such in the main paper because differences in projection generation, preprocessing, and metric implementations prevent a strictly controlled comparison. 
+
+A.2 Forward-Operator Instantiations 
+
+The task-specific part of TF-PRDiT is fully described by the measurement y
+
+and differentiable operator A. In all cases the sampler minimizes Eq. (4); only 12 Z. Zhang et al. 
+
+Table 3: Task-specific forward operators. Pgi is the DRR projector at geometry 
+
+gi, Ds is downsampling by scale s, M is a binary observation mask, and K is a blur kernel.                                     
+
+> Inverse problem Forward model Data-consistency residual
+> Sparse X-ray-to-CT yi=Pgi(x)PMi=1 ∥P gi(ˆ x0)−yi∥22
+> CT super-resolution
+> y=Ds(x)∥D s(ˆ x0)−y∥22
+> Volumetric infilling y=M⊙x∥M⊙ˆx0−y∥22
+> Medical deblurring y=K∗x∥K∗ˆx0−y∥22
+
+the residual used to construct that loss changes. Table 3 summarizes the four instantiations evaluated in this work. For X-ray-to-CT, adding a view appends one projection-space residual to the sum; it does not change the network input channels, architecture, or weights. For the remaining tasks, downsampling, masking, and convolution are linear and differentiable, so their adjoints naturally map the measurement residual back to the 3D voxel grid. This common interface is the practical reason a single unconditional prior can be reused across all four problems. It also clarifies the method’s scope: reconstruction quality depends on the accuracy of A, and unmodelled acquisition geometry or corruption can produce a biased guidance signal even when the generative prior is strong. 
+
+A.3 Enhanced PRDiT Image-Prediction Branch 
+
+TF-PRDiT uses a frozen, unconditional PRDiT prior; the proposed training-free contribution changes the sampling procedure and does not condition or fine-tune the network. For completeness, we detail the implementation used in our experiments and isolate its changes from the public PRDiT architecture [18]. 
+
+Tokenization and shared timestep conditioning. For a noisy CT input 
+
+xt ∈ RB×1×128 ×128 ×128 ,
+
+reflection-padded unfolding extracts overlapping 12 3 voxel patches with stride 8 and padding 2. This produces a 16 3 = 4096 -token grid, with raw token width 
+
+12 3 = 1728 . A 256-dimensional sinusoidal timestep encoding is mapped to a shared 768-dimensional representation and then split into a 1728-dimensional coarse-conditioning vector and a 768-dimensional refiner-conditioning vector. 
+
+Local coarse denoiser. The first stage applies two timestep-modulated SwiGLU MLP blocks independently to every raw patch token. A residual connection bypasses the two MLPs, after which a linear head predicts an 83 × 2 = 1024 -dimensional output patch. This stage captures coarse local structure without global self-attention. From Sparse X-rays to 3D CT: Training-Free Reconstruction 13 
+
+Global residual refiner. The second stage embeds the same raw tokens using a nonlinear 1728 → 3072 → 768 path plus a linear 1728 → 768 skip projec-tion. Normalized 3D positional encodings are added before Transformer blocks with multi-head self-attention, 64 channels per head, a 4× expansion MLP, and timestep-conditioned adaptive normalization and residual gates. The final head predicts a 1024-dimensional residual patch per token. Coarse and residual pre-dictions are added in patch space and rearranged into a dense two-channel 128 3
+
+output, corresponding to noise and clean-image predictions. The prior is trained progressively: the local denoiser is learned first and then frozen while the global refiner learns the residual. Table 4: Changes restricted to the clean-image prediction branch ˆx0. The noise-prediction branch ˆϵ and shared PRDiT backbone are unchanged.       
+
+> Image-branch component Public PRDiT Enhanced prior (ours)
+> Pre-normalization Affine-free LayerNorm,
+> ϵ= 10 −6
+> Affine-free RMSNorm,
+> ϵ= 10 −5
+> AdaLN modulation output SiLU–linear SiLU–linear–RMSNorm,
+> ϵ= 10 −5
+
+The modifications are therefore confined to normalization on the clean-image prediction side; the noise-prediction side and shared local-to-global backbone are retained. TF-PRDiT then supplies the orthogonal inference-time component: the differentiable forward operator guides sampling while every parameter of the prior remains fixed. Because these normalization changes are not ablated individually, we do not attribute the reconstruction gain to either one in isolation. 
+
+A.4 Predictor-Step Ablation 
+
+Table 5 evaluates the predictor-step multiplier k on sparse X-ray-to-CT re-construction and ×2 CT super-resolution. For X-ray-to-CT, increasing k im-proves reconstruction quality up to k = 4 , suggesting that the severely ill-posed projection-to-volume setting benefits from broader exploration during sampling. In contrast, ×2 super-resolution achieves its lowest MSE at k = 2 , indicating that the more constrained restoration task benefits from a conservative update. We therefore use k = 4 for sparse X-ray-to-CT and k = 2 for ×2 super-resolution. Table 5: Ablation on predictor-step multiplier k. MSE is scaled by 10 3.                                
+
+> X-ray-to-CT SR (×2)
+> kMSE ↓PSNR ↑SSIM ↑MSE ↓PSNR ↑SSIM ↑
+> 24.09 28.49 0.726 0.42 38.12 0.914 33.83 28.85 0.756 0.43 38.08 0.917
+> 43.65 29.06 0.767 0.46 37.86 0.915 53.73 28.97 0.770 0.48 37.60 0.912
+
+14 Z. Zhang et al. 
+
+A.5 Scalability Across X-ray Views 
+
+Table 6 reports quantitative performance and Fig. 5 shows reconstructions as the number of input X-ray views increases from 1 to 12. A single view recovers the global layout but leaves fine details blurred. Anatomical detail and cross-plane consistency improve progressively as additional views constrain the reconstruc-tion. Axial Coronal Sagittal        
+
+> GT 1235487610 12
+
+Fig. 5: Qualitative scalability across 1–12 X-ray views. Axial, coronal, and sagit-tal slices are shown for each view count alongside ground truth (GT). Table 6: Reconstruction quality as the number of input X-ray views increases. Values are mean ± standard deviation over three random seeds; MSE is scaled by 10 3.
+
+#Views MSE ↓ PSNR 3D ↑ SSIM 3D ↑ SNR ↑
+
+1 22.51 ± 1.46 21.34 ± 0.30 0.509 ± 0.012 6.01 ± 0.30 
+
+2 3.65 ± 0.12 29.06 ± 0.12 0.767 ± 0.002 13.72 ± 0.12 
+
+3 2.33 ± 0.04 30.94 ± 0.08 0.808 ± 0.001 15.60 ± 0.08 
+
+4 1.96 ± 0.02 31.71 ± 0.06 0.824 ± 0.000 16.37 ± 0.06 
+
+5 1.55 ± 0.03 32.76 ± 0.09 0.843 ± 0.000 17.43 ± 0.09 
+
+6 1.39 ± 0.02 33.20 ± 0.07 0.852 ± 0.000 17.86 ± 0.07 
+
+7 1.28 ± 0.01 33.59 ± 0.06 0.860 ± 0.000 18.26 ± 0.06 
+
+8 1.19 ± 0.01 33.89 ± 0.05 0.865 ± 0.000 18.55 ± 0.05 
+
+10 1.07 ± 0.02 34.36 ± 0.08 0.874 ± 0.000 19.02 ± 0.08 
+
+12 1.02 ± 0.02 34.61 ± 0.07 0.880 ± 0.000 19.27 ± 0.07 
+
+A.6 Additional Qualitative Inverse-Problem Results 
+
+Figure 6 provides detailed visualizations for the additional 3D inverse problems discussed in Sec. 4. In every case, only the forward operator A is changed; the diffusion prior fθ remains frozen. From Sparse X-rays to 3D CT: Training-Free Reconstruction 15 Axial Coronal Sagittal 
+
+Condition (×2) Condition (×4) Condition (×8)GT     
+
+> (a) CT super-resolution at ×2,×4, and ×8.Axial Coronal Sagittal
+> (b) Volumetric infilling. Axial Coronal Sagittal (c) Medical image deblurring.
+
+Fig. 6: Additional inverse-problem results. Each panel shows ground truth, de-graded input, and TF-PRDiT reconstruction.

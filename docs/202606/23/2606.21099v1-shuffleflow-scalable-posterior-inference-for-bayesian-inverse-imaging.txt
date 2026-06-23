@@ -1,0 +1,501 @@
+Title: ShuffleFlow: Scalable Posterior Inference for Bayesian Inverse Imaging
+
+URL Source: https://arxiv.org/pdf/2606.21099v1
+
+Published Time: Tue, 23 Jun 2026 00:37:23 GMT
+
+Number of Pages: 22
+
+Markdown Content:
+> 1
+
+# ShuffleFlow: Scalable Posterior Inference for Bayesian Inverse Imaging 
+
+## Tianao Li, Student Member, IEEE, Tjitske Starkenburg, Yu Sun, Member, IEEE, 
+
+## and Emma Alexander, Member, IEEE 
+
+Abstract —Variational inference (VI) is a powerful method for principled posterior inference for scientific inverse imaging. VI learns the posterior distribution, often with a flow-based network, which can cheaply generate posterior samples upon optimization, and can flexibly incorporate score-based or classic priors. However, its application to large-scale image reconstruction is severely hindered by the poor scalability of the flow-based networks. In this work, we introduce ShuffleFlow , a scalable VI framework to address this challenge. Our method breaks down the problem into three parts: a pixel-unshuffling-based image coordinate sampler, a neural field as feature encoder, and a conditional normalizing flow (CNF) as posterior estimator. Specifically, our framework partitions an image into a stack of sub-images with pixel-unshuffling and uses a shared CNF to model the joint distribution of the sub-image stack. We condition the CNF on the output of a neural field, which embeds feature vectors corresponding to pixel-unshuffling sample locations to capture spatial structures, and share the flow’s latent variable across the channels to model their correlations. We demonstrate our method’s effectiveness and efficiency on both linear and nonlinear imaging inverse problems, and show its ability to more rapidly generate a high-sample-count posterior than diffusion samplers. 
+
+Index Terms —Scientific Imaging, Inverse Problems, Variational Inference 
+
+## ✦
+
+## 1 INTRODUCTION 
+
+# INVERSE problems fundamentally exist in computational imaging systems, which aim to recover latent im-ages x encoded in noisy and incomplete measurements 
+
+y = A(x) + n with physical knowledge of the forward model A(·). This is usually accomplished by solving a maximum-a-posteriori (MAP) problem from a Bayesian per-spective, for estimates 
+
+x∗ = arg min 
+
+> x
+
+{− log p(y|x) − log p(x)} , (1) where p(y|x) is the data likelihood and p(x) is the prior. These inverse problems are generally ill-posed due to infor-mation loss and measurement noise, so reconstructing high-quality images typically requires image priors. For scientific and medical imaging, there is an increasing demand for uncertainty quantification, such as by generating samples to approximate the posterior. Though diffusion models have recently emerged as a powerful generative model to learn rich prior distributions, which can be used to sample from the Bayesian posterior by conditioning on measurements [1], [2], [3], [4], [5], [6], [7], [8], diffusion samplers come with several drawbacks. First, training diffusion models requires large datasets, making them unusable for novel applications where high-quality data are scarce. Second, drawing each posterior sample re-quires iterative and repeated diffusion network evaluations, 
+
+• T. Li and E. Alexander are with the Department of Computer Science, Northwestern University, Evanston, IL 60208. T. Starkenburg is with the Center for Interdisciplinary Exploration and Research in Astrophysics and the Department of Physics and Astronomy, Northwestern University, Evanston, IL 60208. T. Li, E. Alexander, and T. Starkenburg are also with the NSF-Simons AI Institute for the Sky (SkAI), Chicago, IL 60611. Y. Sun is with the Department of Electrical and Computer Engineering, Johns Hopkins University, Baltimore, MD 21218. E-mail: ealexander@northwestern.edu 
+
+• Project website:https://nubivlab.github.io/ShuffleFlow/. 
+
+leading to a high cost for generating high-resolution , i.e., large sample-count, posteriors. Variational inference (VI) provides an alternative to the limitations listed above. Importantly, after learning the vari-ational distribution, one can efficiently draw samples from the variational network. This is particularly important when a high-resolution posterior is needed for downstream science (e.g., imaging for astronomy [9], [10], [11], [12]). VI methods can also incorporate either classic or modern (e.g., diffusion-based) priors, making them flexible for both data-rich and data-scarce applications. Finally, VI has been described as a more principled posterior estimation [13], [14], [15], because its only approximation is the flow-network, compared to the approximations in diffusion samplers due to the intractabil-ity of the likelihood score [1], [2], [3], [4], [5], [6]. Despite the aforementioned advantages, VI has seen limited adoption in inverse imaging (though, see [11], [13], [14], [15], [16], [17]). This is likely due to challenges in scalability: modeling high-dimensional distributions like image distributions usually requires a large normalizing flow network [13], [14], which leads to high memory and time budgets during optimization that scale poorly with image dimension ( O(N 4) for N × N pixels). To adapt VI to inverse problems on larger images, prior work either adopts a naive patching [18] or pixelating strategy [19], [20], at the cost of decreased image quality and posterior expressiveness. In this work, our goal is to improve the scalability of VI without the loss of posterior accuracy. We introduce ShuffleFlow, a novel modular VI framework designed for scalable posterior inference in Bayesian inverse imaging. Inspired by the inherent low-dimensionality of natural images [22], [23] and the pixel-unshuffling technique that breaks down images to be pro-cessed by cheaper networks [24], [25], [26], our intuition is                          
+
+> arXiv:2606.21099v1 [cs.CV] 19 Jun 2026 2
+> Fig. 1. Overview of ShuffleFlow. (a) Overall pipeline of ShuffleFlow. The full N×Nimage is partitioned into S2sub-images with shape NS×NS
+> using pixel-unshuffling with a pre-defined downsample factor S, and feature embeddings {hi}i=1 ,...,S 2are calculated from the sampling offset positions using a coordinate-based MLP (NF encoder), implemented with SIREN [21]. We then draw a base sample z0with dimension of N2
+> S2
+> from a standard normal distribution and feed it into a conditional normalizing flow S2times (each time conditioned on an embedding hifor a different sub-image xi) to obtain the pixel-unshuffled image stack {xi}i=1 ,...,S 2. We then convert this stack of sub-images into a full image sample using pixel-shuffling, which will then be fed into the VI training loss calculated from the KL divergence, consisting of three terms: data likelihood, prior (score network weights are frozen during optimization), and negative entropy. The CNF and NF are trained together at test time on a single measurement (see red arrows for backpropagation). Other priors (e.g., TV) can also be incorporated in place of the score prior. (b) For a 256 ×256 image, previous VI methods either exhaustively model the full image posterior [13] (dimensionality= 216 ) or model an oversimplified one-dimensional posterior [20] (dimensionality=1). Our method considers 64 subsampled images of 32 ×32 pixels each (dimensionality=2 10 ), which outperforms both existing methods and a naive patching strategy [18]. The x-axis shows the posterior dimensionality modeled by each method.
+
+to break down the full posterior modeling task into several components. Specifically, ShuffleFlow decomposes the full image into a stack of downsampled sub-images with pixel-unshuffling, and models the joint distribution of the sub-image stack with a shared conditional normalizing flow (CNF) that is significantly lower-dimensional, hence much cheaper. Additionally, we reduce the CNF size by offloading some of the image reconstruction tasks into a neural field (NF) encoder. Specifically, the sampling offset coordinate of the downsampled images is fed into the NF to calculate coordinate-based feature embeddings, which are used as conditional inputs for the CNF. We show the success of our method using both classic total-variation (TV) prior and a learned score prior to demonstrate its flexibility across data-poor and data-rich settings. Our contributions are: 1. Problem decomposition : We propose a new VI frame-work for inverse problems that decomposes the posterior modeling of a large image into three parts (see Fig. 1a): coordinate sampling, partial image representation, and light-weight uncertainty quantification. Specifically, a pixel-unshuffling-based coordinate sampler partitions an image into a stack of sub-images, a neural field encodes spatial features for each sub-image, and a conditional normaliz-ing flow estimates the joint distribution of the sub-image stack. Our framework’s modular structure is agnostic to specific network architectures and allows easy integration of advances in neural fields, normalizing flow networks, and generative priors. 2. Image quality and uncertainty quantification : Shuf-fleFlow learns complex distributions and achieves SOTA image reconstruction and uncertainty quantification among VI methods (see Fig. 1b). Across diverse applications, we outperform previous VI methods that fully rely on normal-izing flows [13], [14], or decompose the posterior with naive patching [18] or pixelating [19], [20] strategies. 3. Efficient inference for high-sample-count posteriors :ShuffleFlow is a time- and memory-efficient method for pos-terior estimation compared to existing methods in scientific imaging. Fig. 2 shows a 31-98% decrease in computational resources for VI, while Fig. 5 demonstrates that we can re-cover a high-resolution bimodal posterior of 10,000 samples within 16 min, at which point diffusion samplers do not yet show clear bimodal distributions. In our experiments, our method shows SOTA image re-construction quality in less time and memory than previous VI methods. Compared to diffusion samplers, our method is able to quickly generate a large number of posterior samples to discover a bimodal posterior in nonlinear Fourier phase retrieval, which is vital for applications where a high-resolution posterior is needed for downstream science. 3
+
+## 2 RELATED WORK 
+
+2.1 Image Priors 
+
+Classic methods adopt hand-crafted regularization (e.g., total variation [27], sparsity [28]) as prior, and solve Eq. 1 as a regularized maximum likelihood (RML) problem. Deep neural networks have been used to learn a prior from data and are incorporated into inverse problem solvers as plugin denoisers [29], [30], [31], [32], [33], [34]. Diffusion mod-els [35], [36], [37], [38] have emerged as powerful generative models that can capture rich image priors and allow condi-tional sampling from an approximated posterior, either us-ing projection onto the measurement space [1], [39], [40] or taking gradient steps towards higher data likelihood, such as Score-ALD [2], DPS [5], and many others [3], [4], [5]. RED-Diff [6] used a variational diffusion sampler that uses the diffusion process as regularization, but is mode-seeking and lacks posterior diversity. Recent diffusion sampling methods avoid the intractability of the likelihood score calculation via split Gibbs sampling (PnP-DM) [7] or decoupled noise annealing (DAPS) [8]. 
+
+2.2 Neural Fields 
+
+Neural Fields (NFs) [41], also known as Implicit Neural Representations (INRs), have recently emerged as powerful representations for novel view synthesis [42], [43], [44] and self-supervised image reconstruction. By representing im-ages or physical fields using a coordinate-based Multilayer Perceptron (MLP), NFs generally use a relatively small num-ber of weights (usually orders of magnitude smaller than the signal dimension), making large-scale inverse problems better-posed but also significantly reducing the memory requirements. NFs optimize their weights directly on the measurements at test time, bypassing the need for extensive training data, and making them well-suited for novel and complex systems where high-quality labeled datasets are scarce. The MLP’s continuous representation imposes an im-plicit prior and has been shown to be an effective regularizer for natural signals [21]. Given these advantages, NFs have been successfully applied to a variety of scientific imaging problems [45], [46], [47], [48], [49], [50], [51], [52], [53]. 
+
+2.3 Normalizing Flows 
+
+Normalizing flows [54], [55] have been widely used to model complex posterior distributions by transforming a simple base distribution into a desired distribution with invertible functions. The invertibility of flow functions en-ables efficient likelihood calculation through the change-of-variable formula. This capability, coupled with their ability to learn intricate distributions, has led to application in vari-ous domains, including 3D point cloud generation [56], [57], inverse problems in imaging [11], [13], [14], [15], [16], [17], and uncertainty quantification in NeRF [19], [20]. In com-putational imaging, Deep Probabilistic Imaging (DPI) [13], [16] is a leading posterior sampling method that leverages a flow-based generative network and variational inference to approximate the posterior and generate posterior samples with hand-crafted regularization. [14] incorporates score-based diffusion models as a principled prior into VI frame-works, and [15] proposed a surrogate score-based prior that significantly reduces the associated computation. However, the computational expense of the flow networks used in these works still scales poorly with the image size, limiting their practical application. Previous work has, like the proposed method, attempted to address the scalability problem, but with suboptimal trade-offs. [18] crops an image into several non-correlated patches and fails to capture long-range correlations. [58] designed a hierarchical architecture, but it still requires at least one full-dimensional flow layer. CF-NeRF [20] com-bines a neural field with a CNF to model complex scenes, but constraints the posterior on a one-dimensional manifold, significantly limiting the expressiveness of the posterior. Of these, CF-NeRF is the method best suited for imaging problems, but its naive single-pixel approach fails to capture posterior complexity as seen in nonlinear inverse problems. Note that the choice of downsampling strategies is lim-ited by the invertibility requirement of the normalizing flows, and most common strategies (e.g., average/max pool-ing, bilinear interpolation) only produce a single sub-image and discard information needed for invertibility. 
+
+2.4 Other Sampling and UQ methods 
+
+Quantifying the uncertainty in reconstructed images is cru-cial for computational imaging with scientific and medi-cal applications. Traditional uncertainty quantification (UQ) methods include MCMC sampling [7], [59], [60], [61], [62], Bayesian hypothesis testing [63], and variational infer-ence [64]. With the recent flourishing of deep learning, Bayesian learning [65], [66], [67] has been applied to quan-tify the uncertainty of learning-based image reconstruc-tion [68]. [69] provides a Bayesian learning reformulation of NFs, but does not attempt to learn the posterior distribution directly through VI. Other methods include deep ensem-bles [70], equivariant bootstrapping [71], and conformal methods [72], [73]. 
+
+## 3 PROPOSED METHOD 
+
+Our key insight is to break down the problem of image posterior inference into three parts: coordinate sampling, feature encoding, and posterior estimation (Fig. 1a). 
+
+3.1 Image Posterior Representation 
+
+We consider an image x ∈ RN 2
+
+with size N × N . Conven-tional methods [13] represent the probability distribution of this image q(x) using a flow network of dimension N 2 with 
+
+O(N 4) parameters [74], which scales poorly with the image size and poses challenges to computational resources. We reduce this significant expense by leveraging the inherent reduction of dimensionality from image pixels to underly-ing intrinsic dimensions [22], [23], [75], [76], [77], which we do by subsampling the image and using a learned feature encoding for each pixel group. 
+
+3.1.1 Coordinate sampling 
+
+In contrast to previous work which either decompose the image into independent patches [18] or correlated pix-els [20], we decompose the full image into S2 correlated sub-images {xi}i=1 ,...,S 2 with shape NS × NS (S is a divisor 4
+
+of N ) using pixel-unshuffling [24], such that {xi}i=1 ,...,S 2 =
+
+PU (x; S) and x = PS  {xi}i=1 ,...,S 2
+
+, where PU (·; S) is the pixel-unshuffling operation with downsampling factor 
+
+S, and PS (·) is its inverse, the pixel-shuffling operation. Note that every sub-image xi is assigned a 2D coordinate 
+
+ci based on the offset of the sampling location (see cartoon illustration on the top left of Fig. 1a). We refer to this as the pixel-unshuffling coordinate sampling strategy in this paper. 
+
+3.1.2 Scalable posterior estimation 
+
+Since these sub-images {xi}i=1 ,...,S 2 capture the same coarse global structure of the original image, we use a shared 
+
+conditional normalizing flow CNF θ (·) with parameters θ to model their distributions, with the coordinate information as the condition. Such low-resolution similarity has also been leveraged in self-supervised image denoising [78], [79]. This significantly lowers the size of the flow network from 
+
+N 2 to N 2 
+
+> S2
+
+. We observe an optimal downsampling factor S=8, leading to a 64 × reduction in dimensionality (see Sec. S3). Adopting De Finetti’s Theorem [80], we share the base variable z0 of the CNF across all downsampled images, such that their joint distribution q  {xi}i=1 ,...,S 2
+
+, which is essentially the distribution of the full image q(x), can be written as a fully-factorized distribution conditioned on this base variable z0:
+
+q(x) = q  {xi}i=1 ,...,S 2
+
+ =
+
+
+
+> S2
+
+Y
+
+> i=1
+
+q(xi|z0; ci)
+
+ q(z0), (2) where q(xi|z0; ci) is the conditional distribution of the CNF, and q(z0) is the base variable distribution, for which we use a standard normal distribution. Sharing base variables lowers the dimensionality of the image distribution from 
+
+N 2 to N 2 
+
+> S2
+
+, which is well aligned with the inherent lower-dimensionality of the image x and makes learning complex posteriors easier. It also correlates the downsampled images to prevent noise in image samples originating from pixel independencies [19], [20]. 
+
+3.1.3 Feature encoding 
+
+Instead of directly using the sampling offset coordinates as conditional inputs for the CNF, we use a neural field NF ϕ with parameters ϕ as a feature encoder to calculate an embedding hi = NF ϕ(ci) as the conditional input [20] for each sub-image xi. This technique relieves some of the image reconstruction burden from the expensive flow network. The representation of the full image distribution qθ,ϕ (x)
+
+of ShuffleFlow can be written as 
+
+x ∼ qθ,ϕ (x) ⇔ x = PS 
+
+
+
+{CNF θ (z0, hi)}i=1 ,...,S 2
+
+
+
+,
+
+z0 ∼ N  0, IN 2/S 2
+
+ , (3) where IN 2/S 2 is the N 2 
+
+> S2
+
+-dimensional identity matrix. We observe that using a smaller neural field, using positional encoding, and directly conditioning on the 2D coordinates lead to decreased image quality (see ablations in Sec. S3). 
+
+3.1.4 Efficiency analysis 
+
+In scientific applications, a large number of samples can be needed to characterize the posterior distribution (e.g., [9], [10], [11], [12]). Since the sampling cost grows linearly with the number of samples for diffusion samplers, VI methods are a better solution because they can cheaply generate samples after training (see Fig. 2a). Among VI methods, we show theoretically and empirically that our problem decom-position scales nearly as efficiently as pixel-wise inference (see Fig. 2b-d). While latent-space diffusion models and distillation might reduce the score network size or sampling steps, they do not change the linear scaling curve of diffusion sam-plers, i.e., the time for generating a high-resolution posterior still grows linearly with sample count. For methods using Langevin dynamics (e.g., PnP-DM [7], DAPS [8]), which re-quire differentiating through the decoder repeatedly, using a latent-space diffusion model might instead increase the sampling cost (see Appx. B in [8]). Mathematically, because the size of the flow networks is proportional to the square of its dimension [74], we lower the size of the CNF network from O(N 4) (with dimension 
+
+N 2) to O
+
+ N 4
+
+> S4
+
+
+
+(with dimension N 2 
+
+> S2
+
+). Although the minimal NF size to well represent an image also depends on the im-age statistics, it is usually upper bounded by the image size 
+
+O(N 2), corresponding to a pixel grid representation [81], [82]. Therefore, the total model size of ShuffleFlow is 
+
+S(N, S ) = O
+
+ N 4
+
+S4 + N 2
+
+
+
+, (4) which will be dominated by the CNF at a large image size. In Fig. 2b, we show the total model size as a function of image size and observe the polynomial growth for DPI and the constant for CF-NeRF, which has one-dimensional flows, hence a constant network size. Our method also shows better scalability for optimiza-tion time and VRAM (shown in Fig. 2c,d. Note that the computation is dominated by the flow network when a cheap classic prior is used (dashed line), and we see the the-oretically expected trends. When the score prior is present (solid line), our method still shows better scalability than DPI [13]. In practice, we observe an optimal image reconstruction and uncertainty calibration at S = 8 for 256 ×256 images, leading to a 4096 × reduction in flow network size (see ablations in Sec. S3). For image size N , we empirically observe that a down-sampling factor S = √N / 2 (see Sec. S3) preserves perfor-mance, leading to an effective scaling of O(N 2) in Eq. 4. 
+
+3.2 Optimization 
+
+We use a variational Bayesian approach to train Shuffle-Flow’s CNF and NF together by minimizing the Kullback-Leibler (KL) divergence between the variational distribution 
+
+qθ,ϕ (x) and the Bayesian image posterior p(x|y):
+
+θ∗, ϕ ∗ = arg min 
+
+> θ,ϕ
+
+DKL (qθ,ϕ (x)|| p(x|y)) = Eqθ,ϕ (x) [− log p(y|x) − log p(x) + log qθ,ϕ (x)] ,
+
+(5) 5  
+
+> Fig. 2. Scalability comparison. (a) VI methods scale dramatically better than diffusion samplers for high-resolution posterior estimation. (b,c,d) Flow network size, optimization time, and VRAM vs. image dimension across VI methods. When the computation is dominated by the flow network (TV prior, dashed lines), our method (purple) shows the theoretically predicted growth trend compared to DPI (black). Even when an expensive score prior dominates (solid lines), our method still shows a substantial efficiency advantage. Experiment settings follow Sec. 4.3 and Tabs. 1 & S1.
+
+where the three terms are the data likelihood, prior, and neg-ative entropy. The first two terms come from the Bayesian posterior in Eq. 1, and the negative entropy term encourages diversity and prevents the variational distribution from collapsing to a point estimate [13]. During optimization, we calculate Eq. 5 with a Monte-Carlo approximation and use explicit data-fitting loss L(·) and prior R(·):
+
+θ∗, ϕ ∗ = arg min 
+
+> θ,ϕ M
+
+X
+
+> j=1
+
+L  y, A(xj ) + λR  xj 
+
+−β
+
+> S2
+
+X
+
+> i=1
+
+log ∂xji
+
+∂zj
+
+> 0
+
+ ,
+
+(6) where A(·) is the forward model, xj =
+
+PS 
+
+n
+
+CNF θ (zj
+
+> 0
+
+, hi)
+
+o
+
+> i=1 ,...,S 2
+
+
+
+, zj 
+
+> 0
+
+∼ N  0, IN 2/S 2
+
+,
+
+M is the number of Monte-Carlo samples, and λ, β are the weight parameters controlling the strength of the prior and entropy term. To demonstrate the flexibility of our method, we use a surrogate score prior derived by [15] (the score model weights are frozen during optimization) and a classic TV prior as our explicit prior term. For the score prior, we set λ = 1 and β = 1 in our experiment, given the fact that it’s derived from the exact log probability likelihood. For the TV prior, we empirically tuned λ for each method. However, the calibration of β for an accurate uncertainty and the strength of prior λ for a high image quality remains an open problem, which we discuss in Sec. S3. See red arrows in Fig. 1a for the path of gradient backpropagation from our three-part loss functions through the ShuffleFlow framework. 
+
+3.3 Inference 
+
+After training, we calculate embeddings hi using the NF encoder, sample several base variables z0 ∼ N  0, IN 2/S 2
+
+,and feed them into ShuffleFlow to obtain posterior samples. Black arrows in Fig. 1a show forward sampling. 
+
+3.4 Implementation Details 
+
+To implement our method, we use a conditional Real-NVP [74] as the backbone conditional normalizing flow network. We use SIREN [21] as the NF encoder to cal-culate 128-dimensional embedding vectors hi. In every Affine Coupling layer in the RealNVP, the embeddings are concatenated with the flow variable inputs and fed into a 2-layer MLP with LeakyReLU activation function to estimate the affine transform parameters [13]. We also applied an activation normalization layer [83] in place of a batch normalization layer before each flow function to improve the performance. We used NCSN++ [38] as the score network and trained it with the variance preserving (VP) SDE with βmin = 0.1 and βmax = 20 . We set the Monte Carlo sample size M = 32 for all our experiments. See ablation studies on loss weights in Eq. 6 and network architectures in Sec. S3. All experiments were completed on two NVIDIA RTX A6000 GPUs each with 48 GB of VRAM. 
+
+## 4 EXPERIMENTS 
+
+4.1 Metrics 
+
+To assess the accuracy of the reconstructed image and uncer-tainty, we select the following metrics: peak signal-to-noise ratio (PSNR ↑), structural similarity index measure (SSIM 
+
+↑), and learned perceptual image patch similarity (LPIPS ↓)for image quality, expected calibration error (ECE ↓) and negative log-likelihood (NLL ↓) for uncertainty [69]. For   
+
+> Fig. 3. Gaussian toy example with analytical posterior. We show that the posterior learned by ShuffleFlow matches the analytical posterior on the level of mean and standard deviation (left) as well as pixel value distributions (right). Vertical dashed lines show the mean pixel values. 6
+
+TABLE 1 
+
+Quantitative results for linear inverse problems with a pretrained score prior. We compare to VI methods: DPI, CF-NeRF, and ours w/ patch, among which we are simultaneously SOTA in image quality and NLL. We also include diffusion sampling methods: Score-ALD, DPS, RED-Diff, PnP-DM, and DAPS. Note that the best diffusion samplers outperform our method, but scale poorly (see Fig. 2a). 
+
+Method Motion Deblurring Compressed Sensing MRI PSNR ↑ SSIM ↑ LPIPS ↓ NLL ↓ ECE ↓ OODR ↓ PSNR ↑ SSIM ↑ LPIPS ↓ NLL ↓ ECE ↓ OODR ↓
+
+DPI [13] 25.82 0.583 0.419 -1.50 0.083 0.80% 33.51 0.813 0.184 -2.42 0.041 0.59% CF-NeRF [20] 27.78 0.766 0.319 -1.48 0.076 4.19% 34.51 0.857 0.183 -2.45 0.051 2.75% Ours w/ patch 26.45 0.677 0.401 -1.54 0.092 1.55% 29.18 0.725 0.274 -1.74 0.051 4.36% Ours 28.36 0.767 0.325 -1.74 0.099 2.71% 34.56 0.861 0.173 -2.52 0.044 2.44% Score-ALD [2] 25.88 0.589 0.370 -1.64 0.028 0.68% 35.62 0.876 0.162 -2.83 0.031 0.48% DPS [5] 28.41 0.774 0.283 -2.12 0.043 2.17% 34.76 0.863 0.216 -2.76 0.039 0.88% RED-Diff [6] 26.99 0.731 0.352 -0.36 0.130 16.28% 33.75 0.843 0.279 -2.04 0.108 9.79% PnP-DM [7] 28.00 0.725 0.285 -1.82 0.068 3.55% 35.87 0.883 0.188 -2.86 0.027 1.11 % DAPS [8] 29.24 0.793 0.277 -1.86 0.077 6.70% 34.96 0.864 0.162 -2.71 0.025 1.10% 
+
+Fig. 4. Visual samples on linear inverse problems with score prior: motion deblurring (a) and compressed sensing MRI (b). We show the mean image computed from 128 posterior samples in row one and the scatter plot of absolute pixel errors vs. standard deviations in row two. Our method shows superior performance on image quality and uncertainty among VI methods and is comparable to the SOTA diffusion sampler DAPS [8]. We also illustrate results with TV prior in Fig. S5, and PnP-DM [7] results in Fig. S6. Error maps and individual samples are shown in Fig. S9. 
+
+visualizations in Fig. 4, we show the portion of pixels falling outside of three standard deviations (absolute Z-score above 3) from ground truth [13], referred to as out-of-distribution rate (OODR ↓), which we also use as a metric for uncertainty calibration in this paper. Note that these metrics only pro-vide approximate evaluations of the uncertainty and both NLL and OODR should be interpreted with the context that true image posteriors do not follow pixel-wise independent Gaussian distributions. 
+
+4.2 Toy example 
+
+We show a toy example with an analytically available Gaus-sian posterior, arising from a likelihood and prior that are both Gaussian. Specifically, we corrupt an image of digit “3” from the MNIST [84] dataset with a compressed sensing matrix and additive Gaussian noise to create a Gaussian likelihood. We compute a Gaussian prior from all digit “3” images in the MNIST dataset. Fig. 3 illustrates that we successfully capture the mean image as well as the standard deviations at each pixel. Note that the mean image has less noise in the periphery, where the prior has a lower standard deviation, reflecting the stronger regularization effect. More details of this experiment are included in Sec. S1.1. 
+
+4.3 Linear inverse problems 
+
+We test our method on two linear inverse problems: (1) mo-tion deblurring with a kernel size of 61 ×61 and intensity of 0.5, (2) compressed sensing MRI image reconstruction with 7
+
+Fig. 5. Results on nonlinear Fourier phase retrieval. (a) We draw 128 samples from each method and filter the samples into different modes if a bimodal posterior exists. We show the mean image from each mode, and PSNR, SSIM, and LPIPS are calculated with respect to the ground truth of each mode. Our method correctly captures the bimodal posterior among VI methods with the best image quality. DAPS [8] stands out with the best image quality among all. (b) We compare our method with DAPS [8] and DPS [5] in a large sample count (10,000, left) and a small inference time (16 min, right) scenario, showing the t-SNE visualization for the posterior samples (top) and pixel histograms (bottom). Our method is able to generate 10,000 posterior samples in 16 minutes (including both training and sampling time), resulting in a high-resolution bimodal posterior density in the histogram. In contrast, DAPS and DPS generate spiky and noisy posterior densities in a similar time and need 20 × more time to generate a high-resolution posterior. See PnP-DM results in Fig. S6. TABLE 2 
+
+Results for nonlinear Fourier phase retrieval with a pretrained score prior. We draw 128 samples for each method and classify them into two modes (PSNR > 5 compared to upright or rotated ground truth) and compute the image quality metrics on the mean images for each mode. We again outperform the other VI methods in image quality and NLL, but note that VI methods are systematically overconfident in this task, see Figs. 5b & S7b. Our problem decomposition allows our method to recover bimodality with fewer resources than DPI. 
+
+Method Upright mode Rotated mode PSNR ↑ SSIM ↑ LPIPS ↓ NLL ↓ ECE ↓ OODR ↓ Pct. PSNR ↑ SSIM ↑ LPIPS ↓ NLL ↓ ECE ↓ OODR ↓ Pct. 
+
+DPI [13] 15.55 0.366 0.493 202.52 0.384 79.4% 38.1% 15.10 0.360 0.488 222.82 0.384 81.8% 36.3% CF-NeRF [20] 12.28 0.279 0.510 663.54 0.274 90.6% 100.0% N/A N/A N/A N/A N/A N/A 0.0% Ours w/ patch 13.09 0.293 0.524 459.23 0.268 89.5% 100.0% N/A N/A N/A N/A N/A N/A 0.0% Ours 19.65 0.583 0.351 107.38 0.444 75.5% 53.6% 16.39 0.441 0.425 174.79 0.434 82.0% 38.4% Score-ALD [2], [85] 25.71 0.902 0.095 -1.36 0.208 0.0% 57.5% 22.00 0.751 0.243 -1.07 0.324 0.0% 42.4% DPS [5] 21.93 0.624 0.326 -1.16 0.390 0.5% 65.4% 18.48 0.508 0.428 -0.72 0.378 1.4% 34.5% RED-Diff [6] 17.84 0.589 0.380 -0.64 0.423 0.4% 48.9% 17.94 0.579 0.390 -0.65 0.423 0.4% 49.5% PnP-DM [7] 29.62 0.919 0.082 -1.75 0.241 0.4% 70.5% 23.56 0.762 0.226 -1.31 0.327 0.2% 29.3% DAPS [8] 29.84 0.898 0.106 -1.88 0.303 0.0% 79.5% 24.42 0.741 0.251 239.16 0.326 2.4% 20.5% 
+
+Cartesian sampling masks and an acceleration rate of 4.0. We use the AFHQ-v2 dataset [86] for motion deblurring and the fastMRI knee dataset [87] for MRI. All images are resized to 256 ×256 and normalized to [0,1]. See more details of the inverse problem setup in Sec. S1. We compare our method with several diffusion sampling methods: Score-ALD [2], DPS [5], RED-Diff [6], PnP-DM [7], DAPS [8] (current SOTA according to [85]), and several VI methods: DPI [13], [15], CF-NeRF [20]. As an ablation study, we also compare our method with a naive cropping strategy as in [18] (but share the CNF via conditioning like ours), which we refer to as “Ours w/ patch” in this paper. To use CF-NeRF for inverse imaging in our experiments, we reduce its flow dimension from 3 (for RGB images) to 1 (for grayscale images), and train with our three-component KL-divergence loss instead of the 3D reconstruction loss. Note that in practice, we can-not set S = 256 in ShuffleFlow to exactly recover CF-NeRF (1-dimensional), because the Affine Coupling layers require a minimum dimensionality of 2 due to their split-in-half operations. To avoid such conflict, we use a 1-dimensional planar flow function in CF-NeRF. For fair comparisons, all methods share the same pretrained score model. We scale down the layer size of the affine-coupling layers of DPI to fit it in our GPU memory. With each method, we draw 128 posterior samples and calculate the mean image and pixel-wise standard deviations. We report PSNR, SSIM, and LPIPS 8
+
+on the mean image and compute NLL, ECE, and OODR using the pixel-wise uncertainty. We provide a quantitative analysis averaged over our test dataset in Tab. 1 and provide comparisons of visual samples of the mean image along with the scatter plot of absolute error vs. uncertainty for all sample image pixels in Fig. 4. CF-NeRF, at one extreme of VI sampling, can only model a posterior constrained to a one-dimensional manifold. Though this only leads to slightly decreased im-age quality in linear problems since the posterior is single-mode, it is fundamentally unable to represent a bimodal posterior (see Sec. 4.4). The shortcomings of local sampling are more apparent when spread across a patch in ours w/ patch, which displays extended spatial artifacts (see vertical stripes in Fig. 4a). On the other extreme of VI sampling, DPI exhaustively models the full posterior and generates rea-sonable image quality and uncertainty, at the cost of signifi-cantly increased time and memory. In contrast, ShuffleFlow efficiently decomposes the problem and maintains global correlation, resulting in good image reconstruction and uncertainty estimation. We also include quantitative and qualitative results of motion deblurring and compressed sensing MRI with classic TV prior in Sec. S2, showing that our method also outperforms VI methods in the data-scarce setting. As for diffusion samplers, Score-ALD generates high-quality images on MRI but suffers from noisy reconstruction in motion deblurring. RED-Diff reconstructs slightly blurry images, which is due to its limited posterior expressive-ness [6]. DPS, DAPS, and PnP-DM (see Fig. S6) reconstruct good image quality on both tasks, while the latter has superior performance among diffusion samples. This aligns with the observations in Inversebench [85]. 
+
+4.4 Fourier phase retrieval 
+
+We further test our method on a nonlinear Fourier phase retrieval problem using 128 ×128 images in the AFHQ-v2 dataset [86]. Since this is a very challenging and ill-posed problem, we apply oversampling by zero-padding the image to 2 × of its original size before calculating the Fourier space amplitude and add i.i.d. Gaussian noise with 
+
+σ = 0 .01 to the measurements. See the detailed problem setup in Sec. S1.4. Note that due to the loss of Fourier phase information, an 180 ◦-rotated image would fit the measurement equally well as the upright image, leading to a bimodal posterior. We compare our method with DPI [13], CF-NeRF [20], and ours w/ patch, and add 8 additional flow layers for each method to increase expressiveness. We use Score-ALD [2], DPS [5], RED-Diff [6], PnP-DM [7], DAPS [8] as baselines for comparison to diffusion samplers. We draw 128 samples for each method and classify the samples into two modes based on whether they are more similar to the upright or rotated ground truth image (those with PSNR < 5
+
+in both situations are considered “corrupted”). We then calculate the mean images separately for each mode. We provide quantitative analysis in Tab. 2 and show vi-sual samples of mean images in Fig. 5a. Among the VI meth-ods, ours and DPI are able to capture a bimodal posterior, while CF-NeRF and ours w/ patch fail due to their inherent inability to model complex global correlations. Among the diffusion samplers, DAPS and PnP-DM (see visual samples in Fig. S6c) capture a very high-resolution posterior for both modes, while DPS reconstructions show slight blurring. RED-Diff has a very corrupted bimodal posterior, likely due to its limited posterior expressiveness [6]. To our knowledge, ours is the first VI-based method that captures a bimodal posterior with the surrogate score prior [15] in an inverse imaging problem. Tab. 2 shows dramatically reduced UQ performance in VI methods compared to diffusion sampling methods. We note that this is due to systematic overconfi-dence, see Figs. 5b & S7b. Overconfidence can be addressed by increasing the entropy weight, but we observe that this currently leads to mode collapse (see Fig. S8), and must be addressed by future work that stabilizes training. In Fig. 5b, we compare DAPS, DPS, and ours, as repre-sentative methods, under two settings: 1. a high-resolution 
+
+posterior with 10,000 posterior samples (left), and a 16-minute short time budget (right), which are equivalent for our method but not for the diffusion samplers. We provide the t-SNE visualization of the posterior samples, select a pixel around the dog’s eye with clear bimodal values (marked with red dots in Fig. 5a), and show the pixel value histogram from the posterior samples. The vertical dashed lines show the ground truth pixel values for each mode. Our posterior samples reveal a clear bimodal posterior in both the t-SNE visualizations and the pixel histograms. In the time-limited setting, DAPS and DPS can only generate 512 posterior samples, leading to a noisy pixel histogram, and are unable to clearly characterize the second mode. This mode begins to be recovered by all three methods in the 10,000-sample setting, but DAPS and DPS need 20 ×
+
+more sampling time and show less clear structure in t-SNE projection. This demonstrates a significant advantage of our method over diffusion samplers when a high-resolution posterior is needed in scientific applications — the former can generate large numbers of samples cheaply after a short training time, while the latter’s computational costs grow linearly with the number of samples needed. 
+
+## 5 CONCLUSION 
+
+We have introduced ShuffleFlow, an efficient NF+CNF framework for scalable posterior estimation in Bayesian inverse imaging. We break down the problem of modeling a full image posterior into three parts: coordinate sampling (pixel-unshuffling), feature encoding (NF), and posterior estimation (CNF), ShuffleFlow efficiently models the pos-terior as the joint distribution of the downsampled image stack. We demonstrate theoretically and empirically that this decomposition significantly reduces the computational resources while maintaining posterior expressiveness. Our experiments show that ShuffleFlow, among VI methods, is simultaneously SOTA on image quality, uncer-tainty calibration, and computational scalability. We further show our method’s ability to quickly discover bimodality in the posterior of the nonlinear Fourier phase retrieval problem, 20 × faster than the best diffusion samplers. This suggests that VI methods like ours can serve a vital role alongside diffusion samplers, as exploratory tools to deter-mine when posterior complexity justifies extensive sample 9
+
+generation (Fig. 5b) and in low data regimes where diffusion models cannot be trained (Sec. S2.1). A major current shortcoming is overconfidence resulting from training instability in our nonlinear problem example (see Sec. S2.3). Future work should increase the performance with attention-based coordinate sampling strategy, normal-izing flow architecture, and generative priors (e.g., [88]). Another future direction is applying our method to scien-tific applications (e.g., [9], [10], [11], [12]), where a high-resolution posterior is required for downstream science. 
+
+## ACKNOWLEDGMENTS 
+
+We gratefully acknowledge the support of the NSF-Simons AI Institute for the Sky (SkAI) via grants NSF AST-2421845 and Simons Foundation MPS-AI-00010513. This material is based upon work supported by the U.S. National Science Foundation under Award No. 2542022. The authors would like to thank Bryan Pardo, He Sun, and Yi-Chun Hung for helpful discussions. 
+
+## REFERENCES 
+
+[1] Y. Song, L. Shen, L. Xing, and S. Ermon, “Solving inverse problems in medical imaging with score-based generative models,” in 
+
+International Conference on Learning Representations , 2022. [Online]. Available: https://openreview.net/forum?id=vaRCHVj0uGI [2] A. Jalal, M. Arvinte, G. Daras, E. Price, A. G. Dimakis, and J. Tamir, “Robust compressed sensing mri with deep generative priors,” Advances in Neural Information Processing Systems , vol. 34, pp. 14 938–14 954, 2021. [3] B. Kawar, M. Elad, S. Ermon, and J. Song, “Denoising diffusion restoration models,” Advances in Neural Information Processing Sys-tems , vol. 35, pp. 23 593–23 606, 2022. [4] A. Graikos, N. Malkin, N. Jojic, and D. Samaras, “Diffusion models as plug-and-play priors,” Advances in Neural Information Processing Systems , vol. 35, pp. 14 715–14 728, 2022. [5] H. Chung, J. Kim, M. T. McCann, M. L. Klasky, and J. C. Ye, “Dif-fusion posterior sampling for general noisy inverse problems,” in 
+
+11th International Conference on Learning Representations, ICLR 2023 ,2023. [6] M. Mardani, J. Song, J. Kautz, and A. Vahdat, “A variational perspective on solving inverse problems with diffusion models,” in The Twelfth International Conference on Learning Representations ,2024. [Online]. Available: https://openreview.net/forum?id= 1YO4EE3SPB [7] Z. Wu, Y. Sun, Y. Chen, B. Zhang, Y. Yue, and K. Bouman, “Principled probabilistic imaging using diffusion models as plug-and-play priors,” Advances in Neural Information Processing Systems ,vol. 37, pp. 118 389–118 427, 2024. [8] B. Zhang, W. Chu, J. Berner, C. Meng, A. Anandkumar, and Y. Song, “Improving diffusion inverse problem solving with de-coupled noise annealing,” in Proceedings of the Computer Vision and Pattern Recognition Conference , 2025, pp. 20 895–20 905. [9] A. Adam, A. Coogan, N. Malkin, R. Legin, L. Perreault-Levasseur, Y. Hezaveh, and Y. Bengio, “Posterior samples of source galaxies in strong gravitational lenses with score-based priors,” arXiv preprint arXiv:2211.03812 , 2022. [10] K. Karchev, N. A. Montel, A. Coogan, and C. Weniger, “Strong-lensing source reconstruction with denoising diffusion restoration models,” arXiv preprint arXiv:2211.04365 , 2022. [11] B. T. Feng, K. L. Bouman, and W. T. Freeman, “Event-horizon-scale imaging of m87* under different assumptions via deep generative image priors,” arXiv preprint arXiv:2406.02785 , 2024. [12] G. M. Barco, R. Legin, C. Stone, Y. Hezaveh, and L. Perreault-Levasseur, “Blind strong gravitational lensing inversion: Joint inference of source and lens mass with score-based models,” arXiv preprint arXiv:2511.04792 , 2025. [13] H. Sun and K. L. Bouman, “Deep probabilistic imaging: Uncer-tainty quantification and multi-modal solution characterization for computational imaging,” in Proceedings of the AAAI Conference on Artificial Intelligence , vol. 35, no. 3, 2021, pp. 2628–2637. [14] B. T. Feng, J. Smith, M. Rubinstein, H. Chang, K. L. Bouman, and W. T. Freeman, “Score-based diffusion models as principled priors for inverse imaging,” in Proceedings of the IEEE/CVF International Conference on Computer Vision , 2023, pp. 10 520–10 531. [15] B. Feng and K. Bouman, “Variational bayesian imaging with an efficient surrogate score-based prior,” Transactions on Machine Learning Research , 2024. [Online]. Available: https: //openreview.net/forum?id=db2pFKVcm1 [16] H. Sun, K. L. Bouman, P. Tiede, J. J. Wang, S. Blunt, and D. Mawet, “α-deep probabilistic inference ( α-dpi): efficient uncertainty quan-tification from exoplanet astrometry to black hole feature extrac-tion,” The Astrophysical Journal , vol. 932, no. 2, p. 99, 2022. [17] S. Hong, I. Park, and S. Y. Chun, “On the robustness of normal-izing flows for inverse problems in imaging,” in Proceedings of the IEEE/CVF International Conference on Computer Vision , 2023, pp. 10 745–10 755. [18] C. Meng, Y. Song, J. Song, and S. Ermon, “Gaussianization flows,” in International Conference on Artificial Intelligence and Statistics .PMLR, 2020, pp. 4336–4345. [19] J. Shen, A. Ruiz, A. Agudo, and F. Moreno-Noguer, “Stochastic neural radiance fields: Quantifying uncertainty in implicit 3d rep-resentations,” in 2021 International Conference on 3D Vision (3DV) .IEEE, 2021, pp. 972–981. [20] J. Shen, A. Agudo, F. Moreno-Noguer, and A. Ruiz, “Conditional-flow nerf: Accurate 3d modelling with reliable uncertainty quan-tification,” in European Conference on Computer Vision . Springer, 2022, pp. 540–557. [21] V. Sitzmann, J. Martel, A. Bergman, D. Lindell, and G. Wetzstein, “Implicit neural representations with periodic activation func-tions,” Advances in neural information processing systems , vol. 33, pp. 7462–7473, 2020. [22] G. Carlsson, T. Ishkhanov, V. De Silva, and A. Zomorodian, “On the local behavior of spaces of natural images,” International jour-nal of computer vision , vol. 76, no. 1, pp. 1–12, 2008. [23] C. Fefferman, S. Mitter, and H. Narayanan, “Testing the manifold hypothesis,” Journal of the American Mathematical Society , vol. 29, no. 4, pp. 983–1049, 2016. [24] W. Shi, J. Caballero, F. Husz´ ar, J. Totz, A. P. Aitken, R. Bishop, D. Rueckert, and Z. Wang, “Real-time single image and video super-resolution using an efficient sub-pixel convolutional neural network,” in Proceedings of the IEEE conference on computer vision and pattern recognition , 2016, pp. 1874–1883. [25] M. S. Sajjadi, R. Vemulapalli, and M. Brown, “Frame-recurrent video super-resolution,” in Proceedings of the IEEE conference on computer vision and pattern recognition , 2018, pp. 6626–6634. [26] S. Gu, Y. Li, L. V. Gool, and R. Timofte, “Self-guided network for fast image denoising,” in Proceedings of the IEEE/CVF International Conference on Computer Vision , 2019, pp. 2511–2520. [27] L. I. Rudin, S. Osher, and E. Fatemi, “Nonlinear total variation based noise removal algorithms,” Physica D: nonlinear phenomena ,vol. 60, no. 1-4, pp. 259–268, 1992. [28] E. Candes and J. Romberg, “Sparsity and incoherence in compres-sive sampling,” Inverse problems , vol. 23, no. 3, p. 969, 2007. [29] S. V. Venkatakrishnan, C. A. Bouman, and B. Wohlberg, “Plug-and-play priors for model based reconstruction,” in 2013 IEEE global conference on signal and information processing . IEEE, 2013, pp. 945–948. [30] S. H. Chan, X. Wang, and O. A. Elgendy, “Plug-and-play admm for image restoration: Fixed-point convergence and applications,” 
+
+IEEE Transactions on Computational Imaging , vol. 3, no. 1, pp. 84–98, 2016. [31] Y. Romano, M. Elad, and P. Milanfar, “The little engine that could: Regularization by denoising (red),” SIAM Journal on Imaging Sci-ences , vol. 10, no. 4, pp. 1804–1844, 2017. [32] K. Monakhova, J. Yurtsever, G. Kuo, N. Antipa, K. Yanny, and L. Waller, “Learned reconstructions for practical mask-based lens-less imaging,” Optics express , vol. 27, no. 20, pp. 28 075–28 090, 2019. [33] Y. Sun, Z. Wu, X. Xu, B. Wohlberg, and U. S. Kamilov, “Scalable plug-and-play admm with convergence guarantees,” IEEE Trans-actions on Computational Imaging , vol. 7, pp. 849–863, 2021. [34] T. Li and E. Alexander, “Galaxy image deconvolution for weak gravitational lensing with unrolled plug-and-play admm,” 
+
+Monthly Notices of the Royal Astronomical Society: Letters , vol. 522, no. 1, pp. L31–L35, 2023. 10 
+
+[35] Y. Song and S. Ermon, “Generative modeling by estimating gra-dients of the data distribution,” Advances in neural information processing systems , vol. 32, 2019. [36] J. Ho, A. Jain, and P. Abbeel, “Denoising diffusion probabilistic models,” Advances in neural information processing systems , vol. 33, pp. 6840–6851, 2020. [37] J. Song, C. Meng, and S. Ermon, “Denoising diffusion implicit models,” arXiv preprint arXiv:2010.02502 , 2020. [38] Y. Song, J. Sohl-Dickstein, D. P. Kingma, A. Kumar, S. Ermon, and B. Poole, “Score-based generative modeling through stochastic differential equations,” arXiv preprint arXiv:2011.13456 , 2020. [39] H. Chung and J. C. Ye, “Score-based diffusion models for acceler-ated mri,” Medical image analysis , vol. 80, p. 102479, 2022. [40] H. Chung, B. Sim, D. Ryu, and J. C. Ye, “Improving diffusion mod-els for inverse problems using manifold constraints,” Advances in Neural Information Processing Systems , vol. 35, pp. 25 683–25 696, 2022. [41] Y. Xie, T. Takikawa, S. Saito, O. Litany, S. Yan, N. Khan, F. Tombari, J. Tompkin, V. Sitzmann, and S. Sridhar, “Neural fields in visual computing and beyond,” in Computer Graphics Forum , vol. 41, no. 2. Wiley Online Library, 2022, pp. 641–676. [42] R. Martin-Brualla, N. Radwan, M. S. Sajjadi, J. T. Barron, A. Doso-vitskiy, and D. Duckworth, “Nerf in the wild: Neural radiance fields for unconstrained photo collections,” in Proceedings of the IEEE/CVF conference on computer vision and pattern recognition , 2021, pp. 7210–7219. [43] B. Mildenhall, P. P. Srinivasan, M. Tancik, J. T. Barron, R. Ra-mamoorthi, and R. Ng, “Nerf: Representing scenes as neural radiance fields for view synthesis,” Communications of the ACM ,vol. 65, no. 1, pp. 99–106, 2021. [44] J. T. Barron, B. Mildenhall, M. Tancik, P. Hedman, R. Martin-Brualla, and P. P. Srinivasan, “Mip-nerf: A multiscale represen-tation for anti-aliasing neural radiance fields,” in Proceedings of the IEEE/CVF international conference on computer vision , 2021, pp. 5855–5864. [45] Y. Sun, J. Liu, M. Xie, B. Wohlberg, and U. S. Kamilov, “Coil: Coordinate-based internal learning for tomographic imaging,” 
+
+IEEE Transactions on Computational Imaging , vol. 7, pp. 1400–1412, 2021. [46] G. Zang, R. Idoughi, R. Li, P. Wonka, and W. Heidrich, “Intratomo: self-supervised learning-based tomography via sinogram synthe-sis and prediction,” in Proceedings of the IEEE/CVF International Conference on Computer Vision , 2021, pp. 1960–1970. [47] R. Liu, Y. Sun, J. Zhu, L. Tian, and U. S. Kamilov, “Recovery of continuous 3d refractive index maps from discrete intensity-only measurements using neural fields,” Nature Machine Intelligence ,vol. 4, no. 9, pp. 781–791, 2022. [48] L. Shen, J. Pauly, and L. Xing, “Nerp: implicit neural representa-tion learning with prior embedding for sparsely sampled image reconstruction,” IEEE Transactions on Neural Networks and Learning Systems , vol. 35, no. 1, pp. 770–782, 2022. [49] A. Molaei, A. Aminimehr, A. Tavakoli, A. Kazerouni, B. Azad, R. Azad, and D. Merhof, “Implicit neural representation in medical imaging: A comparative survey,” in Proceedings of the IEEE/CVF International Conference on Computer Vision , 2023, pp. 2381–2391. [50] H. Zhou, B. Y. Feng, H. Guo, S. S. Lin, M. Liang, C. A. Metzler, and C. Yang, “Fourier ptychographic microscopy image stack re-construction using implicit neural representations,” Optica , vol. 10, no. 12, pp. 1679–1687, 2023. [51] J. Xu, D. Moyer, B. Gagoski, J. E. Iglesias, P. E. Grant, P. Golland, and E. Adalsteinsson, “Nesvor: implicit neural representation for slice-to-volume reconstruction in mri,” IEEE transactions on medical imaging , vol. 42, no. 6, pp. 1707–1719, 2023. [52] R. Cao, N. S. Divekar, J. K. Nu ˜ nez, S. Upadhyayula, and L. Waller, “Neural space–time model for dynamic multi-shot imaging,” Na-ture Methods , pp. 1–6, 2024. [53] T. Li, M. Cui, C. Ma, and E. Alexander, “Coordinate-based speed of sound recovery for aberration-corrected photoacoustic computed tomography,” in Proceedings of the IEEE/CVF International Confer-ence on Computer Vision , 2025, pp. 27 466–27 475. [54] D. Rezende and S. Mohamed, “Variational inference with normal-izing flows,” in International conference on machine learning . PMLR, 2015, pp. 1530–1538. [55] G. Papamakarios, E. Nalisnick, D. J. Rezende, S. Mohamed, and B. Lakshminarayanan, “Normalizing flows for probabilistic mod-eling and inference,” Journal of Machine Learning Research , vol. 22, no. 57, pp. 1–64, 2021. [56] G. Yang, X. Huang, Z. Hao, M.-Y. Liu, S. Belongie, and B. Har-iharan, “Pointflow: 3d point cloud generation with continuous normalizing flows,” in Proceedings of the IEEE/CVF international conference on computer vision , 2019, pp. 4541–4550. [57] A. Pumarola, S. Popov, F. Moreno-Noguer, and V. Ferrari, “C-flow: Conditional generative flow models for images and 3d point clouds,” in Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition , 2020, pp. 7949–7958. [58] B. Dai and U. Seljak, “Sliced iterative normalizing flows,” in 
+
+International Conference on Machine Learning . PMLR, 2021, pp. 2352–2364. [59] J. M. Bardsley, “Mcmc-based image reconstruction with uncer-tainty quantification,” SIAM Journal on Scientific Computing , vol. 34, no. 3, pp. A1316–A1332, 2012. [60] R. Laumont, V. D. Bortoli, A. Almansa, J. Delon, A. Durmus, and M. Pereyra, “Bayesian imaging using plug & play priors: when langevin meets tweedie,” SIAM Journal on Imaging Sciences , vol. 15, no. 2, pp. 701–737, 2022. [61] G. Cardoso, Y. J. E. Idrissi, S. L. Corff, and E. Moulines, “Monte carlo guided diffusion for bayesian linear inverse problems,” arXiv preprint arXiv:2308.07983 , 2023. [62] Y. Sun, Z. Wu, Y. Chen, B. T. Feng, and K. L. Bouman, “Provable probabilistic imaging using score-based generative priors,” IEEE Transactions on Computational Imaging , 2024. [63] A. Repetti, M. Pereyra, and Y. Wiaux, “Scalable bayesian un-certainty quantification in imaging inverse problems via convex optimization,” SIAM Journal on Imaging Sciences , vol. 12, no. 1, pp. 87–118, 2019. [64] D. M. Blei, A. Kucukelbir, and J. D. McAuliffe, “Variational infer-ence: A review for statisticians,” Journal of the American statistical Association , vol. 112, no. 518, pp. 859–877, 2017. [65] R. M. Neal, Bayesian learning for neural networks . Springer Science & Business Media, 2012, vol. 118. [66] Y. Gal and Z. Ghahramani, “Dropout as a bayesian approximation: Representing model uncertainty in deep learning,” in international conference on machine learning . PMLR, 2016, pp. 1050–1059. [67] A. Kendall and Y. Gal, “What uncertainties do we need in bayesian deep learning for computer vision?” Advances in neural information processing systems , vol. 30, 2017. [68] Y. Xue, S. Cheng, Y. Li, and L. Tian, “Reliable deep-learning-based phase imaging with uncertainty quantification,” Optica , vol. 6, no. 5, pp. 618–629, 2019. [69] F. Vasconcelos, B. He, N. Singh, and Y. W. Teh, “Uncertainr: Uncer-tainty quantification of end-to-end implicit neural representations for computed tomography,” arXiv preprint arXiv:2202.10847 , 2022. [70] B. Lakshminarayanan, A. Pritzel, and C. Blundell, “Simple and scalable predictive uncertainty estimation using deep ensembles,” 
+
+Advances in neural information processing systems , vol. 30, 2017. [71] M. Pereyra and J. Tachella, “Equivariant bootstrapping for uncer-tainty quantification in imaging inverse problems,” in International Conference on Artificial Intelligence and Statistics . PMLR, 2024, pp. 4141–4149. [72] A. N. Angelopoulos, A. P. Kohli, S. Bates, M. Jordan, J. Malik, T. Alshaabi, S. Upadhyayula, and Y. Romano, “Image-to-image regression with distribution-free uncertainty quantification and applications in imaging,” in International Conference on Machine Learning . PMLR, 2022, pp. 717–730. [73] C. T. Ye, J. Han, K. Liu, A. Angelopoulos, L. Griffith, K. Mon-akhova, and S. You, “Learned, uncertainty-driven adaptive acqui-sition for photon-efficient scanning microscopy,” Optics Express ,vol. 33, no. 6, pp. 12 269–12 287, 2025. [74] L. Dinh, J. Sohl-Dickstein, and S. Bengio, “Density estimation using real nvp,” arXiv preprint arXiv:1605.08803 , 2016. [75] S. Gong, V. N. Boddeti, and A. K. Jain, “On the intrinsic dimen-sionality of image representations,” in Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition , 2019, pp. 3987–3996. [76] P. Pope, C. Zhu, A. Abdelkader, M. Goldblum, and T. Goldstein, “The intrinsic dimension of images and its impact on learning,” 
+
+arXiv preprint arXiv:2104.08894 , 2021. [77] X. Li, Z. Zhang, X. Li, S. Chen, Z. Zhu, P. Wang, and Q. Qu, “Understanding representation dynamics of diffusion models via low-dimensional modeling,” in The Thirty-ninth Annual Conference on Neural Information Processing Systems , 2025. [Online]. Available: https://openreview.net/forum?id=BE6QmLdJqY [78] T. Huang, S. Li, X. Jia, H. Lu, and J. Liu, “Neighbor2neighbor: Self-supervised denoising from single noisy images,” in Proceedings of 11 
+
+the IEEE/CVF conference on computer vision and pattern recognition ,2021, pp. 14 781–14 790. [79] Y. Mansour and R. Heckel, “Zero-shot noise2noise: Efficient image denoising without any data,” in Proceedings of the IEEE/CVF Con-ference on Computer Vision and Pattern Recognition , 2023, pp. 14 018– 14 027. [80] D. M. Cifarelli and E. Regazzini, “De finetti’s contribution to probability and statistics,” Statistical Science , pp. 253–282, 1996. [81] N. Kim and S. Fridovich-Keil, “Grids often outperform implicit neural representation at compressing dense signals,” in The Thirty-ninth Annual Conference on Neural Information Processing Systems .[82] A. Essakine, Y. Cheng, C.-W. Cheng, L. Zhang, Z. Deng, L. Zhu, C.-B. Sch ¨ onlieb, and A. I. Aviles-Rivero, “Where do we stand with implicit neural representations? a technical and performance survey,” Transactions on Machine Learning Research .[83] D. P. Kingma and P. Dhariwal, “Glow: Generative flow with in-vertible 1x1 convolutions,” Advances in neural information processing systems , vol. 31, 2018. [84] L. Deng, “The mnist database of handwritten digit images for ma-chine learning research,” IEEE Signal Processing Magazine , vol. 29, no. 6, pp. 141–142, 2012. [85] H. Zheng, W. Chu, B. Zhang, Z. Wu, A. Wang, B. T. Feng, C. Zou, Y. Sun, N. Kovachki, Z. E. Ross et al. , “Inversebench: Bench-marking plug-and-play diffusion priors for inverse problems in physical sciences,” arXiv preprint arXiv:2503.11043 , 2025. [86] Y. Choi, Y. Uh, J. Yoo, and J.-W. Ha, “Stargan v2: Diverse image synthesis for multiple domains,” in Proceedings of the IEEE/CVF conference on computer vision and pattern recognition , 2020, pp. 8188– 8197. [87] J. Zbontar, F. Knoll, A. Sriram, T. Murrell, Z. Huang, M. J. Muckley, A. Defazio, R. Stern, P. Johnson, M. Bruno et al. , “fastmri: An open dataset and benchmarks for accelerated mri,” arXiv preprint arXiv:1811.08839 , 2018. [88] J. Erbach, D. Narnhofer, A. R. Dombos, B. Schiele, J. E. Lenssen, and K. Schindler, “Solving inverse problems with FLAIR,” in The Thirty-ninth Annual Conference on Neural Information Processing Systems , 2025. [Online]. Available: https: //openreview.net/forum?id=w9xETx7HT1 
+
+Tianao Li (Student Member, IEEE) received the B.Eng. degree in electronic engineering with a minor in Astronomy from Tsinghua University, Beijing, China, in 2019, and the M.S. degree in computer science from Northwestern University, Evanston, IL, USA, in 2026. He is currently a Ph.D. candidate in the Department of Computer Science at Northwestern University, Evanston, IL, USA. His research focuses on how genera-tive priors, scene representations, and physics-based forward modeling can advance imaging — turning ill-posed measurements into faithful reconstructions of the world. 
+
+Tjitske Starkenburg received a double B.Sc. in Astronomy and Mathematics, and a M.Sc. and PhD in Astronomy from the University of Groningen, the Netherlands. She has been a Flatiron Research Fellow at the Center for Com-putational Astrophysics of the Flatiron Institute in New York, New York, USA, and a CIERA Fellow at Northwestern University, Evanston, IL, USA. Starkenburg is currently an Assistant Research Professor with the Department of Physics and Astronomy and the Center for Interdisciplinary Exploration and Research in Astrophysics (CIERA) at Northwestern University and the NSF-Simons AI Institute for the Sky (SkAI). Her research focuses on the formation and evolution of galaxies in the universe, computational astrophysics and inference. 
+
+Yu Sun (Member, IEEE) received the B.Eng. de-gree in electronics and information from Sichuan University, Chengdu, China, in 2015, and the Ph.D. degree in computer science from Wash-ington University in St. Louis, St. Louis, MO, USA, in 2022. He is currently an Assistant Pro-fessor with the Department of Electrical and Computer Engineering, Johns Hopkins Univer-sity, Baltimore, MD, USA. Prior to joining Johns Hopkins, he was a Computing, Data & Society Fellow with the Department of Computing and Mathematical Sciences, California Institute of Technology, Pasadena, CA, USA. His research focuses on explainable and reliable AI algorithms for scientific imaging and computer vision. His doctoral dissertation re-ceived the Turner Dissertation Award in Computer Science at Washing-ton University in St. Louis. He is a recipient of the NSF CAREER Award and a member of the IEEE Signal Processing Society’s Computational Imaging Technical Committee. 
+
+Emma Alexander (Member, IEEE) received the B.S. degree in physics and in computer science from Yale University, New Haven, CT, USA, in 2013, and the Ph.D. degree in computer sci-ence from Harvard University in Cambridge, MA, USA, in 2019. She is currently an Assis-tant Professor with the Department of Computer Science, Northwestern University, Evanston, IL, USA. Prior to joining Northwestern, she was a postdoctoral researcher at the University of California Berkeley, Berkeley, CA, USA. Her re-search focuses on bio-inspired computational imaging. She is a recipient of the Fulbright Specialist Award and a member of the IEEE Signal Processing Society’s Computational Imaging Technical Committee. 12 
+
+# ShuffleFlow: Scalable Posterior Inference for Bayesian Inverse Imaging 
+
+# Supplementary Material 
+
+## S1 INVERSE PROBLEM SETUP 
+
+In this section, we describe setups of the inverse problems discussed in Sec. 4. 
+
+S1.1 Toy example 
+
+In our toy example, we use digit “3” images from the MNIST dataset [84] (resized to 32 ×32 and normalized to [-1,1]). We calculate a Gaussian prior N (m, Λ) from all “3” images in the dataset, and use a diagonal covariance matrix for simplicity. The forward model is 
+
+y = Ax + n, (S1) where y is the observed image, A is a 512 ×1024 random Gaussian matrix, x is the clean image, and n is i.i.d. Gaussian noise with σ = 0 .1. This gives us a Gaussian data likelihood N (Ax , σ 2I). In this case, we are able to analytically compute the Gaussian posterior N (μ, Σ):
+
+μ =
+
+ 1
+
+σ2 AT A + Λ−1
+
+−1  1
+
+σ2 AT y + Λ−1m
+
+
+
+,
+
+Σ =
+
+ 1
+
+σ2 AT A + Λ−1
+
+−1
+
+.
+
+(S2) We visualize the ground truth image, data likelihood, prior, and posterior used in Sec. 4.2 in Fig. S1. Note that we lose half of the image dimensions in the measurement 
+
+y because we have a 512 ×1024 forward matrix A. Since the digits are centered in the images, our Gaussian prior has high standard deviations in the center and very low stan-dard deviations in the background. This leads to stronger regularizations in the background compared to the image center. Therefore, in the posterior mean image, we see very little noise in the background but very obvious noise around the image center.  
+
+> Fig. S1. Inverse problem used in toy example.
+
+S1.2 Motion deblurring 
+
+In our motion deblurring experiment, we use data from the AFHQ-v2 dataset [86]. All images are resized to 256 ×256 and normalized to [0,1]. We train our score model on all 12,902 samples in the training set. The forward model is 
+
+y = Hx + n, (S3) where y is the observed image, H is the convolution matrix of the blur kernel, x is the clean image, and n is i.i.d. Gaus-sian noise with σ = 0 .02 . We generate motion blur kernels 1
+
+with kernel size 61 ×61 and intensity of 0.5. We show several samples of ground truth images (row 1), motion blur kernels (row 2), and corresponding measurements (row 3) in Fig. S2. 
+
+S1.3 Compressed sensing MRI 
+
+In our MRI experiment, we use data from the fastMRI single coil knee dataset [87]. All images are resized to 256 ×256 and normalized to [0 , 1] . We train our score model on all 20,443 samples in the training set. The forward model can be expressed as: 
+
+y = MF(x) + n, (S4) where y is the measured k-space components, M is the sampling matrix, F(·) is the 2D Fourier transform, x is the clean image, and n is i.i.d. Gaussian noise. We simulate Cartesian sampling masks using [85]’s implementation with an acceleration rate of 4.0. Specifically, we fully sample 8.0% of k-space components centered around DC and sample equidistance lines in the rest area with a spacing that achieves the desired acceleration rate. We add i.i.d. Gaussian noise with a standard deviation of 0.02. We show several samples of the ground truth image (row 1), full k-space com-ponents (row 2), cartesian sampling mask (row 3), measured k-space (row 4), and zero-filled IFFT reconstruction (row 5) in Fig. S3. 
+
+S1.4 Fourier phase retrieval 
+
+In our Fourier phase retrieval experiment, we also use data from the AFHQ-v2 dataset [86] but instead resize the images to 128 ×128. The forward model can be expressed as 
+
+y = |F (Px )| + n, (S5) where y is the measured Fourier space amplitude, F(·)
+
+is the 2D Fourier transform, | · | indicates the amplitude calculation (removing phase information), P is the zero-padding operator, x is the clean image, and n is i.i.d. Gaussian noise with σ = 0 .01 . To reduce the ill-posedness of the problem, we apply oversampling by zero-padding the image to 2 × of its original size to increase the number  
+
+> 1. https://github.com/LeviBorodenko/motionblur 13
+> Fig. S2. Samples of the motion deblurring dataset.
+
+of Fourier amplitude measurements, which is a common practice for this problem [7]. We show several samples of ground truth images (row 1) and Fourier amplitude measurements (row 2) in Fig. S4. 14 
+
+Fig. S3. Samples of the MRI dataset. 
+
+Fig. S4. Samples of the Fourier phase retrieval dataset. 15 
+
+## S2 ADDITIONAL RESULTS 
+
+S2.1 Linear inverse problems with TV prior 
+
+We show motion deblurring and compressed sensing MRI results with TV prior in Tab. S1 and Fig. S5. We include the following methods as baselines: regularized maximum like-lihood (RML), annealed Langevin dynamics (ALD), Wiener deconvolution (for motion deblurring), and zero-filled IFFT (for MRI). We observe that our method consistently outper-forms existing VI methods. 
+
+S2.2 PnP-DM results 
+
+We show visual samples of PnP-DM [7] on motion deblur-ring, compressed sensing MRI, and Fourier phase retrieval in Fig. S6. The test samples are the same as the ones shown in the main paper. 
+
+S2.3 Additional results on Fourier phase retrieval 
+
+We provide visual results on another test sample for Fourier phase retrieval in Fig. S7. We also picked a pixel (marked with red dots) and show the t-SNE visualization and pixel histograms for a 10,000-sample setting and a short compu-tation time setting. In Sec. 4.4, we mentioned that VI methods generally underestimate uncertainty in phase retrieval. We show that while this could be theoretically addressed by increasing the entropy weight β during training, larger β leads to unstable training and mode collapse (see Fig. S8). This overconfi-dence/training instability problem should be addressed by future work. 
+
+S2.4 Error maps and individual samples 
+
+In Fig. S9, we show error maps and individual samples for Fig. 4. 16 
+
+TABLE S1 
+
+Quantitative results for linear inverse problems with TV prior. Method Motion Deblurring Compressed Sensing MRI PSNR ↑ SSIM ↑ LPIPS ↓ NLL ↓ ECE ↓ OODR ↓ PSNR ↑ SSIM ↑ LPIPS ↓ NLL ↓ ECE ↓ OODR ↓
+
+DPI [13] 24.11 0.453 0.470 -1.31 0.069 0.09% 29.02 0.736 0.312 -1.25 0.097 9.52% CF-NeRF [20] 25.58 0.548 0.418 -1.42 0.091 0.09% 29.33 0.743 0.309 -1.00 0.111 11.78% Ours w/ patch 24.97 0.521 0.460 -1.31 0.141 0.13% 29.07 0.733 0.307 -1.48 0.079 7.39% Ours 27.01 0.669 0.415 -1.57 0.105 1.73% 30.32 0.775 0.297 -1.58 0.073 7.92% Zero-filled IFFT N/A N/A N/A N/A N/A N/A 26.17 0.608 0.383 N/A N/A N/A Wiener 22.70 0.378 0.542 N/A N/A N/A N/A N/A N/A N/A N/A N/A RML 27.46 0.697 0.436 N/A N/A N/A 30.13 0.764 0.305 N/A N/A N/A ALD 26.92 0.625 0.405 -0.88 0.315 0.00% 29.44 0.759 0.323 -0.72 0.126 14.04% 
+
+Fig. S5. Visual samples on linear inverse problems with TV prior: motion deblurring (a) and compressed sensing MRI (b). We show the mean image computed from 128 posterior samples in row one and the scatter plot of absolute pixel errors vs. standard deviations in row two. 
+
+Fig. S6. Illustration of PnP-DM [7] results on motion deblurring (a), compressed sensing MRI (b), and Fourier phase retrieval (c). In Fourier phase retrieval, we show the pixel histogram from 128 posterior samples of the same pixel selected in Fig. 5. 17 
+
+Fig. S7. Additional results on nonlinear Fourier phase retrieval. While diffusion samplers produce high image quality, they are unable to show a clear bimodal posterior in a short computation time (see t-SNE visualization and pixel histogram), while our method can. 
+
+Fig. S8. Fourier phase retrieval results with larger entropy weights. We observe artifacts ( β = 2 .0) and mode collapse with larger entropy weights ( β = 5 .0, 10 .0). 18 
+
+Fig. S9. Error maps and individual samples for motion deblurring (a) and compressed sensing MRI (b). 19 
+
+## S3 ABLATION STUDIES 
+
+S3.1 Flow dimensionality 
+
+As shown in Fig. S10, we explore the impact of the di-mensionality of ShuffleFlow (purple) by adjusting the pixel-unshuffling downsampling factor S. For image size of 256 ×256, the ShuffleFlow dimensionality is d = 256 2 
+
+> S2
+
+. We observe an optimal performance in image quality and uncer-tainty calibration at 2 10 , corresponding to a downsampling factor S = 8 . The computational cost grows slowly with dimensionality and exhibits a sudden increase after 2 12 .This is because most of the computation is dominated by the score prior when d ≤ 212 , while the flow network dominates when d > 212 . This experiment is conducted on compressed-sensing MRI with a score prior. We also explored the impact of the downsampling factor 
+
+S on several different image sizes (see Fig. S11). For each image size, performance sharply decreases once S becomes too large. In all observed cases, this happens after √N / 2,allowing O(N 2) scaling without a dramatic difference in image reconstruction performance. This provides extended evidence that a downsampling factor of S = √N / 2 (marked with vertical dashed lines) preserves performance, yielding an effective scaling of O(N 2) in Eq. 4. This experiment is conducted on compressed-sensing MRI with a TV prior, due to the expense of training new diffusion models for each image size, but note that it shows agreement with diffusion results. We leave further validation of such observations to future work. 
+
+S3.2 Weights in KL divergence loss 
+
+We also explore the impact of entropy weight β and score prior weight λ in Eq. 6 on compressed sensing MRI. Results are shown in Figs. S12 & S13. We show that with the increase of β, the image quality decreases and the predicted pixel uncertainty also increases (see pixel distribution shift in row 2 of Fig. S13a). Although the image quality is better with a small β, the uncertainty is underestimated, which leads to poorly calibrated uncertainty. With a large β, our method predicts high uncertainty but also suffers from high pixel errors due to decreased image quality when the posterior samples are more diverse. For the best calibrated uncertainty, we choose β = 1 .0 (marked with a star) for all flow-based methods in this paper. With the increase of λ, we see an increase in image qual-ity and a decrease in pixel uncertainty (see pixel distribution shift in row 2 of Fig. S13b). This is because the score prior has a stronger regularization effect with larger λ, which increases image quality but also acts as a stronger constraint on the posterior distribution. For the best calibrated uncer-tainty, we choose λ = 1 .0 (marked with a star) for all flow-based methods in this paper. 
+
+S3.3 Flow network architecture 
+
+We run ablation studies on the number of flow layers and the dimension of embedding vectors hi in ShuffleFlow. In Fig. S14a, we observe that more flow layers lead to better image quality and uncertainty, but exhibit a linear growth in optimization time and memory. We choose 8 layers (marked with a star) in this performance-resource tradeoff space. In Fig. S14b, we also see a slight increase in performance with a larger embedding dimension, which saturates around 128 (marked with a star). We use 128-length embeddings for ours, ours w/ patch, and CF-NeRF. Both experiments are done with compressed-sensing MRI with a score prior. In Fig. S15a, we show that using non-ideal optimization settings (fewer training epochs, large entropy weight β, and using a TV prior instead of a score prior) leads to patch-like artifacts. In Fig. S15b, we show that using a smaller neural field, using positional encoding, and conditioning directly on the coordinates leads to decreased image quality. These experiments are conducted on motion deblurring with a score prior. 20 
+
+Fig. S10. Ablation study on inherent dimensionality of ShuffleFlow. We show an optimal downsample factor of 8 (marked by a vertical dashed line) for both image quality and uncertainty calibration. 
+
+Fig. S11. Ablation study on inherent dimensionality of ShuffleFlow for different image sizes. We show downsampling by S = √N / 2 (vertical dashed lines) preserves image reconstruction performance, while setting S too large degrades images. 21 
+
+Fig. S12. Ablation studies on VI loss weights. (a) With the increase of entropy weight β, we see a decrease in image quality due to increased diversity in posterior samples. We select β = 1 .0 for good image quality and optimal uncertainty calibration (marked with a star). (b) With the increase of prior weight λ, we see an increase in image quality due to the stronger regularization effect of the score prior. However, the uncertainty also decreases due to the stronger constraint of the prior, resulting in optimal uncertainty calibration at λ = 1 .0 (marked with a star). 
+
+Fig. S13. Visual samples of ablation studies on VI loss weights. (a) With the increase of entropy weight β, we see a decrease in image quality (row 1) and an increase in uncertainty (see distribution shift towards the right in row 2). (b) With the increase of score prior weight λ, we see an increase in image quality (row 1) and a decrease in uncertainty (see distribution shift towards the left in row 2). 22 
+
+Fig. S14. Ablation studies on network architecture. (a) With the increase in the number of flow layers, we show an improvement in image quality, uncertainty calibration, and an increase in computational cost (marked with a star). We use 8 flow layers (marked with a star) in this performance vs. resource tradeoff. (b) We show a small increase in performance with the increase of the dimension of the embedding vector hi. We set the embedding vector dimension to 128 for optimal performance (marked with a star). 
+
+Fig. S15. Additional ablation studies on patch-like artifacts and neural field. (a) Failure cases with patch-like artifacts. We observe that non-ideal optimization settings lead to patch-like artifacts. (b) Ablations on the neural field encoder. We show that using a smaller neural field (SIREN-8), using positional encoding in place of the neural field (PE), and directly conditioning on the coordinates (coordinate) lead to decreased image quality.

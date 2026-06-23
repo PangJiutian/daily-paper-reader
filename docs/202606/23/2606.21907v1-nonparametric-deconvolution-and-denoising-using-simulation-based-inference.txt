@@ -1,0 +1,2053 @@
+Title: Nonparametric Deconvolution and Denoising using Simulation Based Inference
+
+URL Source: https://arxiv.org/pdf/2606.21907v1
+
+Published Time: Tue, 23 Jun 2026 01:48:16 GMT
+
+Number of Pages: 31
+
+Markdown Content:
+# NONPARAMETRIC DECONVOLUTION AND DENOISING USING 
+
+# SIMULATION BASED INFERENCE 
+
+Ritwik Vashistha 
+
+Department of Statistics and Data Sciences, University of Texas at Austin, Austin, Texas 78712, USA The NSF-Simons AI Institute for Cosmic Origins, USA 
+
+ritwik.v@utexas.edu 
+
+Abhra Sarkar 
+
+Department of Statistics and Data Sciences, University of Texas at Austin, Austin, Texas 78712, USA 
+
+abhra.sarkar@utexas.edu 
+
+Arya Farahi 
+
+Department of Statistics and Data Sciences, University of Texas at Austin, Austin, Texas 78712, USA The NSF-Simons AI Institute for Cosmic Origins, USA 
+
+arya.farahi@utexas.edu 
+
+# ABSTRACT 
+
+Latent signals are often obscured by measurement noise, yet encode the underlying laws and dynamics of complex systems; learning both the signals and their distributions remains a central challenge in scientific inference. The noise is often non-negligible, and the likelihoods for expressive generative models are often intractable. We utilize a convolutional maximum mean discrepancy (convMMD) loss and propose a likelihood-free framework for nonparametric density deconvolution and empirical Bayes denoising under additive measurement error. Our method learns a latent generative model by matching the observed data distribution to the noise-convolved model distribution. This yields a differentiable, simulation-based objective for multivariate homoscedastic or heteroscedastic noise, compatible with expressive sieve classes such as Gaussian mixtures and normalizing flows. The learned density then serves as an empirical prior for posterior denoising of individual latent values. Theoretically, we extend convMMD from parametric to nonparametric estimation, proving finite-sample bounds for empirical sieve minimizers and L2 convergence rates under Sobolev smoothness. These rates recover the classical inverse-problem dependence: polynomial for ordinary-smooth and logarithmic for super-smooth noises. Our method provides a practical, theoretically grounded approach to deconvolution and denoising under generative latent distribution models. 
+
+# 1 Introduction 
+
+Modern scientific inference increasingly relies on measurements that are only corrupted proxies for the latent quantities of interest, so ignoring measurement error can cause an analysis to target the observed surrogate rather than the scientific object itself [ 1]. In survey astronomy, for example, stellar mass, luminosity, and weak-lensing shear must be inferred from observations degraded by instrumental noise, selection effects, projection distortions, and model-dependent pipelines [ 2– 4 ]. These distortions can change scientific conclusions: small biases in recovered weak-lensing shape distributions can propagate into biased cosmological inference [ 5 ], while noisy stellar-mass estimates can induce Eddington bias, scattering more moderate-mass galaxies into high-mass bins than the reverse and altering the inferred abundance and high-mass slope of the galaxy stellar mass function [ 6]. More broadly, measurement error is pervasive and has contributed to reproducibility failures across scientific domains [ 7]. Thus, deconvolution is not merely a technical correction but a prerequisite for aligning statistical learning with the latent distributions that science seeks to understand. 
+
+> arXiv:2606.21907v1 [stat.ME] 20 Jun 2026
+
+Nonparametric Deconvolution and Denoising This population-level perspective naturally leads to a closely related and equally important problem: denoising . When the scientific target is to unravel information about individual objects, such as a particular image, spectrum, galaxy, experimental sample, or data point, it is not enough to recover the latent distribution alone [e.g., 8–15 ]. One must also infer the latent realization underlying each corrupted observation. Denoising, therefore, complements deconvolution by moving from distributional recovery to object-level recovery, enabling scientific interpretation and downstream inference at the level of individual measurements. In this work, we study this problem in a multivariate, potentially high-dimensional regime under the additive noise model eX = X + U, where X is a latent variable, U is measurement noise, and only noisy observations eX are available [16 –20 ]. This setting induces two coupled tasks: density deconvolution , which seeks to recover the distribution of X,and denoising , which seeks to estimate latent realizations Xi from individual observations eXi. Both are ill-posed, and their difficulty depends strongly on the noise distribution, with high-frequency structure often the hardest to recover [16, 19]. Classical deconvolution methods often rely on Fourier inversion, kernel estimators, orthogonal and trigonometric series expansions [ 16 – 21 ]. While these approaches offer a mathematically rigorous foundation, illuminating phenomena such as the phase transition between ordinary and super-smooth distributions, they struggle in practice. Specifically, they often require meticulous regularization, scale poorly with increasing dimensions, and fail to leverage the rich, learned representations available in data. Parametric models, though tractable, remain susceptible to performance degradation under misspecification. Consequently, bridging the gap between classical deconvolution theory and high-capacity generative modeling remains an open challenge. Recent progress in deep generative models offers a route to close this gap. Normalizing flows, variational models, diffusion-based methods, and related approaches can represent highly structured distributions in spaces where classical density estimators struggle [ 22 – 25 ]. Several recent methods bring such models to deconvolution: [ 12 ] use stochastic variational inference with normalizing flows and [ 25 ] trains diffusion models via stochastic forward–backward iteration on noisy data. Yet most training objectives assume clean samples or absorb corruption into the learned distribution, and likelihood-based training under known noise can become intractable when the noisy-data likelihood requires high-dimensional integration or unstable inversion. The central question is therefore how to train expressive generative models directly on noisy observations while preserving statistical interpretability and avoiding explicit deconvolution. Closely related multivariate baselines include NPMLE [26] and Extreme Deconvolution [27]. We address this question through a simulation-based, likelihood-free framework based on Convolutional Maximum Mean Discrepancy [convMMD, 28 ]. When the corruption mechanism is known, we compare the empirical distribution of the noisy data with that obtained by convolving a candidate latent model with the same noise law. This avoids direct inversion and bypasses evaluation of a deconvolved likelihood, replacing unstable spectral inversion with convolved distribution matching in observation space. Our method has two stages. We first learn a latent density model qθ by minimizing an empirical convMMD criterion between the noisy observations and the noise-convolved model. This objective requires only sampling from the latent model and simulator of the corruption mechanism, making it compatible with stochastic gradient optimization and flexible generator families. We then use the fitted latent model as an empirical prior and perform posterior inference for each observation, yielding an Empirical Bayes denoiser [ 29 , 30 ]. A single learned model therefore supports both latent density estimation and pointwise recovery. Our contributions are both methodological and theoretical. Methodologically, we cast nonparametric deconvolution and denoising as a unified generative learning problem, minimizing the convMMD objective over flexible sieve classes like Gaussian mixtures and neural generative models. Theoretically, we extend prior parametric work [ 28 ] to the nonparametric regime. We establish finite-sample oracle inequalities, proving that the estimator achieves a fast parametric O(N −1/2) convergence rate in the latent reproducing kernel Hilbert space (RKHS) geometry. Furthermore, we prove nonparametric L2 convergence rates for the latent density across both ordinary- and super-smooth noise regimes. Finally, we connect these results to downstream inference by linking latent density estimation error to posterior recovery risk. 
+
+# 2 Method 
+
+We propose a unified framework for nonparametric density deconvolution and empirical Bayes denoising under additive measurement error. The method fits a flexible generative model for the latent density by matching noisy observations to the model-implied noise-convolved distribution, then uses the fitted density as an empirical prior for denoising. We formalize the inverse problem, introduce a simulation-based convMMD estimator over growing generative sieves, prove finite-sample and asymptotic guarantees, and demonstrate the approach with Gaussian mixtures and generative models. 2Nonparametric Deconvolution and Denoising 
+
+2.1 Problem Setup: Deconvolution and Denoising 
+
+Let X ∈ X ⊆ Rd be an unobserved latent random variable with unknown density p. We observe only a noisy proxy 
+
+eX = X + UX ,
+
+where UX is an additive measurement error with a known distribution m. We denote the distribution of the noisy observation by ep, so that ep = p ∗ m. Given i.i.d. noisy observations DN = {exi}Ni=1 iid 
+
+∼ ep, our objective is two-fold. The first goal is deconvolution : estimate the unknown latent density p from the noisy sample DN . We do so by introducing a model family {qθ : θ ∈ ΘJ } and learning qθ so that its noise-convolved distribution eqθ = qθ ∗ m matches the observed noisy law. The second goal is denoising : once a latent density estimate has been learned, recover the latent value associated with a particular noisy observation exi. Under the learned model qbθ , the posterior density of the latent signal is 
+
+πbθ (x | exi) ∝ m(exi − x) qbθ (x),
+
+and the denoised estimate is taken to be the posterior mean 
+
+bxi = Eqbθ [X | eX = exi].
+
+Thus, density estimation and denoising are treated within a single framework: first estimate the latent population distribution, then use that estimate to regularize pointwise inversion. 
+
+2.2 convMMD Estimation over Sieve Classes 
+
+Let k be a bounded positive definite kernel on Rd. For a candidate latent density qθ , we define its induced noisy distribution by qθ ∗ m. We estimate θ by minimizing the MMD [ 31 ] between the empirical noisy distribution and the model-implied noisy distribution: 
+
+bθN = arg min 
+
+> θ∈ΘJ
+
+\convMMD 2
+
+> k
+
+(p, q θ , m ) ≡ arg min 
+
+> θ∈ΘJ
+
+MMD 2
+
+> k
+
+ \(p ∗ m)N , q θ ∗ m
+
+
+
+. (1) With eY ∼ qθ ∗ m, the corresponding population objective takes the form                          
+
+> LN(θ)≡MMD 2
+> k
+> \(p∗m)N, q θ∗m
+> 
+> =1
+> N2
+> NX
+> i,j =1
+> k(exi,exj) + EeY,eY′[k(eY,eY′)] −2
+> N
+> NX
+> i=1
+> EeY[k(exi,eY)] .(2)
+
+The objective is likelihood-free and simulation-based. If one can sample Y ∼ qθ and independently simulate UY ∼ m,then eY = Y + UY is a draw from eqθ = qθ ∗ m. So the expectations in Equation (2) can be approximated by Monte Carlo, and an optimization algorithm can then be used to arrive at bθN . See Appendix B for the algorithm. To move beyond the parametric setting, we place the estimator in a sieve framework. Let 
+
+QJ = {qθ : θ ∈ ΘJ }, Q1 ⊂ Q 2 ⊂ · · · ,
+
+where J is a complexity index, and assume that ∪J≥1QJ is dense in a target class of latent densities. The parameter 
+
+J can represent, for example, the number of mixture components or the width or depth of a neural architecture. This formulation allows the estimation problem to be analyzed separately at two levels: a general level covering any regular enough simulation-based sieve, and a sharper level requiring quantitative approximation bounds for the sieve in a strong norm such as L2.
+
+2.3 Empirical Bayes Denoising 
+
+Once the latent density estimate qbθN is obtained, we use it as an empirical prior for denoising. For each noisy observation 
+
+exi, the posterior distribution is 
+
+πbθN (x | exi) = m(exi − x)qbθN (x)
+
+R m(exi − z)qbθN (z) dz , (3) and the empirical Bayes estimator is the posterior mean 
+
+bxEB  
+
+> i
+
+=
+
+Z
+
+x πbθN (x | exi) dx. (4) In practice, if the density qbθN can be evaluated, this posterior mean can be computed by numerical integration or MCMC. If the generative model qbθN is implicit and does not admit a tractable density (e.g., a generative adversarial network), the posterior mean can still be efficiently approximated via self-normalized importance sampling in the latent space, drawing samples Z from the base distribution and weighting the corresponding generated outputs by the known noise likelihood. 3Nonparametric Deconvolution and Denoising 
+
+# 3 Theoretical Guarantees 
+
+We now state the basic guarantees that hold for any sieve class satisfying the assumptions collected in Appendix A. The first theorem gives a finite-sample oracle inequality in convMMD loss. The second states the latent-space equivalence established in [ 28 ]. As a result, this method yields a parametric-rate guarantee in the latent RKHS geometry induced by the noise-smoothed kernel. 
+
+Theorem 3.1 (Finite-sample oracle inequality for sieve-convMMD) . Under Assumptions A.1, A.2, A.3, A.7, and A.12, for every δ ∈ (0 , 1) , with probability at least 1 − δ,
+
+convMMD k
+
+
+
+p, q bθN , m 
+
+
+
+≤ inf 
+
+> θ∈ΘJ
+
+convMMD k(p, q θ , m ) + 2 
+
+r KN + 2 
+
+r 2K log(1 /δ )
+
+N , (5) 
+
+where K is the kernel bound from Assumption A.7. Remark 3.2 . Theorem 3.1 shows that the learned model performs, in convMMD loss, almost as well as the best element of the sieve class. This theorem is model-agnostic. It does not require mixtures, flows, or any particular parametric form. It applies to any model family for which qθ is a valid density, the map θ 7 → qθ ∗ m is well-defined, and optimization is restricted to a regularized compact sieve. 
+
+Theorem 3.3 (Latent MMD equivalence, 28 ). Suppose Assumptions A.1, A.2, A.3, A.4, and A.7 hold. Let k(x, y) = 
+
+k(x − y) be translation invariant. Define the smoothed kernel 
+
+ek(x, y) = EUX ,UY ∼m[k(x + UX , y + UY )] .
+
+Then, for any two latent distributions p and q,
+
+convMMD k(p, q, m ) = MMD ek(p, q ). (6) 
+
+Corollary 3.4 (Parametric convergence in latent RKHS) . Under the assumptions of Theorems 3.1 and 3.3, for every 
+
+δ ∈ (0 , 1) , with probability at least 1 − δ,
+
+MMD ek(p, q bθN ) ≤ inf 
+
+> θ∈ΘJ
+
+MMD ek(p, q θ ) + 2 
+
+r KN + 2 
+
+r 2K log(1 /δ )
+
+N . (7) 
+
+In particular, if the sieve is well-specified at level J, then 
+
+MMD ek(p, q bθN ) = Op(N −1/2). (8) 
+
+Remark 3.5 . Corollary 3.4 gives a sharp parametric rate, but in the latent RKHS geometry associated with the smoothed kernel ek and with a sieve with capacity J large enough to model the distribution p. This is weaker than an L2 statement and does not by itself quantify full recovery of high-frequency structure lost through convolution [ 32 , 33 ]. To obtain such guarantees, one must impose stronger smoothness and approximation assumptions. 
+
+3.1 Nonparametric Guarantees 
+
+We now state the stronger theorem that yields explicit nonparametric convergence rates in L2. This result requires additional assumptions on the smoothness of the latent density, the ill-posedness of the noise, and the approximation power of the sieve. These assumptions are collected in Appendix A and are substantially stronger than those used for the basic convMMD guarantees. 
+
+Theorem 3.6 (Nonparametric L2 Convergence) . Under Assumptions A.1 – A.12, let qbθN be the convMMD estimator over QJ .
+
+Case A (Ordinary Smooth Noise and Kernel): Under (OS-N) with exponent γ and (OS-K) with exponent ν, choosing 
+
+JN ≍ N d/ (2 β) yields 
+
+∥qbθN − p∥2 = Op
+
+
+
+N −β/ (2 β+2 γ+ν)
+
+.
+
+Case B (Supersmooth Noise or Kernel): If the noise is supersmooth (SS-N) with exponent γ, or the kernel is supersmooth (SS-K) with exponent ν, or both, define 
+
+γ∗ =
+
+
+
+γ if (SS-N) and (OS-K) ,ν if (OS-N) and (SS-K) ,
+
+max( γ, ν ) if (SS-N) and (SS-K) .
+
+Then, choosing JN ≍ N d/ (2 β) yields 
+
+∥qbθN − p∥2 = Op
+
+
+
+(log N )−β/γ ∗ 
+
+.
+
+4Nonparametric Deconvolution and Denoising The two regimes in Theorem 3.6 correspond to the classical distinction between ordinary-smooth and super-smooth 
+
+inverse problems, determined by how quickly the noise attenuates high-frequency information. In the ordinary-smooth regime, the noise characteristic function decays polynomially, leading to a mildly ill-posed problem and polynomial L2
+
+convergence rates. In contrast, in the super-smooth regime, exponential decay severely suppresses high frequencies, making the problem exponentially ill-posed and degrading convergence to logarithmic rates. A key feature of convMMD is that the ordinary-smooth rate depends on the kernel’s Fourier decay ν. Compared to the classical minimax optimal bounds [ 19 ], our exponent replaces the dimension d with ν. Since bounded MMD kernels require ν > d , our rate is slightly sub-optimal. However, this theoretical gap reflects a deliberate practical trade-off: achieving optimal rates [ 19 ] via classical density estimation requires vanishing bandwidths that cause numerical instability. By using a fixed, smooth kernel, convMMD incurs a small asymptotic speed penalty to guarantee a stable optimization landscape for generative models. In the super-smooth regime, the noise dominates, and standard logarithmic rates are recovered. We defer detailed examples to Appendix D. 
+
+3.2 Empirical Bayes Denoising Guarantees 
+
+We connect density estimation to empirical Bayes denoising. Let bx∗ be the oracle posterior mean (using the true p) and 
+
+bxEB be the empirical Bayes estimator (using qbθN ). 
+
+Theorem 3.7 (Empirical Bayes Denoising Rates) . Let bx∗ be the oracle posterior mean and bxEB be the empirical Bayes estimator using qbθN . Under Assumptions A.1 – A.13, with the additional requirement that the true marginal ep is strictly positive on a compact observation domain K, the expected excess empirical Bayes risk evaluated over K satisfies: 
+
+Z
+
+> K
+
+∥bxEB (ex) − bx∗(ex)∥2 ep(ex)dex = Op
+
+
+
+∥qbθN − p∥22
+
+
+
+.
+
+Combined with Theorem 3.6: 
+
+• Case A (Ordinary-smooth): Op
+
+
+
+N − 2β
+
+> 2β+2 γ+ν
+
+
+
+.
+
+• Case B (Super-smooth): Op
+
+
+
+(log N )− 2βγ∗
+
+
+
+.
+
+Theorem 3.7 shows that accurate deconvolution implies accurate denoising: the excess Bayes risk inherits the squared 
+
+L2 rate of the latent density estimator. When the noise is Gaussian ( m = N (0, Σ)), Tweedie’s formula [ 29 , 34 ] reveals that bx∗(ex) = ex + Σ∇ep(ex)/ep(ex). Denoising then depends only on the accuracy of the marginal density, bypassing deconvolution entirely, and it may be possible to obtain faster rates of convergence in this case. 
+
+3.3 Model Classes Covered by the Theory 
+
+The preceding theorems apply at two levels of generality. At the first level, Theorem 3.1, Theorem 3.3, and Corollary 3.4 apply to any simulation-based sieve model satisfying the regularity assumptions in Appendix A. The model class must define valid probability measures from which one can sample, admit simulation from the convolved model qθ ∗ m,and be regularized over a compact parameter set at each sieve level. No particular parametric form is required. At the second level, Theorem 3.6 additionally requires quantitative L2 sieve approximation rates (Assumption A.9). This is a mathematical property that separates model families for which the full deconvolution theory is currently available from those for which it remains conjectural. We illustrate this distinction using two classes of models. 
+
+Gaussian Mixture Models (GMMs). Gaussian mixture models provide a classical sieve for which the as-sumptions can be verified explicitly [ 35 , 36 ], including quantitative approximation rates. Consider the sieve 
+
+qθ (x) = PJj=1 πj N (x | μj , Σj ), with parameters θ = {πj , μj , Σj }Jj=1 , weights πj ≥ 0, and PJj=1 πj = 1 .A sieve of J-component Gaussian mixtures with bounded means and regularized covariance matrices forms a compact, simulation-friendly parametric family. Under standard compactness and Sobolev regularity conditions on the target, classical results prove that GMMs achieve the exact polynomial L2 approximation rates required by Assumption A.9 [35, 36]. 
+
+Neural Generative Models. Models defined as neural pushforward maps qθ = ( Gθ )#pz , including normalizing flow models (NFM) [ 24 ], generative adversarial networks (GANs) [ 37 ], and diffusion models [ 38 –40 ], are structurally ideal for convMMD. Simulating the noise-convolved distribution is mathematically trivial: eY = Gθ (Z) + UY , allowing even implicit models like GANs to be fitted without tractable densities. We note that the choice of architecture dictates the 5Nonparametric Deconvolution and Denoising feasibility of downstream tasks. While implicit models like GANs are sufficient for empirical Bayes denoising, explicitly evaluating the learned density for pure deconvolution requires a tractable model such as normalizing flows. Under standard network regularization (e.g., spectral normalization), these models fully satisfy the basic convMMD estimation guarantees of Theorem 3.1. While these architectures are known universal approximators [ 41 , 42 ], proving explicit L2
+
+polynomial approximation rates for their induced pushforward densities remains an active area of approximation theory. Consequently, Theorem 3.6 applies to neural generative models conditionally, assuming the underlying architecture possesses the necessary approximation capacity. A formal mathematical verification of how both GMMs and Neural Generative Models satisfy the framework’s assumptions (including handling degenerate distributions and empirical Bayes importance sampling) is provided in Appendix C. 
+
+# 4 Experiments 
+
+Verifying Rates of Convergence. Figure 1 provides empirical evidence for the two convergence phenomena predicted by our theory. We evaluate convMMD on a one-dimensional heteroscedastic deconvolution problem in which the latent density is a two-component Laplace mixture and the observations are corrupted by additive measurement noise. The estimator is trained directly by minimizing the convMMD objective, using two sieve classes: Gaussian mixture models and rational-quadratic-spline normalizing flows [ 43 ]. We vary the sample size and compare two inverse-problem regimes: an ordinary-smooth setting with Laplace noise and a Laplace kernel, and a supersmooth setting with Gaussian noise and a Gaussian kernel. 3.6 3.8 4.0 4.2 4.4             
+
+> Log(N)
+> 2.8
+> 2.7
+> 2.6
+> 2.5
+> 2.4
+> Log(MISE)
+> (a) Laplace Noise:
+> Log(MISE) vs Log(N)
+> GMM: -0.38 ± 0.01
+> NFM: -0.34 ± 0.03
+> Theory: -0.33
+> 0.92 0.94 0.96 0.98 1.00
+> Log(Log(N))
+> 2.35
+> 2.30
+> 2.25
+> 2.20
+> Log(MISE)
+> (b) Gaussian Noise:
+> Log(MISE) vs Log(Log(N))
+> GMM: -1.58 ± 0.11
+> NFM: -1.89 ± 0.22
+> Theory: -1.5
+> 3.6 3.8 4.0 4.2 4.4
+> Log(N)
+> 4.6
+> 4.4
+> 4.2
+> 4.0
+> 3.8
+> Log( MMD 2(p, q N))
+> (c) Laplace Noise:
+> MMD Comparison
+> GMM: -1.01 ± 0.02
+> NFM: -1.05 ± 0.08
+> Theory: -1.0
+> 3.6 3.8 4.0 4.2 4.4
+> Log(N)
+> 4.4
+> 4.2
+> 4.0
+> 3.8
+> Log( MMD 2(p, q N))
+> (d) Gaussian Noise:
+> MMD Comparison
+> GMM: -0.93 ± 0.04
+> NFM: -1.01 ± 0.05
+> Theory: -1.0
+
+Figure 1: Rate validation. L2 error follows the ordinary-smooth and supersmooth rates predicted by Theorem 3.6, while Latent MMD 2 follows the parametric N −1 rate predicted by Corollary 3.4 The right panels validate Corollary 3.4. In both the ordinary-smooth and supersmooth settings, the latent squared MMD error, MMD 2(p, q bθN ), decays at the parametric N −1 rate, indicating that convMMD achieves fast convergence in the RKHS metric even under measurement error. The left panels validate Theorem 3.6. For ordinary-smooth noise, the L2 density error follows the predicted polynomial decay; for supersmooth Gaussian noise, the rate slows to the expected logarithmic behavior. Thus, the experiments reproduce the central theoretical distinction: RKHS convergence remains parametric, while nonparametric density recovery reflects the ill-posedness of the deconvolution operator. Full experimental details are provided in Appendix E. 
+
+Denoising in presence of outliers. We next demonstrate empirical Bayes denoising with our simulation-based framework. Given the learned sieve density qbθN , we use it as a data-driven prior to estimate the posterior mean 
+
+E[Xi | ˜Xi]. We evaluate this procedure on three structured two-dimensional datasets (Two Moons, Circle, and Checkerboard) where latent points are corrupted by heteroscedastic Gaussian noise. To assess robustness, we further contaminate the latent distribution with 3% outliers. See Table 1 for comparison of convMMD with normalizing flow (NF) and Gaussian mixture model (GMM) sieves against two standard deconvolution baselines: NPEB, a nonparametric empirical Bayes method based on the NPMLE [ 26 ], and XDGMM, which fits a Gaussian-mixture prior by expectation maximization [ 27 ]. An Oracle baseline is also included, which uses the true latent distribution estimated via KDE on a large clean sample, and thus provides an empirical upper bound on the achievable performance. 6Nonparametric Deconvolution and Denoising moons                    
+
+> Clean
+> MSE: 0.534
+> Observed
+> MSE: 0.343
+> NPEB
+> MSE: 0.360
+> XDGMM
+> MSE: 0.267
+> convMMD_NF
+> MSE: 0.283
+> convMMD_GMM
+> MSE: 0.246
+> Oracle
+> circles
+> MSE: 2.509 MSE: 1.798 MSE: 1.859 MSE: 1.081 MSE: 1.082 MSE: 0.822
+> 505
+> checkerboard
+> 505
+> MSE: 0.654
+> 505
+> MSE: 0.510
+> 505
+> MSE: 0.526
+> 505
+> MSE: 0.438
+> 505
+> MSE: 0.442
+> 505
+> MSE: 0.393
+
+Figure 2: Benchmarking denoising. The last column assumes the true density is perfectly known. Table 1: Performance on synthetic datasets. We report mean ± std of MSE and Wasserstein-1 (W1) for denoising and deconvolution, respec-tively.                                                                                              
+
+> Dataset Method MSE ( ↓)W1 Distance ( ↓)
+> Moons convMMD_NF 0.2672 ±0.0154 0.1242 ±0.0022
+> convMMD_GMM 0.2829 ±0.0071 0.1148 ±0.0185
+> NPEB 0.3428 ±0.0095 0.2112 ±0.0050
+> XDGMM 0.3599 ±0.0089 0.1896 ±0.0047
+> Oracle 0.2460 ±0.0040 0.0350 ±0.0019
+> Circles convMMD_NF 1.0809 ±0.0202 0.2935 ±0.0139
+> convMMD_GMM 1.0817 ±0.0238 0.2717 ±0.0210
+> NPEB 1.7982 ±0.0635 0.5900 ±0.0163
+> XDGMM 1.8593 ±0.0310 0.4643 ±0.0114
+> Oracle 0.8217 ±0.0191 0.0801 ±0.0233
+> Checkerboard convMMD_NF 0.4383 ±0.0196 0.1785 ±0.0134
+> convMMD_GMM 0.4424 ±0.0230 0.1197 ±0.0071
+> NPEB 0.5096 ±0.0186 0.2763 ±0.0131
+> XDGMM 0.5260 ±0.0194 0.2053 ±0.0064
+> Oracle 0.3929 ±0.0147 0.0633 ±0.0039
+
+Figure 2 shows denoised posterior means from a representative run. NPEB places the prior on a discrete grid, producing clustered, speckled estimates that miss the continuity of the underlying manifolds. XDGMM uti-lizes a continuous Gaussian mixture, but its EM-based likelihood optimization leads to oversmoothing, failing to recover sharp boundaries (Moons) or hollow geometries (Circle). By evaluating our framework with both Normalizing Flow ( convMMD_NF ) and GMM ( convMMD_GMM ) sieves, we isolate the advantage of the convMMD objective. Notably, despite sharing the same para-metric family as XDGMM, convMMD_GMM 
+
+gives better reconstructions, confirming that simulation-based convMMD framework re-covers complex topology better than likeli-hood maximization in presence of outliers. This observation is consistent with theoretical guarantees regarding MMD’s robustness to corrupted mass [ 44 , 45 ]. The sieves also exhibit distinct inductive biases: the continuous mapping of NF excels on continuous topological manifolds (Moons, Circles), while GMM efficiently captures multimodal clustered grids (Checkerboard). We also investigate the sensitivity of convMMD to the choice of kernel bandwidth, as the median heuristic introduces an implicit free parameter. Results across a nine-point logarithmic grid of scale factors confirm that the performance remains stable over a wide range; see Appendix E.2.1 and Figure 3 for the full analysis. 
+
+Noise Misspecification and Scalability across Dimensions. We next evaluate the scalability and robustness to noise misspecification of convMMD for multivariate deconvolution. We use a “Tangled Ribbon” manifold: a low-intrinsic-dimensional topological structure embedded in observation spaces of increasing dimension, D ∈ { 3, 7, 11 , 15 }, and corrupted with heteroscedastic isotropic Gaussian noise, where per-sample noise scales σi ∼ U (0 .085 , 0.127) with mean ¯σ = 0 .106 . We compare convMMD (with Normalizing Flows) against three multivariate deconvolution baselines: XDGMM [ 27 ], NPEB [ 26 ], and deconv [ 12 ]. Full experimental details and network architectures are provided in Appendix E.3. We assess the robustness to noise misspecification by evaluating each method under three noise regimes: Well Specified ,where each method receives the true per-sample σi; Homoscedastic Misspecified , where a single constant ¯σ is provided; and Heteroscedastic Misspecified , where per-sample estimates are corrupted by log-normal noise calibrated to yield 25% expected relative error. We use the sliced 1-Wasserstein distance (SWD), computed over 1000 random one-dimensional projections, as our primary metric throughout, since exact Wasserstein distances scale poorly in high dimensions at rate 
+
+O(n−1/D ) [46]. 7Nonparametric Deconvolution and Denoising 0.1     
+
+> 0.25
+> 0.5
+> 0.75
+> 1.0
+> 1.5
+> 2.0
+> 3.0
+> 5.0
+> Bandwidth scale factor
+> 0.2
+> 0.4
+> 0.6
+> 0.8
+> 1.0
+> 1.2
+> 1.4
+> MSE (  )
+> Denoising MSE vs Bandwidth Scale
+> 0.1
+> 0.25
+> 0.5
+> 0.75
+> 1.0
+> 1.5
+> 2.0
+> 3.0
+> 5.0
+> Bandwidth scale factor
+> 0.1
+> 0.2
+> 0.3
+> 0.4
+> 0.5
+> 0.6
+> W1 Distance (  )
+> Prior W1 Distance vs Bandwidth Scale
+> Dotted horizontal lines show Oracle (KDE on clean data) bandwidth-independent reference.
+> Two Moons Circles Checkerboard Heuristic (×1)
+
+Figure 3: Dotted horizontal lines show Oracle (KDE on clean data) – bandwidth independent reference. Table 2: SWD (scaled by √D) between generated samples and the true manifold (see Figure 4). Values are mean ± std. 
+
+Noise Type Method D = 3 D = 7 D = 11 D = 15 
+
+Well-specified (True σi)convMMD 0.0329 ± 0.0049 0.0339 ± 0.0034 0.0342 ± 0.0018 0.0396 ± 0.0051 
+
+XDGMM 0.0290 ± 0.0065 0.0357 ± 0.0051 0.0405 ± 0.0025 0.0488 ± 0.0030 
+
+NPEB 0.0351 ± 0.0044 0.0441 ± 0.0033 0.0741 ± 0.0052 0.1161 ± 0.0047 
+
+deconv 0.0711 ± 0.0058 0.1006 ± 0.0018 0.1317 ± 0.0139 0.2090 ± 0.0346 
+
+Homoscedastic Misspecified convMMD 0.0334 ± 0.0061 0.0318 ± 0.0017 0.0367 ± 0.0036 0.0363 ± 0.0014 
+
+XDGMM 0.0299 ± 0.0047 0.0376 ± 0.0041 0.0422 ± 0.0036 0.0513 ± 0.0029 
+
+NPEB 0.0366 ± 0.0038 0.0453 ± 0.0029 0.0707 ± 0.0041 0.1145 ± 0.0055 
+
+deconv 0.0770 ± 0.0034 0.1003 ± 0.0025 0.1382 ± 0.0201 0.2105 ± 0.0274 
+
+Heteroscedastic Misspecified convMMD 0.0318 ± 0.0049 0.0346 ± 0.0036 0.0394 ± 0.0032 0.0469 ± 0.0016 
+
+XDGMM 0.0343 ± 0.0037 0.0457 ± 0.0044 0.0544 ± 0.0040 0.0641 ± 0.0047 
+
+NPEB 0.0379 ± 0.0036 0.0516 ± 0.0031 0.0767 ± 0.0048 0.1068 ± 0.0032 
+
+deconv 0.0807 ± 0.0086 0.1007 ± 0.0032 0.1265 ± 0.0038 0.2192 ± 0.0176 
+
+Table 2 reports results across independent trials, and Figure 4 shows a representative example run for D = 3 . In 
+
+D = 3 under oracle noise, both XDGMM and convMMD successfully recover the latent manifold, with XDGMM slightly more competitive at low dimensionality due to its inductive bias for multimodal densities. NPEB, as a discrete nonparametric estimator, also captures the manifold structure at D = 3 , but its performance degrades as dimension increases. As D increases, convMMD outperforms all baselines by exploiting the expressivity of normalizing flows to recover the low-dimensional manifold structure and achieving significantly lower SWD at D = 11 and D = 15 . deconv performs poorly across all settings, which we attribute to its sensitivity to sample size; in our experiments, it required substantially more than the N = 2000 training points used here to produce well-calibrated deconvolved samples. Under misspecification, convMMD remains the most robust method: its SWD increases only modestly from the oracle to the heteroscedastic misspecified regime across all dimensions. XDGMM shows greater sensitivity, particularly at higher dimensions; NPEB and deconv demonstrate poor performance. This robustness of convMMD to approximate noise specification is practically important, as exact per-sample noise may not be available in some real-world applications. 
+
+Performance in High-dimensional Denoising. In classical nonparametric statistics, density deconvolution is typically restricted to low-dimensional domains. To illustrate scalability to higher-dimensional spaces ( D = 784 ), we apply our framework to MNIST image denoising. We consider unlabeled noisy MNIST images Dobs , and use them to learn the prior qθ via convMMD and denoise via empirical Bayes. We parameterize qθ using two GAN variants: convMMD_GAN (GAN with a fixed Gaussian kernel) and convMMD_GAN* (GAN with an adversarially learned kernel [ 47 ]). We note that convMMD_GAN* may fall outside Assumptions A.7 - A.8, however we include it as 8Nonparametric Deconvolution and Denoising 
+
+Figure 4: Qualitative Comparison of Estimated Prior for d = 3 across different methods (columns) and different noise models (rows). 
+
+Figure 5: Image denoising performance. 9Nonparametric Deconvolution and Denoising an empirical extension. Baselines include Noise2Self [ 48 ] (a self-supervised blind-spot network), SURE [ 49 ] (an unsupervised CNN assuming known Gaussian variance), and BUIFD [ 50 ] (a supervised multi-branch model trained on paired data, serving as an empirical upper bound). We evaluate robustness under Additive White Gaussian Noise (AWGN), controlled by noise standard deviation σ, and spatially correlated AR(1) noise, controlled by correlation parameter ρ ∈ [0 , 1) . Figure 5 summarizes the results. The top panel illustrates denoising as ρ increases (PSNR in yellow). Panels (b) and (c) report the Structural Similarity Index Measure (SSIM, [ 51 ]) evaluated on the test set. We vary σ at fixed ρ = 0 .4 (b), and vary the correlation ρ at fixed σ = 0 .5 (c). Under pure AWGN ( ρ = 0 .0), Noise2Self excels (22.0 dB) by exploiting pixel-wise noise independence. However, its performance collapses as spatial correlation increases (Fig. 5a, c). In contrast, convMMD does not assume pixel independence; by matching the global convolved distribution, both variants remain remarkably stable (maintaining ∼15.2 dB at ρ = 0 .4, while Noise2Self drops to 9.0 dB). This robust stability persists across increasing noise intensities (Fig. 5b), demonstrating that convMMD effectively scales classical deconvolution to complex, high-dimensional measurement error regimes. We note that although the high dimensionality of images may violate the global Sobolev smoothness assumption in Theorem 3.6, our results demonstrate good performance. This experiment is intended as a stress test of the proposed deconvolution framework, rather than as a contribution to the image-denoising literature. Image denoising is a mature and highly specialized area, with methods that exploit image-specific inductive biases, carefully engineered architectures, perceptual losses, and noise models tailored to imaging applications [e.g., 52 , 53 , 10 , 39 , 54 ]. By contrast, convMMD is not optimized for images and does not rely on the common assumptions used in this literature. Hence, comparisons with image-denoising methods should not be interpreted as a competition on an image-restoration benchmark. Rather, MNIST provides a transparent high-dimensional test bed in which the ambient dimension is substantially larger than in classical nonparametric deconvolution, and the noise can be made non-trivially correlated across features. The main lesson from this experiment is that distributional deconvolution via convMMD remains stable in a regime where methods relying on noise independence can degrade sharply. Thus, the purpose of the case study is to demonstrate scalability and robustness of the proposed measurement-error framework beyond the low-dimensional settings emphasized in the theory, while leaving image-specific architectural refinements and benchmark-level optimization to future work. 
+
+# 5 Conclusion 
+
+Our method, which combines flexibility and theory, contributes to the broader statistics and machine learning literature on deconvolution and denoising. Much of modern learning from corrupted data still relies either on heuristic denoisers with limited statistical interpretation or on classical estimators that do not align well with modern generative modeling practices. Our framework offers an alternative: train expressive latent models directly on corrupted observations with an objective that respects the known noise mechanism, supports scalable optimization, and admits both finite-sample and large-sample guarantees. In this sense, the paper advances deconvolution and denoising from a classical inverse problem framework toward a general paradigm for learning under structured corruption utilizing a likelihood-free, simulation-based framework. 
+
+Limitations. While the proposed framework offers a general approach to deconvolution and denoising, our current implementation involves several considerations. From a theoretical perspective, our convergence guarantees are established under specific regularity conditions (known noise distributions and Sobolev smoothness) and assume the attainment of global minima on a non-convex, Monte Carlo approximated objective. Extending these results to account for the dynamics of stochastic gradient methods and the sieve properties of modern neural architectures, like normalizing flows, while accommodating spatial and other dependence patterns in the data remains an area for further study. In practice, the performance of convMMD is sensitive to the kernel and to the choice of the latent generative model and its architecture. Furthermore, the accuracy of the empirical Bayes denoising step is inherently linked to the quality of the learned latent density; consequently, model misspecification in high-dimensional or high-noise settings can impact posterior estimates. These factors highlight meaningful avenues for future research into data-driven kernel selection, choice of the latent model, and the robustness of the framework under noise misspecification. 
+
+# Acknowledgments 
+
+We acknowledge support from the National Science Foundation under Cooperative Agreement 2421782 and grant DMS-2515902, and the Simons Foundation award MPS-AI-00010515. 10 Nonparametric Deconvolution and Denoising 
+
+# References 
+
+[1] Raymond J Carroll, David Ruppert, Leonard A Stefanski, and Ciprian M Crainiceanu. Measurement error in nonlinear models: a modern perspective . Chapman and Hall/CRC, 2006. [2] Jean-Luc Starck, Eric Pantin, and Fionn Murtagh. Deconvolution in astronomy: A review. Publications of the Astronomical Society of the Pacific , 114:1051–1069, 2002. [3] Visal Sok, Adam Muzzin, Pascale Jablonka, Z Cemile Marsan, Vivian YY Tan, Leo Alcorn, Danilo Marchesini, and Mauro Stefanon. Finite-resolution deconvolution of multiwavelength imaging of 20,000 galaxies in the cosmos field: The evolution of clumpy galaxies over cosmic time. The Astrophysical Journal , 924:7, 2022. [4] D Anbajagane, C Chang, Z Zhang, CY Tan, M Adamow, LF Secco, MR Becker, PS Ferguson, A Drlica-Wagner, RA Gruendl, et al. The decade cosmic shear project i: A new weak lensing shape catalog of 107 million galaxies. 
+
+arXiv preprint arXiv:2502.17674 , 2025. [5] Rachel Mandelbaum, François Lanusse, Alexie Leauthaud, Robert Armstrong, Melanie Simet, Hironao Miyatake, Joshua E Meyers, James Bosch, Ryoma Murata, Satoshi Miyazaki, et al. Weak lensing shear calibration with simulations of the hsc survey. Monthly Notices of the Royal Astronomical Society , 481:3170–3195, 2018. [6] Danail Obreschkow, Steven G Murray, Aaron SG Robotham, and Tobias Westmeier. Eddington’s demon: inferring galaxy mass functions and other distributions from uncertain data. Monthly Notices of the Royal Astronomical Society , 474:5500–5522, 2018. [7] Eric Loken and Andrew Gelman. Measurement error and the replication crisis. Science , 355:584–585, 2017. [8] William Hadley Richardson. Bayesian-based iterative method of image restoration. Journal of the Optical Society of America , 62:55–59, 1972. [9] Leon B Lucy. An iterative technique for the rectification of observed distributions. Astronomical Journal , 79:745, 1974. [10] Yunchen Pu, Win Yuan, Andrew Stevens, Chunyuan Li, and Lawrence Carin. A deep generative deconvolutional image model. In Artificial Intelligence and Statistics , pages 741–750. PMLR, 2016. [11] RC Puetter, TR Gosnell, and Amos Yahil. Digital image reconstruction: Deblurring and denoising. Annual Review of Astronomy and Astrophysics , 43:139–194, 2005. [12] Tim Dockhorn, James A Ritchie, Yaoliang Yu, and Iain Murray. Density deconvolution with normalizing flows. 
+
+arXiv preprint arXiv:2006.09396 , 2020. [13] Nima Sedaghat, Martino Romaniello, Jonathan E Carrick, and François-Xavier Pineau. Machines learn to infer stellar parameters just by looking at a large number of spectra. Monthly Notices of the Royal Astronomical Society ,501(4):6026–6041, 2021. [14] Jingshu Wang, Divyansh Agarwal, Mo Huang, Gang Hu, Zilu Zhou, Chengzhong Ye, and Nancy R Zhang. Data denoising with transfer learning in single-cell transcriptomics. Nature methods , 16(9):875–878, 2019. [15] Qiang Zhang, Yaming Zheng, Qiangqiang Yuan, Meiping Song, Haoyang Yu, and Yi Xiao. Hyperspectral image denoising: From model-driven, data-driven, to model-data-driven. IEEE Transactions on Neural Networks and Learning Systems , 35(10):13143–13163, 2023. [16] Raymond J Carroll and Peter Hall. Optimal rates of convergence for deconvolving a density. Journal of the American Statistical Association , 83:1184–1186, 1988. [17] Ming Chung Liu and Robert L Taylor. A consistent nonparametric density estimator for the deconvolution problem. 
+
+Canadian Journal of Statistics , 17:427–438, 1989. [18] Leonard A Stefanski and Raymond J Carroll. Deconvolving kernel density estimators. Statistics , 21:169–184, 1990. [19] Jianqing Fan. On the optimal rates of convergence for nonparametric deconvolution problems. Annals of Statistics ,19:1257–1272, 1991. [20] Aurore Delaigle and Alexander Meister. Density estimation with heteroscedastic error. Bernoulli , 14:562–579, 2008. [21] Peter Hall and Peihua Qiu. Discrete-transform approach to deconvolution problems. Biometrika , 92:135–148, 2005. [22] Danilo Rezende and Shakir Mohamed. Variational inference with normalizing flows. In International Conference on Machine Learning , pages 1530–1538. PMLR, 2015. 11 Nonparametric Deconvolution and Denoising [23] Diederik P Kingma and Prafulla Dhariwal. Glow: generative flow with invertible 1 × 1 convolutions. In 
+
+Proceedings of the 32nd International Conference on Neural Information Processing Systems , pages 10236– 10245, 2018. [24] George Papamakarios, Eric Nalisnick, Danilo Jimenez Rezende, Shakir Mohamed, and Balaji Lakshminarayanan. Normalizing flows for probabilistic modeling and inference. Journal of Machine Learning Research , 22:1–64, 2021. [25] Haoye Lu, Qifan Wu, and Yaoliang Yu. Stochastic forward–backward deconvolution: Training diffusion models with finite noisy datasets. In International Conference on Machine Learning , pages 40741–40768. PMLR, 2025. [26] Jake A Soloff, Adityanand Guntuboyina, and Bodhisattva Sen. Multivariate, heteroscedastic empirical Bayes via nonparametric maximum likelihood. Journal of the Royal Statistical Society Series B: Statistical Methodology ,87:1–32, 2025. [27] Jo Bovy, David W Hogg, and Sam T Roweis. Extreme deconvolution: Inferring complete distribution functions from noisy, heterogeneous and incomplete observations. Annals of Applied Statistics , 5:1657–1677, 2011. [28] Ritwik Vashistha, Jeff M Phillips, Abhra Sarkar, and Arya Farahi. Convolutional maximum mean discrepancy for inference in noisy data. arXiv preprint arXiv:2604.12022 , 2026. [29] Herbert E Robbins. An empirical bayes approach to statistics. In Breakthroughs in Statistics: Foundations and Basic Theory , pages 388–394. Springer. [30] Bradley Efron. Bayes, oracle bayes and empirical bayes. Statistical Science , 34:177–201, 2019. [31] Arthur Gretton, Karsten M. Borgwardt, Malte J. Rasch, Bernhard Schölkopf, and Alexander Smola. A kernel two-sample test. Journal of Machine Learning Research , 13:723–773, 2012. [32] Bharath K Sriperumbudur, Arthur Gretton, Kenji Fukumizu, Bernhard Schölkopf, and Gert RG Lanckriet. Hilbert space embeddings and metrics on probability measures. Journal of Machine Learning Research , 11:1517–1561, 2010. [33] Shuang Liu, Olivier Bousquet, and Kamalika Chaudhuri. Approximation and convergence properties of generative adversarial learning. Advances in Neural Information Processing Systems , 30, 2017. [34] Bradley Efron. Tweedie’s formula and selection bias. Journal of the American Statistical Association , 106:1602– 1614, 2011. [35] Christopher R Genovese and Larry Wasserman. Rates of convergence for the Gaussian mixture sieve. Annals of Statistics , 28:1105–1127, 2000. [36] Subhashis Ghosal and Aad W Van Der Vaart. Entropies and rates of convergence for maximum likelihood and Bayes estimation for mixtures of normal densities. Annals of Statistics , 29:1233–1263, 2001. [37] Ian J Goodfellow, Jean Pouget-Abadie, Mehdi Mirza, Bing Xu, David Warde-Farley, Sherjil Ozair, Aaron Courville, and Yoshua Bengio. Generative adversarial nets. In Proceedings of the 28th International Conference on Neural Information Processing Systems-Volume 2 , pages 2672–2680, 2014. [38] Jascha Sohl-Dickstein, Eric Weiss, Niru Maheswaranathan, and Surya Ganguli. Deep unsupervised learning using nonequilibrium thermodynamics. In International Conference on Machine Learning , pages 2256–2265. PMLR, 2015. [39] Jonathan Ho, Ajay Jain, and Pieter Abbeel. Denoising diffusion probabilistic models. Advances in neural information processing systems , 33:6840–6851, 2020. [40] Yang Song, Jascha Sohl-Dickstein, Diederik P Kingma, Abhishek Kumar, Stefano Ermon, and Ben Poole. Score-based generative modeling through stochastic differential equations. In International Conference on Learning Representations , 2021. [41] Takeshi Teshima, Isao Ishikawa, Koichi Tojo, Kenta Oono, Masahiro Ikeda, and Masashi Sugiyama. Coupling-based invertible neural networks are universal diffeomorphism approximators. Advances in Neural Information Processing Systems , 33:3362–3373, 2020. [42] Kurt Hornik, Maxwell Stinchcombe, and Halbert White. Multilayer feedforward networks are universal approxi-mators. Neural Networks , 2:359–366, 1989. [43] Conor Durkan, Artur Bekasovs, Iain Murray, and George Papamakarios. Neural spline flows. In 33rd Conference on Neural Information Processing Systems , pages 7511–7522. Neural Information Processing Systems Foundation, Inc, 2019. [44] Badr-Eddine Chérief-Abdellatif and Pierre Alquier. Finite sample properties of parametric mmd estimation: robustness to misspecification and dependence. Bernoulli , 28(1):181–213, 2022. 12 Nonparametric Deconvolution and Denoising [45] Pierre Alquier and Mathieu Gerber. Universal robust regression via maximum mean discrepancy. Biometrika ,111(1):71–92, 2024. [46] Nicolas Fournier and Arnaud Guillin. On the rate of convergence in Wasserstein distance of the empirical measure. 
+
+Probability Theory and Related Fields , 162:707–738, 2015. [47] Chun-Liang Li, Wei-Cheng Chang, Yu Cheng, Yiming Yang, and Barnabás Póczos. MMD GAN: Towards deeper understanding of moment matching network. Advances in Neural Information Processing Systems , 30:1–11, 2017. [48] Joshua Batson and Loic Royer. Noise2self: Blind denoising by self-supervision. In International conference on machine learning , pages 524–533. PMLR, 2019. [49] Shakarim Soltanayev and Se Young Chun. Training deep learning based denoisers without ground truth data. 
+
+Advances in neural information processing systems , 31, 2018. [50] Majed El Helou and Sabine Süsstrunk. Blind universal bayesian image denoising with gaussian noise level learning. IEEE Transactions on Image Processing , 29:4885–4897, 2020. [51] Zhou Wang, Alan C Bovik, Hamid R Sheikh, and Eero P Simoncelli. Image quality assessment: from error visibility to structural similarity. IEEE transactions on image processing , 13(4):600–612, 2004. [52] Antoni Buades, Bartomeu Coll, and Jean-Michel Morel. A review of image denoising algorithms, with a new one. 
+
+Multiscale Modeling & Simulation , 4:490–530, 2005. [53] Kostadin Dabov, Alessandro Foi, Vladimir Katkovnik, and Karen Egiazarian. Image denoising by sparse 3-d transform-domain collaborative filtering. IEEE Transactions on Image Processing , 16:2080–2095, 2007. [54] Ziwei Luo, Fredrik Gustafsson, Zheng Zhao, Jens Sjölund, and Thomas Schön. Taming diffusion models for image restoration: a review. Philosophical Transactions of the Royal Society A: Mathematical, Physical and Engineering Sciences , 383, 2025. [55] Takeru Miyato, Toshiki Kataoka, Masanori Koyama, and Yuichi Yoshida. Spectral normalization for generative adversarial networks. arXiv preprint arXiv:1802.05957 , 2018. [56] Tengyuan Liang. How well generative adversarial networks learn distributions. Journal of Machine Learning Research , 22:1–41, 2021. [57] Dmitry Yarotsky. Error bounds for approximations with deep ReLU networks. Neural Networks , 94:103–114, 2017. [58] Ian Goodfellow, Yoshua Bengio, and Aaron Courville. Deep Learning . MIT Press, 2016. [59] Colin McDiarmid et al. On the method of bounded differences. Surveys in Combinatorics , 141:148–188, 1989. [60] Walter Rudin. Real and complex analysis . McGraw Hill, 1974. [61] Robert A Adams and John JF Fournier. Sobolev spaces . Elsevier, 2003. [62] Gerald B Folland. Real analysis: modern techniques and their applications . John Wiley & Sons, 1999. [63] Ilya Loshchilov and Frank Hutter. Decoupled weight decay regularization. In International Conference on Learning Representations .[64] Antonin Schrab. A practical introduction to kernel discrepancies: Mmd, hsic & ksd. arXiv preprint arXiv:2503.04820 , 2025. [65] Felix Biggs, Antonin Schrab, and Arthur Gretton. Mmd-fuse: Learning and combining kernels for two-sample testing without data splitting. Advances in Neural Information Processing Systems , 36:75151–75188, 2023. 13 Nonparametric Deconvolution and Denoising 
+
+# A Assumptions 
+
+For clarity, we collect here all assumptions used in the paper. Theorems in the main text cite the exact subset they require. 
+
+Notation. For two positive functions f (t) and g(t), we write f (t) ≍ g(t) to mean that there exist constants 
+
+0 < c ≤ C < ∞ such that c g (t) ≤ f (t) ≤ C g (t) for all t in the relevant domain. This two-sided bound is essential for the L2 convergence analysis, as it allows us to both upper-bound the low-frequency error and lower-bound the spectral weight when inverting from MMD to L2.
+
+A.1 Data-Generating Assumptions Assumption A.1 (Noise independence) . The measurement error UX is independent of the latent variable X, i.e., 
+
+X ⊥⊥ UX .
+
+Assumption A.2 (Known noise model) . The noise distribution m is known. In heteroscedastic settings, we allow 
+
+UX,i ∼ r(· | ϕi), ϕi ∼ g(· | ψk),
+
+where the conditional family r and the parameter distribution g are known, or the values ϕi are observed. 
+
+Assumption A.3 (Finite second moments of the noise) . The noise variables have finite second moments. Specifically, 
+
+E[∥UX ∥2 | ϕ] = α(ϕ) < ∞,
+
+and α(ϕ) is integrable with respect to g.
+
+Assumption A.4 (Convolution identifiability) . The characteristic function of the noise, 
+
+ϕm(t) = E[eit⊤UX ],
+
+is nonzero almost everywhere. 
+
+Assumption A.5 (Noise smoothness) . Let ϕm(t) = E[eit⊤UX ] be the characteristic function of the noise. We assume 
+
+ϕm satisfies one of the following two-sided decay conditions for constants γ > 0:• (OS-N) Ordinary Smooth Noise : |ϕm(t)| ≍ (1 + ∥t∥2)−γ/ 2.Examples: Laplace noise ( γ = 2 ), Gamma distributions. • (SS-N) Supersmooth Noise : |ϕm(t)| ≍ exp( −cm∥t∥γ ) for some cm > 0.Examples: Gaussian noise ( γ = 2 ), Cauchy noise ( γ = 1 ). The two-sided bound ensures that the characteristic function decays at a known polynomial or exponential rate, neither faster nor slower. 
+
+Assumption A.6 (Latent Sobolev smoothness) . The true latent density p belongs to the Sobolev space Hβ (Rd) for some β > d/ 2, that is, Z
+
+> Rd
+
+(1 + ∥t∥2)β |ϕp(t)|2 dt < ∞.
+
+A.2 Model and Method Assumptions Assumption A.7 (Kernel bound) . The kernel k : Rd × Rd → R is translation invariant, so that k(x, y) = k(x − y),and bounded: 
+
+sup 
+
+> x
+
+k(x, x) ≤ K < ∞.
+
+Moreover, k ∈ L1(Rd) and its Fourier transform ϕk(t) is strictly positive for all t ∈ Rd.
+
+Assumption A.8 (Kernel smoothness) . The Fourier transform of the kernel satisfies one of the following two-sided decay conditions for constants ν > 0:• (OS-K) Ordinary Smooth Kernel : ϕk(t) ≍ (1 + ∥t∥2)−ν/ 2.Examples: Laplace kernel ( ν = d + 1 ), Matérn kernels. • (SS-K) Supersmooth Kernel : ϕk(t) ≍ exp( −ck∥t∥ν ) for some ck > 0.Examples: Gaussian kernel ( ν = 2 ). 14 Nonparametric Deconvolution and Denoising The two-sided bound ensures that the kernel’s spectral weight decays at a controlled rate, which is crucial for relating MMD convergence to L2 convergence. 
+
+Assumption A.9 (Sieve approximation property) . Let QJ = {qθ : θ ∈ ΘJ } be the sieve class. For every target density 
+
+p in the relevant smoothness class, there exists qJ ∈ Q J such that 
+
+inf 
+
+> q∈Q J
+
+∥q − p∥L2(X ) ≤ Capprox J−β/d 
+
+for some constant Capprox > 0.
+
+Assumption A.10 (Compact latent domain) . The true latent distribution p and the model distributions qθ for all θ ∈ ΘJ
+
+are supported on a compact domain X ⊂ Rd, such that ∥x∥ ≤ M for all x ∈ X and some finite constant M > 0.
+
+Remark A.11 . Assumption A.10 is a theoretical requirement for the Empirical Bayes denoising bounds, where the bound M on the posterior mean appears explicitly. For Normalizing Flows and GMMs, which traditionally possess support on Rd, the theoretical sieve class is assumed to be smoothly truncated to a sufficiently large compact domain X
+
+encompassing the data manifold. 
+
+Assumption A.12 (Parameter space compactness) . For a fixed sieve size J, the parameters θ are restricted to a compact subset ΘJ ⊂ RDJ . Additionally, the optimization is regularized such that the estimator maintains a uniformly bounded Sobolev norm: sup θ∈ΘJ ∥qθ ∥Hβ ≤ CB < ∞.
+
+Assumption A.13 (Bounded noise density) . The noise density satisfies ∥m∥∞ < ∞.
+
+Assumption A.14 (Strictly positive marginal) . The true marginal density ep = p ∗ m is strictly positive on a compact observation domain K ⊂ Rd, i.e., inf ex∈K ep(ex) > 0.Assumptions A.1–A.14 are organized in increasing strength. Assumptions A.1, A.2, A.3, A.4, A.7, and A.12 are sufficient for the basic convMMD guarantees in the main text. Assumptions A.5, A.6, and A.9 are additionally needed for the strong nonparametric L2 rates. For the empirical Bayes denoising bounds, Assumptions A.13 and A.14 are required in addition to the L2 rate assumptions. 
+
+# B Optimization Algorithm 
+
+The empirical convMMD objective in Equation (2) is generally non-convex, and the expectations appearing in it are typically unavailable in closed form. We therefore optimize it by Monte Carlo approximation and automatic differentiation. The essential requirement is that the model sampling mechanism and the noise simulation can be written as differentiable transformations of exogenous base randomness. This allows the use of pathwise gradients and standard stochastic optimization methods such as Adam. 
+
+Algorithm 1 Sieve-convMMD density estimation via Monte Carlo and AutoDiff 
+
+Input: noisy data DN = {exi}Ni=1 , sieve class QJ = {qθ : θ ∈ ΘJ }, initial parameter θ(0) , kernel k, learning rate 
+
+η, Monte Carlo batch size M , total iterations Niter 
+
+Output: estimator bθN 
+
+> 1:
+
+for t = 1 , . . . , N iter do  
+
+> 2:
+
+Sample a minibatch {exb}Mb=1 ⊂ D N . 
+
+> 3:
+
+Sample base latent randomness Z1, . . . , ZM ∼ pz . 
+
+> 4:
+
+Sample measurement noise variables UY, 1, . . . , UY,M ∼ m. 
+
+> 5:
+
+Generate latent model samples Yb(θ(t−1) ) ∼ qθ(t−1) via reparameterization.  
+
+> 6:
+
+Form noisy model samples eYb(θ(t−1) ) = Yb(θ(t−1) ) + UY,b . 
+
+> 7:
+
+Compute a Monte Carlo estimate bLM (θ(t−1) ) of the empirical convMMD objective.  
+
+> 8:
+
+Compute the pathwise gradient 
+
+bg(t) = ∇θ bLM (θ) θ=θ(t−1) . 
+
+> 9:
+
+Update parameters 
+
+θ(t) = θ(t−1) − ηbg(t). 
+
+> 10:
+
+end for  
+
+> 11:
+
+return bθN = θ(Niter )
+
+15 Nonparametric Deconvolution and Denoising 
+
+Normalizing Flows: For models like Normalizing Flows, we sample base noise Z ∼ pz and measurement noise 
+
+UY ∼ m, and generate the noisy observation as a differentiable computational graph: 
+
+eY(θ) = Gθ (Z) + UY
+
+We then substitute eY(θ) directly into the empirical MMD estimator bLM (θ) and backpropagate. 
+
+Gaussian Mixture Models: Applying the reparameterization trick to Gaussian Mixture Models is traditionally hindered by the discrete sampling of the mixture components c ∼ Categorical (π). However, because the MMD objective is an expectation, we can analytically marginalize the discrete choices, pulling the scalar weights πc outside the integral. Let Yc(θc) = μc + Σ1/2 
+
+> c
+
+ϵ where ϵ ∼ N (0, Id). The expected cross-term between the observed data and the model becomes: 
+
+E eY∼qθ ∗m[k(exi, eY)] = 
+
+> J
+
+X
+
+> c=1
+
+πc Eϵ,UY
+
+h
+
+k
+
+exi, μc + Σ1/2 
+
+> c
+
+ϵ + UY
+
+i 
+
+Similarly, the U -statistic for the model-to-model term becomes a double summation over the components c and d,weighted by πcπd. By simulating batches of ϵ and UY for each component, we construct a fully differentiable empirical loss where gradients flow deterministically into μc and Σc via reparameterization, and analytically into the mixture weights πc.
+
+# C Verification of Model Classes as Sieve Classes 
+
+In this section, we formally verify how our two representative model families—Gaussian Mixture Models and Neural Generative Models —satisfy the structural and theoretical assumptions of the convMMD framework (Assumptions A.12 and A.9), and the self-regularization condition required for empirical Bayes denoising. 
+
+C.1 Gaussian Mixture Models (GMMs) 
+
+Gaussian mixtures serve as our mathematically explicit baseline for which the entire chain of assumptions, from basic compactness to quantitative L2 approximation, can be rigorously verified. 
+
+Parameter Space and Compactness. For a fixed complexity J ≥ 1, we define the sieve class QJ = {qθ (x) = 
+
+PJc=1 πc N (x | μc, Σc) : θ ∈ ΘJ }. To satisfy the compactness and regularization requirements of Assumption A.12, we consider the parameter space: 
+
+ΘJ = ∆ ϵJ × M J × S (λ, λ )J , (9) where ∆ϵJ = {π ∈ [0 , 1] J : P πc = 1 , π c ≥ ϵ/J } is the bounded-away-from-zero simplex, M = [ −Mμ, M μ]d
+
+restricts the means, and S(λ, λ ) = {Σ ∈ Sd 
+
+> ++
+
+: λId ⪯ Σ ⪯ λId} bounds the covariance eigenvalues. Because ΘJ is a closed and bounded subset of a finite-dimensional Euclidean space, it is strictly compact. The map 
+
+θ 7 → qθ is continuous in both L1 and arbitrary Sobolev norms Hβ . Furthermore, the condition Σc ⪰ λId prevents the mixture components from collapsing into Dirac deltas, ensuring a uniform Sobolev bound sup θ∈ΘJ ∥qθ ∥Hβ < ∞,fully satisfying Assumption A.12. In practice, we enforce the constraint Σc ⪰ λId by parameterizing each covariance as Σc = LcL⊤ 
+
+> c
+
++ λId, where Lc
+
+is an unconstrained lower-triangular matrix. This Cholesky-based parameterization guarantees positive definiteness and ensures that all eigenvalues are at least λ, preventing singularity in all dimensions d ≥ 1. For computational efficiency, when restricting to diagonal covariances, we add a log-barrier penalty −α P 
+
+> c,k
+
+log( σ2
+
+> c,k
+
+) to the objective, which implicitly enforces σ2 
+
+> c,k
+
+> 0 during optimization. 
+
+Quantitative Sieve Approximation. The strong deconvolution rates in Theorem 3.6 rely on the polynomial ap-proximation capacity of the sieve (Assumption A.9). For GMMs, this property is well-established. Following the classical approximation theory of [ 35 ] and [ 36 ], Gaussian mixtures with regularized parameters achieve polynomial approximation rates for sufficiently smooth target densities on compact domains. Specifically, for p ∈ Hβ (X ), there exists a constant C such that: 
+
+inf 
+
+> θ∈ΘJ
+
+∥qθ − p∥L2(X ) ≤ CJ −β/d . (10) 
+
+Remark C.1 . Achieving fine approximation as J → ∞ requires concentrated components ( λJ → 0), yet individual sharp Gaussians have unbounded Sobolev norms, which violates our assumptions. 16 Nonparametric Deconvolution and Denoising We resolve this by constraining the global mixture’s Sobolev norm rather than individual component eigenvalues: 
+
+ΘJ = {θ : Σc ⪰ λJ Id and ∥qθ ∥Hβ ≤ M } , (11) where λJ ≍ J−2/d shrinks with J, and M is a fixed constant independent of J.The constraint ∥qθ ∥Hβ ≤ M prevents pathological configurations (e.g., isolated spikes) while permitting the fine-scale resolution needed for good approximation. 
+
+C.2 Neural Generative Models 
+
+We analyze normalizing flows, GANs, and diffusion models uniformly as pushforward distributions qθ = ( Gθ )#pz ,where Z ∼ pz is a fixed base distribution and Gθ : Rk → Rd is a parameterized neural network. 
+
+Handling Degenerate Densities (GANs). A theoretical concern with neural generative models (e.g., GANs with 
+
+k < d ) is that the latent pushforward (Gθ )#pz may be supported on a lower-dimensional manifold, failing to admit a Lebesgue density. The convMMD framework cleanly circumvents this. 
+
+Proposition C.2 (Existence of the convolved density) . Let m be a noise distribution admitting a bounded density 
+
+m ∈ L∞(Rd). Then, for any pushforward measure qθ = ( Gθ )#pz (regardless of whether qθ has a density), the convolved distribution qθ ∗ m admits a Lebesgue density on Rd given by: 
+
+(qθ ∗ m)( ex) = EZ∼pz [m(ex − Gθ (Z))] . (12) 
+
+Proof. By Fubini’s theorem, for any measurable set A ⊂ Rd, the probability measure of the convolution is (qθ ∗
+
+m)( A) = R 1A(ex)  R m(ex − y)dq θ (y) dex. Since m ∈ L∞, the inner integral is a bounded measurable function defining the Radon–Nikodym derivative. Consequently, the MMD objective in Theorem 3.1 is always well-defined, and optimization via reparameterization gradients eY = Gθ (Z) + UY is unconditionally valid. For pure deconvolution tasks, evaluating the learned density is not possible if the output is degenerate. However, for empirical Bayes denoising, this is inconsequential: the posterior mean can still be accurately estimated using importance sampling drawn from the base measure pz , without ever evaluating the latent density. 
+
+Compactness and Regularity. For a network Gθ with DJ parameters, compactness (Assumption A.12) is enforced using standard regularizations: explicit weight clipping ( ∥W∥∞ ≤ B), or spectral normalization ( ∥W∥op ≤ s). Under these constraints, ΘJ is a compact subset of RDJ . If spectral normalization is used, Gθ is uniformly Lipschitz [ 55 ]. For diffeomorphic mappings like normalizing flows, bounded network weights and invertible architectures (e.g., affine coupling layers) ensure uniform bounds on the Jacobian, guaranteeing sup θ∈ΘJ ∥qθ ∥Hβ < ∞.
+
+The Sieve Approximation Requirement. While these models satisfy the basic estimation guarantees (Theorem 3.1), their applicability to the explicit L2 deconvolution rates (Theorem 3.6) depends on Assumption A.9. Currently, strong universality results exist for these architectures: normalizing flows are universal diffeomorphism approximators [ 41 ], and GANs can approximate any continuous distribution in Wasserstein distance [ 56 ]. Furthermore, unconstrained ReLU networks achieve explicit polynomial approximation rates for Sobolev functions [57]. However, mapping the L∞ or Lp function-approximation rates of a neural network directly to the L2 approximation rate of its induced pushforward density remains an active area of approximation theory. Thus, while implicit models are fully consistent under our convMMD framework, the exact polynomial deconvolution rates of Theorem 3.6 apply to them conditionally , assuming the underlying architecture is sized appropriately to satisfy the quantitative bound in Assumption A.9. 
+
+Empirical Bayes Implementation. For denoising, the empirical Bayes estimator requires the computation of the posterior mean. For normalizing flows, the exact density evaluation qθ (x) = pz (G−1 
+
+> θ
+
+(x)) | det ∇G−1 
+
+> θ
+
+(x)| allows direct numerical integration or MCMC sampling. For GANs and diffusion models lacking tractable densities, we bypass exact evaluation by using Self-Normalized Importance Sampling (SNIS) in the latent space: 
+
+bxEB (exi) ≈
+
+PSj=1 Gθ (zj ) m(exi − Gθ (zj )) 
+
+PSj=1 m(exi − Gθ (zj )) , zj
+
+> iid
+
+∼ pz . (13) This estimator converges to the true posterior mean Eqθ [X | eX = exi] as S → ∞ and leverages only the forward pass of the generator and the known noise density m, fitting seamlessly into the convMMD pipeline. 17 Nonparametric Deconvolution and Denoising 
+
+C.3 Proofs Theorem C.3. Let k : Rd × Rd → R be a continuous, translation-invariant kernel bounded by sup x k(x, x) ≤ K. Let 
+
+\(p ∗ m)N denote the empirical distribution of N i.i.d. observations drawn from the true noisy distribution p ∗ m. Let the estimator bθN be the global minimizer of the exact empirical squared objective over the sieve class ΘJ :
+
+bθN = arg min 
+
+> θ∈ΘJ
+
+\convMMD 2 
+
+> k
+
+(p, q θ , m ) ≡ arg min 
+
+> θ∈ΘJ
+
+MMD 2
+
+> k
+
+ \(p ∗ m)N , q θ ∗ m
+
+
+
+.
+
+Then, with probability at least 1 − δ, we have: 
+
+convMMD k
+
+
+
+p, q bθN , m 
+
+
+
+≤ inf 
+
+> θ∈ΘJ
+
+convMMD k (p, q θ , m ) + 2 
+
+r KN + 2 
+
+r 2K log(1 /δ )
+
+N .
+
+Proof. Let Hk be the Reproducing Kernel Hilbert Space (RKHS) associated with kernel k. Let μP ∈ H k denote the mean embedding of a distribution P , defined as μP (·) = Ex∼P [k(x, ·)] . The MMD between two distributions P and 
+
+Q is then simply the distance between their mean embeddings in the RKHS: MMD (P, Q ) = ∥μP − μQ∥Hk .
+
+By definition of the convMMD, convMMD k(p, q θ , m ) = MMD k(p ∗ m, q θ ∗ m) = ∥μp∗m − μqθ ∗m∥Hk .Because the scalar mapping v 7 → v2 is strictly increasing on [0 , ∞), the estimator bθN that minimizes the squared empirical MMD identically minimizes the unsquared empirical MMD. Thus, for any arbitrary θ ∈ ΘJ :
+
+∥μ \(p∗m)N
+
+− μqbθN ∗m∥Hk ≤ ∥ μ \(p∗m)N
+
+− μqθ ∗m∥Hk .
+
+By the triangle inequality in Hk, we bound the true error of our estimator by introducing the empirical data embedding: 
+
+∥μp∗m − μqbθN ∗m∥Hk ≤ ∥ μp∗m − μ \(p∗m)N
+
+∥Hk + ∥μ \(p∗m)N
+
+− μqbθN ∗m∥Hk .
+
+Applying the optimality condition of bθN to the second term: 
+
+∥μp∗m − μqbθN ∗m∥Hk ≤ ∥ μp∗m − μ \(p∗m)N
+
+∥Hk + ∥μ \(p∗m)N
+
+− μqθ ∗m∥Hk .
+
+We apply the triangle inequality once more to the right-most term to re-introduce the true target embedding μp∗m:
+
+∥μ \(p∗m)N
+
+− μqθ ∗m∥Hk ≤ ∥ μ \(p∗m)N
+
+− μp∗m∥Hk + ∥μp∗m − μqθ ∗m∥Hk .
+
+Combining these yields the fundamental decomposition. Since the bound holds for any θ ∈ ΘJ , we take the infimum over the sieve: 
+
+∥μp∗m − μqbθN ∗m∥Hk ≤ inf 
+
+> θ∈ΘJ
+
+∥μp∗m − μqθ ∗m∥Hk
+
+| {z }
+
+> Approximation Error
+
++ 2 ∥μp∗m − μ \(p∗m)N
+
+∥Hk
+
+| {z }
+
+> Estimation Error
+
+. (14) Since GMMs are dense in L1
+
+ Rd [ 58 ], and convolution with m is a continuous linear operator, the set of convolved models {qθ ∗ m} is dense in the space of observed densities. We bound the statistical estimation error ∆( ex1, . . . , exN ) = ∥μp∗m − μ \(p∗m)N
+
+∥Hk using McDiarmid’s Inequality [ 59 ]. If we replace a single observation exi with an independent draw ex′
+
+> i
+
+, the value of ∆ changes by at most: 
+
+|∆( . . . , exi, . . . ) − ∆( . . . , ex′
+
+> i
+
+, . . . )| ≤ 1
+
+N ∥k(exi, ·) − k(ex′
+
+> i
+
+, ·)∥Hk .
+
+Using the property of the RKHS norm: 
+
+∥k(exi, ·) − k(ex′
+
+> i
+
+, ·)∥Hk =
+
+q
+
+k(exi, exi) + k(ex′
+
+> i
+
+, ex′
+
+> i
+
+) − 2k(exi, ex′
+
+> i
+
+).
+
+18 Nonparametric Deconvolution and Denoising By the Cauchy-Schwarz inequality in Hk, we have |k(exi, ex′
+
+> i
+
+)| ≤ pk(exi, exi)k(ex′
+
+> i
+
+, ex′
+
+> i
+
+) ≤ K, meaning −k(exi, ex′
+
+> i
+
+) ≤ K.Thus: 
+
+∥k(exi, ·) − k(ex′
+
+> i
+
+, ·)∥Hk ≤ p2K − 2( −K) = 2 √K. 
+
+Thus, the maximum change is bounded by ci = 2√KN . Applying McDiarmid’s Inequality, for any ϵ > 0:
+
+P(∆ − E[∆] ≥ ϵ) ≤ exp −2ϵ2
+
+PNi=1 c2
+
+> i
+
+!
+
+= exp −2ϵ2
+
+N ( 4KN 2 )
+
+!
+
+= exp 
+
+ −N ϵ 2
+
+2K
+
+
+
+.
+
+Setting δ = exp( −N ϵ 2/2K) and solving for ϵ gives, with probability at least 1 − δ:
+
+∆ ≤ E[∆] + 
+
+r 2K log(1 /δ )
+
+N . (15) By Jensen’s inequality, E[∆] ≤ pE[∆ 2]. Expanding the squared RKHS norm gives the variance of the sample mean embedding: 
+
+E[∆ 2] = E
+
+ 1
+
+N
+
+> N
+
+X
+
+> i=1
+
+k(exi, ·) − μp∗m
+
+> 2
+> Hk
+
+ = 1
+
+N E eX∼p∗m
+
+h
+
+∥k( eX, ·) − μp∗m∥2
+
+> Hk
+
+i
+
+.
+
+Using the identity E[∥X − E[X]∥2] ≤ E[∥X∥2], we have: 
+
+E[∆ 2] ≤ 1
+
+N E eX[∥k( eX, ·)∥2 
+
+> Hk
+
+] = 1
+
+N E eX[k( eX, eX)] ≤ KN
+
+⇒ E[∆] ≤
+
+r KN . (16) Combining equations (15) and (16), we have with probability 1 − δ:
+
+∥μp∗m − μ \(p∗m)N
+
+∥Hk ≤
+
+r KN +
+
+r 2K log(1 /δ )
+
+N
+
+Substituting this back into the equation (14) (multiplying by 2), we have with probability 1 − δ:
+
+∥μp∗m − μqbθN ∗m∥Hk ≤ inf 
+
+> θ∈ΘJ
+
+∥μp∗m − μqθ ∗m∥Hk + 2 
+
+r KN + 2 
+
+r 2K log(1 /δ )
+
+N
+
+⇒ convMMD k
+
+
+
+p, q bθN , m 
+
+
+
+≤ inf 
+
+> θ∈ΘJ
+
+convMMD k (p, q θ , m ) + 2 
+
+r KN + 2 
+
+r 2K log(1 /δ )
+
+N
+
+Theorem C.4 (Nonparametric L2 Convergence) . Under Assumptions A.1 – A.12, let qbθN be the convMMD estimator over QJ .
+
+Case A (Ordinary Smooth Noise and Kernel): Under (OS-N) with exponent γ and (OS-K) with exponent ν, choosing 
+
+JN ≍ N d/ (2 β) yields 
+
+∥qbθN − p∥2 = Op
+
+
+
+N −β/ (2 β+2 γ+ν)
+
+.
+
+Case B (Supersmooth Noise or Kernel): If the noise is supersmooth (SS-N) with exponent γ, or the kernel is supersmooth (SS-K) with exponent ν, or both, define 
+
+γ∗ =
+
+
+
+γ if (SS-N) and (OS-K) ,ν if (OS-N) and (SS-K) ,
+
+max( γ, ν ) if (SS-N) and (SS-K) .
+
+Then, choosing JN ≍ N d/ (2 β) yields 
+
+∥qbθN − p∥2 = Op
+
+
+
+(log N )−β/γ ∗ 
+
+.
+
+19 Nonparametric Deconvolution and Denoising 
+
+Proof. We aim to bound the expected true L2 risk of the latent density estimator, ∥qbθN − p∥2. By Plancherel’s theorem [ 60 ], the squared L2 distance between the true density and our estimator is proportional to the integrated squared difference of their Fourier transforms. Let ϕq (t) and ϕp(t) denote the characteristic functions of qbθN and p respectively, and let ∆ϕ(t) = ϕq (t) − ϕp(t). We then have: 
+
+∥qbθN − p∥22 = 1(2 π)d
+
+Z
+
+> Rd
+
+|∆ϕ(t)|2dt.
+
+By the convolution theorem and Plancherel’s identity (or Bochner’s theorem for translation-invariant kernels) [ 32 ], the squared MMD between the convolved densities qbθN ∗ m and p ∗ m can be written in the frequency domain as: MMD 2(qbθN ∗ m, p ∗ m) = 1(2 π)d
+
+Z
+
+> Rd
+
+|∆ϕ(t)|2 |ϕm(t)|2ϕk(t)
+
+| {z } 
+
+> W(t)
+
+dt,
+
+where we recall that ϕm(t) is the characteristic function of the error distribution m, and ϕk(t) is the Fourier transform of the MMD kernel k. The term W (t) = |ϕm(t)|2ϕk(t) then acts as a spectral weighting function. Because W (t) → 0
+
+as ∥t∥ → ∞ , high-frequency differences are heavily discounted (i.e., lightly penalized) in the MMD objective, which makes them difficult to recover and fundamentally characterizes the ill-posed nature of deconvolution. Under the two-sided smoothness assumptions (Assumptions A.5 and A.8), W (t) satisfies the following two-sided bounds: • (OS-N) + (OS-K): W (t)≍(1 + ∥t∥2)−γ−ν/ 2
+
+• (SS-N) + (OS-K): W (t)≍ exp( −2cm∥t∥γ )(1 + ∥t∥2)−ν/ 2
+
+• (OS-N) + (SS-K): W (t)≍(1 + ∥t∥2)−γ exp( −ck∥t∥ν )
+
+• (SS-N) + (SS-K): W (t)≍ exp( −2cm∥t∥γ − ck∥t∥ν )
+
+To recover the L2 error from the MMD space, we must invert this weight. We truncate the L2 integral, for any Ω > 0:
+
+∥qbθN − p∥22 = 1(2 π)d
+
+Z
+
+> ∥t∥≤ Ω
+
+|∆ϕ(t)|2dt
+
+| {z }
+
+> Low-Frequency Error
+
++
+
+Z
+
+> ∥t∥>Ω
+
+|∆ϕ(t)|2dt
+
+| {z }
+
+> High-Frequency Tail
+
+ . (17) The cutoff Ω is a free parameter to be optimized at the end; it is not tied to the sieve complexity J.
+
+Bounding the High-Frequency Tail: Because both the true density p and the empirical estimator qbθN belong to the Sobolev space Hβ with bounded norms, their difference ∆ϕ ∈ Hβ is also bounded: R 
+
+> Rd
+
+(1 + ∥t∥2)β |∆ϕ(t)|2dt ≤ C
+
+for some constant C. For any ∥t∥ > Ω, the fraction (1+ ∥t∥2)β 
+
+> (1+Ω 2)β
+
+≥ 1. We use this to bound the tail: 
+
+Z
+
+> ∥t∥>Ω
+
+|∆ϕ(t)|2dt ≤
+
+Z
+
+> ∥t∥>Ω
+
+(1 + ∥t∥2)β
+
+(1 + Ω 2)β |∆ϕ(t)|2dt
+
+≤ 1(1 + Ω 2)β
+
+Z
+
+> Rd
+
+(1 + ∥t∥2)β |∆ϕ(t)|2dt ≤ C
+
+(1 + Ω 2)β . (18) For large Ω, the term (1 + Ω 2)β ≍ Ω2β .
+
+Bounding the Low-Frequency Error: For the low-frequency integral ( ∥t∥ ≤ Ω), we multiply and divide by the spectral weight W (t). Using the lower bound from the two-sided assumption on W (t), we can control the supremum of the inverse weight: sup ∥t∥≤ Ω 1/W (t) is finite and grows at a known rate in Ω. By pulling this supremum outside the integral and noting that the integrand is non-negative, extending the bounds back to all of Rd yields an upper bound matching the true MMD. Note that because we pull the supremum of 1/W (t) outside the integral, the geometric volume of the domain ∥t∥ ≤ Ω is implicitly captured entirely by the full MMD integral, preventing an explicit Ωd factor from 20 Nonparametric Deconvolution and Denoising appearing here: 
+
+Z
+
+> ∥t∥≤ Ω
+
+|∆ϕ(t)|2dt ≤ sup 
+
+> ∥t∥≤ Ω
+
+1
+
+W (t)
+
+! Z
+
+> ∥t∥≤ Ω
+
+|∆ϕ(t)|2W (t)dt
+
+≤ sup 
+
+> ∥t∥≤ Ω
+
+1
+
+W (t)
+
+!
+
+(2 π)dMMD 2(qbθN ∗ m, p ∗ m). (19) Squaring both sides of Theorem 3.1 and using (a + b)2 ≤ 2a2 + 2 b2:MMD 2(qbθN ∗ m, p ∗ m) ≲ inf 
+
+> θ∈Q J
+
+MMD 2(q ∗ m, p ∗ m) + Op(N −1). (20) Let q∗ 
+
+> J
+
+∈ Q J be the element achieving the sieve approximation rate ∥q∗ 
+
+> J
+
+−p∥2 ≤ Capprox J−β/d (Assumption A.9). The spectral weight is bounded globally: sup t W (t) ≤ CW (which follows from ϕk(t) being bounded and |ϕm(t)| ≤ 1), for some constant CW . By factoring out this maximum weight and applying Plancherel’s theorem to the remaining integral, we can relate the MMD distance directly to the L2 distance: 
+
+MMD 2
+
+> k
+
+(q∗ 
+
+> J
+
+∗ m, p ∗ m) = 1(2 π)d
+
+Z
+
+> Rd
+
+|ϕq∗ 
+
+> J
+
+(t) − ϕp(t)|2 W (t) dt
+
+≤ CW
+
+ 1(2 π)d
+
+Z
+
+> Rd
+
+|ϕq∗ 
+
+> J
+
+(t) − ϕp(t)|2 dt
+
+
+
+= CW ∥q∗ 
+
+> J
+
+− p∥22
+
+≤ CW C2approx J−2β/d . (21) Substituting into (20): 
+
+MMD 2
+
+> k
+
+(qbθN ∗ m, p ∗ m) ≲ J−2β/d + N −1. (22) Collecting (18), (19), and (22): 
+
+∥qbθN − p∥22 ≲ sup 
+
+> ∥t∥≤ Ω
+
+1
+
+W (t)
+
+! 
+
+J−2β/d + N −1
+
++ Ω −2β . (23) This bound has two free parameters: J and Ω. We optimize them sequentially. 
+
+Choose J: Select J large enough that the sieve bias is dominated by the statistical error: 
+
+J−2β/d ≤ N −1 ⇐⇒ J ≳ N d/ (2 β). (24) This simplifies (23) to 
+
+∥qbθN − p∥22 ≲ W −1(Ω) N −1 + Ω −2β . (25) 
+
+Case A (OS-N) and (OS-K): Under polynomial decay assumptions, |ϕm(t)| ≍ (1 + ∥t∥2)−γ/ 2 and ϕk(t) ≍
+
+(1 + ∥t∥2)−ν/ 2, we have 
+
+sup 
+
+> ∥t∥≤ Ω
+
+1
+
+W (t) = sup 
+
+> ∥t∥≤ Ω
+
+1
+
+|ϕm(t)|2 ϕk(t) ≍ { (1 + Ω 2)γ/ 2}2 · { (1 + Ω 2)ν/ 2} ≍ Ω2γ+ν . (26) This simplifies (23) to 
+
+∥qbθN − p∥22 ≲ Ω2γ+ν N −1 + Ω −2β . (27) Balancing the bias and variance terms yields: 
+
+Ω2γ+ν N −1 = Ω −2β =⇒ ΩN = N 1/(2 β+2 γ+ν). (28) Substituting Ω ≍ N 1/(2 β+2 γ+ν), and taking the square root provides the final polynomial convergence rate: 
+
+∥qbθN − p∥2 = Op
+
+r
+
+N 12β+2 γ+ν
+
+−2β
+
+!
+
+= Op
+
+
+
+N − β
+
+> 2β+2 γ+ν
+
+
+
+.
+
+21 Nonparametric Deconvolution and Denoising 
+
+Case B (SS-N) or (SS-K): Under exponential decay assumptions, |ϕm(t)|2 ≍ exp( −2cm∥t∥γ ) or ϕk(t) ≍
+
+exp( −2ck∥t∥ν ). Let 
+
+γ∗ =
+
+
+
+γ if (SS-N) and (OS-K) ,ν if (OS-N) and (SS-K) ,
+
+max( γ, ν ) if (SS-N) and (SS-K) .
+
+Then, using the lower bound from the two-sided assumptions and identifying the dominant exponent γ∗, we have: 
+
+sup 
+
+> ∥t∥≤ Ω
+
+1
+
+W (t) = sup 
+
+> ∥t∥≤ Ω
+
+1
+
+|ϕm(t)|2 ϕk(t) ≍ exp( c∗Ωγ∗
+
+).
+
+The variance term dominates the decay and balancing exp( c∗Ωγ∗
+
+)N −1 ≍ Ω−2β gives ΩN ≍ (log N )1/γ ∗
+
+, and substituting yields 
+
+∥qbθN − p∥2 = Op
+
+
+
+(log N )−β/γ ∗ 
+
+. (29) 
+
+Remark C.5 . While the dimension d does not appear explicitly in the convergence exponents, it imposes fundamental implicit constraints on the model parameters. Specifically, for the target density to lie in Hβ , we require β > d/ 2 per the Sobolev embedding theorem. Furthermore, to ensure the kernel is bounded and integrable (Assumption A.7), its Fourier decay ν must satisfy ν > d in Case A, ensuring that R (1 + ∥t∥2)−ν/ 2dt < ∞. Thus, higher dimensions strictly require smoother targets and smoother kernels, effectively slowing down the permissible rates. 
+
+Theorem C.6 (Empirical Bayes Denoising Rates) . Let bx∗ be the oracle posterior mean and bxEB be the empirical Bayes estimator using qbθN . Under Assumptions A.1 – A.13, with the additional requirement that the true marginal ep
+
+is strictly positive on a compact observation domain K, the expected excess empirical Bayes risk evaluated over K
+
+satisfies: Z
+
+> K
+
+∥bxEB (ex) − bx∗(ex)∥2 ep(ex)dex = Op
+
+
+
+∥qbθN − p∥22
+
+
+
+.
+
+Combined with Theorem 3.6: 
+
+• Case A (Ordinary-smooth): Op
+
+
+
+N − 2β
+
+> 2β+2 γ+ν
+
+
+
+.
+
+• Case B (Super-smooth): Op
+
+
+
+(log N )− 2βγ∗
+
+
+
+.Proof. For the rest of the proof, we denote q = qbθN for brevity. First, we prove that the total Mean Squared Error (MSE) decomposes exactly into the irreducible Bayes risk and the excess empirical Bayes (EB) risk. We write the total error as: 
+
+∥X − bxEB ( eX)∥2 = ∥X − bx∗( eX) + bx∗( eX) − bxEB ( eX)∥2
+
+= ∥X − bx∗( eX)∥2 + ∥bx∗( eX) − bxEB ( eX)∥2 + 2 ⟨X − bx∗( eX), bx∗( eX) − bxEB ( eX)⟩.
+
+Taking the expectation over the joint distribution of (X, eX), we can apply the tower property of expectation to the cross-term by conditioning on eX:
+
+EX, eX
+
+⟨X − bx∗( eX), bx∗( eX) − bxEB ( eX)⟩ = E eX
+
+h
+
+EX| eX
+
+⟨X − bx∗( eX), bx∗( eX) − bxEB ( eX)⟩ | eXi
+
+= E eX
+
+⟨EX| eX[X | eX] − bx∗( eX)
+
+| {z } 
+
+> =0
+
+, bx∗( eX) − bxEB ( eX)⟩
+
+ = 0,
+
+where the term vanishes because the oracle estimator bx∗( eX) is defined exactly as the true posterior conditional mean 
+
+Ep[X | eX]. Thus, the total MSE decomposes perfectly: 
+
+E∥X − bxEB ( eX)∥2 = E∥X − bx∗( eX)∥2| {z }
+
+> Irreducible Bayes Risk
+
++ E∥bxEB ( eX) − bx∗( eX)∥2| {z }
+
+> Excess EB Risk
+
+. (30) Our goal is now to bound the excess EB risk. 22 Nonparametric Deconvolution and Denoising By Bayes’ rule, the true posterior density is π∗(x | ex) = p(x)m(ex−x) 
+
+> ep(ex)
+
+. The oracle posterior mean, as a function of the noisy observation ex, is: 
+
+bxex =
+
+Z
+
+xπ∗(x | ex)dx =
+
+R x m(ex − x) p(x) dx
+
+ep(ex) . (31) We define the numerator functional rp(ex) = R x m(ex − x) p(x) dx, making bxex = rp(ex) 
+
+> ep(ex)
+
+. Analogously, the empirical Bayes estimator is bxEB (ex) = rq (ex) 
+
+> eq(ex)
+
+.We decompose the pointwise difference between the estimators by adding and subtracting rp(ex) 
+
+> eq(ex)
+
+:
+
+bxEB (ex) − bx∗(ex) = rq (ex)
+
+eq(ex) − rp(ex)
+
+ep(ex)= rq (ex)
+
+eq(ex) − rp(ex)
+
+eq(ex) + rp(ex)
+
+eq(ex) − rp(ex)
+
+ep(ex)= rq (ex) − rp(ex)
+
+eq(ex) + rp(ex)
+
+ ep(ex) − eq(ex)
+
+ep(ex)eq(ex)
+
+
+
+= rq (ex) − rp(ex)
+
+eq(ex)
+
+| {z }
+
+> (A)
+
++ bx∗(ex) · ep(ex) − eq(ex)
+
+eq(ex)
+
+| {z }
+
+> (B)
+
+. (32) We bound the numerators of terms (A) and (B) using the assumption that p and q are supported on a compact domain 
+
+X where ∥x∥ ≤ M . Using the triangle inequality for integrals and the fact that m(·) ≥ 0:
+
+∥rq (ex) − rp(ex)∥ =
+
+Z
+
+x m(ex − x)( q(x) − p(x)) dx
+
+≤
+
+Z
+
+∥x∥ m(ex − x)|q(x) − p(x)|dx
+
+≤ M
+
+Z
+
+m(ex − x)|q(x) − p(x)|dx
+
+= M (|q − p| ∗ m)( ex). (33) Similarly, the difference in the marginal densities is bounded by: 
+
+|ep(ex) − eq(ex)| =
+
+Z
+
+m(ex − x)( p(x) − q(x)) dx
+
+≤
+
+Z
+
+m(ex − x)|p(x) − q(x)|dx
+
+= ( |q − p| ∗ m)( ex). (34) Because bx∗(ex) is the expectation of X under the true posterior (a distribution strictly supported on X where ∥x∥ ≤ M ), its magnitude is bounded by the maximum norm of the support: ∥bx∗(ex)∥ ≤ M .Applying the triangle inequality to Equation (32): 
+
+∥bxEB (ex) − bx∗(ex)∥ ≤ ∥rq (ex) − rp(ex)∥
+
+eq(ex) + ∥bx∗(ex)∥ |ep(ex) − eq(ex)|
+
+eq(ex)
+
+≤ 1
+
+eq(ex)
+
+h
+
+M (|q − p| ∗ m)( ex) + M (|q − p| ∗ m)( ex)
+
+i
+
+= 2M
+
+eq(ex) (|q − p| ∗ m)( ex). (35) We now bound the denominator eq(ex) using uniform convergence of convolved densities. 23 Nonparametric Deconvolution and Denoising Let K ⊂ Rd be a compact observation domain. By the Cauchy-Schwarz inequality, the uniform ( L∞) distance between the marginal densities is explicitly controlled by the L2 error of the latent densities: 
+
+∥eq − ep∥∞ = sup 
+
+> ex
+
+Z
+
+(q(x) − p(x)) m(ex − x)dx
+
+≤ sup 
+
+> ex
+
+Z 
+
+|q(x) − p(x)|2dx
+
+1/2 Z 
+
+m(ex − x)2dx
+
+1/2
+
+= ∥q − p∥2∥m∥2. (36) By assumption, the noise is a bounded probability density ( ∥m∥∞ < ∞). Therefore, it is strictly square-integrable, since ∥m∥22 ≤ ∥ m∥∞∥m∥1 = ∥m∥∞ < ∞. Because Theorem 3.6 establishes that the latent error ∥qbθN − p∥2 → 0 in probability as N → ∞ , the bound above mathematically guarantees that the marginal density eq converges uniformly to 
+
+ep in probability. Because the true marginal density is strictly positive on K, there exists an absolute constant ρ0 > 0 such that 
+
+inf ex∈K ep(ex) ≥ 2ρ0. The uniform convergence guarantees that, with probability approaching one for sufficiently large 
+
+N , the estimator satisfies eq(ex) ≥ ρ0 simultaneously for all ex ∈ K .Applying the triangle inequality to the pointwise difference over K:
+
+∥bxEB (ex) − bx∗(ex)∥ ≤ ∥rq − rp∥
+
+eq + M |ep − eq|
+
+eq ≤ 2Mρ0
+
+(|q − p| ∗ m)( ex). (37) We square the pointwise bound and integrate over the observation domain K with respect to the true marginal density ep:
+
+Z
+
+> K
+
+∥bxEB (ex) − bx∗(ex)∥2 ep(ex)dex ≤ 4M 2
+
+ρ20
+
+Z
+
+> K
+
+ (|q − p| ∗ m)( ex)2 ep(ex)dex. (38) To bound the ep(ex) term, we utilize the smoothness of the latent space. By Assumption A.6, the true latent density p
+
+belongs to the fractional Sobolev space Hβ (Rd) with smoothness index β > d/ 2. Under this condition, the Sobolev Embedding Theorem [ 61 ] guarantees that Hβ (Rd) embeds continuously into the space of bounded, continuous functions 
+
+L∞(Rd) ∩ C(Rd). Consequently, the true latent density has a finite supremum norm: ∥p∥∞ < ∞.The true marginal density is defined by the convolution ep = p ∗ m. We apply Young’s convolution inequality [ 62 ], which states that for any f ∈ L∞ and g ∈ L1, their convolution is globally bounded by ∥f ∗ g∥∞ ≤ ∥ f ∥∞∥g∥1. Since the noise distribution m is a valid probability density, its total absolute mass is exactly one ( ∥m∥1 = R m(u)du = 1 ). Therefore, the marginal density is globally bounded across all of Rd by the peak of the latent density: 
+
+ep(ex) ≤ ∥ p ∗ m∥∞ ≤ ∥ p∥∞∥m∥1 = ∥p∥∞. (39) Substituting this uniform upper bound into our integral, and extending the integration domain from K to the entirety of 
+
+Rd (which is strictly valid since the squared integrand is non-negative), we obtain: 
+
+Eep
+
+∥bxEB − bx∗∥2 ≤ 4M 2∥p∥∞
+
+ρ20
+
+Z
+
+> Rd
+
+ (|q − p| ∗ m)( ex)2dex
+
+= 4M 2∥p∥∞
+
+ρ20
+
+|q − p| ∗ m 22. (40) By Young’s convolution inequality, ∥f ∗ g∥2 ≤ ∥ f ∥2∥g∥1. Since ∥m∥1 = 1 :
+
+∥(q − p) ∗ m∥2 ≤ ∥ q − p∥2. (41) Thus, the excess empirical Bayes risk over K is directly bounded by the L2 error of the latent density: 
+
+Eep
+
+∥bxEB − bx∗∥2 ≤ 4M 2∥p∥∞
+
+ρ20
+
+∥qbθN − p∥22. (42) Because M , ∥p∥∞, and ρ0 are absolute constants independent of N , the asymptotic rate is entirely governed by the squared L2 norm. Squaring the rates established in Theorem 3.6: 24 Nonparametric Deconvolution and Denoising • Ordinary-smooth regime: ∥qbθN − p∥2 = Op
+
+
+
+N − β
+
+> 2β+2 γ+ν
+
+
+
+=⇒ Excess Risk = Op
+
+
+
+N − 2β
+
+> 2β+2 γ+ν
+
+
+
+.• Super-smooth regime: ∥qbθN − p∥2 = Op
+
+
+
+(log N )− βγ∗
+
+
+
+=⇒ Excess Risk = Op
+
+
+
+(log N )− 2βγ∗
+
+
+
+.This completes the proof. 
+
+# D Ordinary- and Super-smooth Regimes: Definitions and Examples 
+
+This section provides canonical examples underlying the two regimes in Theorem 3.6. These regimes are characterized by the decay of the characteristic function of the noise distribution, which determines the degree of ill-posedness of the deconvolution problem. 
+
+Setup. Let ε ∼ m denote the additive noise with characteristic function 
+
+ϕm(t) = E[eit⊤ε].
+
+The behavior of |ϕm(t)| as ∥t∥ → ∞ governs how much high-frequency information about the latent density is lost. 
+
+Ordinary-smooth noise. The noise distribution is called ordinary-smooth with exponent γ > 0 if 
+
+|ϕm(t)| ≍ (1 + ∥t∥2)−γ/ 2.
+
+In this case, the characteristic function decays polynomially, and the inverse problem is mildly ill-posed. A canonical example is Laplace noise . If ε ∼ Laplace( 0, b ), then 
+
+ϕm(t) = 11 + b2∥t∥2 ,
+
+which corresponds to γ = 2 . More generally, Laplace-type and certain heavy-tailed distributions fall into this class. Under ordinary-smooth noise and kernel assumptions, Theorem 3.6 yields the polynomial convergence rate 
+
+∥qbθN − p∥2 = Op
+
+
+
+N − β
+
+> 2β+2 γ+ν
+
+
+
+.
+
+Super-smooth noise. The noise distribution is called super-smooth with exponent γ > 0 if 
+
+|ϕm(t)| ≍ exp( −c∥t∥γ )
+
+for some c > 0. In this case, the characteristic function decays exponentially, and the inverse problem is severely ill-posed. A canonical example is Gaussian noise . If ε ∼ N (0, σ 2Id), then 
+
+ϕm(t) = exp 
+
+
+
+− σ2∥t∥2
+
+2
+
+
+
+,
+
+corresponding to γ = 2 . In this regime, Theorem 3.6 gives the logarithmic rate 
+
+∥qbθN − p∥2 = Op
+
+
+
+(log N )−β/γ ∗ 
+
+,
+
+where γ∗ captures the dominant smoothness between the noise and kernel. 
+
+Interpretation. These two regimes reflect how aggressively the noise suppresses high-frequency components of the latent density. In the ordinary-smooth case, information is lost gradually, allowing polynomial recovery rates. In the super-smooth case, high-frequency components are exponentially attenuated, making recovery substantially harder and limiting convergence to logarithmic rates. This distinction is classical in nonparametric deconvolution and explains why Gaussian measurement error is significantly more challenging than Laplace noise. 25 Nonparametric Deconvolution and Denoising 
+
+# E Experiment Details 
+
+E.1 Verifying Rates of Convergence Data Generating Process (DGP) The true latent distribution p of the scalar variable X is a two-component Laplace mixture: 
+
+Xi ∼ 0.6 Laplace (μ = 3 .0, σ = 0 .8) + 0 .4 Laplace (μ = −2.0, σ = 1 .0) 
+
+where σ denotes the standard deviation (corresponding to a scale parameter b = σ/ √2). For the observational noise, we simulate a heteroscedastic setting (consistent with Assumption A.2). For each sample 
+
+i, a noise standard deviation is drawn uniformly: ϕi ∼ U (0 .5, 1.0) . We observe the noisy proxy eXi = Xi + UX,i ,evaluating two specific noise types: • Ordinary-Smooth (OS): UX,i ∼ Laplace (0 , b = ϕi/√2) .• Super-Smooth (SS): UX,i ∼ N (0 , ϕ 2 
+
+> i
+
+).
+
+Theoretical Slope Calculations The theoretical slopes plotted in Figure 1 are derived directly from Theorem 3.6. • OS Case (Laplace): For Laplace distribution, we have polynomial convergence exponent −2β 
+
+> 2β+2 γ+ν
+
+and this theoretical limit evaluates to a slope of −0.33 in log-log space. Here, β = 1 .5, γ = 2 and ν = 2 .• SS Case (Gaussian): For Gaussian distribution, the convergence rate degrades to (log N )−β/γ ∗
+
+. This corre-sponds to a slope of −1.5 in log -log log space. Here, β = 1 .5, γ = 2 and ν = 2 .• Latent MMD (Corollary 3.4): The squared MMD parametric rate is Op(N −1), yielding a log-log slope of 
+
+−1.0.
+
+Sieve Architectures We utilized two distinct sieve architectures to demonstrate that our bounds are agnostic to the choice of the underlying well-specified sieve: • Gaussian Mixture Model (GMM): The models are initialized via standard EM (scikit-learn) on the noisy data before being fine-tuned via the convMMD loss. We scale the number of components K ∈ [12 , 16] 
+
+gracefully with N . To ensure stability and differentiability, the covariance matrices are parameterized via their Cholesky factors L, where the diagonals are constrained using a Softplus activation. For optimization, we use the reparameterization trick to draw Monte Carlo samples (128 samples per batch) to evaluate the expected convMMD objective. • Normalizing Flow Model (NFM): We utilize a 1D Rational Quadratic Spline (RQS) flow. To strictly satisfy the finite Sobolev norm assumptions required by our theory, we bound the derivative of the splines using a Sigmoid activation (maximum derivative = 10 .0). The base distribution is a standard Normal matching the empirical mean and variance of the observations. The flow consists of 4 blocks, 16 spline bins, and a tail bound of 30 .0. The hidden sizes of the conditioner MLPs were scaled between 25 and 128 depending on N to guarantee sufficient sieve capacity. 
+
+Optimization The models are trained to minimize the empirical unbiased U-statistic MMD loss. We use AdamW optimizer [ 63 ] with a weight decay of 10 −4 (GMM) or 5 × 10 −3 (NFM). Gradients are clipped to a global norm of 
+
+1.0. For learning rate, we use cosine decay schedule starting at 10 −3 (NFM) or 5 × 10 −2 (GMM), decaying down to a factor of 10 −4 over the training run. Each N configuration is run over 20 to 100 independent random seeds. Training spans 1000 to 1500 epochs using batch sizes ranging from 200 to 400 .
+
+Results Figure 1 evaluates the theoretical predictions of Corollary 3.4 and Theorem 3.6. We consider a one-dimensional density deconvolution problem in which the latent variable follows a two-component Laplace mixture distribution and the observations are generated as 
+
+˜Xi = Xi + εi,
+
+with heteroscedastic additive noise. The convMMD estimator is trained by minimizing the discrepancy between the empirical noisy distribution and the noise-convolved model distribution. We compare two expressive sieve classes: Gaussian mixture models and normalizing flows parameterized by rational quadratic splines. To probe the two inverse-problem regimes in Theorem 3.6, we use Laplace noise with a Laplace 26 Nonparametric Deconvolution and Denoising kernel for the ordinary-smooth setting and Gaussian noise with a Gaussian kernel for the supersmooth setting. Sample sizes are varied over 
+
+N ∈ { 4000 , 8000 , 12000 , 16000 , 24000 , 32000 }.
+
+We measure nonparametric recovery using 
+
+MISE ≈ ∥ qbθN − p∥2 
+
+> L2
+
+.
+
+In the ordinary-smooth case, the theory predicts polynomial decay; for the Laplace smoothness parameters used here, the expected log-log slope is approximately −0.33 . Both GMM and normalizing-flow sieves exhibit the predicted linear trend. In the supersmooth case, the problem is severely ill-posed and the theory predicts logarithmic convergence. The empirical log(MISE) versus log(log N ) trends align closely with the predicted slope of −1.5.We also evaluate latent-space convergence through 
+
+MMD 2(p, q bθN ).
+
+Consistent with Corollary 3.4, the squared latent MMD decays at the parametric rate Op(N −1) in both ordinary-smooth and supersmooth regimes. Thus, even when L2 recovery is slowed by supersmooth noise, the RKHS metric retains fast parametric convergence. 
+
+E.2 Denoising in presence of outliers Data Generating Process and Outlier Corruption For each of the three topologies (Two Moons, Circle, Checker-board), we generate N = 2000 latent samples xi ∈ R2. To evaluate robustness, we randomly select 3% of the latent samples and displace them using a large uniform offset (e.g., U(−4.0, 4.0) ). This creates a set of "true" outliers that exist far outside the primary manifold. We generate independent per-sample noise standard deviations ϕi ∼ U (a, b ). For the Moon and Checkerboard datasets, we use noise bounds (a, b ) = (0 .2, 0.6) . Because the Circle has a larger geometric footprint, we increase the noise bounds to (a, b ) = (0 .5, 1.0) . The final observed data is generated as exi = xi + ux,i , where ux,i ∼ N (0, ϕ 2 
+
+> i
+
+I2).
+
+Method Configuration convMMD_NF We utilize a Rational Quadratic Spline (RQS) Normalizing Flow as the sieve model [ 43 ]. The flow consists of 4 coupling blocks, with 16 spline bins per block, and conditioner MLPs with a hidden dimension of 32. The tail bound is set to 2.0. The base distribution is a standard Gaussian shifted and scaled to match the empirical mean and variance of the observations. The model is trained for 3000 epochs. We use the AdamW optimizer with a learning rate of 5 × 10 −2 and a cosine decay schedule. Kernel bandwidths are chosen automatically using the median heuristic [ 64 , 65 ]. We use multiple bandwidths and select bandwidth using the formula h = pQq /(log 10 (2 n)√2) , where Qq
+
+are the quantiles of the pairwise distances between observed noisy samples and model generated noisy samples. Here, 
+
+q = [0 .1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9] . Once trained, we draw M = 30 , 000 samples from the learned prior qbθN
+
+and compute the posterior mean for each observation via Monte Carlo integration: 
+
+bxEB  
+
+> i
+
+= EqbθN
+
+[x | exi] ≈
+
+> M
+
+X
+
+> m=1
+
+wi,m ym, where wi,m ∝ exp 
+
+
+
+− ∥exi − ym∥2
+
+2ϕ2
+
+> i
+
+
+
+,
+
+NPEB We use the Nonparametric Empirical Bayes framework via the ‘npeb‘ package. This method computes the Nonparametric Maximum Likelihood Estimator (NPMLE) using the ‘GLMixture‘ solver. The algorithm places a fine grid over the observational space and optimizes the mixture weights using convex optimization (via CVXPY). We use diagonal precision matrices parameterized by the known heteroscedastic noise variances. The denoised estimates are then extracted using the exact discrete posterior mean (GMLEB). 
+
+XDGMM Extreme Deconvolution (XDGMM) fits a continuous Gaussian Mixture Model to data with known heteroscedastic measurement noise. To ensure a fair comparison and avoid bottlenecks, we implemented a custom JAX-accelerated, JIT-compiled version of the XDGMM Expectation-Maximization algorithm. We set the number of Gaussian components to K = 10 and regularize the covariances by 10 −6 to prevent singularity collapses caused by the outliers. The model is trained for 100 EM iterations (or until convergence with a tolerance of 10 −5). Once fit, we calculate the exact closed-form Gaussian posterior mean for each observation. 27 Nonparametric Deconvolution and Denoising 
+
+Evaluation Performance is measured using the standard Mean Squared Error (MSE) between the denoised estimates 
+
+bxEB  
+
+> i
+
+and the clean latent truths xi (excluding the outliers): MSE = 1
+
+N
+
+> N
+
+X
+
+> i=1
+
+∥bxEB  
+
+> i
+
+− xi∥2
+
+The MSE results presented in Figure 2 are representative of the average performance across 5 independent random seeds. 
+
+E.2.1 Kernel Bandwidth Sensitivity 
+
+In this experiment, we use convMMD with Normalizing Flow. We use a multi-scale Laplace kernel with bandwidths 
+
+{σj }9 
+
+> j=1
+
+selected via the median heuristic: pairwise distances between observed noisy samples and model generated noisy samples are pooled, nine quantiles of their empirical distribution are extracted, and each σj is set proportionally to the square root of the corresponding quantile, normalised by log 10 (2 n)√2. This heuristic provides user with a principled data-driven default. Here, we verify the sensitivity of the learned prior and downstream denoising performance on bandwidth choice. 
+
+Setup. We hold the full training procedure fixed and vary only a single multiplicative scale factor s ∈
+
+0.10 , 0.25 , 0.50 , 0.75 , 1.00 , 1.50 , 2.00 , 3.00 , 5.00 applied uniformly to all nine bandwidths, i.e. ˜σj = s · σheuristic  
+
+> j
+
+.The value s = 1 recovers the default heuristic. For each (s, dataset , seed ) triplet we train a fresh normalizing flow from the same initialization using the scaled bandwidths and evaluate on the held-out test set of 2000 points. Base bandwidths are computed once per seed before training of the model. All other hyperparameters (architecture, learning rate, number of gradient steps) match the main experiment. Results are averaged over five seeds and we report mean ±
+
+standard deviation. As a bandwidth-independent reference, we include the Oracle baseline (KDE fitted on a large clean sample with no outliers), whose MSE and W1 do not depend on s and are shown as horizontal dotted lines in Figure 3. 
+
+Results. Figure 3 plots test MSE (left) and prior W1 distance (right) as a function of s for all three datasets, with shaded ±1 std bands across seeds. We see that performance is remarkably stable for s ∈ [0 .25 , 2.00] , covering nearly an order of magnitude around the heuristic default. Both MSE and W1 remain within one standard deviation of the 
+
+s = 1 value across this range, indicating that convMMD is not sensitive to moderate misspecification of the bandwidth. At s = 0 .10 (very narrow kernels) the loss becomes dominated by near-zero-distance interactions and the prior loses its ability to capture global structure, causing an increase in W1. At s = 5 .00 (very wide kernels) the kernel smooths over local geometry and W1 increases similarly, though the degradation is more gradual. These results justify using the median heuristic as a fixed, tuning-free component of the conMMD pipeline. 
+
+E.3 Deconvolution Performance across Dimensions Dataset: Tangled Ribbon Manifold The latent distribution is supported on a two-dimensional spiral manifold embedded in RD . A scalar parameter t ∼ U (1 .5π, 4.5π) parameterises the base spiral via 
+
+xbase =
+
+ t cos ttmax , t sin ttmax 
+
+
+
+∈ [−1, 1] 2, (43) padded with D − 2 zeros to form a D-dimensional vector, and then multiplied by a fixed random orthogonal matrix 
+
+Q ∈ RD×D (drawn once per seed via QR decomposition of a standard Gaussian matrix). This construction ensures the manifold is genuinely embedded in RD without being axis-aligned, and that the intrinsic dimension remains 2 regardless of D. For each run, we generate Ntotal = 12 000 samples: the first 2 000 noisy observations {yi} form the training set, and the remaining 10 000 clean latent samples {xi} form the held-out evaluation set used exclusively for computing SWD. 
+
+Noise model. Each observation in the high-dimensional experiments is similarly corrupted by heteroscedastic isotropic Gaussian noise: 
+
+exi = xi + ux,i , ux,i ∼ N (0, ϕ 2 
+
+> i
+
+Id), ϕi ∼ U (0 .085 , 0.127) , (44) giving a population mean of ¯ϕ = 0 .106 .Each method is run under three noise-knowledge conditions, exercising both the homoscedastic/heteroscedastic axis and the correctly-specified/misspecified axis: • Well Specified: Each method receives the exact per-sample ϕi used to generate the data. 28 Nonparametric Deconvolution and Denoising • Homoscedastic Misspecified: Each method receives the constant bϕ = ¯ϕ = 0 .106 , equal to the true population mean. This condition tests whether discarding within-sample variance information is harmful. • Heteroscedastic Misspecified: Each method receives noisy per-sample estimates 
+
+bϕi = ϕi exp  ei − δ2
+
+> 2
+
+, ei ∼ N (0 , δ 2), (45) where δ = αpπ/ 2 is chosen so that the expected relative error satisfies E[| bϕi/ϕ i − 1|] ≈ α = 0 .25 . The log-normal centering ensures E[ bϕi] = ϕi (mean-unbiased estimates). The misspecified estimates { bϕi} are generated once per trial in the experiment from a deterministic fold of the data key to ensure all four methods see identical estimates within a trial. 
+
+Evaluation Metric All methods are evaluated with the sliced 1-Wasserstein distance (SWD) between 10 000 samples drawn from the fitted model and the 10 000 held-out clean latent samples. approximated with P = 1000 uniformly random projection directions, using the ott-jax implementation with Euclidean ground cost. Exact W2 distances are avoided because their sample complexity scales as O(n−1/D ), making them impractical for D ≥ 7.
+
+Method Configurations convMMD. The normalizing flow uses 6 coupling blocks, each consisting of a Rational Quadratic Spline (RQS) coupling layer interleaved with an invertible linear layer (LU decomposition). Each coupling network has hidden size 1024 and 16 spline bins; the tail bound is 1.0. The base distribution mean and standard deviation are initialised to the empirical mean and std of the training batch. Training uses AdamW with cosine learning-rate decay from 5 × 10 −4
+
+to 5 × 10 −6, gradient clipping at norm 1.0, weight decay 10 −4, and a full-batch size of 2 000 for 3 000 epochs. The convMMD kernel bandwidth is set via a data-driven heuristic: nine quantiles ( 0.1, . . . , 0.9) of pairwise distances between training observations and dummy model samples are computed, and the corresponding Laplace kernel widths are used in the convMMD loss. 
+
+XDGMM [ 27 ]. We use a JAX implementation of Extreme Deconvolution with K = 25 Gaussian components, EM run for up to 100 iterations (tolerance 10 −5), and a covariance regularisation of 10 −6I. Components are initialised with a 10-iteration scikit-learn GMM fit to the observed (noisy) training data. 
+
+NPEB We use the NPEB package [ 26 ] to fit the model. The package uses the Kiefer–Wolfowitz nonparametric maximum likelihood estimator for Gaussian location mixtures, with support atoms initialised by subsampling 2000 points from the training data. 
+
+deconv We use the stochastic variational inference normalizing flow from [ 12 ] with 5 flow steps, a batch size of 2000, Adam with learning rate 5 × 10 −4, and 200 training epochs. Noise covariances are passed as per-sample full diagonal matrices. 
+
+E.4 Denoising MNIST Images Dataset: MNIST Images We utilize the MNIST dataset in this experiment. In each experimental run, models are trained utilizing the unlabelled noisy training data consisting of Ntrain = 60 000 images. Quantitative evaluations are performed on a held-out test set consisting of Ntest = 1 000 images over 5 runs. For convMMD_ GAN , images are maintained at their native 28 × 28 resolution ( D = 784 ) and flattened to D-dimensional vectors. In convMMD_ GAN ∗,images are zero-padded to 32 × 32 (D = 1024 ). All image pixels are normalized to the range [0 , 1] .
+
+Noise model. Each clean observation xi is corrupted by an additive measurement error ui:
+
+exi = xi + ui. (46) We evaluate the models under two distinct measurement error regimes: • Additive White Gaussian Noise (AWGN): Independent pixel-wise errors drawn as ui ∼ N (0, σ 2I) with a base standard deviation of σ = 0 .5.• Spatially Correlated AR(1) Noise: Here, we generate stationary Autoregressive (AR(1)) Gaussian noise using exact spectral sampling. A white noise tensor is transformed to the frequency domain via 2D Fast Fourier 29 Nonparametric Deconvolution and Denoising Transform ( F), modulated by the square root of the power spectral density (PSD), and projected back to the spatial domain: 
+
+ui = F−1√S ⊙ F (W)
+
+
+
+, (47) where W ∼ N (0, I) is a white noise tensor, and ⊙ denotes element-wise multiplication. The matrix S
+
+represents the discrete PSD evaluated at spatial frequencies (ωx, ω y ), given by: 
+
+S(ωx, ω y ) ∝ 1(1 − 2ρ cos ωx + ρ2)(1 − 2ρ cos ωy + ρ2) . (48) Here, ρ ∈ [0 , 1) is the spatial correlation parameter. To guarantee a strictly controlled comparison across varying correlation levels ρ, we apply exact per-sample normalization. Each synthesized noise sample ui is scaled such that its sample standard deviation exactly equals the target σ prior to addition with the clean image. 
+
+Method Configurations convMMD-GAN (Fixed Kernel). This model parameterizes the prior using a Deep Convolutional Generator (DC-GAN) mapping a latent vector z ∼ N (0, I10 ) to R784 . The network comprises a dense layer mapping to a 256 × 7 × 7
+
+tensor, followed by a sequence of ConvTranspose2d blocks with SELU/ReLU activations and Batch Normalization, ending with a Sigmoid output. The model is trained using the convMMD objective matching the simulated noise-convolved samples against the observed noisy images. For this experiment, we utilize a mixture of Gaussian (RBF) kernels with bandwidths selected using median heuristic used in Section E.2. Optimization is performed using Adam (learning rate 5 × 10 −4, β1 = 0 .5, β 2 = 0 .999 ) with gradient clipping at norm 10 .0 and a MultiStepLR scheduler (halving at iterations 15 000 and 30 000) for 300 epochs. 
+
+convMMD-GAN* (Adversarial Kernel). This variant uses MMD-GAN minimax framework [ 47 ] for optimization. The generator maps z ∈ R10 to a 32 ×32 image. A critic network, structured as a multi-layer Convolutional Autoencoder, extracts feature representations of the data. The convMMD objective is evaluated in the critic’s feature space using RBF bandwidths σk ∈ { 1, 2, 4, 8, 16 }. The network is trained using a Rank Hinge Loss combined with an Autoencoder L2
+
+reconstruction penalty (weights λrg = 16 .0, λ AE = 8 .0) to prevent representation collapse. Both generator and critic are optimized using RMSprop (learning rate 5 × 10 −5) for 250 epochs, with 5 critic updates per generator update. 
+
+Noise2Self. We implement the self-supervised blind-spot network utilizing a fully convolutional U-Net architecture [48 ]. We enforce the blind-spot property using J-invariant masking strategy. During each training iteration, the input tensor is interpolated using a mask width of 4. The network is trained using Mean Squared Error (MSE) computed strictly over the masked pixels, preventing the learning of an identity mapping. The model is optimized using Adam (learning rate 10 −3) for 50 epochs. 
+
+SURE. Stein’s Unbiased Risk Estimate (SURE) [ 49 ] provides an unsupervised loss function that requires no clean targets and a known noise variance. We parameterize the denoising model using a fully convolutional autoencoder. The encoder consists of two Conv2d layers (kernel size 3, stride 2, 10 channels), and the decoder symmetrically utilizes two 
+
+ConvTranspose2d layers. All weights are initialized via Xavier Uniform, and all activations are Sigmoid . The SURE loss divergence term is approximated via Monte Carlo SURE (MC-SURE) using Gaussian perturbation vectors with 
+
+ϵ = 10 −3. The network is trained via Adam (learning rate 10 −3) for 30 epochs. 
+
+BUIFD. The Blind Unsupervised Image Filtering (BUIFD) architecture [ 50 ] serves as our empirical upper bound. It consists of three highly parameterized parallel modules: (1) A 20-layer DnCNN feature extractor (64 channels per layer with Conv2d , BatchNorm , and ReLU ) to estimate the additive noise. (2) A 6-layer NoiseCNN terminating in a 
+
+Sigmoid activation to spatially estimate the standard deviation noise map. (3) A FinalFusion module consisting of three dilated convolutional layers that concatenates the noisy input, the estimated prior (input minus estimated noise), the estimated noise map, and their interactions to produce the final denoised image. The model is trained in a fully supervised configuration using MSE against exact ground-truth noise residuals for 50 epochs via Adam (learning rate 
+
+10 −3). 
+
+Empirical Bayes Inference (convMMD variants) For both convMMD models, denoising is separated entirely from prior estimation. Once the generative models are trained, denoising is executed via self-normalized Importance Sampling to evaluate the posterior mean E[x | ex]. For each noisy test image, we draw S = 100 000 latent samples zs
+
+and generate their corresponding clean candidate images xs. Candidate weights are assigned proportional to the exact known noise likelihood m(ex − xs).30 Nonparametric Deconvolution and Denoising For the spatially correlated AR(1) noise condition, direct spatial evaluation of the dense D × D covariance likelihood is computationally intractable. We resolve this by computing the log-likelihood in the frequency domain. Utilizing Parseval’s theorem, we take the 2D FFT of the spatial residual ex − xs and weight the squared magnitude by the exact inverse AR(1) PSD. 31
