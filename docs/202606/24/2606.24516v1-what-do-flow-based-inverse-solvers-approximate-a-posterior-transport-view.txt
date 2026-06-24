@@ -1,0 +1,1023 @@
+Title: What Do Flow-Based Inverse Solvers Approximate? A Posterior-Transport View
+
+URL Source: https://arxiv.org/pdf/2606.24516v1
+
+Published Time: Wed, 24 Jun 2026 01:07:22 GMT
+
+Number of Pages: 22
+
+Markdown Content:
+Preprint 
+
+# WHAT DO FLOW -B ASED INVERSE SOLVERS APPROX -
+
+# IMATE ?A P OSTERIOR -T RANSPORT VIEW 
+
+Jian Xu 1,2, Delu Zeng 3, John Paisley 4, Qibin Zhao 21RIKEN iTHEMS 2RIKEN AIP 3South China University of Technology 4Columbia University 
+
+jian.xu@riken.jp 
+
+# ABSTRACT 
+
+A growing family of training-free solvers—FlowDPS, FLOWER, PnP-Flow and their diffusion ancestors (DPS, DAPS)—repurpose a pretrained flow-matching prior to solve imaging inverse problems by adding a measurement-guidance term to the deterministic probability-flow ODE. Despite strong empirical results, what these per-step corrections actually approximate—and how far the resulting sam-ples are from the true posterior p(x | y)—has not been characterized. We give a posterior-transport account of flow-based inverse problem solving. Our starting point is a simple but consequential fact: for a deterministic flow prior, Bayesian conditioning is realized entirely by a reweighting of the source distribution , not by a drift correction; pushing the reweighted source through the unmodified velocity field yields exact posterior samples. From this we show that trajectory-guidance solvers can be read as the minimum-kinetic-energy correction field needed to morph the unconditional source into the posterior, and that FlowDPS / FLOWER / PnP-Flow correspond to distinct zeroth-order / Gaussian / proximal approxima-tions of this single object; we bound the resulting posterior bias in Wasserstein distance. A controlled 2D study with a closed-form posterior confirms the the-ory decisively: source reweighting matches the true posterior to the Monte-Carlo floor on every metric, whereas trajectory guidance incurs 200 –800 × larger error and collapses posterior modes, regardless of guidance strength . Guided by the analysis we propose a cheap, principled velocity-correction solver that is com-petitive across two in-domain priors (AFHQ, CelebA) and two out-of-distribution settings while, unlike point-estimate source-space optimizers, producing diverse posterior samples with uncertainty that correlates with reconstruction error. 
+
+# 1 INTRODUCTION 
+
+Flow matching (Lipman et al., 2023; Liu et al., 2023; Albergo & Vanden-Eijnden, 2023) has become a state-of-the-art framework for generative modeling, learning a velocity field vt whose probability-flow ODE transports a simple source p0 to a data distribution p1. A pretrained flow model is an implicit prior over images, and a large recent literature reuses it—without retraining—to solve linear and nonlinear inverse problems such as super-resolution, deblurring and inpainting (Kim et al., 2025; Pourya et al., 2026; Martin et al., 2025; Ben-Hamu et al., 2024). These solvers all share a template inherited from diffusion posterior sampling (Chung et al., 2023; Zhang et al., 2025): integrate the prior flow ODE and, at each step, nudge the trajectory toward the measurement y with a likelihood-based correction. This template works well empirically, but it is built bottom-up by analogy to diffusion guidance, and a basic question has gone unanswered: what does the per-step correction approximate, and how biased is the resulting sampler relative to the true posterior p(x | y)? Perceptual metrics (LPIPS, FID) reward producing a plausible reconstruction, and so they mask the distinction between sampling the posterior and merely landing on its typical set. For reliability-critical restoration—and for any use of these solvers to quantify uncertainty—the distinction matters. 1
+
+> arXiv:2606.24516v1 [cs.CV] 23 Jun 2026
+
+Preprint We take a top-down, posterior-transport view. The key observation is that the deterministic nature of the probability-flow ODE changes the structure of Bayesian conditioning relative to the stochastic (diffusion) case. For an SDE prior, conditioning on y adds a Doob h-transform drift to the dynamics (Denker et al., 2024). For a deterministic flow, we show there is no canonical added drift : the exact posterior is obtained by leaving the velocity field untouched and reweighting the source distribution 
+
+by the endpoint likelihood (Section 3, Proposition 2). Conditioning lives in the source, not in the trajectory. This reframing has three consequences. (i) It explains what trajectory-guidance solvers are doing: because sampling the reweighted source is intractable, they start from the unconditional source and inject a correction field to morph it into the posterior; we identify the canonical (minimum-kinetic-energy) correction and show FlowDPS, FLOWER and PnP-Flow are distinct approxima-tions of it (Proposition 3). (ii) It yields a posterior-bias bound in Wasserstein distance controlled by the correction-estimation error (Theorem 1). (iii) It tells us where existing solvers must fail— multimodal posteriors, where a local correction collapses to a single mode—and what a faithful solver should instead do. We validate the theory on a 2D problem with a closed-form Gaussian-mixture posterior, removing all model error: source reweighting reaches the Monte-Carlo floor on sliced-Wasserstein, energy dis-tance, MMD and mode-weight recovery, while trajectory guidance is 200 –800 × worse and collapses modes for every guidance strength (Section 5). On AFHQ, CelebA, and out-of-distribution image restoration we reproduce the standard benchmark and, guided by the analysis, give a cheap velocity-correction solver (no ODE backpropagation) that is competitive on quality while producing diverse posterior samples with error-correlated uncertainty that point-estimate source-space optimizers (e.g. D-Flow) cannot (Section 6). 
+
+Contributions. 
+
+• Exact posterior transport for flow priors. We prove that, for a deterministic flow prior, the posterior is the pushforward of a reweighted source under the unmodified velocity field— conditioning is source reweighting, not drift (Proposition 1). • A unifying view of flow inverse solvers. We characterize the canonical correction field that trajectory-guidance solvers approximate and place FlowDPS, FLOWER, PnP-Flow and DPS within it as zeroth-order / Gaussian / proximal approximations (Proposition 3), with a Wasser-stein posterior-bias bound (Theorem 1). • Decisive empirical confirmation and a practical solver. A closed-form 2D study confirms the predictions exactly; on image restoration our analysis-guided solver matches strong baselines in quality while delivering error-correlated posterior uncertainty. 
+
+# 2 BACKGROUND AND PROBLEM SETUP 
+
+Flow-matching priors. A flow-matching model learns a time-dependent velocity field vt : Rd →
+
+Rd, t ∈ [0 , 1] , such that the probability-flow ODE 
+
+dxt
+
+dt = vt(xt), x0 ∼ p0 = N (0 , I ), (1) transports the source p0 to the data distribution p1 ≈ pdata . Let Φs→t denote the flow map of equation 1 (the solution operator from time s to t); it is a deterministic diffeomorphism, and pt =(Φ 0→t)#p0. We write Φ := Φ 0→1, so p1 = Φ #p0.
+
+Inverse problems. We observe y = A(x) + η, η ∼ N (0 , σ 2I), with a known (possibly non-invertible) forward operator A and likelihood p(y | x). Using the flow model as prior, the Bayesian posterior is p(x | y) ∝ p(y | x) p1(x). We want samples from p(x | y), not just a single recon-struction. 
+
+Trajectory-guidance solvers. The dominant template integrates equation 1 from x0 ∼ p0 while adding a measurement correction: dxt 
+
+> dt
+
+= vt(xt) + ut(xt), where ut is built from a one-step end-point estimate ˆx1(xt) = xt + (1 − t)vt(xt) (a flow Tweedie formula) and the likelihood gradient 2Preprint 
+
+∇xt log p(y | ˆx1). FlowDPS (Kim et al., 2025) uses this gradient directly; FLOWER (Pourya et al., 2026) replaces it with an isotropic-Gaussian endpoint-posterior projection solved by conjugate gra-dients; PnP-Flow (Martin et al., 2025) alternates a data-fidelity step with flow-path reprojection and denoising. D-Flow (Ben-Hamu et al., 2024) is the exception: it optimizes the source latent z to fit 
+
+y, returning a single MAP-like point. 
+
+# 3 EXACT POSTERIOR TRANSPORT UNDER A FLOW PRIOR 
+
+We first establish that, for a deterministic flow prior, conditioning is a source operation. Throughout, 
+
+Φ is the prior flow map and p0 = N (0 , I ).
+
+Lemma 1 (Posterior = reweighted source; classical) . Define the source posterior 
+
+py 
+
+> 0
+
+(z) ∝ p y | Φ( z) p0(z). (2) 
+
+Then x = Φ( z) with z ∼ py 
+
+> 0
+
+is distributed exactly as p(x | y), i.e. p(· | y) = Φ #py 
+
+> 0
+
+.
+
+Lemma 1 is the elementary change-of-variables identity underlying latent-space Bayesian infer-ence and normalizing-flow posterior inference; we claim no novelty for it and state it only to fix notation. Our contribution is what it implies for the dynamics , which is specific to flow matching and, to our knowledge, has not been made explicit. Define the time-t reweighting 
+
+rt(x) := p(y | Φt→1(x)) /p (y).
+
+Proposition 1 (Conditioning is a prior-flow invariant) . The posterior marginal is the reweighted prior marginal, py 
+
+> t
+
+= rt pt, and rt is conserved along prior-flow characteristics, ∂trt + vt·∇ rt = 0 .Consequently the posterior marginal path is transported by the unmodified prior velocity, 
+
+∂tpy 
+
+> t
+
++ ∇·  py 
+
+> t
+
+vt
+
+ = 0 , py 
+
+> 1
+
+= p(· | y), (3) 
+
+i.e. no drift correction is required (proof in Appendix A). 
+
+The conservation DDt rt = 0 holds because the endpoint Φt→1(xt) = x1 is constant along a deter-ministic characteristic: the “filtering” expectation that defines the diffusion h-function collapses to a point evaluation. This yields our central conceptual point, which sharply separates the flow case from the diffusion case it is usually derived by analogy to. 
+
+Proposition 2 (Zero-drift dichotomy / small-noise h-transform limit) . For the family of noisy bridges dxt = [ vt(xt) + ϵ2∇ log hϵt (xt)] dt + ϵ dW t conditioned on y at t = 1 , the Doob drift correction ϵ2∇ log hϵt vanishes pointwise as ϵ → 0, while the endpoint constraint is enforced in the limit through the reweighted initial law py 
+
+> 0
+
+. Hence in the deterministic ( ϵ = 0 ) flow limit, condition-ing carries no drift and is realized entirely by source reweighting (proof in Appendix A). 
+
+Proposition 2 is the conceptual core: porting a diffusion guidance drift (a Doob h-transform, as in classifier/measurement guidance and Denker et al. (2024)) onto a deterministic flow is structurally mismatched, because in the flow limit there is no drift to port—the conditioning information has mi-grated into the source. This explains, rather than merely observes, why trajectory-guidance solvers cannot be exact in general (Section 4). 
+
+Why solvers add a drift anyway. Proposition 1 also exposes the catch: it requires initializing at the reweighted source py 
+
+> 0
+
+. One can sample p0 = N (0 , I ), but py 
+
+> 0
+
+is intractable (it requires the full flow map inside the likelihood), and naive importance reweighting of p0 suffers from vanishing effective sample size in high dimension. Trajectory-guidance solvers sidestep this by starting from the unconditional p0 and adding a correction field ut to bend the marginals from pt to py 
+
+> t
+
+. The next section makes this precise. 
+
+# 4 FLOW INVERSE SOLVERS AS APPROXIMATE POSTERIOR CORRECTIONS 
+
+Suppose we integrate the corrected ODE dxt 
+
+> dt
+
+= vt(xt) + ut(xt) from x0 ∼ p0 and let qu 
+
+> t
+
+be the resulting marginals. We seek ut that lands on the posterior, qu 
+
+> 1
+
+= p(· | y). Among all such fields, the canonical choice is the one of minimum kinetic energy: 
+
+u⋆t = arg min 
+
+> u
+
+Z 10
+
+Equ 
+
+> t
+
+ut(xt) 2 dt s.t. qu 
+
+> 1
+
+= p(· | y). (4) 3Preprint This is a Benamou–Brenier / Schr¨ odinger-type control problem: u⋆ is the optimal-transport correc-tion taking the prior path to the posterior path. It is the deterministic analogue of the Doob/F¨ ollmer drift, but defined through a chosen mobility (here the Euclidean metric) rather than a diffusion coef-ficient. We stress what is and is not being claimed. Any field with qu 
+
+> 1
+
+= p(· | y) is a valid corrector; u⋆
+
+is merely the canonical (minimum-energy) representative, and Theorem 1 bounds the bias of any 
+
+corrector by its discrepancy from u⋆. Existing solvers do not attempt to compute u⋆; they follow a likelihood gradient and are greedy, local correctors that in general do not reach the posterior at all. So Proposition 3 should be read not as “they approximate the single object u⋆” but as “they are local likelihood-gradient correctors whose gap to any exact corrector is what Theorem 1 controls and what Section 5 measures.” 
+
+Proposition 3 (Existing solvers as approximations of u⋆). Write the generic correction as ut(x) = 
+
+Mt(x) ∇x log p y | ˆx1(x, t ) for a mobility operator Mt and endpoint estimate ˆx1. Then: 1. DPS / FlowDPS use ˆx1 = x + (1 − t)vt(x) (flow Tweedie) and a scalar mobility Mt = ζtI, i.e. a zeroth-order (point-mass endpoint) approximation of u⋆;2. FLOWER replaces the point mass by an isotropic-Gaussian endpoint posterior N (ˆ x1, σ 2
+
+> r,t
+
+I)
+
+and sets Mt to the corresponding Gaussian posterior-covariance (a ΠGDM/CG projection); 3. PnP-Flow replaces the gradient step by a data-fidelity proximal map followed by flow-path reprojection, a splitting approximation of the same correction. All three neglect higher-order structure of the endpoint posterior p(x1 | xt) and therefore incur a nonzero gap ut − u⋆t even with exact velocity fields. 
+
+Theorem 1 (Posterior-bias bound) . Let pu 
+
+> 1
+
+be the terminal law of the corrected ODE with an ap-proximate field u, and let p(· | y) be the true posterior. Under Lipschitz regularity of vt + ut
+
+(Assumption 1, Appendix A), 
+
+W2
+
+ pu 
+
+> 1
+
+, p (· | y) ≤ L
+
+Z 10
+
+ Equ 
+
+> t
+
+∥ut − u⋆t ∥21/2dt + ϵdisc + ϵflow , (5) 
+
+where ϵdisc is ODE discretization error and ϵflow is the flow-model approximation error. 
+
+Equation equation 5 is a stability guarantee: the posterior bias of any trajectory-guidance solver is controlled by how well its correction matches u⋆. The optimal corrector u⋆ is generally intractable, so we do not claim equation 5 gives a computable error estimate; rather it identifies the right object (the correction– u⋆ gap), whose magnitude we then measure directly against a closed-form posterior in Section 5. That measurement shows the gap is substantial for likelihood-gradient guidance and, importantly, does not vanish under any scalar guidance strength—consistent with a mis-specified correction direction rather than a mis-tuned magnitude. 4.1 A LARGE -DEVIATION VIEW OF SOURCE REWEIGHTING AND GUIDANCE COLLAPSE 
+
+The source representation equation 2 has a clean small-noise asymptotic geometry that sharpens why 
+
+source reweighting is exact yet hard, and why guidance collapses. We take the small-observation-noise regime, in which only the measurement noise shrinks, y = A(x) + √ϵ η, η ∼ N (0 , I ), and the source prior is kept fixed (p0 = N (0 , I ), matching the actual model—we do not temper the prior). Writing ℓy(x) = 12 ∥A(x) − y∥2, the source posterior is the tilted measure 
+
+py,ϵ  
+
+> 0
+
+(z) ∝ exp   − ℓy(Φ( z)) /ϵ  p0(z). (6) 
+
+Proposition 4 (Small-noise concentration and Laplace weights) . Let ℓy ◦ Φ be C2 with isolated nondegenerate minimizers {z⋆k} on supp p0 (the measurement-consistent set). Then as ϵ → 0,
+
+py,ϵ  
+
+> 0
+
+concentrates on {z⋆k} and, by Laplace’s method, converges weakly to the categorical mixture P 
+
+> k
+
+wk δz⋆k with basin weights 
+
+wk ∝ p0(z⋆k) ∇2(ℓy ◦ Φ)( z⋆k) −1/2, (7) 
+
+the prior entering through the prefactor p0(z⋆k). Since Φ is a diffeomorphism, the data posterior 
+
+py,ϵ  
+
+> 1
+
+= Φ #py,ϵ  
+
+> 0
+
+concentrates on {Φ( z⋆k)} with the same weights. 
+
+4Preprint 
+
+Figure 1: Conditioning lives in the source (densities, 8-mode 2D GMM prior, linear measure-ment). (a) The source N (0 , I ) reweighted by the endpoint likelihood p(y | Φ( z)) —conditioning is a reweighting on the source. (b) Closed-form true posterior. (c) Our source reweighting pushed through the unmodified velocity field—visually indistinguishable from (b). (d) DPS-style trajectory guidance collapses the multimodal posterior onto a single measurement-consistent ridge. 
+
+Regime and caveat. Proposition 4 is an asymptotic, explanatory statement about the small-observation-noise limit with a fixed prior; it is not a claim about the fixed-finite-σ posterior, and the basin picture is exact only as ϵ → 0. We use it to explain—not to certify—the finite-noise phenomena observed empirically (ESS collapse, mode mis-weighting). The path-space/Freidlin– Wentzell statements below additionally use a small dynamics noise (a reference SDE); these are likewise asymptotic. Proposition 4 (proof in Appendix A) makes three points precise. (i) Why source reweighting is exact but hard. The exact estimator weights p0 by e−ℓy (Φ( z)) /ϵ , but the rate function localizes mass in O(√ϵ) neighborhoods of {z⋆k}; unconditional draws z ∼ p0 rarely hit them, so the ef-fective sample size collapses—a large-deviation account of the high-dimensional ESS failure noted above. (ii) Why guidance mis-weights modes. The true posterior is a Laplace mixture over basins with weights wk. Source reweighting preserves these inter-basin weights, whereas a likelihood-gradient correction reweights them incorrectly because it transports mass by local ascent rather than by the global optimal coupling. We make this precise only for an idealized caricature —a pure single-trajectory ascent of ∇ log rt, which collapses to one basin and gives TV ≥ 1 − max k wk
+
+independent of guidance strength (Proposition 8, Appendix B). Real solvers integrate vt + ut, and the prior velocity vt itself spreads mass across modes, so their failure is softer : mode mis-weighting rather than exact single-basin collapse. The idealized bound is therefore an upper caricature of the effect; what we verify empirically is the milder but real mis-weighting (Table 1: large mode-weight error and a non-vanishing distributional gap that no guidance strength removes) and, complementar-ily, the exponential ESS decay of exact source IS (Proposition 6; Figure/Table in Appendix B). (iii) What u⋆ is. The minimum-kinetic-energy correction equation 4 is the deterministic-limit minimum-action (Freidlin–Wentzell) control (Freidlin & Wentzell, 2012; Dembo & Zeitouni, 2010) steering the unconditional source to the posterior; from the reweighted source py 
+
+> 0
+
+no action is needed (Propo-sition 1). This situates our transport picture within the Schr¨ odinger-bridge / F¨ ollmer-drift continuum (Appendix E). 
+
+# 5 A CONTROLLED STUDY WITH A CLOSED -FORM POSTERIOR 
+
+To test the theory free of model error we use a 2D flow prior whose target is a random 8-component Gaussian mixture; the conditional Euler velocity is available in closed form, so the flow map is es-sentially exact. With a linear-Gaussian measurement the true posterior is again a Gaussian mixture, available in closed form. We compare against this ground truth: (i) source reweighting (ours)— integrate the unmodified ODE from p0 and weight by the endpoint likelihood (Lemma 1); and (ii) FlowDPS-style guidance — the Tweedie-endpoint likelihood-gradient correction, swept over guidance strength. We report sliced-Wasserstein ( W2), energy distance, multi-scale MMD 2, and mode-weight ℓ1 error, against a Monte-Carlo floor (two independent draws of the true posterior). 5Preprint Table 1: 2D study against the closed-form posterior (K=8 modes, 20 k samples). Source reweighting reaches the Monte-Carlo floor on every metric; trajectory guidance is 200 –800 × worse on distributional metrics and badly misestimates mode weights, for all guidance strengths g.                                                         
+
+> Method sliced-W2energy dist. MMD 2mode-weight ℓ1
+> NULL floor (GT vs GT) 0.060 0.0004 1.5×10 −40.024
+> Source reweighting (ours) 0.032 0.0006 2.1×10 −40.028
+> FlowDPS-style guidance, g=0 .50.71 0.122 4.4×10 −20.53 FlowDPS-style guidance, g=1 .00.38 0.087 3.0×10 −20.16 FlowDPS-style guidance, g=2 .00.53 0.243 7.8×10 −20.52 FlowDPS-style guidance, g=4 .00.84 0.307 9.5×10 −20.56 DAPS (Zhang et al., 2025) (decoupled annealing) 0.87 0.076 1.5×10 −20.29 MGPS (Janati et al., 2024) (midpoint guidance) 0.45 0.092 3.2×10 −20.17
+
+Scope of this comparison. Table 1 compares solver mechanisms in a setting where it is fair to do so: all methods act on the same analytic flow prior with a closed-form posterior, so differences reflect the solver, not the prior. This is the only place we can directly compare against diffusion-native solvers, which are normally run with a diffusion prior on a different benchmark—so a shared imaging table would confound prior and solver, and we restrict the imaging tables (Section 6) to the flow-prior family. We reproduce the mechanisms of DAPS (Zhang et al., 2025) (decoupled annealing with an exact Gaussian endpoint-posterior inner step, favourable to DAPS) and MGPS (Janati et al., 2024) (midpoint guidance) on the shared analytic prior. Both improve on pure likelihood-gradient guidance (lower energy/MMD), yet remain ∼ 130 –190 × the Monte-Carlo floor and still mis-weight modes ( ℓ1 = 0 .17 –0.29 ): even an annealing/MCMC solver that provably targets the posterior in the limit is, at practical budgets, far from the exact source reweighting. (We do not report a toy number for the optimization-based SITCOM (Alkhouri et al., 2025): its triple-consistency objective is defined for the diffusion setup and our attempts to port it to the 2D flow were unstable; we did not want to report a strawman. It is discussed in Section 7.) These results are the empirical signature of our thesis across the solver family. Table 1 and Figure 1 confirm the theory decisively. Source reweighting through the unmodified velocity field matches the true posterior to the sampling floor on all four metrics, validating Propo-sition 1: the conditioning is captured entirely in the source. Trajectory guidance, by contrast, is two-to-three orders of magnitude worse on every distributional metric and collapses the multimodal posterior onto a single ridge (Figure 1d); increasing the guidance strength does not fix this—the error plateaus and then worsens—exactly the non-vanishing floor predicted by Theorem 1. 
+
+# 6 IMAGE RESTORATION 
+
+Setup. We use AFHQ-Cat 256 ×256 with a pretrained optimal-transport flow-matching prior, and the standard inverse problems of the FLOWER benchmark (Pourya et al., 2026): ×4 super-resolution, Gaussian deblurring, and box inpainting, all at measurement noise σ=0 .05 . We report PSNR and LPIPS. All methods share the same pretrained prior. 
+
+An analysis-guided solver. Proposition 3 says a faithful solver should (i) use a well-chosen mobil-ity Mt rather than a fixed scalar step, and (ii) preserve, rather than collapse, posterior multimodal-ity. We adopt a cheap velocity-correction scheme that integrates the prior ODE from a random 
+
+source draw and applies a per-step, mobility-modulated, normalized measurement correction (Ap-pendix D); it requires one forward/backward through the endpoint per step— no backpropagation through the ODE, unlike source-space optimizers such as D-Flow. Different source draws give dif-ferent posterior samples, from which we form a posterior mean and a per-pixel uncertainty map. Table 2 shows our solver is competitive on distortion (PSNR) and strong on perceptual quality: it attains the best LPIPS on box inpainting (0.052, vs. 0.077 for FLOWER) and the second-best on super-resolution and deblurring, behind only OT-ODE. We do not claim uniform state-of-the-art on single-reconstruction metrics—on these constraining problems several methods cluster closely— 6Preprint Table 2: AFHQ-Cat restoration (PSNR ↑ / LPIPS ↓). Our velocity-correction solver attains the best perceptual quality (LPIPS) on box inpainting and is competitive throughout, while uniquely providing posterior samples (Table 4) at low cost (Table 3). Best / second-best LPIPS per column in 
+
+bold / underline.                         
+
+> Method Super-resolution Gaussian deblur Box inpainting FLOWER (Pourya et al., 2026) 25.95 / 0.276 27.25 / 0.301 25.65 / 0.077 OT-ODE 25.18 / 0.107 26.40 / 0.117 25.23 / 0.083 Flow-Priors 23.36 / 0.276 25.85 / 0.183 26.15 / 0.125 D-Flow (Ben-Hamu et al., 2024) 24.11 / 0.180 26.70 / 0.173 24.32 / 0.085 PnP-Flow (Martin et al., 2025) ––25.44 / 0.116
+> Ours (velocity correction) 25.07 / 0.122 25.53 / 0.130 25.57 / 0.052
+
+Table 3: Capabilities and cost. Beyond a single reconstruction, only our solver provides posterior samples and error-correlated uncertainty without backpropagating through the ODE. Runtime is wall-clock seconds per 256 ×256 image (AFHQ super-resolution, same GPU; each method at its reported step budget, ours with a single sample).                           
+
+> Method posterior samples uncertainty–error corr. ODE-backprop-free runtime (s/img) FLOWER ✗(single) ✗✓124.7 OT-ODE ✗(single) ✗✓20.2 D-Flow ✗(single MAP) ✗✗(needs backprop) 503.7
+> Ours ✓(diverse) ✓(ρ=0 .76 )✓6.6
+
+because that is precisely the regime where such metrics are least discriminative (Section 5). The case for our solver is made on the axes those metrics ignore, which we isolate next. 
+
+Statistical significance. Paired Wilcoxon signed-rank tests on per-image LPIPS ( n=10 shared im-ages per problem) confirm the perceptual gains over the SOTA guidance solver are significant: ours 
+
+< FLOWER on super-resolution ( p=0 .002 ) and deblurring ( p=0 .002 ), and marginally on inpaint-ing ( p=0 .064 ). Against the strong OT-ODE the picture is mixed, as expected from Table 2: ours is significantly better on inpainting ( p=0 .004 ), significantly worse on super-resolution ( p=0 .027 ), and statistically tied on deblurring ( p=0 .19 ). Comparisons to D-Flow trend in our favor but are un-derpowered ( n=5 , p≥0.06 ). We report these honestly: our reconstruction quality is competitive— clearly ahead of FLOWER perceptually, on par with OT-ODE— not uniformly state-of-the-art, con-sistent with our thesis that single-reconstruction metrics are not where the contribution lies. 
+
+Robustness to sample size. To check that these conclusions are not artifacts of small n, we re-ran the main comparisons at n=50 (AFHQ) and n=100 (CelebA super-resolution). The order-ing is unchanged: AFHQ super-resolution LPIPS—ours 0.141 , OT-ODE 0.113 , FLOWER 0.256 ;AFHQ inpainting—ours 0.050 vs. OT-ODE 0.094 ; AFHQ deblurring—ours 0.130 ; CelebA super-resolution—ours 0.029 vs. OT-ODE 0.026 . The OOD advantage also persists at n=50 (Table 7). Thus the n=10 tables are representative; the larger-n numbers move by < 0.02 LPIPS and preserve every reported comparison. 
+
+What our solver offers that the baselines do not. Table 3 summarizes the qualitative differences. Trajectory-guidance solvers (FLOWER, OT-ODE, PnP-Flow) return a single, near-deterministic re-construction and no uncertainty. D-Flow, the source-space competitor, returns a single MAP point 
+
+and requires backpropagation through the entire ODE, making it the most expensive method by far. Our solver is the only one that simultaneously (i) produces diverse posterior samples, (ii) yields a per-pixel uncertainty map that tracks error (Table 4), and (iii) avoids ODE backpropagation. It is also the fastest method measured— 3× faster than OT-ODE, 19 × faster than FLOWER, and 76 × faster than D-Flow (Table 3)—because it neither backpropagates through the ODE nor requires hundreds of solver steps. 
+
+Posterior uncertainty. The distinguishing property of our solver is that it samples the posterior rather than returning a point estimate, yielding a per-pixel uncertainty map (the across-sample stan-7Preprint 
+
+Figure 2: The uncertainty map tracks the error (box inpainting, 3 examples). Per row: degraded observation; posterior mean; per-pixel uncertainty (across-sample std); actual error |mean − gt |
+
+(both in the turbo colormap, observation/mean gamma-brightened for display). Uncertainty and error co-localize on the inpainted region (per-image ρ in titles); point-estimate solvers produce no uncertainty map. dard deviation). Figure 2 shows that this map concentrates exactly where the reconstruction error concentrates—the inpainted region—so the solver localizes “what it does not know.” Quantita-tively (Table 4), the Pearson correlation between the per-pixel uncertainty and the per-pixel error is 
+
+ρ = 0 .76 ± 0.02 (95% CI over 60 inpainting images), ρ = 0 .65 ± 0.02 on CelebA inpainting ( 62 
+
+images), and ρ = 0 .53 ± 0.02 on super-resolution ( 20 images, where the error is more diffuse)—a strong, highly significant positive correlation across operators and datasets (a one-sample test of per-image ρ > 0 gives p < 10 −12 throughout). We deliberately avoid the word “calibrated”: ρ indicates the uncertainty tracks error in aggregate, not that it is a calibrated credible interval; establishing the latter would require conformal or coverage-based evaluation, which we leave to future work. The point is comparative—point-estimate baselines (D-Flow, OT-ODE) furnish no uncertainty at all. Ensembling additionally helps quality: the posterior-mean over 8 samples raises inpainting PSNR from 23 .79 (single sample, Table 2) to 25 .82 , above the source-space MAP baseline D-Flow (24 .32 ), at far lower cost (no ODE backpropagation). Additional examples and 8-sample montages are in Appendix C. 
+
+Ablation. Table 5 isolates the ingredients of our solver on box inpainting, addressing whether the quality comes merely from gradient normalization or step-size tuning. It does not: removing the Tweedie endpoint estimate (guiding on xt rather than ˆx1) collapses LPIPS from 0.045 to 0.248 ,and removing per-image gradient normalization is catastrophic (the unnormalized update diverges for all but the smallest γ, peaking at LPIPS 0.24 ). Both ingredients are necessary, not incidental. The mobility schedule is a minor knob (constant slightly beats σ2
+
+> r,t
+
+, which vanishes near t = 1 ); guidance strength behaves monotonically without a sharp optimum; and the posterior-mean over samples steadily improves PSNR ( 26 .9 → 28 .2 → 29 .2 for 1/4/8 samples), the ensembling benefit that single-shot solvers forgo. 8Preprint Table 4: Posterior uncertainty (8 samples). The Pearson correlation ρ (95% CI) between the per-pixel sample std and the per-pixel reconstruction error measures whether the solver “knows what it does not know”; computed per image (clean log) and consistent across operators/datasets, highly significant ( p < 10 −12 , one-sample test of per-image ρ > 0). Point-estimate solvers (D-Flow) produce no uncertainty; the posterior mean over samples additionally improves PSNR.                        
+
+> Method operator post.-mean PSNR diversity (std) uncertainty–error ρ
+> D-Flow (single MAP) inpainting 24.32 0 (point est.) n/a
+> Ours (8samples) inpainting ( 60 im.) 25.82 0.042 0.76 ±0.02 Ours (8samples) super-res ( 20 im.) 25.6 0.038 0.53 ±0.02
+
+Table 5: Ablation (box inpainting, 20 images, PSNR ↑ / LPIPS ↓). The Tweedie endpoint and gradi-ent normalization are both essential; mobility and guidance strength are secondary; more posterior samples monotonically improve the posterior-mean PSNR.                                      
+
+> Variant PSNR LPIPS
+> Full (γ=2 , const mobility, normalized, Tweedie) 26.87 0.045
+> −Tweedie endpoint (guide on xt)18.80 0.248
+> −gradient normalization (best γ=0 .01 )17.50 0.239 mobility σ2
+> r,t (vs. constant) 25.26 0.120 guidance γ= 0 .5/1/416.12 / 24.07 / 26.95 0.427 / 0.134 / 0.059 Euler steps 50 /100 23.77 / 26.87 0.154 / 0.045 posterior samples 1/4/826.87 / 28.16 / 29.24 0.045 / 0.042 / 0.042
+
+6.1 ADDITIONAL DATASETS : A SECOND IN -DOMAIN PRIOR AND OUT -OF -DISTRIBUTION PRIORS 
+
+We repeat the study with a second pretrained flow prior, CelebA ( 128 ×128 faces), and additionally probe robustness with two out-of-distribution (OOD) settings in which the AFHQ-cat prior is ap-plied to AFHQ-dog and AFHQ-wild images (prior–data mismatch). (Only AFHQ-cat and CelebA flow priors are publicly released; we use both, plus the OOD reuse of the cat prior.) 
+
+Second in-domain dataset (CelebA). Table 6 shows the same pattern as AFHQ: our solver is competitive on quality—best or second-best LPIPS on super-resolution and random inpainting— without being uniformly top on PSNR. Its uncertainty remains strongly error-correlated on faces: 
+
+ρ = 0.65 ± 0.02 (inpainting, 62 images), again far exceeding the zero uncertainty of the point-estimate baselines. The posterior mean over 8 samples lifts super-resolution to 32 .9/0.021 
+
+(PSNR/LPIPS), competitive with the best baseline. 
+
+Out-of-distribution priors (AFHQ-dog / -wild). Under prior–data mismatch our solver gener-alizes markedly better perceptually than guidance (super-resolution, n=50 ): on dog images ours attains LPIPS 0.183 vs. FLOWER’s 0.260 , and on wild images 0.195 vs. 0.309 (Table 7); the in-painting LPIPS are also lower on both (dog 0.061 vs. 0.071 , wild 0.058 vs. 0.078 ). Guidance over-commits to the (mismatched) prior’s modes, whereas our correction stays closer to the measurement. Uncertainty still localizes correctly on the inpainted region even OOD (per-image ρ ≈ 0.7; Figure 3). 6.2 SCOPE , AND THE THEORY –PRACTICE GAP 
+
+We are deliberately explicit about what the theory does and does not certify, since the analysis and the practical solver live at different scales. 
+
+What the theory establishes (the concept). For deterministic flow priors, conditioning is exact source reweighting and carries no drift (Lemma 1, Propositions 1–2); trajectory guidance is a greedy local corrector whose posterior gap is bounded by its distance to any exact corrector (Theorem 1) and is, empirically, large and untunable. The 2D study decisively validates this concept against a closed-form posterior (Table 1). 9Preprint Table 6: CelebA (128 2, 20 imgs; PSNR ↑/LPIPS ↓). Best/2nd LPIPS per row in bold /underline. Uncertainty–error ρ = 0 .65 ±
+
+0.02 (inpainting).                         
+
+> Operator Ours FLOWER OT-ODE D-Flow Super-res. 30.9 / 0.028 32.3 / 0.032 31.6 / 0.018 29.5 / 0.036 Inpainting 31.0 / 0.028 31.2 / 0.018 29.8 / 0.033 31.0 / 0.021 Deblur 31.5 / 0.064 34.9 / 0.025 ––Rand.-inp. 33.1 / 0.011 33.8 / 0.020 ––
+
+Table 7: OOD (cat prior on dog/wild, n=50 ; LPIPS, ours wins all).          
+
+> Ours FLOWER dog SR .183 .260 dog inp .061 .071 wild SR .195 .309 wild inp .058 .078
+
+Figure 3: Uncertainty localizes across datasets and OOD (box inpainting). Rows: CelebA face, AFHQ-dog (OOD), AFHQ-wild (OOD). Columns: observation, posterior mean, uncertainty (sam-ple std), error. The uncertainty tracks the error on the inpainted region even when the prior is mismatched (per-image ρ in titles). 
+
+Why the image solver is a separate, heuristic object. The exact estimator (source importance sam-pling) is intractable beyond low dimension: its effective sample size collapses from ≈ 1 at d=2 to 
+
+≈ 1/N by d=128 , and the IS posterior mean becomes worse than the prior mean (Table 8). Hence at image scale one cannot run the exact method, and our velocity-correction solver is an amortized for-ward heuristic motivated by —not derived from—the analysis. Its ablation (Table 5) is honest about this: the dominant ingredient is the Tweedie endpoint estimate, which matches the endpoint-map approximation the theory singles out (Proposition 3), but the other essential ingredient, per-image gradient normalization, is a numerical stabilizer not predicted by the optimal-transport analysis, and the theory-favored mobility schedule is only a minor knob. We therefore do not claim the image solver provably samples the posterior; we assess its faithfulness only indirectly (uncertainty–error correlation ρ ≈ 0.53 –0.76 ; OOD generalization). The decisive posterior-faithfulness evidence is for the concept (2D), not for this practical solver. 
+
+Open problem. Closing this gap—a provably faithful and scalable source-side posterior sampler for flow priors—is, in our view, the natural next step that the posterior-transport viewpoint makes precise. 10 Preprint 
+
+# 7 RELATED WORK 
+
+Diffusion-based inverse solvers. The dominant template is likelihood-gradient guidance: DPS (Chung et al., 2023) adds a Tweedie-endpoint manifold-constrained gradient to the reverse dif-fusion, MCG (Chung et al., 2022) augments it with a manifold projection, ΠGDM (Song et al., 2023) replaces the point likelihood by an isotropic-Gaussian (pseudoinverse) approximation, and DDNM (Wang et al., 2023) projects onto the measurement null-space. A second line reduces the greedy per-step error our analysis flags: DAPS (Zhang et al., 2025) decouples consecutive steps with noise annealing and an MCMC (Langevin/HMC) update so the time-marginals anneal to the posterior; MGPS (Janati et al., 2024) performs variational posterior sampling with midpoint guid-ance; and SITCOM (Alkhouri et al., 2025) is optimization-based, enforcing measurement, forward-and backward -diffusion consistency by optimizing the model input at each step. Provably consistent SMC/annealing samplers also exist (Xu & Chi, 2024; Wu et al., 2023; Cardoso et al., 2024). Our viewpoint organizes these: pure guidance (DPS/MCG/ ΠGDM/DDNM) are the greedy local correc-tors of Proposition 3; the annealing/MCMC methods (DAPS/MGPS) and the optimization methods (SITCOM, and D-Flow below) are partial moves toward the source side —trading per-step locality for exploration or latent optimization— which our source-transport analysis (Section 3) identifies as the exact object. 
+
+Flow-matching inverse solvers. FlowDPS (Kim et al., 2025), FLOWER (Pourya et al., 2026) and PnP-Flow (Martin et al., 2025) port the guidance template to deterministic flow priors. We do not propose another such solver; we explain what their corrections approximate (Proposition 3), bound the posterior bias (Theorem 1), and show that for a deterministic flow conditioning is a source reweighting rather than a drift. 
+
+Source-space and exact-posterior methods. D-Flow (Ben-Hamu et al., 2024) optimizes the source latent, returning a single MAP-like point; concurrent work explores source-space posterior 
+
+sampling (e.g. Langevin in latent space). Our Lemma 1 and Proposition 2 give the exact-transport justification for source-side conditioning and clarifies its relationship to trajectory guidance. On the diffusion side, provably consistent posterior samplers with bounds exist (Xu & Chi, 2024); they tar-get SDE priors and do not provide the flow velocity-plus-correction decomposition or the unification of flow solvers. 
+
+h-transforms and guidance. Doob h-transforms underpin conditional diffusion training and guid-ance (Denker et al., 2024); the deterministic-flow case we treat is structurally different (Section 3). 
+
+# 8 CONCLUSION 
+
+We gave a posterior-transport account of flow-based inverse problem solving: for a deterministic flow prior, conditioning is a reweighting of the source, and existing trajectory-guidance solvers are approximations of the minimum-kinetic-energy correction needed when one instead starts from the unconditional source. A closed-form study confirms that source reweighting is exact while trajectory guidance is structurally biased and mode-collapsing. The analysis yields a cheap, faithful velocity-correction solver whose uncertainty correlates with error. We hope the posterior-transport view offers a principled basis for designing and evaluating the next generation of flow inverse solvers, beyond single-reconstruction metrics. 
+
+# REFERENCES 
+
+Michael S. Albergo and Eric Vanden-Eijnden. Building normalizing flows with stochastic inter-polants. In International Conference on Learning Representations (ICLR) , 2023. Ismail R. Alkhouri, Shijun Liang, Cheng-Han Huang, Jimmy Dai, Qing Qu, Saiprasad Ravishankar, and Rongrong Wang. SITCOM: Step-wise triple-consistent diffusion sampling for inverse prob-lems. In International Conference on Machine Learning (ICML) , 2025. Heli Ben-Hamu, Omri Puny, Itai Gat, Brian Karrer, Uriel Singer, and Yaron Lipman. D-Flow: Differentiating through flows for controlled generation. In International Conference on Machine Learning (ICML) , 2024. 11 Preprint Jean-David Benamou and Yann Brenier. A computational fluid mechanics solution to the Monge-Kantorovich mass transfer problem. Numerische Mathematik , 84(3):375–393, 2000. Gabriel Cardoso, Sylvain Le Corff, Eric Moulines, et al. Monte Carlo guided denoising diffusion models for Bayesian linear inverse problems. In International Conference on Learning Represen-tations (ICLR) , 2024. Hyungjin Chung, Byeongsu Sim, Dohoon Ryu, and Jong Chul Ye. Improving diffusion models for inverse problems using manifold constraints. In Advances in Neural Information Processing Systems (NeurIPS) , 2022. Hyungjin Chung, Jeongsol Kim, Michael T. Mccann, Marc L. Klasky, and Jong Chul Ye. Diffusion posterior sampling for general noisy inverse problems. In International Conference on Learning Representations (ICLR) , 2023. Valentin De Bortoli, James Thornton, Jeremy Heng, and Arnaud Doucet. Diffusion Schr¨ odinger bridge with applications to score-based generative modeling. In Advances in Neural Information Processing Systems (NeurIPS) , 2021. Amir Dembo and Ofer Zeitouni. Large Deviations Techniques and Applications . Springer, 2010. Alexander Denker, Francisco Vargas, Shreyas Padhy, Kieran Didi, Simon Mathis, Vincent Dutordoir, Riccardo Barbano, Emile Mathieu, Urszula Julia Komorowska, and Pietro Lio. DEFT: Efficient fine-tuning of diffusion models by learning the generalised h-transform. In Advances in Neural Information Processing Systems (NeurIPS) , 2024. Paul Dupuis and Richard S Ellis. A Weak Convergence Approach to the Theory of Large Deviations .John Wiley & Sons, 2011. Berthy T Feng, Jamie Smith, Michael Rubinstein, Huiwen Chang, Katherine L Bouman, and William T Freeman. Score-based diffusion models as principled priors for inverse imaging. In 
+
+IEEE/CVF International Conference on Computer Vision (ICCV) , 2023. Mark I Freidlin and Alexander D Wentzell. Random Perturbations of Dynamical Systems . Springer, 3rd edition, 2012. Yazid Janati, Badr Moufad, Alain Durmus, Eric Moulines, and Jimmy Olsson. Variational diffu-sion posterior sampling with midpoint guidance. In Advances in Neural Information Processing Systems (NeurIPS) , 2024. Jeongsol Kim, Bryan Sangwoo Kim, and Jong Chul Ye. FlowDPS: Flow-driven posterior sampling for inverse problems. In IEEE/CVF International Conference on Computer Vision (ICCV) , 2025. Yaron Lipman, Ricky T. Q. Chen, Heli Ben-Hamu, Maximilian Nickel, and Matt Le. Flow matching for generative modeling. In International Conference on Learning Representations (ICLR) , 2023. Xingchao Liu, Chengyue Gong, and Qiang Liu. Flow straight and fast: Learning to generate and transfer data with rectified flow. In International Conference on Learning Representations (ICLR) ,2023. S´ egol` ene Martin, Anne Gagneux, Paul Hagemann, and Gabriele Steidl. PnP-Flow: Plug-and-play image restoration with flow matching. In International Conference on Learning Representations (ICLR) , 2025. George Papamakarios, Eric Nalisnick, Danilo Jimenez Rezende, Shakir Mohamed, and Balaji Lak-shminarayanan. Normalizing flows for probabilistic modeling and inference. Journal of Machine Learning Research , 22:1–64, 2021. Mehrsa Pourya, Bassam El Rawas, and Michael Unser. FLOWER: A flow-matching solver for inverse problems. In International Conference on Learning Representations (ICLR) , 2026. Danilo Rezende and Shakir Mohamed. Variational inference with normalizing flows. In Interna-tional Conference on Machine Learning (ICML) , 2015. 12 Preprint Jiaming Song, Arash Vahdat, Morteza Mardani, and Jan Kautz. Pseudoinverse-guided diffusion models for inverse problems. In International Conference on Learning Representations (ICLR) ,2023. Belinda Tzen and Maxim Raginsky. Theoretical guarantees for sampling and inference in generative models with latent diffusions. Conference on Learning Theory (COLT) , 2019. Yinhuai Wang, Jiwen Yu, and Jian Zhang. Zero-shot image restoration using denoising diffusion null-space model. In International Conference on Learning Representations (ICLR) , 2023. Luhuan Wu, Brian L Trippe, Christian A Naesseth, David Blei, and John P Cunningham. Practi-cal and asymptotically exact conditional sampling in diffusion models. In Advances in Neural Information Processing Systems (NeurIPS) , 2023. Xingyu Xu and Yuejie Chi. Provably robust score-based diffusion posterior sampling for plug-and-play image reconstruction. In Advances in Neural Information Processing Systems (NeurIPS) ,2024. Bingliang Zhang, Wenda Chu, Julius Berner, Chenlin Meng, Anima Anandkumar, and Yang Song. Improving diffusion inverse problem solving with decoupled noise annealing. In IEEE/CVF Con-ference on Computer Vision and Pattern Recognition (CVPR) , 2025. Qinsheng Zhang and Yongxin Chen. Path integral sampler: A stochastic control approach for sam-pling. In International Conference on Learning Representations (ICLR) , 2022. 
+
+# A PROOFS 
+
+Throughout, Φs→t is the flow map of the probability-flow ODE ˙xt = vt(xt), Φ := Φ 0→1, and 
+
+p0 = N (0 , I ). We make the standard regularity assumption. 
+
+Assumption 1 (Regularity) . The velocity field vt and corrections ut are continuous in t and L-Lipschitz in x, uniformly in t ∈ [0 , 1] ; the flow map Φ is a C1-diffeomorphism with det ∇Φ̸ = 0 ;and the likelihood x 7 → p(y | x) is bounded and measurable. These hold for the smooth velocity fields produced by trained flow models on bounded domains. 
+
+A.1 PROOF OF LEMMA 1 AND PROPOSITION 1
+
+Reweighting identity. Let py 
+
+> 0
+
+(z) = p(y | Φ( z)) p0(z)/Z with Z = R p(y | Φ( z)) p0(z) dz. For any bounded test function g,
+
+Ez∼py
+
+> 0
+
+g(Φ( z))  = 1
+
+Z
+
+Z
+
+g(Φ( z)) p(y | Φ( z)) p0(z) dz
+
+= 1
+
+Z
+
+Z
+
+g(x) p(y | x) p0(Φ −1(x)) det ∇Φ−1(x) dx (x = Φ( z)) = 1
+
+Z
+
+Z
+
+g(x) p(y | x) p1(x) dx =
+
+Z
+
+g(x) p(x | y) dx, (8) where the third equality uses the change-of-variables identity for the pushforward density, p1(x) = 
+
+p0(Φ −1(x)) | det ∇Φ−1(x)|, and the last uses Z = R p(y | x)p1(x) dx = p(y) together with Bayes’ rule p(x | y) = p(y | x)p1(x)/p (y). As this holds for all bounded g, Φ#py 
+
+> 0
+
+= p(· | y).
+
+Posterior path. Let μ0 be any initial law and μt := (Φ 0→t)#μ0. Because {Φ0→t}t is the flow of 
+
+˙x = vt(x), the curve t 7 → μt satisfies the continuity (Liouville) equation ∂tμt + ∇· (μtvt) = 0 in the weak sense: for g ∈ C∞ 
+
+> c
+
+, ddt 
+
+R g dμ t = R ∇g · vt dμ t by differentiating g(Φ 0→t(x)) and integrating against μ0. Taking μ0 = py 
+
+> 0
+
+gives py 
+
+> t
+
+= (Φ 0→t)#py 
+
+> 0
+
+with ∂tpy 
+
+> t
+
++ ∇· (py 
+
+> t
+
+vt) = 0 and terminal value 
+
+py 
+
+> 1
+
+= Φ #py 
+
+> 0
+
+= p(· | y). The velocity field is the prior vt, independent of y; conditioning enters only through the initial law py 
+
+> 0
+
+. □
+
+13 Preprint A.2 PROOF OF PROPOSITION 2Fix a bounded, C1 terminal weight g(x1) = p(y | x1) with g ≥ c > 0 on the relevant compact set (so log g is well defined and Lipschitz), and let Φ be a C1 flow (Assumption 1). Consider the reference SDE with small noise dxt = vt(xt) dt + ϵ dW t and its endpoint-conditioned (Doob) bridge, whose drift is vt + ϵ2∇ log hϵt with the harmonic function 
+
+hϵt (x) = Eg(xϵ
+
+> 1
+
+) xϵt = x, (9) the expectation taken under the reference SDE. We show the correction vanishes pointwise. 
+
+Step 1 (the harmonic function converges to a point evaluation). Let xϵ 
+
+> 1
+
+solve the reference SDE from xϵt = x. By standard small-noise stability of SDEs (Gr¨ onwall on E∥xϵ 
+
+> 1
+
+− Φt→1(x)∥2 ≤ Cϵ 2
+
+under Assumption 1), xϵ 
+
+> 1
+
+→ Φt→1(x) in L2, hence in probability, as ϵ → 0. As g is bounded and continuous, dominated convergence gives hϵt (x) → g(Φ t→1(x)) =: h0 
+
+> t
+
+(x).
+
+Step 2 ( C1 convergence and a uniform gradient bound). Differentiating equation 9 in x and using the first-variation (derivative) flow Jϵt→1 = ∂xϵ
+
+> 1
+
+/∂ x, which converges to the deterministic Jacobian ∇Φt→1(x) in L2,
+
+∇hϵt (x) = E(Jϵt→1)⊤ ∇g(xϵ
+
+> 1
+
+) −−−→
+
+> ϵ→0
+
+ ∇Φt→1(x)⊤∇g(Φ t→1(x)) = ∇h0 
+
+> t
+
+(x), (10) which is finite and bounded on compacts (product of bounded C1 quantities). Since also hϵt →
+
+h0 
+
+> t
+
+≥ c > 0, the logarithmic gradient is uniformly bounded for small ϵ: sup ϵ≤ϵ0 ∥∇ log hϵt (x)∥ =sup ϵ ∥∇ hϵt /h ϵt ∥ ≤ M (x) < ∞.
+
+Step 3 (the drift vanishes; the source carries the conditioning). Therefore the Doob correction satisfies ∥ϵ2∇ log hϵt (x)∥ ≤ ϵ2M (x) → 0 pointwise. At the same time the bridge’s initial law is the reference initial law reweighted by hϵ
+
+> 0
+
+, py,ϵ  
+
+> 0
+
+∝ hϵ 
+
+> 0
+
+p0 → g(Φ( ·)) p0 = p(y | Φ( ·)) p0 ∝ py 
+
+> 0
+
+.Passing to the limit, the conditioned process is the deterministic flow Φ started from py 
+
+> 0
+
+with zero 
+
+added drift, matching Proposition 1. □
+
+Remark (the tempered-likelihood regime). Step 2’s O(1) gradient bound uses that g is fixed in ϵ.If instead the likelihood is tempered at the noise scale, gϵ = exp( −ℓy◦Φt→1/ϵ 2) (the large-deviation scaling of Appendix B), then log hϵt ≍ − St/ϵ 2 for an action St and ϵ2∇ log hϵt → −∇ St̸ = 0 : the correction converges to the Freidlin–Wentzell minimum-action drift rather than to zero. The two regimes are consistent—both reach p(· | y)— and correspond exactly to the Section 3 (source reweighting, no drift) vs. Section 4 (start from p0, pay an action) dichotomy. A.3 EXACT REWEIGHTING OF THE MARGINAL PATH AND PROOF OF PROPOSITION 3We first record the deterministic collapse of the h-function that distinguishes the flow case from the diffusion case. 
+
+Proposition 5 (Deterministic reweighting) . For every t, the posterior marginal equals the prior marginal reweighted by a pointwise likelihood, 
+
+py 
+
+> t
+
+(x) = pt(x) p y | Φt→1(x)
+
+p(y) . (11) 
+
+Proof. Under the prior flow, the terminal state is the deterministic function x1 = Φ t→1(xt) of 
+
+xt. Hence conditioning the endpoint on y reweights the law of xt by p(y | x1 = Φ t→1(xt)) :
+
+py 
+
+> t
+
+(x) ∝ pt(x) p(y | Φt→1(x)) , and normalizing by p(y) gives equation 11. The conditional expectation defining the diffusion h-function, ht(x) = E[p(y | x1) | xt = x], collapses to a point evaluation because x1 | xt is a Dirac mass. Equation equation 11 defines the instantaneous likelihood score 
+
+st(x) := ∇x log p y | Φt→1(x) =  ∇xΦt→1(x)⊤∇x1 log p(y | x1) x1=Φ t→1(x). (12) 14 Preprint 
+
+The canonical correction. To reach p(· | y) when starting from the unconditional p0 (rather than 
+
+py 
+
+> 0
+
+), one integrates ˙x = vt + ut with marginals qu 
+
+> t
+
+, q0 = p0, and requires qu 
+
+> 1
+
+= p(· | y). Among all admissible u, the minimum-kinetic-energy field equation 4 exists and is a gradient field u⋆t = ∇ϕt,where (q⋆t , ϕ t) solve the Benamou–Brenier optimality system relative to the reference drift vt,
+
+∂tq⋆t + ∇·  q⋆t (vt + ∇ϕt) = 0 , ∂tϕt + vt ·∇ ϕt + 12 ∥∇ ϕt∥2 = 0 , (13) with boundary data q⋆ 
+
+> 0
+
+= p0, q⋆ 
+
+> 1
+
+= p(· | y) (Benamou & Brenier, 2000). This is the deterministic, mobility-Euclidean analogue of the Doob/F¨ ollmer drift; the existence and gradient form follow from the dynamic-OT formulation under Assumption 1. 
+
+Existing solvers as approximations. Trajectory-guidance solvers use the greedy correction aligned with the instantaneous likelihood score equation 12, with two approximations: 1. Endpoint map. They replace the exact endpoint map Φt→1(x) by its one-step (Tweedie) lin-earization ˆx1(x, t ) = x + (1 − t)vt(x), i.e. ˆx1 = x + (1 − t)vt(x) = Φ t→1(x) + O (1 − t)2,so that st(x) ≈ ∇ x log p(y | ˆx1(x, t )) .2. Mobility and greediness. They scale this score by a mobility Mt and follow it greedily rather than solving equation 13: FlowDPS takes Mt = ζtI scalar (point-mass endpoint); FLOWER 
+
+models x1 | xt ≈ N (ˆ x1, σ 2
+
+> r,t
+
+I) and sets Mt to the induced Gaussian posterior covariance, solved by conjugate gradients ( ΠGDM-type); PnP-Flow replaces the gradient step by a data-fidelity proximal map and a flow-path reprojection (operator splitting). Both approximations are exact only in degenerate cases (linear Φt→1; Gaussian endpoint posterior; vanishing transport cost), so in general ut̸ = u⋆t and a posterior bias remains, quantified next. □
+
+A.4 PROOF OF THEOREM 1Let wt = vt + u⋆t and w′ 
+
+> t
+
+= vt + ut be the exact and approximate total velocities, generating flows 
+
+Ψ0→t and Ψ′ 
+
+> 0→t
+
+from the shared initial law p0. Couple trajectories by the same initial point x0 ∼ p0
+
+and write xt = Ψ 0→t(x0), x′ 
+
+> t
+
+= Ψ ′
+
+> 0→t
+
+(x0). Then  
+
+> ddt
+
+∥xt − x′
+
+> t
+
+∥ ≤ ∥ wt(xt) −wt(x′
+
+> t
+
+)∥ +∥wt(x′
+
+> t
+
+) −w′
+
+> t
+
+(x′
+
+> t
+
+)∥ ≤ L∥xt − x′
+
+> t
+
+∥ +∥u⋆t (x′
+
+> t
+
+) −ut(x′
+
+> t
+
+)∥, (14) using Assumption 1. Gr¨ onwall’s inequality with x0 = x′ 
+
+> 0
+
+gives ∥x1 − x′
+
+> 1
+
+∥ ≤ R 10 eL(1 −s)∥u⋆s (x′
+
+> s
+
+) −
+
+us(x′
+
+> s
+
+)∥ ds . Taking the L2(p0) norm, using the coupling as an admissible plan for W2 and Minkowski’s integral inequality, 
+
+W2
+
+ Ψ0→1 # p0, Ψ′
+
+> 0→1 #
+
+p0
+
+ ≤ eL
+
+Z 10
+
+ Equ 
+
+> s
+
+∥us − u⋆s ∥21/2 ds. (15) Since Ψ0→1 # p0 = p(· | y) exactly and Ψ′
+
+> 0→1 #
+
+p0 = pu 
+
+> 1
+
+in continuous time with exact vt, adding the ODE-discretization error ϵdisc (from finite step size) and the flow-model error ϵflow (from ˆvt̸ =
+
+vt) by the triangle inequality yields equation 5 with L ← eL. □
+
+Remark (non-vanishing floor). If the correction has a mis-specified direction or mobility—e.g. a scalar Mt where u⋆ requires an anisotropic one, or a greedy field where transport requires a global rerouting—then inf c> 0 E∥c ut − u⋆t ∥2 > 0, so no scalar rescaling of the guidance drives the bound to zero. This is the plateau observed in Table 1. A.5 PROOF OF PROPOSITION 4The source posterior is the Gibbs measure py,ϵ  
+
+> 0
+
+∝ e−Iy /ϵ with Iy in equation 6 continuous and, by coercivity of I0, with compact sublevel sets (a good rate function). By Varadhan’s lemma / the Laplace principle (Dembo & Zeitouni, 2010; Dupuis & Ellis, 2011), {py,ϵ  
+
+> 0
+
+} satisfies an LDP with rate Iy, so for any closed F and open G, lim sup ϵ ϵ log py,ϵ  
+
+> 0
+
+(F ) ≤ − inf F Iy and 
+
+lim inf ϵ ϵ log py,ϵ  
+
+> 0
+
+(G) ≥ − inf G Iy; mass thus concentrates on arg min Iy = {z⋆k}. Around each nondegenerate minimizer a second-order (Laplace) expansion gives the stated normalized weights 
+
+wk ∝ e−Iy (z⋆k )/ϵ |∇ 2Iy(z⋆k)|−1/2. Finally Φ is a continuous bijection, so the contraction principle (Dembo & Zeitouni, 2010, Thm. 4.2.1) applied to x = Φ( z) yields an LDP for Φ#py,ϵ  
+
+> 0
+
+with rate 
+
+Jy(x) = inf z:Φ( z)= x Iy(z) = Iy(Φ −1(x)) , the last equality by injectivity of Φ. □
+
+15 Preprint 
+
+# B EXTENDED LARGE -DEVIATION ANALYSIS 
+
+This appendix develops the small-noise picture of Section 4.1 in more detail. We keep the scaling of equation 6: observation y = A(x) + √ϵ η and tempered source p0 ∝ e−I0/ϵ , so the source posterior is py,ϵ  
+
+> 0
+
+∝ e−Iy /ϵ with Iy(z) = I0(z) + ℓy(Φ( z)) − min Iy, ℓy(x) = 12 ∥A(x) − y∥2, and minimizers 
+
+{z⋆k}Kk=1 with Hessians Hk = ∇2Iy(z⋆k).B.1 WHY IMPORTANCE SAMPLING COLLAPSES : EXPONENTIAL ESS DECAY 
+
+Consider self-normalized importance sampling of py,ϵ  
+
+> 0
+
+with proposal p0 and weights w(z) =
+
+p(y | Φ( z)) = e−ℓy (Φ( z)) /ϵ . The standard normalized effective sample size is ESS /N =
+
+ Ep0 w2/Ep0 w2 = 1 / 1 + χ2(py,ϵ  
+
+> 0
+
+∥ p0).
+
+Proposition 6 (Exponential ESS decay) . Under the above scaling with a tempered prior of the same order, Ep0 wm ≍ e− 1    
+
+> ϵinf z[I0(z)+ m ℓ y(Φ( z)) ]
+
+by Laplace’s method, so 
+
+ϵ log ESS 
+
+N −−−→ 
+
+> ϵ→0
+
+−
+
+
+
+2 m1 − m2 − m0
+
+
+
+=: −∆ ≤ 0, (16) 
+
+where mj = inf z[I0(z) + j ℓ y(Φ( z))] for j ∈ { 0, 1, 2}. Whenever the likelihood is informative (ℓy ◦ Φ non-constant on the prior’s typical set), ∆ > 0 by strict convexity of j 7 → mj , so ESS /N 
+
+decays exponentially in 1/ϵ (equivalently, in problem dimension at fixed per-coordinate noise). This is the large-deviation form of the statement that naive source reweighting is exact but intractable in high dimension. 
+
+We verify this directly (Table 8): for a Gaussian flow prior with a random linear measurement observing d/ 4 coordinates at fixed noise σ=0 .3, the importance-sampling ESS/ N collapses from 
+
+0.97 at d=2 to the floor ≈ 1/N by d=128 , and the IS posterior-mean estimate degrades from 3% 
+
+relative error to worse than the prior mean . Exact source reweighting is thus usable only at very low dimension—hence the need for an amortized solver at image scale. Table 8: Exact source importance sampling collapses with dimension (Gaussian flow, observe 
+
+d/ 4 coords, σ=0 .3, N =4 ×10 4 proposals). ESS /N → 1/N and the IS posterior-mean error exceeds 
+
+1 (worse than the prior). 
+
+dimension d 2 8 32 128 512 2048 ESS /N 0.97 3.2×10 −3 3.2×10 −4 2.5×10 −5 2.5×10 −5 2.5×10 −5
+
+rel. error of IS mean 0.03 0.06 0.83 1.89 1.97 2.23 
+
+B.2 SOURCE REWEIGHTING PRESERVES LAPLACE WEIGHTS ; GREEDY GUIDANCE DOES NOT 
+
+Proposition 7 (Basin-weight preservation) . As ϵ → 0, both the true posterior and exact source reweighting (importance resampling) converge to the same categorical law over basins, P 
+
+> k
+
+wk δx⋆k
+
+with x⋆k = Φ( z⋆k) and wk ∝ e−Iy (z⋆k )/ϵ |Hk|−1/2. Source reweighting therefore preserves the rela-tive basin (mode) weights by construction. 
+
+Proposition 8 (Greedy guidance collapses to a single basin) . Consider the idealized likelihood-ascent guidance that follows the instantaneous score ∇x log rt along a single trajectory initialized at z ∼ p0. In the small-noise limit its endpoint is the gradient-flow limit of −ℓy ◦ Φt→1, hence lands in the single basin k(z) whose region of attraction contains z. Consequently its terminal law is a 
+
+single-basin measure δx⋆k⋆ (for the dominant/attracting k⋆), and for any guidance strength c > 0,
+
+TV  guidance , p (· | y) ≥ 1 − max  
+
+> k
+
+wk, (17) 
+
+which is bounded away from 0 for every genuinely multimodal posterior ( K ≥ 2, max k wk < 1)and is independent of c.Proof. Resampling from an exact reweighting reproduces the limiting mixture, giving Proposition 7. For Proposition 8, the deterministic descent map sends each initialization to one basin minimizer, so 16 Preprint the pushforward of any initial law is supported on the basin minimizers; a greedy ascent that does not track inter-basin mass places (asymptotically) all mass on the dominant basin, and TV between a point mass at x⋆k⋆ and the mixture P 
+
+> k
+
+wkδx⋆k equals 1 − wk⋆ ≥ 1 − max k wk. Scaling the score by c reparameterizes the descent but not its basin of attraction, so the bound is c-independent. □
+
+Equation equation 17 is the asymptotic counterpart of the empirical plateau in Table 1: the guidance error has a floor set by the posterior’s basin geometry (1 − max k wk), not by a tunable step size. It also predicts the failure mode sharpens as the posterior becomes more balanced (several comparable 
+
+wk), consistent with the multimodal toy. B.3 u⋆ AS A FREIDLIN –W ENTZELL MINIMUM -ACTION CORRECTION 
+
+Finally we make explicit the action interpretation of the canonical corrector. For the small-noise controlled dynamics dxt = ( vt + ut) dt + √ϵ dW t, the Freidlin–Wentzell rate of a path γ is 
+
+S[γ] = 12
+
+R 10 ∥ ˙γt − vt(γt)∥2 dt (Freidlin & Wentzell, 2012; Dupuis & Ellis, 2011). The most likely way to transport p0 to p(· | y) minimizes E S over controls with the prescribed endpoint law, which is exactly the kinetic-energy objective equation 4 with ut = ˙γt − vt(γt); its mini-mizer is the Benamou–Brenier geodesic relative to vt (Appendix A). Thus u⋆ is simultaneously (i) the minimum-kinetic-energy corrector, (ii) the deterministic ( ϵ → 0) Schr¨ odinger-bridge/F¨ ollmer drift, and (iii) the Freidlin–Wentzell minimum-action control from the unconditional source to the posterior—three views of one object. From the reweighted source py 
+
+> 0
+
+, the required action is zero (Proposition 1); the action is the price of starting from p0.
+
+# C ADDITIONAL QUALITATIVE RESULTS 
+
+Figure 4: Full mechanism comparison on the controlled 2D prior (densities; companion to Ta-ble 1). (a) closed-form true posterior; (b) source reweighting (ours)—matches (a); (c) DPS-style guidance collapses onto a measurement-consistent ridge; (d) DAPS partially recovers the mode structure but mis-weights it; (e) MGPS, like guidance, collapses toward a ridge. Only source-side reweighting reproduces the posterior; the entire trajectory/guidance family is biased. Across all four restoration tasks the uncertainty pattern adapts to the operator and tracks the error, with 3 examples each below (columns: observation, posterior mean, per-pixel uncertainty (sample std), actual error; per-image ρ in titles). 
+
+# D METHOD AND EXPERIMENTAL DETAILS 
+
+D.1 VELOCITY -CORRECTION SOLVER 
+
+Guided by Proposition 3, our solver integrates the prior ODE from a random source draw and ap-plies, at each step, a mobility-modulated and per-image normalized measurement correction aligned with the instantaneous likelihood score equation 12 (using the Tweedie endpoint ˆx1). Normaliza-tion is essential for stability: the raw gradient of ∥H ˆx1 − y∥2/(2 σ2) has magnitude O(1 /σ 2) and, applied without normalization, diverges. Algorithm 1 summarizes one posterior sample; S indepen-dent draws give a posterior mean (reconstruction) and a per-pixel standard deviation (uncertainty map). 17 Preprint 
+
+Figure 5: Additional uncertainty maps (box inpainting), including darker / harder cases. Per row: observation, posterior mean, per-pixel uncertainty (across-sample std), actual error. The uncertainty localizes on the inpainted region across a range of image appearances. 
+
+Figure 6: Posterior diversity, amplified (box inpainting). Per row: posterior mean; four per-sample deviations (sample i − mean ) × 4 (red/blue), and the across-sample std. The deviations are concen-trated in—and differ across samples within—the inpainted region: the modest but genuine posterior variation that single-shot solvers do not capture. (Raw 8-sample montages are visually near-identical precisely because the inter-sample variation is small in magnitude; we therefore visualize it ampli-fied.) 
+
+Mobility schedules. We use either a constant mobility wt ≡ 1 (CONST ) or the flow noise level 
+
+wt = σ2 
+
+> r,t
+
+with σr,t = (1 − t)/pt2 + (1 − t)2 (SIGMA R ). The latter vanishes as t → 1, removing late-stage data correction; CONST retains correction throughout and is our default. The correction requires one forward and one backward through the endpoint per step— no backpropagation through the ODE, in contrast to source-space optimizers such as D-Flow. 18 Preprint 
+
+Figure 7: Gaussian deblurring (CelebA, 3 examples). Uncertainty concentrates on edges and fine facial structure—the high-frequency content the deblurring must restore. 
+
+Algorithm 1 Posterior-flow velocity correction (one sample)  
+
+> 1:
+
+input: measurement y, operator H, noise σ, steps N , guidance γ, mobility {wt} 
+
+> 2:
+
+x ∼ N (0 , I ); δ ← 1/N  
+
+> 3:
+
+for i = 0 , . . . , N − 1 do  
+
+> 4:
+
+t ← iδ ; v ← vt(x); ˆx1 ← x + (1 − t)v {flow Tweedie endpoint } 
+
+> 5:
+
+g ← ∇ x
+
+ 12 ∥H ˆx1 − y∥2; ˆg ← g/(∥g∥ + ϵ) {per-image normalized } 
+
+> 6:
+
+x ← x + δ v − γ w t ˆg 
+
+> 7:
+
+end for  
+
+> 8:
+
+return x
+
+Hyperparameters. Unless stated, N = 100 Euler steps, γ = 1 , mobility CONST ; uncertainty experiments use S = 8 samples. All AFHQ runs use the public pretrained OT flow-matching prior and the FLOWER benchmark degradations at σ = 0 .05 ; we report PSNR and LPIPS (AlexNet). Baselines use their released, per-problem-tuned hyperparameters. D.2 CLOSED -FORM 2D STUDY 
+
+Prior and exact velocity. The target is a Gaussian mixture p1 = PKk=1 wk N (μk, σ 2 
+
+> p
+
+I) (K = 8 ,random μk in [−5, 5] 2, random wk, σp = 0 .35 ) and the source is p0 = N (0 , I ). For the straight (rectified-flow) conditional path xt = (1 − t)x0 + tx1 with independent x0 ∼ p0, x1 ∼ p1, the marginal velocity vt(x) = E[x1 − x0 | xt = x] is available in closed form. Conditioned on component k, xt | k ∼ N (tμ k, s 2 
+
+> t
+
+I) with s2 
+
+> t
+
+= (1 − t)2 + t2σ2 
+
+> p
+
+, and the joint Gaussianity gives 
+
+E[x1 | xt, k ] = μk + tσ 2
+
+> p
+> s2
+> t
+
+(xt − tμ k), E[x0 | xt, k ] = 1−ts2
+
+> t
+
+(xt − tμ k), (18) so that vt(x) = P 
+
+> k
+
+rk(x)  E[x1 | x, k ] − E[x0 | x, k ] with responsibilities rk(x) ∝
+
+wk N (x; tμ k, s 2 
+
+> t
+
+I). This makes the flow map essentially exact (no learned model), isolating the posterior-sampling question from approximation error. 19 Preprint 
+
+Figure 8: ×4 super-resolution (CelebA, 3 examples). Uncertainty spreads over the high-frequency detail that super-resolution hallucinates. 
+
+Measurement and exact posterior. With a linear measurement y = Ax + η, η ∼ N (0 , σ 2I), the posterior is again a Gaussian mixture: each component k has Σpost = ( σ−2 
+
+> p
+
+I + A⊤σ−2A)−1, mean 
+
+Σpost (σ−2 
+
+> p
+
+μk + A⊤σ−2y), and updated weight ∝ wk N (y; Aμ k, Aσ 2 
+
+> p
+
+A⊤ + σ2I). We draw from this closed-form posterior for the ground-truth comparison. 
+
+Methods and metrics. Source reweighting integrates the unmodified ODE from 20 k draws of p0
+
+and weights by p(y | Φ( z)) (Lemma 1); we report effective sample size and use weighted metrics to remove resampling variance. FlowDPS-style guidance adds g · ∇ xt log p(y | ˆx1) to the velocity, swept over g. Metrics are sliced-W2 (1000 projections), energy distance, multi-scale RBF MMD 2,and the ℓ1 error of mode weights (nearest-component assignment), each against a null floor given by two independent posterior draws. 
+
+# E RELATION TO EXISTING FRAMEWORKS 
+
+Our results sit at the intersection of several literatures. Below we treat each in turn, in every case separating what we borrow (established machinery) from what is new here (its specialization to deterministic flow-matching posteriors and the consequences for guidance-based solvers). A one-line summary: the source-reweighting identity and the optimal-transport/Schr¨ odinger machinery are classical; their synthesis into a deterministic-flow posterior-transport account —with the zero-drift dichotomy, the guidance-as-approximate-corrector reading, and the large-deviation explanation of mode collapse—is, to our knowledge, new. 
+
+Normalizing-flow and latent-space Bayesian inference. An invertible generator x = Φ( z) turns a data posterior into a reweighted source posterior py 
+
+> 0
+
+∝ p(y | Φ( z)) p0(z) (Lemma 1). This is the change-of-variables identity at the heart of variational inference with normalizing flows (Rezende & Mohamed, 2015; Papamakarios et al., 2021) and of latent-variable Bayesian inference more broadly; encoder/decoder posterior inference, flow-based VI, and “inference amortization” all exploit it. Bor-rowed: the identity itself. New: its dynamical consequence for a flow-matching prior (Proposi-20 Preprint 
+
+Figure 9: Random inpainting (AFHQ-cat, 3 examples). Uncertainty localizes on the missing pix-els. tions 1–2). The reweighting rt(x) = p(y | Φt→1(x)) /p (y) is a first integral of the prior flow ( DDt rt = 0 ), so the posterior marginal path is carried by the unmodified velocity field and condi-tioning requires no drift. Normalizing-flow posterior inference operates on the static map Φ; it does not analyze the time-marginal dynamics that flow-matching inverse solvers actually run, which is exactly where guidance methods inject their (drift) corrections. 
+
+Source-side posterior sampling: importance sampling, MCMC, SMC. Because conditioning lives in the source, drawing py 
+
+> 0
+
+is a latent-space inference problem, and every generic posterior sam-pler applies. (i) Importance sampling: reweighting unconditional draws z ∼ p0 by p(y | Φ( z)) 
+
+is unbiased and is exactly our toy estimator; Proposition 4 explains, via the rate function Iy, why its effective sample size decays exponentially in dimension and inverse-noise. (ii) Latent MCMC: 
+
+Langevin / HMC on log py 
+
+> 0
+
+(z) = log p0(z) + log p(y | Φ( z)) needs ∇z log p(y | Φ( z)) =(∇zΦ) ⊤∇ log p(y | · ), i.e. differentiation through the flow—the same backpropagation-through-the-ODE cost that makes D-Flow expensive (Table 3); D-Flow itself is the MAP/optimization limit of this chain and recent work adds latent Langevin (“D-Flow-SGLD”). (iii) SMC: particle filters that anneal the likelihood along the trajectory give asymptotically exact diffusion posterior samples (Wu et al., 2023; Cardoso et al., 2024) at the price of many particles and resampling. New / our position: 
+
+we do not propose another source-side sampler; our velocity-correction solver is a cheap amortized forward surrogate (one ODE pass, no backprop) whose deviation from the exact source-side answer is precisely the corrector gap of Proposition 3/Theorem 1. It is complementary to MCMC/SMC: it can warm-start them, and they can debias it. 
+
+Conditional and dynamic optimal transport. When one insists on starting from the uncondi-tional p0, the minimum-energy way to reach p(· | y) is the canonical corrector u⋆ of equation 4, a 
+
+conditional dynamic-OT problem relative to the reference drift vt, characterized by the Benamou– Brenier system (Benamou & Brenier, 2000). This connects measurement guidance to a substantial body of work on transport-based generation and conditioning—rectified/OT flow matching, and OT couplings between arbitrary endpoints. Borrowed: the Benamou–Brenier characterization and the gradient-field form of u⋆. New: the reading of FlowDPS/FLOWER/PnP-Flow as greedy, locally-
+
+21 Preprint 
+
+linearized approximations of this conditional-OT corrector (Tweedie endpoint + mobility), and the resulting Wasserstein bias bound. The lens matters: “likelihood gradient” suggests the only error is a step size, whereas “approximate conditional transport” makes clear the error is a mis-specified 
+
+field , which Section 5 confirms cannot be tuned away. 
+
+Schr¨ odinger bridges, the F¨ ollmer drift, and the small-noise limit. The stochastic analogue of u⋆ is the entropic Schr¨ odinger bridge / F¨ ollmer drift that steers a reference diffusion to a pre-scribed terminal law (De Bortoli et al., 2021; Zhang & Chen, 2022; Tzen & Raginsky, 2019); con-ditional/guided diffusion is the special case where the terminal constraint is a likelihood and the correction is the Doob h-transform drift at∇ log ht (Denker et al., 2024). Proposition 2 places the deterministic flow at the boundary of this family: as the bridge noise ϵ → 0, the drift ϵ2∇ log hϵt → 0
+
+and the entropic bridge Γ-converges to the deterministic OT map acting on a reweighted source. Hence diffusion guidance (drift-based) and flow conditioning (source-based) are two regimes of one continuum, and—this is the practical upshot—an h-transform drift designed for ϵ > 0 has no nonzero limit to “port” onto a flow ( ϵ = 0 ); the information has migrated into the initial law. This is, to our knowledge, the first explicit account of where deterministic flow conditioning sits relative to the Schr¨ odinger/F¨ ollmer picture. 
+
+Large deviations and the geometry of mode collapse. Our use of the Laplace principle (Propo-sition 4) draws on standard large-deviation theory (Dembo & Zeitouni, 2010; Dupuis & Ellis, 2011; Freidlin & Wentzell, 2012). Borrowed: Varadhan’s lemma, the contraction principle, and Laplace’s method. New: their application to the flow source posterior to (a) quantify the IS effective-sample-size collapse via the rate Iy, and (b) explain guidance mode collapse as a failure to preserve the relative Laplace weights wk ∝ e−Iy (z⋆k )/ϵ |∇ 2Iy(z⋆k)|−1/2 of the action basins—a structural, not a magnitude, error. The identification of u⋆ with the Freidlin–Wentzell minimum-action correction from p0 to p(· | y) ties the transport, bridge, and large-deviation pictures together. 
+
+Diffusion posterior samplers with guarantees, and flow inverse solvers. On the diffusion side, provably consistent posterior samplers exist (Xu & Chi, 2024; Feng et al., 2023), targeting SDE priors via SMC/annealing; they share our goal (true posterior sampling) but not our object (a de-terministic flow’s velocity-plus-correction decomposition and source-transport viewpoint). On the flow side, FlowDPS (Kim et al., 2025), FLOWER (Pourya et al., 2026), PnP-Flow (Martin et al., 2025) and D-Flow (Ben-Hamu et al., 2024) are the methods we analyze; our contribution is not to outrank them on reconstruction metrics but to explain what their corrections approximate, when they must fail, and what a faithful—and cheap—alternative looks like. 22
