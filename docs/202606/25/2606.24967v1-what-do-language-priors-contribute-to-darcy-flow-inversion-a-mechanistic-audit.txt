@@ -1,0 +1,658 @@
+Title: What Do Language Priors Contribute to Darcy-Flow Inversion? A Mechanistic Audit
+
+URL Source: https://arxiv.org/pdf/2606.24967v1
+
+Published Time: Thu, 25 Jun 2026 00:05:10 GMT
+
+Number of Pages: 28
+
+Markdown Content:
+# What Do Language Priors Contribute to Darcy-Flow Inversion? A Mechanistic Audit 
+
+Taiga Saito a, ∗, Yu Otake a, Daijiro Mizutani a, Sopheakpolin Mom a
+
+> aDepartment of Civil and Environmental Engineering, Tohoku University, 6-6-06 Aramaki Aoba, Aoba-ku, Sendai, Miyagi, 980-8579, Japan
+
+Abstract 
+
+In ill-posed inverse problems, the recovered solution depends as much on the prior as on the data, yet much of the engineering knowledge that could serve as that prior is recorded qualitatively rather than in formal mathematical form. Here we test whether sentence embeddings can act as an inference-time interface for injecting geological descriptions into a learned Darcy-flow inverse solver. Across six synthetic geological classes and an exploratory transfer to a benchmark reservoir model (SPE10), we vary only the conditioning representation and find that text conditioning reduces reconstruction error by 81% relative to a no-text counterfactual. Most of this gain comes from a categorical, class-level constraint whose value concentrates where the hydraulic head leaves the conductivity field underdetermined, while within-class geometric detail is secondary and pattern-dependent. Compared with a discrete class label, sentence embeddings add little dense-observation accuracy but improve training stability and enable paraphrase-based sensitivity analysis and open-vocabulary inputs. These results show that language priors can serve as an engineering-informatics interface for injecting geological knowledge into learned inverse solvers, while clarifying when they help and what signal they actually carry. 
+
+Keywords: Sentence embeddings, Soft priors, Text conditioning, Hydraulic conductivity, Site characterisation, Knowledge representation 
+
+1. Introduction 
+
+Across engineering, many of the quantities that govern system behaviour cannot be observed directly. Spatially varying material properties, internal states, and subsurface structures must instead be inferred from sparse, indirect observations through the physics that links them to the measured response, an inverse mapping that is typically underdetermined or ill-posed [ 1 , 2, 3]. Which of the many configurations consistent with the data is recovered is then decided largely by the prior (the regularisation term, the correlation model, or the training ensemble that encodes which solutions are considered plausible [ 4 ]). The practical question is therefore one of prior selection: what knowledge should be used to choose among the plausible configurations, and in what form should it enter the solver? Much of the knowledge engineers actually hold, however, is not stored as equations or covariances. It exists instead as qualitative, documented expertise, and turning that expertise into a computable prior is a central concern of engineering informatics. Subsurface site characterisation makes this concern especially concrete. The performance of civil and geotechnical systems is strongly influenced by the heterogeneity of the surrounding ground [5 ], which has long motivated random-field modelling for reliability-based design [ 6 , 7 , 8], yet that heterogeneity is only partially observed through site data that are often multivariate, uncertain, sparse, and incomplete [ 9 ]. The prior knowledge practitioners bring to this task is rarely limited to numerical smoothness or correlation structure. It is often expressed in heterogeneous, partly   
+
+> ∗Corresponding author
+> Email address: taiga.saito.r3@dc.tohoku.ac.jp (Taiga Saito)
+> arXiv:2606.24967v1 [cs.LG] 23 Jun 2026
+
+qualitative forms such as borehole logs, stratigraphic interpretations, depositional-setting narratives, and expert judgement about recurring structural patterns, whose classification and representation are long-standing organising principles of the field [ 10 , 11 ]. In this sense, site characterisation is inherently multimodal. Here we focus on language as one controllable source of this prior information, rather than proposing a general multimodal fusion system. Classical regularised inversion encodes smoothness, sparsity, or spatial correlation through mecha-nisms such as Tikhonov-type penalties on model magnitude or roughness [ 4 ], total-variation penalties on gradient sparsity [ 12 ], and variogram-based geostatistics [ 13 , 14 ]. It does not, however, encode the categorical, morphological structure a geologist reasons with: that clay layers tend to be continuous and inclined, that lenses and channels have recognisable shapes, and that a site exhibits only a few such patterns. Conceptual geological models express this categorical structure [ 15 , 16 ], and learned priors can absorb it implicitly from training ensembles, including convolutional encoder–decoders [17 , 18 ] and spatial generative adversarial networks [ 19 , 20 ], while physics-informed networks constrain solutions through the governing residual [ 21 , 22 , 23 , 24 ]. Knowledge-representation approaches like-wise structure geological information explicitly, for example through entity–relationship networks for three-dimensional geomodelling [ 25 ]. Recent engineering-informatics work pursues related data-driven approaches: graph networks infer subsurface stratigraphy from sparse, multi-source exploration data [26 ], sensor-selection frameworks build on qualitative physical models [ 27 ], diffusion-based models bring uncertainty evaluation to geotechnical displacement reconstruction [ 28 ], and mixture-of-experts surrogates are fused with data assimilation for dam-deformation modelling [ 29 ]. Yet none of these routes accepts free-form, case-specific knowledge at inference time: a practitioner whose core log describes exactly such a pattern cannot straightforwardly communicate it to a trained network. The missing element is a plug-in semantic conditioning interface that injects such knowledge into the trained solver. Recent progress in language models makes such an interface plausible. Large language models make free-form technical text computationally accessible [ 30 ]. More broadly, natural language has matured into a first-class conditioning signal in machine learning: vision–language alignment and text-conditioned generative models routinely steer image synthesis with a sentence [ 31 , 32 ]. Engineering uses, however, remain predominantly text-to-text or text-to-structured-knowledge (classification, information extraction, retrieval, ontology and knowledge-graph construction [ 33 , 34 ], and drafting) rather than making a free-form description an inference-time prior for the inverse problem itself. Within engineering informatics, the missing step is therefore not language processing itself, but letting that description act directly on a physics-governed inverse solver. The step examined here is text-to-physics: a free-form description, encoded as a continuous embedding, directly conditioning a learned solver for a physics-governed inverse problem. The open questions are what such text actually contributes to the recovered field, and through which mechanism. Engineering informatics has also begun using LLM-driven systems to expose domain knowledge under practical data constraints, from multi-agent geotechnical analysis to physics-informed evaluation of language-model outputs and multimodal landslide interpretation [ 35 , 36 , 37 ]; position papers chart this potential across the wider geotechnical workflow [ 38 , 39 ]. To our knowledge, however, this adjacent engineering-informatics literature does not yet address the question studied here: how a free-form description functions as an inference-time prior for a learned inverse solver, namely what signal it contributes and through which pathway. The closest direct precedent comes from outside engineering informatics, where semantic information has recently been used to guide physics-governed inverse problems. Zhang et al. [ 40 ] showed that sentence embeddings of natural-language scene descriptions can regularise an electromagnetic inverse problem: the text enters as a semantic latent-space penalty that pulls the inferred latent toward an LLM encoding of the description. Follow-up work extends the idea to multimodal semantic priors in the same electromagnetic setting [ 41 ]. These studies establish that semantic descriptions can constrain inverse recovery, but they leave open the engineering-informatics question addressed here: what part of the textual prior a learned solver actually uses, whether a discrete class label would carry the same signal, and when language adds value under different observation regimes. We bring this question to Darcy flow, a representative ill-posed inverse problem of subsurface engineering. Hydraulic conductivity 2governs groundwater flow and contaminant transport yet is rarely observed directly; it must be inferred from the routinely accessible hydraulic head h through Darcy’s law, 
+
+−∇ · (K∇h) = 0 , (1) an inverse problem that is ill-posed in the classical sense that distinct K fields produce nearly indistinguishable head responses [ 2 ]. In contrast to that precedent, which supplies text to improve recovery, we ask what the text itself contributes, and we design the main synthetic experiments so that the conditioning representation, rather than an auxiliary penalty, is the sole experimental variable (§3.1). Rather than proposing a new architecture, we contribute a controlled audit: a systematic evaluation of what information the text conditioning carries, treating the sentence embedding as a plug-in interface and characterising the capabilities it provides. This question bears on what a practitioner would need to provide at inference time: a detailed narrative, a simple label, or a flexible open-vocabulary description. To answer it mechanistically, we use controlled synthetic descriptions as an analysis instrument, varying their content in isolation to reveal which aspect of the prior aids recovery. What is intended to carry over to practice is not the synthetic text itself, but the channel it probes: an entry point through which qualitative site observations can constrain the inversion alongside quantitative data. In a Bayesian inverse-problem view [ 3], we interpret the text t as supplying a soft prior in p(K | h, t ), and read the trained text-conditioned generator with its paraphrase ensemble as a low-cost, posterior-inspired sensitivity proxy rather than as a posterior sampler ( §3.2). The resulting mechanism-first study centres on the claim that this prior, language-encoded engineering information, is conditional: how much language contributes to the recovered field depends on how strongly the head observation already constrains K. Language is expected to matter most when the forward map collapses geologically distinct fields onto nearly indistinguishable observations, to add finer information when observations are sparse and the missing structure is describable, and to become largely redundant when the observation nearly determines K
+
+once the broad geological class is known. The study therefore characterises this regime dependence rather than reporting a single accuracy gain, and is organised around three questions: 1. What information does the solver use from text? We test whether sentence embeddings contribute instance-specific geological information or mainly act as a class-level prior, and whether the same recoverable signal could be carried by a discrete class label. 2. When does text help? We examine whether the value of language depends on the degree to which the hydraulic-head observation constrains K, including cases where the forward map collapses distinct geological structures onto similar responses and cases where observations are sparsified. 3. What does the embedding interface enable beyond a fixed label? We evaluate two interface-level capabilities of free-form text: paraphrase-based sensitivity analysis and open-vocabulary descriptions outside the closed six-class taxonomy. 
+
+2. Problem Setting and Datasets 
+
+2.1. Synthetic Darcy dataset (six geological classes) 2.1.1. Field generation and split. 
+
+We consider steady-state Darcy flow (Equation 1) on Ω = [0 , 1] 2, discretised on a 64 × 64 grid. For five of the six classes, hydraulic conductivity K is binary: clay ( K = 10 −8 m/s) or sand ( K =10 −5 m/s), spanning three orders of magnitude, a contrast representative of unconsolidated sedimentary environments; the Continuous class instead uses a log-normal continuous K field. Six structural classes are generated from a two-dimensional latent variable ξ = ( ξ1, ξ 2), whose components ξ1 and ξ2 are drawn independently from the uniform distribution on [0 , 1]: 
+
+• Band : a continuous sand body of characteristic width, tilted at an angle. 
+
+• Circle : a connected sandy conduit formed by a zig-zag chain of circular segments. 3K field             
+
+> Band Circle Ellipse Layered Random Continuous
+> h field
+> 0.00
+> 0.25
+> 0.50
+> 0.75
+> 1.00
+> K (normalised)
+> 0.00
+> 0.25
+> 0.50
+> 0.75
+> 1.00
+> h (normalised) Figure 1: Representative examples of the six synthetic geological classes (columns, left to right: Band, Circle, Ellipse, Layered, Random, Continuous). Top row: hydraulic conductivity Kfields, shown as log 10 Kand min-max scaled for visualisation only. Bottom row: the corresponding hydraulic head hfields obtained by solving the steady-state Darcy equation (Equation 1) on the same domains.
+
+• Ellipse : scattered elongated sand lenses with horizontal or vertical orientation and varying position. 
+
+• Layered : 1–4 horizontal sand strata embedded in a clay background, with a vertical offset. 
+
+• Random : a spatially correlated binary random field with clay fraction ∈ [0 .2, 0.7], generated via thresholded Gaussian process. 
+
+• Continuous : a log-normal K field whose log-mean and spatial correlation scale vary with ξ.The six classes are chosen to represent recurring structural motifs in sedimentary ground (layers, inclined bands, lenses, and channel-like conduits) together with two standard geostatistical field models (a correlated binary field and a log-normal continuous field); they are morphological abstractions rather than a standard geotechnical taxonomy. Class assignment is fixed by τ = ξ1 + ξ2 via equal-mass thresholds on τ (∼16 .7% of samples per class). Within each class, the same ( ξ1, ξ 2) determine that class’s geometric or field parameters; the Random and Continuous classes additionally draw a Gaussian random field. The latent-to-class partition and the shared vertical-placement coordinate are illustrated in S1. Figure 1 shows representative K and h fields for each class. The dataset comprises 18,000 samples ( ∼3,000 per class). A leak-free hash-grouped train/validation/test split (14 ,381 /1,747 /1,872) keeps all samples sharing a K field in the same partition, preventing K-field leakage from generators that reuse a small library of distinct fields (S5). The head field h is solved via second-order centred finite differences with Dirichlet conditions (left h=1, right h=0; h is dimensionless) and no-flux Neumann conditions on top/bottom. The solver is verified against analytic solutions for uniform and two-layer media; taking the y-averaged hydraulic-head profile along x, the maximum absolute deviation from the analytic profile is < 10 −4 in both cases. 
+
+2.1.2. Text generation. 
+
+For each sample, the known latent parameters ξ and derived geometric quantities (angle, layer count, clay fraction, etc.) are formatted into a structured prompt and submitted to OpenAI’s GPT-4o-mini [42 ], which generates a single 20–40-word natural-language geological description. Descriptions are generated individually per sample and vary with latent-derived geometric quantities: Band samples with steep angles yield phrasing such as “near-vertical clay barrier”, while shallow angles produce “gently dipping aquitard”. This ensures that the text embedding space reflects genuine geological variation rather than a fixed set of class-level templates (Figure 2c). Each description is encoded into a 384-dimensional embedding e by a frozen SBERT model (all-MiniLM-L6-v2) [ 43 ]. Full prompts 4-10 0 10 20 30 
+
+> PC 1 (28.7%)
+> -20
+> -15
+> -10
+> -5
+> 0
+> 5
+> 10
+> 15
+> 20
+> PC 2 (5.2%)
+
+(a)     
+
+> -20 -10 010 20
+> PC 1 (54.3%)
+> -15
+> -10
+> -5
+> 0
+> 5
+> 10
+> 15
+> 20
+> PC 2 (17.8%)
+
+(b)      
+
+> -0.4 -0.2 0.0 0.2 0.4 0.6
+> PC 1 (17.3%)
+> -0.4
+> -0.2
+> 0.0
+> 0.2
+> 0.4
+> 0.6
+> PC 2 (16.3%)
+
+(c)        
+
+> Band Circle Ellipse Layered Random Continuous Figure 2: Class structure of the dataset under the forward map. First two principal components of (a) the conductivity fields K, (b) the head fields h, and (c) the SBERT text embeddings, over all 18 ,000 samples, coloured by class.
+
+for all six classes are provided in S2.1. Because every description is generated from the known latent parameters ξ, this synthetic text is “oracle” by construction ( §1): it is a controlled instrument for isolating which geological information aids recovery, not an emulation of the noisier, human-authored reports a deployed system would receive. 
+
+2.1.3. Forward-map PCA of K, h, and text embeddings. 
+
+A three-way principal-component view of the dataset previews why a language prior should help unevenly across classes. The conductivity fields are strongly class-structured (Figure 2a), but the forward Darcy map collapses much of that structure: the head fields overlap across classes onto a single dominant boundary-driven mode (Figure 2b; PC1 ≈54%), to a degree that differs by class. The text embeddings, by contrast, retain class separation (Figure 2c). Where the head collapses a class’s structure most, the head observation least constrains K, motivating the hypothesis that a description has more to add there; we make this per-class and quantitative with a forward-collapse ratio in §4.5, where, over only six classes, we treat it as an interpretive axis rather than a quantitative predictor. 
+
+2.2. SPE10 (industry-standard reservoir benchmark) 
+
+As a semi-real external anchor we use the SPE10 Model 2 benchmark [ 44 ], a geostatistical reservoir model representative of real North Sea formations: 85 layers of heterogeneous permeability spanning the Tarbert (shallow-marine, smooth gradients) and Upper Ness (fluvial, channelised) formations. Each layer is resized to 64 × 64, log-scaled, and min-max normalised to [0 , 1] to play the role of K in the Darcy problem defined above, and the same Darcy solver with a fixed-head line-drive surrogate boundary condition generates head fields. The SPE10 facies vocabulary overlaps only partially with the six synthetic classes, so any text benefit must come from a coarse in-domain geological prior rather than exact class matching; data preparation, the surrogate boundary condition, and the class-vocabulary mapping are detailed in S3.1. 
+
+3. Methods 
+
+3.1. Model Architecture and Training 
+
+The generator is a U-Net encoder–decoder [ 45 ] that takes the observed head field h (1 channel, 64 × 64) as input and outputs a hydraulic conductivity reconstruction ˆK (1 channel, 64 × 64; Figure 3). The encoder comprises four convolutional blocks with batch normalisation and ReLU activation, reducing spatial resolution from 64 × 64 to 8 × 8, followed by a bottleneck block at 4 × 4 (channel progression 1 → 32 → 64 → 128 → 256 → 512). The decoder mirrors the encoder with transposed convolutions and skip connections, restoring the output to 64 × 64. 5Text information enters via Feature-wise Linear Modulation (FiLM; [ 46 ]) at the bottleneck (4 × 4, 512 channels): ˜z = z + γ(e) ⊙ z + β(e), (2) where z is the bottleneck feature map, e ∈ R384 is the SBERT embedding, and ( γ, β ) = FC (e) are learned affine parameters produced by a single linear layer (384 → 2 × 512). This residual form recovers the identity map when ( γ, β ) = ( 0, 0), so the unconditioned generator is a natural special case. We adopt FiLM because it provides channel-wise modulation without increasing the spatial dimensionality of the bottleneck. The headline synthetic experiments train the generator with a pure reconstruction objective, 
+
+LG = ∥K − ˆK∥2, (3) so that the parameterisation comparisons of §3.4 isolate the effect of the conditioning encoding under an identical, minimal objective. Every synthetic experiment here, including all controls of §3.4, uses this pure reconstruction objective (Equation 3); the SPE10 transfer instead adds two auxiliary terms, described with the transfer protocol ( §3.6). Training uses Adam ( β1 = 0 .5) at learning rate 2 × 10 −4 for 400 epochs (batch size 64) with ReduceOnPlateau scheduling and best-checkpoint selection on the validation K-MSE, the mean squared error between the reconstructed and true hydraulic conductivity fields and our primary reconstruction-accuracy metric. 
+
+3.2. Text as a Soft Prior and the Paraphrase-Ensemble Proxy 
+
+To motivate the paraphrase-ensemble uncertainty proxy, we interpret geological text as a soft prior on admissible K fields in a Bayesian inverse-problem framework. The trained generator itself is deterministic, producing a point estimate ˆK = Gθ (h, t ); the posterior notation below is therefore an interpretive model for the information that h and t supply, not a claim that the generator samples from 
+
+p(K | h, t ). More formally, treating p(h | K) as the implicit likelihood induced by the Darcy forward operator and assuming that text affects K only through the prior (so that p(h | K, t ) = p(h | K), since the Darcy operator itself is unchanged by t), Bayes’ rule on ( h, t, K ) gives 
+
+p(K | h, t ) ∝ p(h | K) p(K | t). (4) What the text actually contributes to this prior (whether it acts only as a class label or also carries finer within-class structure) is the mechanism question we take up in §5.1. Because a single description t is one linguistic surface form of an underlying belief, intended to preserve the geological content, we treat the reference sentence together with Np − 1 LLM-generated paraphrases of it as Np draws {tk}Np 
+
+> k=1
+
+from a paraphrase distribution around that belief ( Np = 16 in all experiments; per-experiment prompt variants are detailed in §3.3 and S2.2). We do not assume that these paraphrases are independent or exhaustive; we use them only to probe the linguistic neighbourhood of the description. Passing each text through the (frozen) generator yields an ensemble of hydraulic conductivity reconstructions { ˆKk}Np 
+
+> k=1
+
+which we read as a posterior-inspired probe around the conditioning pair ( h, t ): the within-paraphrase standard deviation σK (x) = std k ˆKk(x) serves as a per-pixel dispersion proxy whose grid-mean we denote ¯σK . This is not a formal posterior sampler in the sense of Stein-variational or MCMC methods [ 3]: the paraphrases are not samples from p(K | h, t ), but a low-cost sensitivity proxy that measures how much the reconstruction changes under meaning-preserving perturbations of the text input. Whether this stand-in is reliable both as a relative ranking and as a quantitative magnitude is an empirical question deferred to §4.6. 
+
+3.3. Specificity Spectrum and Uncertainty-Reduction Protocol 
+
+To quantify which aspects of geological text carry the most information, we define five specificity levels (Table 1). For each level, an ensemble of Np = 16 variants is generated by GPT-4o-mini. L0 and L1 are pattern-independent generic descriptions drawn from a short seed pool and extended by GPT calls; L2–L4 are paraphrases of the level-specific anchor text (Table 1); for the number-bearing levels (L3–L4), the meaning-preserving paraphrase prompt is relied on to keep the numerical values in 6Observed head field ℎ
+
+1 ch , 64 ×64 
+
+Predicted ˆ𝐾 field 
+
+1 ch , 64 ×64 
+
+32 ch, 64 ×64 
+
+64 ch, 32 ×32 
+
+128 ch, 16 ×16 
+
+256 ch, 8×8
+
+MaxPool 
+
+MaxPool 
+
+MaxPool 
+
+512 ch, 4×4
+
+FiLM 
+
+˜z = z + 𝜸 (e) ⊙ z + 𝜷 (e)
+
+MaxPool z
+
+256 ch, 8×8
+
+128 ch, 16 ×16 
+
+64 ch, 32 ×32 
+
+32 ch, 64 ×64 
+
+˜z
+
+Up-Conv 
+
+Up-Conv 
+
+Up-Conv 
+
+1×1 Conv + Sigmoid 
+
+SBERT (all-MiniLM-L6-v2, frozen) FC (384 → 1024) 
+
+Geological description (specificity levels) 
+
+L0: “A porous medium.” 
+
+L1: “A porous medium with clay and sand regions.” 
+
+L2: “A band pattern of clay in a sand background.” 
+
+L3: “A band pattern oriented at ∼57 ◦ with centre near 𝑦 =0.4.” 
+
+L4: “A band clay layer at 57 ◦ from vertical, centred at 𝑦 =0.42 , width 0.08 m in sand.” 
+
+e ∈ R384 
+
+𝜸 , 𝜷 ∈ R512 
+
+# Encoder Decoder 
+
+# Text branch Figure 3: Text-conditioned generator architecture. The observed head field h passes through a U-Net encoder–decoder with horizontal skip connections (grey arrows) to produce the predicted conductivity field ˆK. A frozen SBERT embedding 
+
+e of the geological description modulates the bottleneck via FiLM (Equation 2). The example descriptions L0–L4 illustrate the specificity spectrum of §3.3, from a generic statement of the medium to a fully detailed geometric description. 
+
+7Table 1: Specificity levels used in the text uncertainty reduction experiment. Angle brackets denote sample- or class-dependent placeholders; examples shown are for the band family, with wording adapted per class. The L0 baseline is intentionally minimal and serves as the reference level for the uncertainty-reduction proxy. 
+
+Level Label Example text Scope L0 Generic “A porous medium.” All classes L1 Material “A porous medium with clay and sand regions.” All classes L2 Pattern “A ⟨pattern ⟩ pattern of clay and sand regions.” Per class L3 Approximate “A ⟨pattern ⟩ pattern oriented at ∼⟨ angle ⟩° with centre near y = ⟨y⟩.” Per sample L4 Exact Template-based complete description instantiated from known ξ Per sample 
+
+the text stable rather than enforcing them through a dedicated constraint. The prompt variants used by the specificity experiment ( §4.3) and the posterior-reliability experiment ( §4.6) are documented in S2.2. Each variant is encoded by SBERT and passed through the generator independently, producing an ensemble of Np hydraulic conductivity predictions { ˆK1, . . . , ˆKNp } for each input sample. Text uncertainty reduction is estimated as ˆ∆ℓ =̂ H(K | h, t ℓ=0 ) −̂ H(K | h, t ℓ), (5) where ̂
+
+H(K | h, t ℓ) = 1
+
+Npix 
+
+∑ 
+
+> i,j
+> 12
+
+log (2πe σ 2 
+
+> ij
+
+(tℓ)) (6) is the grid-mean pixel-wise Gaussian differential entropy (diagonal approximation) of the generator output ensemble at level ℓ, with σij (tℓ) the standard deviation of ˆK across the level-ℓ variants at pixel (i, j ) ( §3.2); the per-pixel variance is clamped at 10 −12 for numerical stability, and Npix = 64 2 = 4096. ˆ∆ℓ is not a formal conditional mutual information but an ensemble-based proxy: by construction ˆ∆ℓ=0 = 0, and ˆ∆ℓ > 0 means the ensemble at level ℓ is tighter (more certain) than at L0. The reliability of the linear dispersion summary ¯σK (§3.2) is tested separately in §4.6; the specificity spectrum instead uses the log-dispersion entropy proxy ̂ H, so the two dispersion summaries are not interpreted as calibrated or interchangeable uncertainty estimates. The specificity spectrum is evaluated on a fixed, reproducible subset of 10 hash-grouped test samples per pattern; the associated paired statistics ( §4.3) are therefore interpreted as exploratory. 
+
+3.4. Representation Controls 
+
+To test whether sentence embeddings supply more than a class label, we compare the SBERT generator against four representation controls: (i) a class-mean embedding inserted at inference without retraining, (ii) a within-class text swap, (iii) from-scratch retrains with a categorical one-hot code and a capacity-matched random-code variant, and (iv) a nearest-class-mean proxy on SPE10 as an out-of-distribution test. 
+
+Class-mean embedding (no retrain). To isolate class identity from within-class variation, we use the SBERT-trained generator unchanged and replace each test sample’s per-sample SBERT embedding with the training-set class mean ¯ec of its true class. This 384-dimensional substitute carries class identity but no within-class variation. Because this control shares the SBERT-trained generator with the oracle and no-text conditions, we quantify it by the capture percentage capture % = K-MSE notext − K-MSE class-mean 
+
+K-MSE notext − K-MSE oracle 
+
+× 100 , (7) the fraction of the oracle-vs-no-text gain recovered given only perfect class identity, where the oracle condition feeds the SBERT-trained generator the per-sample full-text embedding and no-text feeds the same generator a zero 384-dimensional embedding. Because the generator was trained only with non-zero conditioning, the no-text input should be read as a counterfactual rather than an in-distribution baseline. The resulting capture percentage is therefore only an approximate decomposition and can exceed 100% when the class mean yields lower K-MSE than the per-sample SBERT embedding. 8Within-class text swap (no retrain). To test whether the correct within-class instance matters beyond class identity, we use the same SBERT-trained generator and replace each test sample’s embedding with that of a different same-class sample with a distinct K realisation (excluding the target’s own, to avoid pseudoreplication), averaging K-MSE over ten random donor draws. The instance fraction ( within − oracle )/(no-text − oracle ) isolates the benefit of the correct within-class instance, complementing the class-mean control from the content side. 
+
+One-hot and capacity-matched retrains ( d = 6 and d = 384 ). To test whether sentence embeddings carry recoverable information beyond a discrete class label, a new generator is trained from scratch with the conditioning input replaced by a discrete class code, in two variants. The first is the canonical one-hot encoding 1c ∈ { 0, 1}6, reducing the FiLM projection to Linear (6 → 1024), the smallest possible conditioning bottleneck. The second is a capacity-matched control (one-hot 384 ) replacing each class label with a fixed per-class random unit vector in R384 , drawn fresh per seed (a dense code, not a literal one-hot), so its FiLM projection Linear (384 → 1024) matches the SBERT input width; this tests whether input width alone explains the instability of the 6-dimensional one-hot. The architecture, optimiser, schedule, random seed, and hash-grouped training partition (S5) are matched to a freshly retrained SBERT reference at the same seed, and all three retrains (SBERT, one-hot, one-hot 384 ) are repeated across ten seeds ( §4.4.3). Capture (Equation 7) does not apply to these separately trained generators, so they are compared with SBERT at the seed level (family (ii) of §3.8). 
+
+SPE10 nearest-class-mean (no retrain). On the SPE10 transfer ( §3.6) the class-mean control has no ground-truth label, so we assign a class automatically from text. For each of the 13 holdout layers we assign the class whose synthetic training-set SBERT centroid ¯ec (c = 1 , . . . , 6) has the highest cosine similarity to the layer’s K-informed reference embedding eℓ, and forward that nearest centroid through the SPE10-fine-tuned generator in place of eℓ. This is the most direct automated class-label proxy reachable from the fixed taxonomy without human intervention: the assignment is purely embedding-based and fully reproducible, though it is not tuned to maximise generator performance; the assigned-class mean cosine is reported alongside K-MSE so that the reader can judge how well SPE10 layers fit the synthetic class manifold. 
+
+3.5. Mechanism Probes 
+
+To localise when and why the text helps, we add a forward-collapse measure and a decodability probe, together with a sparse-observation grid retraining variant. 
+
+Forward-collapse ratio. To quantify how much geological variation each class’s head field retains, we compute, over the class’s unique K realisations, the mean pairwise Euclidean distance among the head fields divided by the mean pairwise distance among the conductivity fields that generate them (both fields globally z-standardised so the ratio is dimensionless). A ratio near zero means geologically distinct fields map to near-identical heads, so the observation cannot distinguish them and the inverse problem must lean on the prior. 
+
+Decodability probe. To test whether the embedding retains within-class instance information inde-pendently of whether the solver uses it, we fit a low-capacity per-class ridge readout from the text embedding to the generative latent ξ (§2) and score it held-out ( R2), benchmarked against a shuffled-ξ
+
+null, for the deployed SBERT encoder and three alternatives (MPNet, e5, BGE) to rule out encoder-specific artefacts. A clearly positive held-out R2 above the null indicates the instance signal is linearly present in the embedding even where the solver leaves it unused. 
+
+Sparse-observation grid retraining. To probe whether beyond-class information becomes useful as the head observation is degraded, we retrain a reconstruction-only generator on grid-subsampled heads: each head is sampled on an endpoint-inclusive k × k grid and bilinearly interpolated back to the full 64 × 64 field, with subsampling applied as an online training augmentation (on 70% of batches, k
+
+redrawn per sample) so that a single model, retrained from scratch, spans all densities. At evaluation we sweep N = k2 ∈ { 4096 , 1024 , 256 , 64 , 16 , 4} (Figure 9a). As a pure class-identity reference we feed 9the class-mean embedding ( §3.4) at each density on a single training seed and report its capture of the oracle benefit; the within-class swap is recomputed at each density across ten independent training seeds, and per class the rise of the beyond-class gap ( within − oracle ) from full observation to the corners-only grid is tested with an exact Wilcoxon signed-rank across seeds, Holm-corrected over the five non-Layered classes. 
+
+3.6. SPE10 Transfer Protocol 
+
+Exploratorily, we fine-tune a separate SPE10-transfer base (synthetically pre-trained with the auxiliary objective below, distinct from the reconstruction-only headline model) on N = 20 SPE10 layers (generator and discriminator jointly), evaluating on a fixed 13-layer holdout (fine-tuning schedule and layer split in S3.3, S3.4). The transfer objective adds two auxiliary terms to the reconstruction loss, an adversarial sharpening loss [ 20 , 19 , 18 ] and a semantic-alignment penalty between a bottleneck projection ˆe and the input embedding e (cf. [ 40 ]); full form and weights are in S3.2. Against a no-text baseline, three text inputs are compared: K-informed reference text (a per-layer GPT-4o-mini description rendered from the log 10 (K) image, an upper bound on per-layer text, not a true inverse-problem oracle), a generic-geological control (a single pattern-free sentence applied to every layer), and a non-geological random-text control; the taxonomy-restricted nearest-class-mean proxy ( §3.4) is evaluated on the same holdout. The reference-text prompt and schema are in S2.3; the control sentences are specified in S3.3. 
+
+3.7. Classical Inversion Baselines 
+
+To place the text-driven gain in context against priors that carry no geological knowledge, we evaluate unregularised, Tikhonov [ 4], and total-variation (TV) [ 12 ] inversions on the grouped synthetic test set. Each minimises a head data-fit term plus a regulariser λR (K) over the normalised log-conductivity field (the generator’s output space), optimised through the same differentiable Darcy discretisation used to generate the data. For each sample we report the K-MSE of the iterate with the lowest head data-fit, selected without access to the true K, which favours the iterative baselines over final-iterate reporting. Aggregate statistics use the full grouped test set ( n = 1 ,872), with oracle-text and no-text generator outputs evaluated on the same samples; the classical runs are allowed up to 500 iterations with early stopping. 
+
+3.8. Statistical Methods 
+
+All confirmatory tests are two-sided at α = 0 .05. Paired comparisons use the Wilcoxon signed-rank test (per-sample K-MSE is right-skewed and heavy-tailed); monotonic associations use Spearman’s ρs,with exact permutation p-values for class-level analyses ( n = 6). Multiplicity is handled within three pre-specified families: (i) six per-pattern L0 →L4 specificity tests ( §4.3, Table S4); (ii) six seed-level one-hot-vs-SBERT tests across the ten-seed retrains ( §4.4.3, Table S3); and (iii) three SPE10 text-condition comparisons ( §4.8, Table S5). Holm–Bonferroni adjustment [ 47 ] is primary for families (i) and (iii). Family (ii) raw p-values are reported as seed-level diagnostics; we make no family-wise significance claim from the small-error patterns, where the encodings differ only marginally. The SPE10 nearest-class-mean contrasts ( §3.4) are external descriptive controls, reported with raw paired Wilcoxon p-values. Intervals labelled BCa use the bias-corrected and accelerated bootstrap with 10 ,000 resamples [ 48 ], resampling observations at the sample or layer level: per-pattern L0 →L4 specificity differences ( §4.3), SPE10 condition means and paired condition differences ( §4.8), and classical-baseline mean K-MSE (Table 3). The headline text-effect interval (S4) instead uses a unique-K-field cluster bootstrap. For the within-class control, Table 4 reports the row-weighted instance fraction; for classes built from repeated 
+
+K fields we additionally compute a realisation-level estimate: averaging the no-text, within-class, and oracle K-MSE within each unique K field before forming the fraction, with the unique field as the unit (Layered: n = 10). The one-hot-vs-SBERT comparison is summarised by across-seed mean ± s.d. (Table S3); per-pattern aggregate K-MSE in Table 2 are point estimates. 10 Head field h Ground truth K   
+
+> K-MSE = 0.2541
+> No text
+> K-MSE = 0.0035
+> Oracle text
+> K-MSE = 0.5184
+> Random text
+> (Band)
+> 0.00
+> 0.25
+> 0.50
+> 0.75
+> 1.00
+> 0.00
+> 0.25
+> 0.50
+> 0.75
+> 1.00 Figure 4: Single-sample reconstruction of a Continuous-class pattern under three text conditions, evaluated on the grouped test partition. From left: observed head field h, ground-truth hydraulic conductivity K, and reconstructed K
+> with no text, oracle text, and random text (a wrong-class Band description, not a non-geological string).
+
+4. Results 
+
+4.1. Text Conditioning Reduces Reconstruction Error Across All Pattern Classes 
+
+We compare three text conditions on the leak-free hash-grouped test set ( n = 1 ,872, approximately 300 per pattern; S5 documents the split protocol): 
+
+No text Zero 384-dimensional embedding, used as a no-language counterfactual; the generator was not trained with embedding dropout, so this input is out of distribution (see §5.3). 
+
+Oracle text The ground-truth parametric description from the generation pipeline. 
+
+Random text A description drawn from a randomly chosen sample of a different pattern class (wrong-class but in-domain geological text; distinct from the non-geological random-text used on SPE10, §4.8). Relative to this no-text counterfactual, oracle text reduces average test K-MSE from 0.0869 to 0.0168, an 81% improvement across the full grouped test set. Figure 4 illustrates this on a single Continuous-class sample: oracle text recovers the log-normal K structure almost exactly, while a wrong-class description severely distorts the reconstruction. Table 2 reports per-pattern results.     
+
+> Table 2: Per-pattern K-MSE under three text conditions on the grouped test set. Rows ordered by no-text K-MSE (descending). Improvement is ( Knotext −Koracle )/K notext .Random denotes a wrong-class in-domain geological description.
+
+Pattern n No-text Oracle Random Improvement Layered 363 0.3065 0.0782 0.3422 74% Random 297 0.1003 0.0046 0.1289 95% Continuous 304 0.0488 0.0033 0.2163 93% Band 299 0.0203 0.0011 0.1039 95% Circle 305 0.0018 0.0013 0.0439 27% Ellipse 304 0.0006 0.0001 0.0270 80% Overall 1,872 0.0869 0.0168 0.1501 81% Figure 5a summarises the pattern-level contrasts. The largest absolute improvements occur on patterns with the highest no-text error: Layered, Random, and Continuous, all characterised by spatially extensive structures whose head fields are similar across a wide range of configurations. A Layered medium with two sand strata at different depths produces a head field nearly indistinguishable from one with three thinner strata at different positions; text resolves this ambiguity by specifying the number and placement of strata. Conversely, Circle and Ellipse, where localised sand bodies produce distinctive local head deflections that constrain K tightly, show the smallest absolute gains (Figure 5b). 11 Layered Random Continuous Band Circle Ellipse     
+
+> 10 4
+> 10 3
+> 10 2
+> 10 1
+> K-MSE
+
+(a)          
+
+> No text
+> Oracle text
+> Random text
+> 10 310 210 1
+> No-text K-MSE (baseline error)
+> 10 4
+> 10 3
+> 10 2
+> 10 1
+> Absolute improvement
+> (no-text  oracle K-MSE)
+
+(b)   
+
+> Band
+> Circle
+> Ellipse
+> Layered
+> Random
+> Continuous Figure 5: Text conditioning effect on synthetic data. (a) K-MSE by pattern under three text conditions: no text (zero embedding), oracle text (ground-truth description), and random text (wrong-class description). Oracle text improves all patterns; random text degrades all pattern means. (b) Absolute improvement (no-text −oracle K-MSE) tracks no-text baseline error; text helps most where physics alone is most ambiguous.
+
+These gains are not merely pixel-wise: the text-conditioned reconstructions are more consistent with the observed Darcy flow, not only closer to the true K. Solving the Darcy forward operator on the reconstructed ˆK, oracle text reduces the mean head-residual MSE (the forward-consistency of ˆK
+
+with the observed head) from 0 .0034 to 0 .0002 and the relative error in total outlet discharge from 0 .23 to 0 .14; over the five binary-facies classes, thresholding into sand/clay facies raises the mean facies intersection-over-union from 0 .72 to 0 .92, with the largest gain on Layered (0 .14 → 0.71). Wrong-class text increases mean K-MSE in every pattern and is 73% worse overall than no text (0.1501 vs 0.0869), supporting sensitivity to text content beyond a generic non-zero-input effect. Because the no-text condition is itself the zero-embedding counterfactual, this remains an in-domain wrong-text contrast rather than a strict non-zero ablation. 
+
+4.2. Comparison with Classical Inversion Baselines 
+
+We compare the trained generator against three classical inversion baselines (unregularised gradient descent, Tikhonov, and total variation) on the full grouped test set. The protocol is described in 
+
+§3.7; the trained generator with oracle text and with no text is evaluated on the same samples for comparison.  
+
+> Table 3: Mean K-MSE on the grouped synthetic test set ( n= 1 ,872). Oracle and no-text rows reproduce the trained generator from Table 2. 95% CIs are BCa bootstrap (10,000 resamples).
+
+Method Mean K-MSE 95% CI Oracle text 0.0168 [0.0149, 0.0192] No text 0.0869 [0.0812, 0.0928] Unregularised 0.2029 [0.2003, 0.2053] Tikhonov ( L2) 0.1862 [0.1837, 0.1888] Total variation 0.2030 [0.2003, 0.2055] As reported in Table 3, the trained generator with oracle text reaches a mean K-MSE of 0.0168, more than an order of magnitude below the best classical baseline (Tikhonov, 0.1862). Unregularised and TV inversions essentially fail at this scale ( ≈ 0.20): with only the head observation as a constraint, gradient descent on K through the elliptic operator finds many fields that match h to within the residual tolerance but differ markedly from the true K. The zeroth-order Tikhonov ( L2) penalty reduces the overall mean only modestly ( ∼8%). Even no-text generator inference (0.0869), which 12 Band Circle Ellipse Layered Random Continuous 
+
+> 0
+> 1
+> 2
+> 3
+> 4
+> (K; t h )
+
+(a)           
+
+> L1 L2 L3 L4
+> Band Circle Ellipse Layered Random Continuous
+> 0.0
+> 0.5
+> 1.0
+> 1.5
+> 2.0
+> 2.5
+> 3.0
+> 3.5
+> 4.0
+> (K; t h )
+> 59% 124%
+> 24%
+> 84%
+> 7%
+> 94% 110%
+> 10%
+
+(b)           
+
+> L0 L2 (pattern identification)
+> L2 L4 (instance parameters)
+> L2 L4 (negative) Figure 6: Specificity spectrum on synthetic data ( n= 10 stratified samples per pattern). (a) Text uncertainty reduction ˆ∆(K;t|h) by pattern and specificity level (L1–L4; L0 is the minimal generic-text reference, “A porous medium.”, not the zero-embedding no-text condition). (b) Decomposition of total ˆ∆L4 into the L0 →L2 component (pattern identification) and L2 →L4 component (instance-specific parameters), with percentages indicating the L0 →L2 fraction.
+
+carries no site knowledge at all, remains below every classical baseline, by more than 2 × at this iteration budget, indicating that the architectural prior implicit in the U-Net plus the training distribution already supplies structure that the tested L2 magnitude and total-variation penalties alone do not. 
+
+4.3. Specificity Spectrum of Posterior Contraction 
+
+On all six synthetic pattern classes ( n = 10 stratified samples per pattern), the text uncertainty-reduction proxy ˆ∆ (K; t | h) is larger at the most specific level L4 than at the generic L0 (Figure 6a; paired Wilcoxon within family (i) of §3.8; per-pattern statistics in Table S4). The trajectory is broadly increasing but not strictly monotonic: beyond pattern naming, more detailed geometric descriptions can introduce paraphrase variability that outweighs the added constraint, so individual L →L+1 steps sometimes decrease. Decomposing the total reduction (Figure 6b), the L0 →L2 component, pattern identification, carries the bulk on four of six patterns (Circle, Ellipse, Random, Continuous; ≥84%, exceeding 100% where ˆ∆peaks at L2 and then falls back), with Band more balanced. The exception is Layered, where pattern naming captures only 7% and the dominant jump is at L2 →L3 (81%), when the text specifies the number and positions of strata, moving from “A horizontally layered pattern” to “3 horizontal clay strata in sand”. The specificity axis thus corroborates, from the text side, the encoding controls of 
+
+§4.4: for five of six classes the class-level signal carries the benefit, and only Layered draws on finer, instance-specific detail. The absolute L4 reduction varies roughly twofold across patterns, consistent with how strongly the head field alone constrains the inverse solution (the forward-map view developed in §4.5 and §5.1). 
+
+4.4. Encoding the Soft Prior: Class-Mean, One-Hot, and Sentence Embedding 
+
+The specificity spectrum ( §4.3) showed that pattern identification accounts for the bulk of the text uncertainty reduction on most patterns. Three further controls isolate the numerical encoding of that pattern-level signal. The first holds class membership fixed while removing within-class variation in the embedding (the class-mean control). The second swaps each text for that of a different same-class realisation, asking whether the correct within-class instance matters at all (the within-class control). The third replaces the SBERT embedding with a discrete class indicator, retraining the generator from scratch (the one-hot baseline). 13 Table 4: Within-class control (grouped test set, n = 1 ,872; canonical order). Per-class K-MSE under no-text, a within-class swap (same class, different K realisation), and oracle text. The instance fraction ( within − oracle )/( no-text − oracle ), the share of the oracle benefit requiring the correct same-class instance, is ≈0 except for Layered. 
+
+Class no-text within-class oracle instance frac. (%) Band 0.0203 0.0012 0.0011 0.3Circle 0.0018 0.0013 0.0013 −2.0Ellipse 0.0006 0.0001 0.0001 −0.3Layered 0.3065 0.1881 0.0782 48 .1Random 0.1003 0.0050 0.0046 0.4Continuous 0.0488 0.0038 0.0033 1.1Overall 0.0869 0.0383 0.0168 30 .6
+
+4.4.1. Class-mean embedding control. 
+
+Applying the class-mean control of §3.4 on the grouped test set (per-sample SBERT input replaced by the training-set class centroid, generator weights untouched), we find that for five of six patterns, the class-mean condition captures effectively all of the oracle K-MSE benefit by the zero-baseline capture metric of Equation 7 (99 .5–107 .7%). The exception is Layered, where the class-mean captures only 19 .0%. One alternative explanation is that within-class SBERT embeddings cluster tightly around their centroid, so the substitution changes little; the next two controls address it: a within-class text swap that varies the description while holding the class fixed, and a one-hot retrain that drops the embedding for a discrete label carrying no within-class information at all. 
+
+4.4.2. Within-class control: the embedding acts as a largely class-level prior. 
+
+To separate the embedding’s value as class identity from within-class instance detail, we swap each test sample’s text for that of a different same-class realisation (distinct K, ten draws; §3.4), so that (no-text − within ) isolates the class contribution and ( within − oracle ) the instance contribution. For five of six classes the within-class condition is indistinguishable from oracle (instance fraction ≈0%; Table 4): once the class is known, the specific wording adds nothing beyond what the head already supplies, so the embedding acts as a categorical prior, with the meaningful class-level evidence carried by Band, Random and Continuous (Circle and Ellipse sit at the K-MSE floor, h-only ≤ 0.002, where the instance fraction is uninformative). The sole exception is Layered, where ∼48% of the achievable benefit requires the correct instance (44% over its ten unique K realisations; §3.8). This addresses the alternative left open by the class-mean control ( §4.4.1): varying the wording within a class, not merely collapsing it to a centroid, leaves the reconstruction essentially unchanged, and a wrong-class description degrades it on 82 .7% of samples versus 11 .3% for a wrong same-class instance, confirming that class fidelity, not instance wording, is what the solver requires. The unused instance signal is nonetheless present in the embedding: with the deployed encoder, a held-out ridge probe recovers the generative latent ξ from the text embedding with clearly positive R2 for the five non-Layered classes, above near-zero shuffled-ξ nulls (overall R2 = 0 .50–0 .66 across encoders; §3.5); for Layered, with only ten unique realisations, the probe is inconclusive (near-zero R2), though there the swap result above is itself functional evidence that the embedding carries the instance signal. 
+
+4.4.3. One-hot class-label baseline: a multi-seed view. 
+
+To test whether sentence-embedding conditioning carries information beyond a discrete class label, we retrain the generator from scratch with the SBERT input replaced by a 6-dimensional one-hot class indicator (the smallest possible conditioning bottleneck) and, to separate input width from embedding geometry, by a capacity-matched 384-dimensional fixed random per-class vector (one-hot 384 ), each across ten random seeds with the training seed as the unit of analysis ( §3.4). The central finding is a difference in training stability, not in attainable error. SBERT conditioning is stable across seeds with no seed-level split, its minimum validation K-MSE tightly clustered at 0.0102–0 .0111. The one-hot retrain is instead bimodal: classifying a seed as low-error by a 0 .01 14 Band Circle Ellipse Layered Random Continuous     
+
+> 10 4
+> 10 3
+> 10 2
+> 10 1
+> oracle K-MSE
+
+(a)             
+
+> SBERT one-hot (6-d) one-hot (384-d, random)
+> 050 100 150 200 250 300 350 400
+> training epoch
+> 10 2
+> 10 1
+> validation K-MSE
+
+(b) Figure 7: Reliability of discrete-code versus sentence-embedding conditioning across ten retrain seeds (each at its oracle conditioning; §4.4.3). (a) Per-pattern oracle K-MSE for SBERT (green), the 6-d one-hot (orange), and the capacity-matched 384-d random code (purple); horizontal bars mark across-seed means. (b) Per-epoch validation K-MSE for all ten seeds of each code (log y). 
+
+validation cutoff (in the wide gap between the one-hot’s two modes and just below SBERT’s tight range, so the count is insensitive to its exact value), one-hot reaches the low-error mode on only 5 of 10 seeds, the capacity-matched one-hot 384 on 7 of 10. Across all ten seeds it thus shows no reliable advantage: comparable to SBERT in the mean but at nearly twenty times the across-seed s.d. (per-pattern values and the seed-level test in Table S3; Figure 7). Conditional on reaching its low-error mode, however, the one-hot retrain is in fact more accurate than SBERT (0 .0212 versus 0 .0771 on Layered), so a discrete label can encode the structural constraint at least as tightly, simply unreliably under the matched protocol. That the capacity-matched one-hot 384 
+
+is bimodal in the same way places the instability in the conditioning representation rather than in input width. The codes also differ in convergence speed (Figure 7b): SBERT settles into its stable plateau within ∼40 epochs on every seed, whereas a one-hot seed either plateaus early at high error or transfers only after several times as many epochs (median 186 versus 42). At this data scale, the main practical gain from sentence embeddings is therefore more stable, faster training rather than strictly more information. The takeaway is not that discrete labels suffice in general, but that this closed-vocabulary, taxonomy-aligned setting lets a clean label compete; the capabilities the interface enables beyond such labels, open-vocabulary coverage and a paraphrase-ensemble uncertainty proxy, are taken up in §5.2. 
+
+4.5. When Text Carries Instance Information: Forward-Map Collapse and Sparse Observation 
+
+The within-class controls ( §4.4.2) leave Layered as the only class drawing on within-class text: its correct instance supplies ∼48% of the text benefit (Table 4), against ≈0% for the rest. Since a class label fixes the class but never the realisation, this is the one place text can add what a label cannot, and the forward map h = f (K) explains why (Figure 8). Per class, the forward-collapse ratio measures the head-field spread relative to the conductivity spread that generates it ( §3.5). It is order-unity for five classes (0 .20–0 .83) but 1 .3 × 10 −5 for Layered, whose strata lie parallel to the imposed flow so that distinct layerings produce near-identical heads: the head barely constrains which layering produced it, leaving text the only channel that can. Layered is correspondingly the hardest class (largest no-text error; §4.1). 15 Kh                            
+
+> max| h|2×10 5max| h|7×10 6max| h|6×10 6max| h| = 0.452 max| h| = 0.732 max| h| = 0.618
+> 0.00
+> 0.25
+> 0.50
+> 0.75
+> 1.00
+> K (norm.)
+> -0.6
+> -0.3
+> 0.0
+> 0.3
+> 0.6
+> h (norm.)
+> Band Circle Ellipse Layered Random Continuous
+> 10 4
+> 10 2
+> 10 0
+> forward-collapse ratio
+> Layered (collapse ratio = 1.3 × 10 5)Continuous (collapse ratio = 0.83 )
+> (a)
+> (b)
+
+Figure 8: Forward-collapse of the head field ( §4.5). (a) Three unique-K realisations (top) and their head anomalies ∆h (deviation from the class-mean head; bottom, shared colour scale) for Layered and the contrast class Continuous. (b) Forward-collapse ratio (head spread over conductivity spread; §3.5) for all six classes. 
+
+A forward-map degeneracy is not the only way the observation can underdetermine the geology: sparsifying the observation itself should act in the same direction, if more weakly. We therefore degrade the observed head to an endpoint-inclusive k × k grid (Figure 9a; §3.5) and track the beyond-class gap ( within − oracle ), what the correct instance text adds over a same-class wrong-instance text, across ten training seeds (Figure 9b). At full observation this gap is small for all five classes ( ≤4% of no-text K-MSE; Figure 9b). Sparsifying broadens it where the missing structure is describable global geometry, such as Band’s dip direction and Ellipse’s body geometry, whereas Continuous rises weakly and non-significantly, Random stays elevated at every density without a consistent trend, and Circle stays near zero throughout. Layered sits far off this scale and confirms the forward-map account: its gap is large and flat across the sweep ( ≈46% of no-text error at every density), and, in the grid-retrained model used for this sweep, feeding the class-mean embedding (pure class identity, the cleanest stand-in for a class label) reconstructs Layered worse than no text (capture ≈ − 27%), whereas the same class mean recovers nearly all of the oracle benefit for the other five classes. The beyond-class contribution thus grows as sparser observation leaves describable structure underdetermined, though even at the corners-only limit it remains a fraction of Layered’s forward-map degeneracy. We read this growth as a conservative lower bound on what richer description can contribute under sparse observation: the six-class taxonomy is deliberately informative (class identity alone recovers nearly all of the text benefit for five of six classes), so in settings without so strong a categorical prior, instance-level description would have correspondingly more room to add value. 
+
+4.6. The Paraphrase-Ensemble Proxy: Rank-Reliable but Miscalibrated 
+
+For the paraphrase ensemble to serve as the posterior-inspired sensitivity proxy of §3.2, its dispersion should track reconstruction error in both rank and magnitude. We test this on n = 200 synthetic test samples stratified across the six pattern classes, each with an ensemble of Np = 16 texts: the oracle text plus 15 LLM-generated paraphrases of it. For each sample we compare ¯σK to the observed error √K-MSE of the oracle-text reconstruction against the ground-truth K field. The rank ordering is strong overall: Spearman ρ = 0 .85 (Figure 10). This overall correlation is, however, largely a between-pattern effect, visible in the figure as colour clusters that separate along the diagonal while spreading vertically within each class: within individual patterns only Random correlates robustly ( ρ = 0 .76; the other five ρ ≤ 0.36). Thus ¯σK separates easy patterns from hard 16 (a) N = 4096 N = 1024 N = 256 N = 64 N = 16 N = 4             
+
+> 4096 1024 256 64 16 4
+> grid observations
+> 0
+> 2
+> 4
+> 6
+> 8
+> beyond-class gap (%)
+> Layered 46% (flat, off-scale)
+> (b)
+> Band
+> Circle
+> Ellipse
+> Random
+> Continuous Figure 9: Beyond-class text contribution under sparsifying observation. (a) The six swept observation densities, from full (N= 4096) to corners-only ( N= 4); red points mark the observed head positions. (b) Beyond-class ( within −oracle )gap as a percentage of no-text K-MSE for the five non-Layered classes; mean over ten training seeds, band ±1 s.e.
+
+ones more reliably than it ranks samples within a pattern. In magnitude, however, the proxy is miscalibrated: the log-log fit across the samples (the fitted line in Figure 10) has slope 0 .74, below the unit slope expected if ¯σK were a calibrated predictive standard deviation, and the paraphrase spread under-estimates RMSE across the whole dispersion range, by roughly 26 × at the low end of the fitted relation, narrowing to ∼4× at the top. The paraphrase ensemble is therefore a useful cross-pattern uncertainty proxy, separating easy reconstructions from hard ones, but its per-sample use within a class is limited: the sub-unit slope and the large multiplicative offset mean the absolute spread needs post-hoc calibration before it can be read as a predictive standard deviation, while the generally weak within-pattern correlations, which calibration cannot repair, would require separate validation before any within-class triage. This cross-pattern rank reliability motivates the uncertainty probe of §5.2: the paraphrase interface exposes an input-dependent dispersion signal (arising from the varying text alone, as the SBERT encoder is frozen and deterministic) that a discrete one-hot label, having nothing to paraphrase, does not provide. 
+
+4.7. Operating Envelope under Observation Noise 
+
+All synthetic experiments above train and evaluate on noiseless head fields, so the gain at σ = 0 should be read as a best-case estimate of the prior’s value. As an evaluation-only stress test of the noiseless-trained solver (no noise-aware retraining), we map how the oracle-vs-no-text gap changes when zero-mean Gaussian noise is added i.i.d. to every cell of the dense input head field, the same realisation corrupting the paired oracle and no-text branches; the swept noise level σ is a measurement-precision axis rather than an observation-density or -placement one. This injection (normalised head field range [0 , 1], so σ reads directly as a fraction of the full head range; n = 200 stratified test samples) reduces the oracle-vs-no-text gain from 80 .3% at σ = 0 to 39 .0% at σ = 10 −3, 8 .5% at σ = 5 × 10 −3, and 
+
+∼1% by σ = 2 × 10 −2 (Figure 11). By σ = 5 × 10 −3 both reconstructions are already substantially degraded (oracle/no-text K-MSE 0 .31 /0.34, versus 0 .015 /0.076 at σ = 0) and the text gain has largely closed. Because the generator never saw noisy heads in training, this collapse conflates two effects we do not separate here (the genuine loss of observation signal-to-noise, and the train/test mismatch of a noiseless-trained solver evaluated on corrupted inputs), so we read it as an empirical operating envelope rather than as an information-theoretic limit. Either way, the direction is consistent with the 17 10 4 10 3 10 2 10 1 10 0       
+
+> K
+> 10 4
+> 10 3
+> 10 2
+> 10 1
+> 10 0
+> K-MSE
+> Band
+> Circle
+> Ellipse
+> y=x
+> Layered
+> Random
+> Continuous
+> = 0.85
+> fit: slope = 0.74
+
+Figure 10: Reliability of the paraphrase-ensemble proxy on n = 200 stratified test samples ( Np = 16 texts each): per-sample oracle-text √K-MSE against ¯σK , coloured by pattern class; the grey dashed line y = x marks perfect magnitude calibration, the red dashed line the log-log fit across samples. 0 0.001 0.005 0.01 0.02 0.05  
+
+> Observation-noise std
+> 10 1
+> K-MSE
+> 80% gain
+> 1.1% gain
+> Oracle text
+> No text
+
+Figure 11: Evaluation-only noise stress test. Reconstruction K-MSE under oracle text and no text versus the standard deviation σ of Gaussian noise added to the normalised head field at evaluation time. The solver is not retrained for noisy inputs, so the curves reflect both loss of observation signal-to-noise and train–test mismatch. Means over n = 200 stratified test samples, with σ = 0 placed at 10 −4 for the logarithmic axis. 
+
+mechanism characterised above: the embedding acts as auxiliary information that resolves structural ambiguity only while the structure-induced head signal stays above the noise floor. Within this no-retraining stress test, the practical advantage of oracle text over no text is confined to low-noise inputs and closes rapidly as noise grows; quantifying its value under realistic monitoring-well noise, and whether noise-aware training can recover any of the lost gain, is left to future work. 
+
+4.8. Exploratory Transfer to the SPE10 Reservoir 
+
+As a semi-real external anchor (exploratory, at n = 13 holdout layers, rather than a field-deployment validation), we fine-tune the generator on N = 20 SPE10 layers and evaluate on the 13-layer holdout (§3.6). K-informed reference text reduces mean holdout K-MSE from 0 .0352 to 0 .0190 ( −46%). A single pattern-free generic-geological sentence does as well ( −52%), echoing the synthetic specificity spectrum (§4.3) in which most of the benefit needs no fine-grained detail, whereas a random non-geological control is numerically worse than no text (+19%). The results suggest that the description needs to name the relevant physical concept, rather than elaborate it. Coarsening the generic sentence one fixed text at a time (Table 5) shows the gain is governed by whether the text names heterogeneous permeability, not by its length or geological detail: an even shorter “A heterogeneous permeability field.” matches the generic sentence and the single word “Permeability.” still recovers most of the benefit, whereas on-topic rock-type descriptions that omit the concept retain at most a modest gain (“Sedimentary rock.”) or fall back to the no-text baseline and below (“Subsurface rock.”; “A porous rock.”, worse than random text). Figure 12 shows the 18 Table 5: SPE10 concept floor: mean K-MSE on the 13-layer holdout under each text condition (lower is better). Ladder rows apply one fixed sentence to all layers. The generic sentence is “A porous medium with heterogeneous permeability distribution.”; an example random non-geological sentence is “The weather forecast predicts rain for tomorrow afternoon.” 
+
+Tier Text K-MSE Names the concept “A heterogeneous permeability field.” 0.0148 generic sentence 0.0169 “Permeability.” 0.0215 On-topic, concept absent “Sedimentary rock.” 0.0307 “Subsurface rock.” 0.0352 “A porous rock.” 0.0429 Reference & controls nearest-class-mean proxy 0.0188 
+
+K-informed reference text (per layer) 0.0190 no text 0.0352 random non-geological text 0.0419 ladder on one holdout layer per formation: texts that name the concept suppress the spurious low-K
+
+bodies that the no-text and random reconstructions hallucinate, and the K-informed reference adds no further visible structure beyond the generic sentence. Consistently, the trained FiLM map sends the in-domain geological texts to nearly the same bottleneck-control direction, while non-geological random text departs from that direction; this compression provides a representation-level explanation for why added per-layer detail does not improve over the generic sentence (S3.6). The conditioning therefore has a minimum content requirement (the text must name the discriminating concept) and, once that requirement is met, diminishing returns: adding formation or pattern detail to the generic sentence fails to lower holdout K-MSE, which instead rises monotonically with payload toward the 
+
+K-informed reference value. This benefit is not confined to one rock type. Across the two SPE10 formations (full 85-layer evaluation; one layer of each in Figure 12) the trend is the same (text helps and the generic sentence matches the K-informed reference), but its magnitude tracks how under-determined the inversion is: it is largest in the smooth-gradient Tarbert layers, whose head fields least identify K (higher no-text error than Upper Ness; the generic sentence beats no text on all 35 layers, −47%), and smaller in the channelised Upper Ness layers, whose channels are partly recoverable from the head (46 of 50 layers, −36%). Detailed text edges the generic sentence more often in the channelised layers, where the geology has describable structure, but the average there remains essentially tied, so finer description still buys no reliable gain. A taxonomy-restricted nearest-class-mean proxy, the closest automated class-label substitute, is no better than the generic sentence (Table 5) and collapses to a near-degenerate assignment, so the fixed six-class taxonomy does not fit SPE10, motivating the open-vocabulary capability we take up in §5.2. Within this exploratory 13-layer holdout, the coarse in-domain geological prior remains useful but the finer per-layer detail does not at this fine-tuning scale; the holdout paired statistics and full protocol are in S3 (Table S5), and the FiLM-compression geometry is in S3.6. 
+
+5. Discussion 
+
+Where Zhang et al. [ 40 ] train with a semantic latent penalty so that text regularises the inversion, we deliberately use the conditioning as a measurement instrument (a frozen embedding injected only through FiLM, with the synthetic models trained on pure reconstruction), so the controls vary the conditioning representation alone and can be read as an audit of what the language channel carries. 19 Layer 16        
+
+> (Tarbert)
+> Head field hGround truth K
+> K-MSE = 0.0428
+> No text
+> K-MSE = 0.0904
+> Random text
+> K-MSE = 0.0648
+> Concept absent
+> ( A porous rock. )
+> K-MSE = 0.0119
+> Names the concept
+> (generic sentence)
+> K-MSE = 0.0124
+> K-informed ref.
+> Layer 54
+> (Upper Ness)
+> K-MSE = 0.0449 K-MSE = 0.0912 K-MSE = 0.0303 K-MSE = 0.0143 K-MSE = 0.0224
+> 0.0
+> 0.2
+> 0.4
+> 0.6
+> 0.8
+> 1.0
+> h (norm.)
+> 0.0
+> 0.2
+> 0.4
+> 0.6
+> 0.8
+> 1.0
+> K (norm.)
+
+Figure 12: Concept-floor ladder on one SPE10 holdout layer per formation: Layer 16 (Tarbert, smooth-gradient) and Layer 54 (Upper Ness, patchy); columns as labelled. Panel values are single-layer K-MSE; the random panel uses one control sentence, so its value differs from the five-sentence-per-layer average of Table 5. The concept-absent text suppresses the spurious low-K bodies of the no-text reconstruction only in the Upper Ness layer and degrades the Tarbert layer. 
+
+5.1. Contraction Through a Low-Dimensional, Largely Categorical Direction 5.1.1. A largely class-level contraction. 
+
+Section 3.2 cast the text as a soft prior, p(K | h, t ) ∝ p(h | K) p(K | t) (Eq. 4); the controls now let us say what that prior encodes. Introducing a latent structural class c (the six classes of §2), the prior decomposes exactly as p(K | t) = ∑ 
+
+> c
+
+p(K | c, t ) p(c | t), in which p(K | c, t ) carries any within-class text information beyond the class label. As a baseline we define a class-only null model p0
+
+by putting the text-free prior p(K | c) in place of p(K | c, t ), so that text acts only through the soft class assignment p(c | t): 
+
+p0(K | h, t ) ∝ p(h | K) ∑
+
+> c
+
+p(K | c) p(c | t). (8) The substitution p(K | c, t ) → p(K | c) would be exact only if text carried no within-class information beyond the class label; p0 is therefore a null model to read the controls against, not a posterior we estimate. The controls evaluate this null model class by class. Under dense observation the controls are consistent with p0 for five of six classes: language contracts the posterior chiefly through p(c | t), a low-dimensional categorical direction. The within-class text-dependence it discards is nonetheless real, used for Layered even under full observation, and increasingly for Band and Ellipse as the observation is sparsified. The specificity spectrum ( §4.3) and the class-mean embedding control ( §4.4) both indicate that, outside Layered, pattern identification rather than within-class detail carries most of the gain. 
+
+5.1.2. Information content versus training stability. 
+
+Whether a sentence embedding carries information beyond this class-level direction is the question the one-hot retrain addresses, and the multi-seed answer concerns training stability rather than information content. When its optimisation reaches the low-error mode, the one-hot code matches or beats SBERT: most visibly on Layered, the pattern with the largest h-only ambiguity of the six (h-only K-MSE = 0 .306; §4.1), where one-hot conditioned on reaching that mode attains oracle K-MSE 0.021 against SBERT’s across-seed mean of 0 .077. A discrete class label can therefore encode the structural constraint at least as tightly as the embedding; the information is not unique to language. But the one-hot code reaches that mode on only about half of the ten seeds (and the capacity-matched 384-dimensional random code shows the same qualitative bimodality), so on the high-error Layered case and in the overall mean it holds no reliable advantage, whereas SBERT converges to its solution on every seed. We therefore read the comparison as an optimisation phenomenon rather than an information one: at this data scale and FiLM bottleneck the structured embedding makes the class-level constraint reliably learnable, while a sparse or unstructured code realises it only intermittently. That 20 SBERT carries information is not in doubt: oracle text reduces K-MSE by 81% ( §4.1); what the multi-seed comparison adds is that its practical value here is training stability rather than strictly more information. For deploying a learned inverse solver this is a consequential distinction: reproducibility across retraining, not best-case accuracy on a fortunate seed, is what lets a practitioner trust a model, so the embedding’s training stability is itself an engineering-relevant property. We caution that the one-hot instability may be remediable with conditioning-specific tuning, so this is a statement about the matched, untuned protocol, not an intrinsic limitation of discrete labels; whether SBERT’s stability stems from embedding geometry or semantic content is not resolved by the present class-mean and random-code diagnostics and would require further controls (e.g. permuted-embedding retrains), which we leave to future work. The embedding nonetheless contains more than class identity: the decode probe recovers the generative latent ξ for the same five classes whose instance signal the solver leaves unused ( §4.4.2). That the within-class signal is present yet unused under full observation is a property of the inverse problem (the head field already determines K once the class is fixed) rather than a bottleneck in the embedding. 
+
+5.1.3. When language helps: a per-class map. 
+
+The categorical geological structure expressed by text (“four horizontal layers”, “scattered elliptical lenses”, “tilted band”) partitions the solution space into mutually disjoint subsets that the zeroth-order Tikhonov and total-variation penalties tested here do not explicitly encode [ 4, 12 ]; at a fixed iteration budget both trail even no-text generator inference, and are about an order of magnitude worse than oracle-text inference ( §4.2). How much this categorical contribution matters varies with how tightly the head field already constrains K (Figure 2). On Circle and Ellipse the localised head response pins 
+
+K down even without text ( h-only K-MSE ≤ 0.002), leaving little headroom for any conditioning; Band is intermediate, well-constrained by the head field yet with residual ambiguity that text still resolves. The head under-constrains K most for Layered, Random and Continuous (the largest no-text errors). For Random and Continuous this stems from their high conductivity contrast and variance rather than from a collapsed head, and class naming supplies most of the missing information. Layered is the distinct, extreme case: its horizontal strata lie parallel to the imposed flow and are nearly invisible to it (forward-collapse ratio 1 .3 × 10 −5; §4.5), so even the within-class detail (which layering is present) is needed ( §4.4.2). Correspondingly, the largest structural gain appears here: the Layered sand/clay facies IoU rises from 0 .14 to 0 .71 ( §4.1). Degrading the observation extends the same logic: as the head is grid-subsampled, the beyond-class contribution grows where the missing structure is describable global geometry (Band’s dip direction, Ellipse’s lens geometry), while the other three classes show no seed-robust rise ( §4.5). The geological content that helps is thus the describable large-scale structure (layering, dip direction, lens geometry) that the head field leaves unresolved and the embedding demonstrably carries, not the precise placement of individual objects. From an engineering-informatics standpoint, this decomposition is a map of when a language-encoded source of engineering information can condition a computational inverse model and what it contributes: chiefly a categorical geological prior, and chiefly where the head field under-constrains 
+
+K. Its value is therefore often intelligible from how far the quantitative observations alone constrain 
+
+K, rather than being uniform across sites, and the interface-level capabilities developed next are positioned to complement existing site-characterisation workflows, not to replace measured data. 
+
+5.2. What the Sentence-Embedding Interface Provides 
+
+Viewed as an interface rather than merely a code, the sentence embedding lets a user inject and perturb a structural prior without retraining the inverse solver. The parameterisation comparison above does not test this flexibility directly, but it remains a practical advantage of free-form text in the present FiLM-conditioned setting. Four affordances distinguish the sentence-embedding interface from a discrete class label, none requiring text to be the more accurate code. First, training stability: across ten retraining seeds the embedding converges to a tightly clustered oracle error, whereas a one-hot code reaches a comparably low-error solution on only about half ( §4.4.3), an engineering-relevant reliability, not a lower attainable error. Second and third, developed below, are the paraphrase-ensemble dispersion 21 signal and open-vocabulary coverage; both persist regardless of how the accuracy comparison resolves at larger scale. Fourth, and narrower, the embedding carries within-class instance detail a fixed label cannot, which the solver demonstrably draws on in one case: Layered, where the head under-constrains 
+
+K (§4.5, §5.1). 
+
+5.2.1. Paraphrase-ensemble uncertainty proxy. 
+
+Paraphrase ensembles yield a low-cost, posterior-inspired sensitivity probe on K given ( h, t ): meaning-preserving paraphrases of one description map to nearby but distinct conditioning vectors, and the resulting reconstruction dispersion, summarised by ¯σK , serves as the uncertainty proxy ( §3.2, 
+
+§3.3). Tested in §4.6, it is best read as a cross-pattern triage signal (rank-reliable across patterns, considerably weaker within them) whose absolute scale would need post-hoc calibration before being treated as a predictive standard deviation. A discrete one-hot label has nothing to paraphrase: any re-wording maps to the same vector, so this uncertainty construction has no analogue within a discrete-label parameterisation. Conceptually, ¯σK is a text-derived estimate of where the head observations least determine K, a candidate surrogate, if so far only cross-pattern, for the local degree of ill-posedness. The forward-collapse ratio of §4.5 measures that same ill-posedness from the physics side and network-independently; ¯ σK is its text-conditioned, input-dependent counterpart (supported here only as a cross-pattern signal, §4.6), so the two are complementary diagnostics rather than competing ones. This also suggests a future use of the same text-conditioning interface as an inner objective for Bayesian optimal experimental design (BED; e.g. sensor placement) [ 49 , 50 , 51 ]: with the site narrative held fixed, candidate measurements could be ranked by the paraphrase-ensemble dispersion reduction each is expected to induce, without additional generator training. Whether the paraphrase dispersion is reliable enough within a single site to drive such a design (as opposed to the cross-pattern triage supported here) remains untested. More broadly, this is complementary to established Bayesian site-characterisation frameworks [ 9 , 11 , 52 ], and, outside the Bayesian family, to error-domain model falsification, which evaluates candidate models under systematic uncertainty by falsification rather than posterior weighting [ 53 , 54 ]. What is new is that the prior is supplied by a natural-language description rather than by a parametric covariance, an analogue dataset, or a predefined candidate-model set. 
+
+5.2.2. Open-vocabulary coverage beyond the training taxonomy. 
+
+The open-vocabulary capability is that the sentence-embedding interface accepts any in-domain text the user is willing to write, including descriptions that have no natural representation in a six-class one-hot taxonomy. On SPE10 the nearest-class-mean proxy (the closest automated class-label substitute reachable from the fixed taxonomy) collapses to a near-degenerate assignment and does not outperform a single generic geological sentence ( §4.8), precisely in the out-of-distribution regime where open-vocabulary coverage should matter most. A discrete one-hot interface, by contrast, has by construction no way to encode that sentence at all. Beyond coverage, the same interface admits prompt refinement or optimisation [ 55 ] (more technical phrasing or structured constraints) as a future capability for language-assisted site characterisation [ 56 ]; we do not test whether such prompt engineering improves reconstruction accuracy in the present SPE10 setting. 
+
+5.3. Limitations 
+
+Several caveats temper the scope of our conclusions. The physical setting is idealised: results are for 64 × 64 grids with normalised hydraulic conductivity, and SPE10 is evaluated only as 2D slices under a simplified line-drive boundary condition rather than the original five-spot configuration ( §2); 3D field-scale validity under realistic units and boundary conditions remains untested. The head observations are likewise idealised, since training and main evaluation use noiseless simulated heads. In an evaluation-only stress test with no noise-aware retraining (stratified n = 200), the text gain falls from 80% to ∼1% as added head-noise σ rises from 0 to 2 × 10 −2 (§4.7); this conflates reduced observation precision with the train/test mismatch of a noiseless-trained solver, so the prior’s value under realistic monitoring-well noise remains open, as does whether noise-aware training can recover the lost gain. 22 The linguistic and embedding scope is also limited. On the linguistic side, ground-truth descriptions are generated by GPT-4o-mini from structured prompts containing the known latent parameters, rather than authored by human geologists; real site reports are more ambiguous, verbose, and context-dependent, and whether the class-level mechanism persists under human-authored knowledge is untested. The fidelity of such human-supplied context is itself an active question in AI-assisted engineering design [ 57 ]. On the embedding side, we use a general-purpose SBERT model rather than one adapted to geological text; the decode probe already shows that encoder choice changes latent recovery ( §4.4.2), so the deployed encoder should not be read as a ceiling for domain-adapted representations. The mechanism analysis is also bounded. The when-does-text-help findings are interpretive rather than predictive laws: over only six classes the forward-collapse ratio does not significantly rank text benefit ( p > 0.1; §4.5), and Layered’s instance dependence rests on only ten unique K realisations (§4.4.2). The sparse-observation trend is measured on a separate grid-retrained generator, which conflates degraded observation with any change in how the FiLM channel is used, and is modest in magnitude outside Layered. Relatedly, because text enters only through FiLM at the 4 × 4 bottleneck, our reading of the within-class detail left unused under full observation as a property of the inverse problem rather than the embedding cannot be cleanly separated from an architectural one: the present bottleneck may be less able to route fine instance-specific geometry than a conditioning path with access to finer-resolution features. The decodability and instance-use results are specific to this solver, encoding, and observation scheme, and the audit protocol itself has likewise been exercised only on this Darcy-flow benchmark, so its transfer to related language-conditioned inverse problems remains to be demonstrated. Finally, the no-text baseline is itself a counterfactual: it uses a zero embedding, which is out of distribution because the generator was trained with full conditioning (no embedding dropout), so reported text-versus-no-text gains compare against a never-trained counterfactual, and an explicitly unconditional or dropout-trained baseline could reduce the apparent gap. 
+
+6. Conclusions 
+
+We have examined what natural-language site knowledge (short geological descriptions encoded as frozen sentence embeddings) carries into a neural solver for the Darcy-flow hydraulic conductivity inverse problem, asking whether this form of engineering information conditions the reconstruction beyond what a discrete class label could. Under the leak-free grouped split, reference text reduces mean K-MSE by 81% relative to a zero-embedding no-text counterfactual ( §4.1). To isolate what fraction of this gain is unique to sentence embeddings, we apply four representation controls on the same grouped partition: a class-mean embedding, a within-class text swap, and from-scratch retrains with a one-hot class code and a capacity-matched random code. Across ten seeds, the 6-dimensional one-hot class indicator can match or beat SBERT when its optimisation reaches the low-error mode. But the one-hot and random codes reach that mode only intermittently across retraining seeds, whereas SBERT converges there on every seed ( §4.4.3); the class-mean and within-class controls likewise leave the reconstruction essentially unchanged for all but one class (negligible instance contribution; §4.4.2). At the present data scale and FiLM bottleneck, the language-derived prior therefore acts mainly as a class-level constraint on K. A clean discrete code can represent much of the same signal. What the sentence-embedding route adds is training stability: a nearly twenty-fold lower across-seed standard deviation of the reference-text K-MSE, rather than additional dense-observation accuracy. Beyond class identity, the embedding does carry within-class instance information (recoverable by a held-out decode of the generative latent), but in this benchmark the solver draws on it where the forward map or the observation under-constrains 
+
+K: consistently for the geology-invariant Layered class, and increasingly under sparse observation for classes with describable global geometry (Band, Ellipse). Text helps mainly when the head data do not already constrain K strongly ( §4.5). Reaching this conclusion required treating the conditioning representation as the sole experimental variable (a frozen embedding injected only through FiLM, with the synthetic models trained on pure reconstruction) and auditing it through the controls and probes 23 above. Exercised here only on Darcy flow, this audit design is intended as a reusable template for related language-conditioned inverse problems. Beyond the training-stability and instance-detail findings above, the sentence-embedding interface adds two capabilities that a fixed class code cannot, by construction, support: First, its paraphrase ensemble yields a dispersion that rank-orders reconstruction error across, though not yet within, pattern classes ( §4.6): not a calibrated variance, but a candidate inner objective for language-driven Bayesian optimal experimental design [ 49 , 50 ]. Second, its open vocabulary covers descriptions outside the training taxonomy: in the exploratory SPE10 holdout, a single generic geological sentence performs broadly comparably to per-layer K-informed reference text and numerically better than the nearest-class-mean control ( §4.8). The conditions under which the language prior helps are thus a head field that under-constrains 
+
+K and a high-precision observation regime: in an evaluation-only stress test, the text gain falls from its noiseless best case toward zero as head-observation noise grows ( §4.7). Three directions follow naturally from this mechanistic account: 
+
+• Removal of the reference-text assumption. Generate text automatically from the observed head field through gradient-style optimisation in language space [ 55 ], so that the conditioning input no longer presupposes a correct in-domain description supplied in advance. The concept-floor result ( §4.8) sets the bar such optimisation must clear: the recovered text must not only reduce the head residual but also name the discriminating physical concept. 
+
+• Paraphrase-ensemble calibration for deployment. Calibrate the paraphrase-ensemble dis-persion ¯σK as a predictive standard-deviation estimate so that the language-driven experimental-design utility of §5.2 can be benchmarked against parametric-covariance alternatives on increas-ingly field-like site-characterisation problems. 
+
+• Human-authored site descriptions. Replace the LLM-generated synthetic descriptions with real borehole logs and geologist narratives to test whether the class-level mechanism persists under the ambiguity, verbosity, and context-dependence of field descriptions. Together these directions would extend the sentence-embedding interface beyond the controlled Darcy-flow setting of this paper: first to realistic subsurface-characterisation workflows, and ultimately to the wider class of engineering inverse problems in which expert natural-language knowledge serves, alongside quantitative data, as computable information that both constrains the solution and guides the next measurement. 
+
+Acknowledgments 
+
+This research was supported by JSPS KAKENHI Grant Numbers JP23H00195 and JP25KJ0619. 
+
+Declaration of competing interest 
+
+The authors declare that they have no known competing financial interests or personal relationships that could have appeared to influence the work reported in this paper. 
+
+References 
+
+[1] A. Tarantola, Inverse Problem Theory and Methods for Model Parameter Estimation, SIAM, 2005. [2] D. S. Oliver, A. C. Reynolds, N. Liu, Inverse Theory for Petroleum Reservoir Characterization and History Matching, Cambridge University Press, 2008. [3] A. M. Stuart, Inverse problems: A Bayesian perspective, Acta Numerica 19 (2010) 451–559. doi:10.1017/S0962492910000061. 24 [4] R. C. Aster, B. Borchers, C. H. Thurber, Parameter Estimation and Inverse Problems, 3rd Edition, Elsevier, 2018. [5] Y. Otake, Y. Honjo, Challenges in geotechnical design revealed by reliability assess-ment: Review and future perspectives, Soils and Foundations 62 (3) (2022) 101129. doi:10.1016/j.sandf.2022.101129. [6] K.-K. Phoon, F. H. Kulhawy, Characterization of geotechnical variability, Canadian Geotechnical Journal 36 (4) (1999) 612–624. doi:10.1139/t99-038. [7] K.-K. Phoon, F. H. Kulhawy, Evaluation of geotechnical property variability, Canadian Geotech-nical Journal 36 (4) (1999) 625–639. doi:10.1139/t99-039. [8] G. B. Baecher, J. T. Christian, Reliability and Statistics in Geotechnical Engineering, John Wiley & Sons, 2003. [9] K.-K. Phoon, J. Ching, T. Shuku, Challenges in data-driven site characterization, Georisk: Assessment and Management of Risk for Engineered Systems and Geohazards 16 (1) (2022) 114–126. doi:10.1080/17499518.2021.1896005. [10] J. Ching, K.-K. Phoon, Transformations and correlations among some clay parameters—the global database, Canadian Geotechnical Journal 51 (6) (2014) 663–685. doi:10.1139/cgj-2013-0262. [11] J. Ching, S. Wu, K.-K. Phoon, Constructing quasi-site-specific multivariate probability distribution using hierarchical Bayesian model, Journal of Engineering Mechanics 147 (10) (2021) 04021069. doi:10.1061/(ASCE)EM.1943-7889.0001964. [12] L. I. Rudin, S. Osher, E. Fatemi, Nonlinear total variation based noise removal algorithms, Physica D: Nonlinear Phenomena 60 (1–4) (1992) 259–268. doi:10.1016/0167-2789(92)90242-F. [13] P. K. Kitanidis, Introduction to Geostatistics: Applications in Hydrogeology, Cambridge University Press, 1997. [14] H. Zhou, J. J. G´ omez-Hern´ andez, L. Li, Inverse methods in hydrogeology: Evolution and recent trends, Advances in Water Resources 63 (2014) 22–37. doi:10.1016/j.advwatres.2013.10.014. [15] T. Enemark, L. J. M. Peeters, D. Mallants, O. Batelaan, Hydrogeological conceptual model building and testing: A review, Journal of Hydrology 569 (2019) 310–329. doi:10.1016/j.jhydrol.2018.12.007. [16] N. Linde, P. Renard, T. Mukerji, J. Caers, Geological realism in hydrogeological and geophysical inverse modeling: A review, Advances in Water Resources 86 (2015) 86–101. doi:10.1016/j.advwatres.2015.09.019. [17] Y. Zhu, N. Zabaras, Bayesian deep convolutional encoder–decoder networks for surrogate mod-eling and uncertainty quantification, Journal of Computational Physics 366 (2018) 415–447. doi:10.1016/j.jcp.2018.04.018. [18] S. Mo, Y. Zhu, N. Zabaras, X. Shi, J. Wu, Deep convolutional encoder–decoder networks for uncertainty quantification of dynamic multiphase flow in heterogeneous media, Water Resources Research 55 (1) (2019) 703–728. doi:10.1029/2018WR023528. [19] E. Laloy, R. H´ erault, D. Jacques, N. Linde, Training-image based geostatistical inversion using a spatial generative adversarial neural network, Water Resources Research 54 (1) (2018) 381–406. doi:10.1002/2017WR022148. [20] I. J. Goodfellow, J. Pouget-Abadie, M. Mirza, B. Xu, D. Warde-Farley, S. Ozair, A. Courville, Y. Bengio, Generative adversarial nets, in: Advances in Neural Information Processing Systems (NeurIPS), Vol. 27, 2014, pp. 2672–2680. 25 [21] M. Raissi, P. Perdikaris, G. E. Karniadakis, Physics-informed neural networks: A deep learning framework for solving forward and inverse problems involving nonlinear partial differential equations, Journal of Computational Physics 378 (2019) 686–707. doi:10.1016/j.jcp.2018.10.045. [22] A. M. Tartakovsky, C. Ortiz Marrero, P. Perdikaris, G. D. Tartakovsky, D. Barajas-Solano, Physics-informed deep neural networks for learning parameters and constitutive relation-ships in subsurface flow problems, Water Resources Research 56 (5) (2020) e2019WR026731. doi:10.1029/2019WR026731. [23] H. Du, Z. Zhao, H. Cheng, J. Yan, Q. Z. He, Modeling density-driven flow in porous media by physics-informed neural networks for CO 2 sequestration, Computers and Geotechnics 159 (2023) 105433. doi:10.1016/j.compgeo.2023.105433. [24] Y. Chen, Y. Xu, L. Wang, T. Li, Modeling water flow in unsaturated soils through physics-informed neural network with principled loss function, Computers and Geotechnics 161 (2023) 105546. doi:10.1016/j.compgeo.2023.105546. [25] Q. Wu, Z. Xie, Y. Zhao, M. Tian, X. Zhang, Q. Qiu, Multi-type and multi-scale geological three-dimensional modeling using entity-relationship networks, Advanced Engineering Informatics 72 (2026) 104436. doi:10.1016/j.aei.2026.104436. [26] X. Zhou, B. Sheil, S. Suryasentana, P. Shi, Graph attention neural network for subsurface stratigraphy on spatial and feature level using multiple-source sparse exploration data, Advanced Engineering Informatics 70 (2026) 104108. doi:10.1016/j.aei.2025.104108. [27] X. Diao, M. R. Rownak, S. Olatubosun, P. K. Vaddi, C. Smidts, A multiple-criteria sensor selection framework based on qualitative physical models, Advanced Engineering Informatics 65 (2025) 103228. doi:10.1016/j.aei.2025.103228. [28] W. Qin, Y. Pan, X. Ye, D. Yang, Y. Tan, H. Ouyang, H. Zhong, PTC-diffusion: A partitioned modeling with diffusion-based uncertainty evaluation for blasting silt displacement method reconstruction, Advanced Engineering Informatics 70 (2026) 104123. doi:10.1016/j.aei.2025.104123. [29] Y. Zhang, G. Ma, T. Qu, Z. Wang, K. Xiong, W. Zhou, MoE-D 2AN: A mixture-of-experts surrogate and dual-branch data assimilation network for spatiotemporal dam deformation modeling, Advanced Engineering Informatics 69 (2026) 104122. doi:10.1016/j.aei.2025.104122. [30] OpenAI, GPT-4 technical report, arXiv preprint arXiv:2303.08774 (2023). [31] A. Radford, J. W. Kim, C. Hallacy, A. Ramesh, G. Goh, S. Agarwal, G. Sastry, A. Askell, P. Mishkin, J. Clark, G. Krueger, I. Sutskever, Learning transferable visual models from natural language supervision, in: Proceedings of the 38th International Conference on Machine Learning (ICML), Vol. 139 of Proceedings of Machine Learning Research, 2021, pp. 8748–8763. [32] R. Rombach, A. Blattmann, D. Lorenz, P. Esser, B. Ommer, High-resolution image synthesis with latent diffusion models, in: Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR), 2022, pp. 10684–10695. [33] H. Liu, J. C. P. Cheng, V. J. L. Gan, S. Zhou, A novel data-driven framework based on BIM and knowledge graph for automatic model auditing and quantity take-off, Advanced Engineering Informatics 54 (2022) 101757. doi:10.1016/j.aei.2022.101757. [34] T. Shan, F. Zhang, A. P. C. Chan, S. Zhu, K. Li, Large language models-empowered automatic knowledge graph development based on multi-modal data for building health resilience, Advanced Engineering Informatics 68 (2025) 103655. doi:10.1016/j.aei.2025.103655. [35] Z. Qian, C. Shi, Uncertainty-aware multi-agent system for automated and real-time geotechnical analysis in tunneling, Computer-Aided Civil and Infrastructure Engineering 49 (2026) 100079. doi:10.1016/j.cacaie.2026.100079. 26 [36] M. Jia, Q. Cheng, C. Tao, Y. Hu, Q. Hong, W. Cheng, Z. Liu, A physics-informed train on synthetic and test on real method for evaluating large language model-generated safety-critical traffic scenarios, Computer-Aided Civil and Infrastructure Engineering 40 (28) (2025) 5153–5169. doi:10.1111/mice.70071. [37] K. Areerob, V.-Q. Nguyen, X. Li, S. Inadomi, T. Shimada, H. Kanasaki, Z. Wang, M. Suganuma, K. Nagatani, P.-j. Chun, T. Okatani, Multimodal artificial intelligence approaches using large language models for expert-level landslide image analysis, Computer-Aided Civil and Infrastructure Engineering 40 (19) (2025) 2900–2921. doi:10.1111/mice.13482. [38] S. Wu, Y. Otake, Y. Higo, I. Yoshida, Pathway to a fully data-driven geotechnics: Lessons from materials informatics, Soils and Foundations 64 (3) (2024) 101471. doi:10.1016/j.sandf.2024.101471. [39] S. Wu, Y. Otake, D. Mizutani, C. Liu, K. Asano, N. Sato, H. Baba, Y. Fukunaga, Y. Higo, A. Kamura, S. Kodama, M. Metoki, T. Nakamura, Y. Nakazato, T. Saito, A. Shioi, M. Takenobu, K. Tsukioka, R. Yoshikawa, Future-proofing geotechnics workflows: accelerating problem-solving with large language models, Georisk: Assessment and Management of Risk for Engineered Systems and Geohazards 19 (2) (2025) 307–324. doi:10.1080/17499518.2024.2381026. [40] H. Zhang, Y. Chen, Z. Wang, T. J. Cui, P. del Hougne, L. Li, Semantic regularization of electromagnetic inverse problems, Nature Communications 15 (2024) 3869. doi:10.1038/s41467-024-48115-5. [41] Y. Chen, H. Zhang, J. Ma, T. J. Cui, P. del Hougne, L. Li, Semantic–electromagnetic inver-sion with pretrained multimodal generative model, Advanced Science 11 (42) (2024) 2406793. doi:10.1002/advs.202406793. [42] OpenAI, GPT-4o system card, arXiv preprint arXiv:2410.21276 (2024). [43] N. Reimers, I. Gurevych, Sentence-BERT: Sentence embeddings using Siamese BERT-networks, in: Proceedings of the 2019 Conference on Empirical Methods in Natural Language Processing and the 9th International Joint Conference on Natural Language Processing (EMNLP-IJCNLP), 2019, pp. 3982–3992. doi:10.18653/v1/D19-1410. [44] M. A. Christie, M. J. Blunt, Tenth SPE comparative solution project: A comparison of upscaling techniques, SPE Reservoir Evaluation & Engineering 4 (4) (2001) 308–317. doi:10.2118/72469-PA. [45] O. Ronneberger, P. Fischer, T. Brox, U-Net: Convolutional networks for biomedical image segmentation, in: Medical Image Computing and Computer-Assisted Intervention (MICCAI), Vol. 9351 of Lecture Notes in Computer Science, 2015, pp. 234–241. doi:10.1007/978-3-319-24574-4 28. [46] E. Perez, F. Strub, H. de Vries, V. Dumoulin, A. Courville, FiLM: Visual reasoning with a general conditioning layer, in: Proceedings of the AAAI Conference on Artificial Intelligence, Vol. 32, 2018, pp. 3942–3951. doi:10.1609/aaai.v32i1.11671. [47] S. Holm, A simple sequentially rejective multiple test procedure, Scandinavian Journal of Statistics 6 (2) (1979) 65–70. [48] B. Efron, Better bootstrap confidence intervals, Journal of the American Statistical Association 82 (397) (1987) 171–185. doi:10.1080/01621459.1987.10478410. [49] D. V. Lindley, On a measure of the information provided by an experiment, Annals of Mathematical Statistics 27 (4) (1956) 986–1005. doi:10.1214/aoms/1177728069. [50] E. G. Ryan, C. C. Drovandi, J. M. McGree, A. N. Pettitt, A review of modern computational algorithms for Bayesian optimal design, International Statistical Review 84 (1) (2016) 128–154. doi:10.1111/insr.12107. 27 [51] T. Fu, Q. Hu, J. Zhao, G. Jiang, P. Wang, L. Shan, Y. Yao, Y. Rong, Optimal placement design of pressure and electric sensors for enhanced underwater source sensing, Advanced Engineering Informatics 72 (2026) 104435. doi:10.1016/j.aei.2026.104435. [52] I. Yoshida, Y. Tomizawa, Y. Otake, Estimation of trend and random components of conditional random field using Gaussian process regression, Computers and Geotechnics 136 (2021) 104179. doi:10.1016/j.compgeo.2021.104179. [53] J.-A. Goulet, I. F. C. Smith, Structural identification with systematic errors and unknown uncertainty dependencies, Computers & Structures 128 (2013) 251–258. doi:10.1016/j.compstruc.2013.07.009. [54] R. Pasquier, I. F. C. Smith, Robust system identification and model predictions in the pres-ence of systematic uncertainty, Advanced Engineering Informatics 29 (4) (2015) 1096–1109. doi:10.1016/j.aei.2015.07.007. [55] M. Y¨ uksekg¨ on¨ ul, F. Bianchi, J. Boen, S. Liu, P. Lu, Z. Huang, C. Guestrin, J. Zou, Optimiz-ing generative AI by backpropagating language model feedback, Nature 639 (2025) 609–616. doi:10.1038/s41586-025-08661-4. [56] Z. Qian, C. Shi, Large language model-empowered paradigm for automated geotechnical site planning and geological characterization, Automation in Construction 173 (2025) 106103. doi:10.1016/j.autcon.2025.106103. [57] S. Vyas, S. Cheruku, V. R. Krishnamurthy, How does contextual fidelity impact how we think, talk, and act in AI-assisted engineering design?, Advanced Engineering Informatics 72 (2026) 104456. doi:10.1016/j.aei.2026.104456. 28
