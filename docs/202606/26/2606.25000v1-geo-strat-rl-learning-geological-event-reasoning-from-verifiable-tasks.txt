@@ -1,0 +1,1423 @@
+Title: Geo-Strat-RL: Learning Geological Event Reasoning from Verifiable Tasks
+
+URL Source: https://arxiv.org/pdf/2606.25000v1
+
+Published Time: Thu, 25 Jun 2026 00:06:41 GMT
+
+Number of Pages: 21
+
+Markdown Content:
+## Geo-Strat-RL: Learning Geological Event Reasoning from Verifiable Tasks 
+
+Lukas Mosser 1
+
+Abstract 
+
+To evaluate whether vision-language models can reason about geological histories, it is necessary to construct observations for which the underlying process history is known. Furthermore, reasoning over geological histories is not just a question of recognizing visual patterns, but also of understanding temporal and structural relationships that may be only indirectly visible or highly ambiguous. When ground-truth event histories are not uniquely identifiable or are unavailable, it remains an open challenge to teach models capable of visual reasoning to produce valid geological reconstructions that are consistent with both observed evidence and geological principles. We therefore investigate whether defining a verifiable geological reasoning task can improve geological event reconstruction across observation domains through reinforcement learning with verifiable rewards (RLVR). To this end, we present Geo-Strat-RL, a synthetic environment that generates stratigraphic observations and compact visible-evidence event histories. The environment combines a geological generator with an executable verifier that scores chronology, event identity, deposition, and structural relationships. We show that RLVR improves geological reconstruction in vision-language models (VLMs), increasing geological content scores on held-out stratigraphic diagrams. We further evaluate the same held-out geological histories in a synthetic seismic observation domain by converting the generated scenes into acoustic-impedance-derived amplitude sections. In this controlled paired-renderer setting, we present evidence that geological reasoning learned from stratigraphic diagram-domain RLVR training transfers to synthetic seismic representations without seismic-specific training examples, supporting the hypothesis that RLVR can teach reusable geological reasoning concepts across related observation formats. 
+
+1. Introduction 
+
+Machine learning has a long history in geoscience, spanning remote sensing, seismic interpretation, lithology classifica-tion, document-scale knowledge extraction, and many more applications (Bergen et al., 2019; Dramsch, 2020; Zhu et al., 2017; Waldeland et al., 2018; Wu et al., 2019; Hall, 2016; Bressan et al., 2020; Deng et al., 2023; Lin et al., 2024). Recent foundation models extend this line of work from task-specific predictors toward language- and vision-language systems that can answer domain questions, follow instruc-tions, and synthesize scientific context. Geoscience-specific language models such as K2 and GeoGalactica adapt general large language models (LLMs) with geoscience corpora and instruction data (Deng et al., 2023; Lin et al., 2024), while remote-sensing VLMs such as GeoChat show how multi-modal instruction-following can be specialized to geospatial imagery (Kuckreja et al., 2024). These systems suggest that geological artificial intelligence (AI) is moving from classification toward reasoning, but they do not directly test whether a model can reconstruct a latent geological history       
+
+> 1Aker BP ASA. Correspondence to: Lukas Mosser <Lukas.mosser@akerbp.com>.
+> Preprint. June 25, 2026.
+
+from a static diagram. Controlled geological generators provide a way to make this question measurable. Earlier generative-model work used neural networks to represent distributions of porous media and to define geological priors (Mosser et al., 2017; 2020). More recently, conversational systems have shown how large language models can expose decades of ex-ploration knowledge through natural-language interfaces (Mosser et al., 2024). Geo-Strat-RL follows the same prac-tical pattern: the model is not asked to describe geology in the abstract, but to recover a known geological object from controlled observations and to be evaluated against quantities that can be checked. Stratigraphic cross sections provide a compact setting for this question. The final image is static, but the interpretation depends on temporal ordering, superposition, cross-cutting relationships, and the distinction between deposition, defor-mation, erosion, and intrusion. This makes the task different from object recognition or captioning: the model must infer a process history whose steps are only indirectly visible. General VLMs such as LLaVA-style models connect a vi-sual encoder to an instruction-following language model (Liu et al., 2023); recent Qwen-VL models provide strong 1
+
+> arXiv:2606.25000v1 [cs.LG] 23 Jun 2026 Geo-Strat-RL
+
+open multimodal baselines (Qwen Team, 2025a). Qwen3-VL further emphasizes stronger multimodal reasoning and multi-level visual feature integration (Qwen Team, 2025b). However, broad VLM benchmarks rarely isolate whether the model has learned domain-specific temporal rules rather than surface-level description. We therefore frame stratigraphic interpretation as an RLVR problem. The generator provides images and exact event histories, the verifier maps model output to decomposed geological rewards, and training can optimize the model against this executable feedback without human preference labels. This follows recent reasoning-model work in which reinforcement learning improves answer-verifiable tasks (Shao et al., 2024; DeepSeek-AI, 2025), but we apply the idea to visual geological event reconstruction. To make the approach practical on open VLMs, we train low-rank adap-tation (LoRA) adapters (Hu et al., 2021) with Hugging Face Transformer Reinforcement Learning (TRL)’s Group Rel-ative Policy Optimization (GRPO) implementation, which supports custom reward functions and multimodal GRPO training (von Werra et al., 2020; Hugging Face, 2026). This paper studies whether current VLMs can infer geolog-ical event histories from synthetic cross sections without relying on rendered layer names, arrows, or other visual annotations. The objective is not to produce the most realis-tic geological diagrams or seismic representations. Rather, Geo-Strat-RL uses geology as a compact, high-ambiguity reasoning domain in which generalisation across geoscience domains from RLVR can be studied under controlled su-pervision: the observations require temporal and structural reasoning, the answer is verifiable, and the same latent event history can be rendered through different representation do-mains. The benchmark is intentionally narrow: each image is generated by a controlled simulator with a known event sequence, and each model response is scored against a com-pact JavaScript Object Notation (JSON) target.  
+
+> Figure 1. A simple paired held-out scene rendered as a diagram observation and as a seismic-style amplitude observation. Both panels correspond to the same hidden geological history and com-pact target.
+
+Contributions 
+
+• A controlled geological generator that produces strati-graphic observations together with compact visible-evidence event histories. • An executable verifier that decomposes model perfor-mance into format, chronology, event identity, deposi-tion, and structural-attribute components. • A training and evaluation workflow that uses generated examples and verifiable rewards to improve open VLM geological reconstruction. • A fixed no-label train/validation/test fixture suite with component-wise confidence intervals for diagram and seismic-style observations. • Paired diagram/seismic-style experiments that test whether policies trained on one observation domain transfer to the other for the same latent geological his-tories. 
+
+Artifacts 
+
+Repository, dataset, model, and adapter links are collected in Section E. 
+
+2. Methodology 
+
+2.1. Task Definition 
+
+Given a cross-section image x, the model must produce a compact JSON object y containing a chronological event sequence. Each event is represented with a short event code and attributes: 
+
+y = {"seq" : [ e1, e 2, . . . , e T ]}. (1) The same compact target can be paired with different ren-derings of the hidden scene; Figure 1 shows a simple diagram/seismic-style pair used in the transfer setting. The target chronology is generated directly by the simulator and then normalized to include only evidence visible in the final rendered image, with an explicit initial basement unit re-tained as a fixed convention. The compact schema supports five event codes: deposition D, tilting T, faulting F, erosion or angular unconformity E, and intrusion I. Each deposition event names basement or one layer; deposition events are not grouped. Tilting records affected layers and clock-wise or counterclockwise direction. Faulting records a fault identifier and normal or reverse motion. Erosion records an angular-unconformity surface and visible truncated layers or structures. Intrusion records a dike identifier, preserved start and end points, and visible cut layers. For intrusions whose endpoints fall inside the stratigraphic column, the layer endpoint is approximated from generated vertical endpoint 2Geo-Strat-RL 
+
+metadata rather than inferred independently from rendered pixels; it is therefore a controlled target convention, not a claim about human image-picking precision. The event letters are a deliberate interface choice rather than geolog-ical notation: fixed short codes reduce completion length, lower truncation risk, simplify deterministic parsing, and keep the verifier stable across model families. Fault events intentionally omit affected-layer lists because such lists are ambiguous in final static images after erosion and later de-position; the benchmark instead scores fault chronology, identity, and normal/reverse sense. 
+
+2.2. Synthetic Generator 
+
+The generator samples a chronological sequence and then renders the final state. It starts from an explicit basement unit, deposits a lower package of layers, optionally tilts that package, adds complexity-dependent finite faults and intrusions, applies erosion or an angular unconformity, and deposits younger layers. For complexity levels 4 and 5, an intrusion is guaranteed later in the program if none was sampled before erosion. The randomized generator uses 4–9 layers and cycles through five complexity levels when building training rows. Lithologies are drawn from a small stylized set. Diagram colors and textures are not semantic identifiers: basement has a fixed diagnostic style, while non-basement depositional units and intrusions receive seed-deterministic randomized styles with contrast constraints between neighboring units. The geometric model is deliberately textbook-like. Depo-sition creates polygonal units with finite visible thickness. Tilting rotates existing layers around the lower frame. Fault-ing uses a finite displacement field in fault-local coordinates with along-fault decay, across-fault attenuation, and a nar-row core transition; affected layers and existing intrusions are split and deformed rather than simply overprinted by a fault line. Erosion clips existing layers and intrusions below a sloping unconformity surface, and intrusion inserts an irregular dike polygon through the current stratigraphy. After construction, the scene is vertically scaled into the frame, deformation voids are assigned either to basement exposure or to an upward extension of the youngest visible layer, and the final input image is rendered without layer names, arrows, or event markers. The event vocabulary fol-lows standard sequence-stratigraphic and structural-geology concepts, but the renderer is intentionally schematic rather than a physical forward model (Catuneanu, 2006; Allan, 1989). These assumptions are intentionally restrictive. The diagram benchmark does not model depositional facies uncertainty, ambiguous outcrop exposure, or multiple valid geological interpretations. Instead, it provides a controlled process-history task where the simulator defines a single answer key and where failures can be attributed to visual recognition, chronological ordering, or schema compliance. 
+
+Compact target example. For the construction flow in Figure 2, the visible-evidence target is: 
+
+Target JSON                                     
+
+> {"seq": [["D", "basement"], ["D", "layer_1"], ["D", "layer_2"], ["D", "layer_3"], ["D", "layer_4"], ["T", ["basement", "layer_1", "layer_2", "layer_3", "layer_4"], "clockwise"], ["F", "fault_a", "normal"], ["F", "fault_b", "normal"], ["I", "intrusion_a", "layer_2", "angular_unconformity", ["layer_2", "layer_3", "layer_4"]], ["E", "angular_unconformity", ["layer_1", "layer_2", " layer_3", "layer_4", "fault_a", "fault_b", "intrusion_a "]], ["D", "layer_5"], ["D", "layer_6"], ["F", "fault_c", "reverse"], ["E", "angular_unconformity", ["layer_5", "layer_6", " fault_c"]], ["D", "layer_7"] ]}
+
+2.3. Seismic-Style Transfer Renderer 
+
+To test whether diagram-domain RLVR learns geological reasoning that survives a controlled observation-domain shift, we add a seismic-style renderer for the same hidden scenes. This renderer changes only the observed data do-main, not the sampled geological history or compact JSON target. For each seed, the paired diagram and seismic-style observations therefore have the same event sequence and the same visible-evidence answer key. The diagram ob-servation is a colored schematic cross section, while the seismic-style observation is a synthetic acoustic amplitude section represented as an image for VLM input; Figure 1 shows a minimal paired example. The renderer first rasterizes three acoustic property fields over the final scene: P-wave velocity vp, density ρ, and acoustic impedance Z = ρv p. Depositional units receive deterministic acoustic impedances that increase by a fixed minimum step from one layer to the next, with only a small lithology-dependent perturbation. This makes each depo-sitional contact produce a visible reflection coefficient, in-cluding contacts between visually similar or locally adjacent units. Faults, unconformities, and intrusions enter through the same final deformed geometry used by the diagram ren-derer; intrusions receive a high-impedance body, but their interior amplitudes are smoothed so the task cue is the body and its cut relationships rather than point-diffraction arti-facts. The velocity model is then used in a simple two-dimensional acoustic finite-difference calculation. We place a line of sur-3Geo-Strat-RL 
+
+Figure 2. Construction flow for generated seed 20001. The training and evaluation images contain only the final cross section, but the simulator constructs the scene through a known chronological event sequence. 
+
+face shots and receivers over a padded model, inject a Ricker wavelet, propagate pressure waves with an absorbing bound-ary sponge, mute direct arrivals, and record synthetic shot gathers. The shot gathers are mapped back to depth with a lightweight Kirchhoff-style imaging condition using source– image–receiver travel times and illumination normalization. The final displayed seismic-style image blends this depth image with the impedance-contact image, adds controlled coherent noise and trace-gain variation, and scales ampli-tudes to grayscale. This produces a depth-domain acoustic-amplitude section whose layers, faults, unconformities, and intrusions remain aligned with the paired diagram while adding basic wave-propagation and acquisition effects. In addition to the GRPO runs performed on stratigraphic di-agrams as the training domain, we additionally train one Qwen3-VL-4B adapter on the paired seismic-style observa-tions to test reverse transfer back to stratigraphic diagrams. 
+
+2.4. Environment and Datasets 
+
+The generator is exposed to the reinforcement learning framework TRL as a materialized Hugging Face dataset. Each row contains a conversational prompt, a Portable Net-work Graphics (PNG)-encoded image, the compact answer in the answer field, and metadata such as seed, complex-ity, and number of visible events. The same interface can generate examples on demand by advancing through de-terministic seeds, so the environment is not intrinsically limited to a closed set of diagrams. For reproducibility, and lower training-time overhead, the reported runs instead use a fixed cached training split with distinct seeded rows; this split is larger than the number of prompt rows consumed by the 2000-step training jobs. The RLVR training runs reported here use images without rendered visual annota-tions, 16 generations per prompt, generation batch size 16, LoRA rank 16 with alpha 32 and dropout 0.05, target mod-
+
+Table 1. Dataset composition of geological events. All reported RLVR runs use the same fixed training split. Validation and test rows report exact compact visible targets for the fixed held-out fixtures. Split Rows D T F E I Events/row Train 16,384 125,056 9,784 14,403 14,386 6,553 10.39 Validation 100 748 64 86 88 40 10.26 Held-out test 100 747 59 88 88 40 10.22 
+
+ules q_proj and v_proj , and 2000 GRPO training steps. The main Qwen2.5-VL-3B and Qwen3-VL-4B adapters are trained on diagram observations; a separate Qwen3-VL-4B adapter is trained on seismic-style observations with the same GRPO recipe. Validation and test fixtures are fixed disjoint Hugging Face datasets; exact artifact identifiers and seed ranges are listed in Section E. The results in this paper report only held-out test performance. Table 1 summarizes the fixed train, validation, and test splits. 
+
+2.5. Reward Components 
+
+The prompt requires the model to emit only compact JSON with a top-level seq field. The verifier first extracts and parses JSON, accepting fenced JSON only after stripping the fence. Invalid JSON receives zero reward. For a valid compact response, the scalar training reward R is a weighted sum of ten component scores: 
+
+R = 0 .10 Rjson + 0 .15 Rcount + 0 .25 Rorder + 0 .10 Rtypes 
+
++ 0 .15 Rdep + 0 .10 Rfault + 0 .08 Rintr + 0 .04 Runc 
+
++ 0 .02 Rextra + 0 .01 Rprose . (2) Each component lies in [0 , 1] , so the weights express how much the verifier values different failure modes. Rjson 
+
+checks only that the response is parseable compact JSON. 
+
+Rcount , Rorder , and Rtypes evaluate the coarse event history: the number of events, their chronological event-code or-4Geo-Strat-RL  
+
+> Figure 3. Enlarged annotated final cross section for generated seed 20001. This panel is for reader audit only; benchmark images do not contain labels or arrows.
+
+der, and the set of event codes present. Rdep , Rfault , Rintr ,and Runc evaluate event-specific geological attributes for deposition, faults, intrusions, and unconformities. The final two terms are interface and parsimony terms: Rextra pe-nalizes hallucinated additional events, and Rprose penalizes explanations around the JSON object. For an unparsable response, the verifier sets R = 0 rather than applying these terms. Thus a syntactically valid compact response with no geological match can still receive the format reward; this is useful during RL training because it bootstraps the required response interface, but it is not counted as geolog-ical reasoning in the geology-only analysis. For reporting geological reconstruction independent of response-interface compliance, we define 
+
+Rgeo = 17 (Rcount + Rorder + Rtypes + Rdep 
+
++ Rfault + Rintr + Runc ). (3) This unweighted geology-only score is not the training ob-jective. It is used for cross-domain analysis because it ex-cludes JSON validity, prose suppression, and extra-event parsimony, and therefore better reflects event-history re-covery once a compact answer has been produced. The seven terms in Rgeo are intentionally averaged with equal weight: this makes the reported geology score less sensitive to the particular RL reward weights in the training objec-tive. The table and log names follow these terms directly. 
+
+json_valid is the parseability term, and no_prose is the compact-output term. event_count penalizes miss-ing or extra events; event_order compares event codes in chronological position with an additional length penalty; and event_types measures set overlap over event codes. 
+
+deposition_units matches layer identifiers for D
+
+events. fault_attributes matches fault identifier and normal/reverse sense, while intrusion_attributes 
+
+and unconformity_attributes match the required compact fields for intrusions and unconformities at the ex-pected event position. no_extra_events is one when the response has no more events than the target and oth-erwise decays as target length over response length. The remaining equations define the non-attribute components. Let A = ( a1, . . . , a M ) be the predicted compact event list and B = ( b1, . . . , b N ) be the target list. Here M and N are the predicted and target lengths, c(e) returns the event code of event e (for example D, F, or I), and 1[·] is an indicator 5Geo-Strat-RL  
+
+> Figure 4. Examples from the synthetic dataset. The model receives only the stratigraphic diagram as an image and must recover a compact chronological event sequence.
+
+function. The implemented component scores are: 
+
+Rcount = max 
+
+
+
+0, 1 − |M − N |
+
+N
+
+
+
+, (4) 
+
+Rorder = max 
+
+
+
+0, S ord − 0.25 |M − N |
+
+N
+
+
+
+, (5) 
+
+Sord = 1
+
+N
+
+> N
+
+X
+
+> i=1
+
+1[i ≤ M ∧ c(ai) = c(bi)] , (6) 
+
+Rtypes = |CA ∩ CB ||CB | , (7) 
+
+Rextra =
+
+(
+
+1, M ≤ N, N/M, M > N. (8) The count score is one when the response has the correct length and decreases linearly as events are missing or added. 
+
+Sord is the fraction of target positions whose event code matches at the same chronological position; Rorder then subtracts a smaller length penalty so that a response can-not obtain a high order score simply by matching a short prefix. For the type-overlap score, CA = {c(ai)}Mi=1 and 
+
+CB = {c(bi)}Ni=1 are the predicted and target sets of event codes. This rewards whether the response includes the right kinds of geological processes, independent of how many times they occur. Rextra is one when the response is no longer than the target and decays as N/M when the model adds unsupported events. Typed attribute scores are aver-aged over target events of the relevant type at their expected positions. For each required field, scalar/string values re-ceive 1 for exact normalized equality and 0 otherwise, while list values receive target-normalized set overlap. The re-quired compact fields are: D basement or layer id for Rdep ;
+
+F fault id and normal/reverse sense for Rfault ; I intrusion id, start, end, and cut-layer list for Rintr ; and E surface type and truncated-feature list for Runc . If a target contains no event of a typed class, that typed attribute score is defined as 1. For seismic-style scoring, a prediction may omit the leading basement deposition event when the target begins with basement, because basement is not always uniquely distinguishable in the amplitude-style observations. The prose score Rprose is 1 for a bare JSON object, 0.75 for a fenced JSON object, and 0 when extra prose surrounds the object. The TRL run passes this verifier as a custom re-ward function to GRPOTrainer . TRL computes rewards over generated completions and supports weighted custom reward functions; its current GRPO documentation also explicitly supports VLM training with image-text datasets (Hugging Face, 2026). The training and evaluation scripts use the aggregate reward for optimization and log every component for analysis. The implementation uses Hugging 6Geo-Strat-RL  
+
+> Figure 5. Training reward and loss during the completed 2,000-step TRL/GRPO LoRA training runs. The curves include Qwen2.5-VL-3B diagram-domain training, Qwen3-VL-4B diagram-domain training, and Qwen3-VL-4B seismic-domain training; final claims are based on held-out test rows and the transfer analysis rather than training reward alone.
+
+Face datasets for split storage (Lhoest et al., 2021), and PyTorch for training utilities (Paszke et al., 2019). For API-served pretrained open and closed VLM evaluations, we use OpenRouter as the primary model provider; locally trained LoRA adapters and local base checkpoints are evaluated directly with the same prompts and verifier. 
+
+3. Results 
+
+3.1. Held-Out Test Results 
+
+Table 2 reports held-out test performance and shows that RLVR-style optimization produces large improvements over the corresponding base models. Each table row is one model evaluation: a specified open or closed VLM, base check-point, or LoRA adapter evaluated on a fixed observation domain with the same prompts, held-out examples, roll-out protocol, and verifier. Unless otherwise noted, each evaluation uses the same 100 held-out examples with 5 roll-outs per example, and confidence intervals are computed by averaging rollouts within each example, then bootstrap-ping over the 100 example means. For cost reasons, the GPT-5.5 diagram evaluation uses 3 rollouts per example; we disclose this exception because medium-reasoning GPT-5.5 inference was substantially more expensive than the other API evaluations. Table 3 reports the corresponding seismic-style evaluations, including pretrained API-served baselines, local pretrained checkpoints, and local LoRA adapters. For Qwen2.5-VL-3B, held-out test reward in-creases from 0.208 to 0.695 after diagram-domain GRPO LoRA tuning with 16 generations per prompt. For Qwen3-VL-4B, held-out test reward increases from 0.311 to 0.740, the highest mean among the reported local open tuned evalu-ations. The closed GPT-5.5 medium-reasoning diagram eval-uation reaches 0.747 average reward under the same verifier after enabling JSON-object mode and omitting an output-token cap. It is 0.007 average reward above the Qwen3-VL-4B diagram ng16 LoRA evaluation, while producing the strongest event-count, event-order, deposition-unit, fault-attribute, intrusion-attribute, unconformity-attribute, and 7Geo-Strat-RL 
+
+Table 2. Current held-out test performance on stratigraphic diagram images from porestar/geo-strat-rl-test . Each metric cell reports the mean with a 95% bootstrap confidence interval underneath. R is the full verifier reward; Rgeo averages event count, event order, event types, deposition units, fault attributes, intrusion attributes, and unconformity attributes. Unless otherwise noted, evaluations use 100 examples with 5 rollouts per example; the GPT-5.5 diagram evaluation uses 3 rollouts per example because medium-reasoning API inference was substantially more expensive. Rollouts are averaged within each example before bootstrapping over held-out examples. Err. and Trunc. report rollout-level provider/error and truncation rates where current result files are included. Arrows indicate that higher scores are better; bold underlined values mark the best reported mean in each metric. 
+
+Model Class Method R ↑ Rgeo ↑ JSON ↑ Count ↑ Order ↑ Types ↑ Dep. ↑ Fault ↑ Intr. ↑ Unc. ↑ Extra ↑ Prose ↑ Err. ↓ Trunc. ↓
+
+Gemma 4 31B IT open VLM pretrained 0.701 
+
+[0.664,0.739] 
+
+0.616 
+
+[0.568,0.665] 
+
+0.992 
+
+[0.984,0.998] 
+
+0.867 
+
+[0.845,0.888] 
+
+0.603 
+
+[0.554,0.654] 
+
+0.836 
+
+[0.800,0.872] 
+
+0.720 
+
+[0.683,0.756] 
+
+0.403 
+
+[0.310,0.499] 
+
+0.608 
+
+[0.513,0.697] 
+
+0.275 
+
+[0.194,0.359] 
+
+0.986 
+
+[0.977,0.994] 
+
+0.992 
+
+[0.984,0.998] 0.000 0.000 
+
+Qwen3-VL-30B-A3B open VLM pretrained 0.621 
+
+[0.578,0.662] 
+
+0.552 
+
+[0.503,0.600] 
+
+0.872 
+
+[0.834,0.908] 
+
+0.706 
+
+[0.663,0.747] 
+
+0.525 
+
+[0.478,0.573] 
+
+0.817 
+
+[0.777,0.854] 
+
+0.665 
+
+[0.623,0.706] 
+
+0.384 
+
+[0.296,0.474] 
+
+0.548 
+
+[0.458,0.637] 
+
+0.218 
+
+[0.142,0.298] 
+
+0.768 
+
+[0.727,0.808] 
+
+0.872 
+
+[0.834,0.908] 0.000 0.020 Mistral Small 3.2 24B open VLM pretrained 0.624 
+
+[0.591,0.656] 
+
+0.563 
+
+[0.523,0.604] 
+
+0.966 
+
+[0.932,0.992] 
+
+0.483 
+
+[0.426,0.540] 
+
+0.526 
+
+[0.484,0.568] 
+
+0.940 
+
+[0.905,0.969] 
+
+0.740 
+
+[0.699,0.780] 
+
+0.403 
+
+[0.312,0.497] 
+
+0.588 
+
+[0.492,0.682] 
+
+0.264 
+
+[0.181,0.348] 
+
+0.659 
+
+[0.618,0.699] 
+
+0.725 
+
+[0.699,0.744] 0.014 0.020 Gemini 2.5 Flash Lite closed VLM pretrained 0.691 
+
+[0.651,0.730] 
+
+0.613 
+
+[0.564,0.661] 
+
+0.978 
+
+[0.956,0.996] 
+
+0.780 
+
+[0.742,0.816] 
+
+0.620 
+
+[0.570,0.670] 
+
+0.818 
+
+[0.770,0.863] 
+
+0.731 
+
+[0.687,0.773] 
+
+0.423 
+
+[0.329,0.517] 
+
+0.615 
+
+[0.520,0.706] 
+
+0.307 
+
+[0.224,0.393] 
+
+0.834 
+
+[0.806,0.862] 
+
+0.978 
+
+[0.956,0.996] 0.000 0.022 GPT-5.5 (OpenAI, 2026) closed VLM medium reasoning 0.747 
+
+[0.705,0.787] 
+
+0.668 
+
+[0.615,0.718] 
+
+1.000 
+
+[1.000,1.000] 
+
+0.917 
+
+[0.898,0.935] 
+
+0.681 
+
+[0.626,0.735] 
+
+0.867 
+
+[0.835,0.896] 
+
+0.756 
+
+[0.710,0.800] 
+
+0.435 
+
+[0.343,0.528] 
+
+0.627 
+
+[0.533,0.717] 
+
+0.391 
+
+[0.307,0.473] 
+
+0.991 
+
+[0.986,0.996] 
+
+1.000 
+
+[1.000,1.000] 0.000 0.000 
+
+Qwen2.5-VL-3B open VLM pretrained 0.208 
+
+[0.182,0.234] 
+
+0.189 
+
+[0.163,0.217] 
+
+0.404 
+
+[0.358,0.448] 
+
+0.232 
+
+[0.200,0.265] 
+
+0.121 
+
+[0.103,0.140] 
+
+0.314 
+
+[0.276,0.353] 
+
+0.139 
+
+[0.119,0.158] 
+
+0.167 
+
+[0.120,0.216] 
+
+0.246 
+
+[0.195,0.300] 
+
+0.107 
+
+[0.068,0.149] 
+
+0.332 
+
+[0.292,0.372] 
+
+0.328 
+
+[0.289,0.365] 0.000 0.000 
+
+Qwen2.5-VL-3B open VLM diagram ng16 LoRA 0.695 
+
+[0.664,0.724] 
+
+0.609 
+
+[0.568,0.649] 
+
+1.000 
+
+[1.000,1.000] 
+
+0.812 
+
+[0.784,0.836] 
+
+0.603 
+
+[0.564,0.642] 
+
+0.861 
+
+[0.827,0.892] 
+
+0.750 
+
+[0.719,0.781] 
+
+0.408 
+
+[0.315,0.505] 
+
+0.601 
+
+[0.502,0.691] 
+
+0.229 
+
+[0.153,0.309] 
+
+0.905 
+
+[0.885,0.923] 
+
+0.750 
+
+[0.750,0.750] 0.000 0.000 
+
+Qwen3-VL-4B open VLM pretrained 0.311 
+
+[0.254,0.366] 
+
+0.287 
+
+[0.233,0.341] 
+
+0.430 
+
+[0.358,0.502] 
+
+0.355 
+
+[0.295,0.413] 
+
+0.256 
+
+[0.204,0.308] 
+
+0.377 
+
+[0.311,0.441] 
+
+0.309 
+
+[0.255,0.366] 
+
+0.233 
+
+[0.172,0.297] 
+
+0.290 
+
+[0.222,0.362] 
+
+0.191 
+
+[0.135,0.249] 
+
+0.424 
+
+[0.355,0.496] 
+
+0.376 
+
+[0.308,0.444] 0.000 0.000 
+
+Qwen3-VL-4B open VLM diagram ng16 LoRA 0.740 
+
+[0.708,0.772] 
+
+0.664 
+
+[0.622,0.706] 
+
+1.000 
+
+[1.000,1.000] 
+
+0.906 
+
+[0.888,0.924] 
+
+0.633 
+
+[0.587,0.679] 
+
+0.981 
+
+[0.961,0.996] 
+
+0.755 
+
+[0.722,0.788] 
+
+0.428 
+
+[0.336,0.523] 
+
+0.618 
+
+[0.524,0.707] 
+
+0.328 
+
+[0.243,0.415] 
+
+0.964 
+
+[0.953,0.973] 
+
+1.000 
+
+[1.000,1.000] 0.000 0.000 
+
+Table 3. Held-out test performance on seismic-style observations generated from stratigraphic diagrams. Each evaluation uses 100 examples with 5 rollouts per example, averages rollouts within example, and bootstraps over example means for 95% confidence intervals. 
+
+R is the full verifier reward; Rgeo averages event count, event order, event types, deposition units, fault attributes, intrusion attributes, and unconformity attributes. Err. and Trunc. report rollout-level provider/error and truncation rates. The Gemini 2.5 Flash Lite evaluation is retained for comparison but should be read with caution: even with a 16,384-token output cap, 82 of 500 rollouts ended with length truncation. 
+
+Model Class Method R ↑ Rgeo ↑ JSON ↑ Count ↑ Order ↑ Types ↑ Dep. ↑ Fault ↑ Intr. ↑ Unc. ↑ Extra ↑ Prose ↑ Err. ↓ Trunc. ↓
+
+Gemma 4 31B IT open VLM pretrained 0.627 
+
+[0.589,0.665] 
+
+0.545 
+
+[0.495,0.593] 
+
+0.994 
+
+[0.986,1.000] 
+
+0.710 
+
+[0.680,0.739] 
+
+0.483 
+
+[0.435,0.529] 
+
+0.710 
+
+[0.665,0.754] 
+
+0.675 
+
+[0.644,0.705] 
+
+0.420 
+
+[0.327,0.511] 
+
+0.603 
+
+[0.508,0.695] 
+
+0.215 
+
+[0.141,0.295] 
+
+0.992 
+
+[0.985,0.998] 
+
+0.994 
+
+[0.986,1.000] 0.000 0.000 
+
+Qwen3-VL-30B-A3B open VLM pretrained 0.655 
+
+[0.616,0.693] 
+
+0.582 
+
+[0.537,0.628] 
+
+0.928 
+
+[0.896,0.956] 
+
+0.761 
+
+[0.727,0.794] 
+
+0.550 
+
+[0.501,0.598] 
+
+0.853 
+
+[0.815,0.890] 
+
+0.679 
+
+[0.638,0.720] 
+
+0.398 
+
+[0.306,0.490] 
+
+0.580 
+
+[0.489,0.668] 
+
+0.254 
+
+[0.180,0.333] 
+
+0.868 
+
+[0.834,0.899] 
+
+0.928 
+
+[0.896,0.956] 0.000 0.022 Mistral Small 3.2 24B open VLM pretrained 0.716 
+
+[0.683,0.747] 
+
+0.636 
+
+[0.592,0.678] 
+
+1.000 
+
+[1.000,1.000] 
+
+0.823 
+
+[0.797,0.848] 
+
+0.640 
+
+[0.597,0.681] 
+
+0.871 
+
+[0.844,0.897] 
+
+0.775 
+
+[0.741,0.807] 
+
+0.434 
+
+[0.342,0.525] 
+
+0.600 
+
+[0.500,0.690] 
+
+0.308 
+
+[0.229,0.388] 
+
+0.900 
+
+[0.879,0.921] 
+
+0.750 
+
+[0.750,0.750] 0.000 0.000 
+
+Gemini 2.5 Flash Lite closed VLM pretrained 0.560 
+
+[0.504,0.613] 
+
+0.507 
+
+[0.451,0.563] 
+
+0.816 
+
+[0.744,0.882] 
+
+0.504 
+
+[0.436,0.570] 
+
+0.476 
+
+[0.418,0.532] 
+
+0.767 
+
+[0.698,0.833] 
+
+0.638 
+
+[0.576,0.698] 
+
+0.371 
+
+[0.286,0.460] 
+
+0.539 
+
+[0.446,0.632] 
+
+0.256 
+
+[0.179,0.338] 
+
+0.623 
+
+[0.560,0.685] 
+
+0.816 
+
+[0.744,0.882] 0.000 0.164 GPT-5.5 (OpenAI, 2026) closed VLM medium reasoning 0.656 
+
+[0.632,0.680] 
+
+0.590 
+
+[0.556,0.623] 
+
+1.000 
+
+[1.000,1.000] 
+
+0.732 
+
+[0.699,0.764] 
+
+0.552 
+
+[0.520,0.584] 
+
+0.773 
+
+[0.735,0.808] 
+
+0.604 
+
+[0.569,0.637] 
+
+0.459 
+
+[0.369,0.546] 
+
+0.637 
+
+[0.546,0.723] 
+
+0.372 
+
+[0.301,0.445] 
+
+0.944 
+
+[0.929,0.959] 
+
+1.000 
+
+[1.000,1.000] 0.000 0.000 
+
+Qwen2.5-VL-3B open VLM pretrained 0.192 
+
+[0.169,0.214] 
+
+0.171 
+
+[0.148,0.194] 
+
+0.402 
+
+[0.360,0.444] 
+
+0.245 
+
+[0.215,0.277] 
+
+0.090 
+
+[0.075,0.105] 
+
+0.257 
+
+[0.222,0.291] 
+
+0.107 
+
+[0.091,0.123] 
+
+0.165 
+
+[0.120,0.212] 
+
+0.244 
+
+[0.194,0.294] 
+
+0.089 
+
+[0.057,0.124] 
+
+0.368 
+
+[0.328,0.408] 
+
+0.339 
+
+[0.303,0.375] 0.000 0.000 
+
+Qwen2.5-VL-3B open VLM diagram ng16 LoRA 0.655 
+
+[0.626,0.682] 
+
+0.588 
+
+[0.549,0.627] 
+
+0.998 
+
+[0.994,1.000] 
+
+0.758 
+
+[0.735,0.780] 
+
+0.492 
+
+[0.455,0.527] 
+
+0.905 
+
+[0.886,0.923] 
+
+0.660 
+
+[0.632,0.688] 
+
+0.428 
+
+[0.336,0.519] 
+
+0.600 
+
+[0.503,0.692] 
+
+0.275 
+
+[0.204,0.349] 
+
+0.964 
+
+[0.948,0.978] 
+
+0.748 
+
+[0.745,0.750] 0.000 0.000 
+
+Qwen3-VL-4B open VLM pretrained 0.244 
+
+[0.199,0.292] 
+
+0.220 
+
+[0.176,0.268] 
+
+0.386 
+
+[0.322,0.450] 
+
+0.267 
+
+[0.219,0.316] 
+
+0.176 
+
+[0.135,0.221] 
+
+0.336 
+
+[0.277,0.394] 
+
+0.241 
+
+[0.196,0.288] 
+
+0.180 
+
+[0.123,0.239] 
+
+0.238 
+
+[0.176,0.304] 
+
+0.105 
+
+[0.062,0.153] 
+
+0.368 
+
+[0.304,0.431] 
+
+0.362 
+
+[0.302,0.422] 0.000 0.000 
+
+Qwen3-VL-4B open VLM diagram ng16 LoRA 0.717 
+
+[0.683,0.750] 
+
+0.639 
+
+[0.596,0.682] 
+
+1.000 
+
+[1.000,1.000] 
+
+0.846 
+
+[0.822,0.870] 
+
+0.610 
+
+[0.563,0.657] 
+
+0.904 
+
+[0.877,0.930] 
+
+0.744 
+
+[0.708,0.778] 
+
+0.448 
+
+[0.356,0.539] 
+
+0.605 
+
+[0.507,0.696] 
+
+0.318 
+
+[0.236,0.402] 
+
+0.963 
+
+[0.949,0.977] 
+
+1.000 
+
+[1.000,1.000] 0.000 0.000 
+
+Qwen3-VL-4B open VLM seismic ng16 LoRA 0.745 
+
+[0.713,0.776] 
+
+0.670 
+
+[0.628,0.711] 
+
+1.000 
+
+[1.000,1.000] 
+
+0.863 
+
+[0.843,0.883] 
+
+0.663 
+
+[0.618,0.707] 
+
+0.974 
+
+[0.954,0.990] 
+
+0.768 
+
+[0.733,0.801] 
+
+0.457 
+
+[0.367,0.547] 
+
+0.603 
+
+[0.506,0.696] 
+
+0.360 
+
+[0.277,0.446] 
+
+0.935 
+
+[0.919,0.950] 
+
+1.000 
+
+[1.000,1.000] 0.000 0.000 
+
+no-extra-event scores in Table 2. For the Mistral Small 3.2 24B diagram evaluation, average reward is 0.624 with a 95% bootstrap confidence interval of [0.591, 0.656]; this evaluation had 7 provider errors out of 500 rollouts and 10 truncated outputs out of 500 rollouts. Mistral Small 3.2 24B has the strongest average reward among the pre-trained seismic evaluations, with 0.716 [0.683, 0.747] and no provider errors or truncations in the final result file. The strongest seismic-style evaluation overall is the Qwen3-VL-4B seismic ng16 LoRA adapter, with R = 0 .745 [0.713, 0.776] and Rgeo = 0 .670 [0.628, 0.711]. Gemini 2.5 Flash Lite remains affected by long, non-compact seismic com-pletions: after reevaluating with a 16,384-token output cap, 82 of 500 rollouts still terminate by length. We keep this evaluation in Table 3 because it documents observed ser-vice behavior under the same compact-JSON task, but we interpret it as a truncation-limited baseline rather than a clean estimate of model capability. GPT-5.5 also completes cleanly on seismic-style observations, reaching 0.656 [0.632, 0.680] average reward with zero final truncations. Both adapters reach perfect JSON validity on the diagram test split; Qwen3-VL-4B also reaches perfect no-prose com-pliance, while Qwen2.5-VL-3B still emits prose in some rollouts. The remaining errors concentrate in structural at-tributes: fault and intrusion attributes improve moderately, while unconformity attributes remain the weakest compo-nent. Figure 6 shows that the strongest gains are not limited to the easiest examples: both adapters improve over their pretrained bases at every complexity level. The degradation with increasing complexity remains substantial, however, which supports reporting complexity-stratified scores rather than one aggregate. 
+
+3.2. Diagram/Seismic Domain Transfer 
+
+For the transfer experiment, the most relevant question is not whether a model obeys the JSON interface but whether it extracts the geological history from a differ-ent data domain. We therefore report a geology-only score that averages the seven content components: event count, event order, event types, deposition units, fault at-tributes, intrusion attributes, and unconformity attributes. This deliberately excludes json_valid , no_prose , and 
+
+no_extra_events , because those components mainly measure response-interface compliance and output parsi-mony. The aggregate reward remains useful for training, 8Geo-Strat-RL 
+
+but it mixes schema learning with geological interpretation and is less clean for a cross-modal transfer investigation. Additional paired examples are provided in Section C. Table 4 and Figure 7 show that diagram-domain RLVR im-proves geology-only scores on both the original diagram domain and the synthetic seismic-style observation domain. Table 4 also includes the reverse experiment: a Qwen3-VL-4B adapter trained on seismic-style observations reaches the strongest seismic geology-only score, 0.670, and trans-fers back to diagram observations at 0.652. Table 5 shows that this is not just schema transfer; on seismic-style obser-vations, Qwen3 diagram-domain training improves event count by 0.580, event types by 0.568, deposition units by 0.503, and intrusion attributes by 0.367, while seismic-domain training gives the strongest event order and uncon-formity scores. The OpenAI GPT-5.5 medium-reasoning evaluations in Tables 2 and 3 reach 0.747 average reward on diagrams and 0.656 average reward on seismic-style ob-servations. All 500 GPT-5.5 seismic rollouts finish with valid compact JSON and application programming inter-face (API) finish reason stop . Qwen2.5-VL-3B improves from 0.171 to 0.588 geology-only score after diagram-domain RLVR. The conservative conclusion is therefore that the LoRA adapters provide evidence for controlled cross-domain geological transfer in both directions, with the domain-matched Qwen3 seismic adapter ending highest on seismic and retaining most of the gain when evaluated on diagrams. 
+
+4. Discussion 
+
+The results support four observations. First, strong pre-trained VLMs can recover some geological structure from diagrams without visual annotations, but performance varies substantially by model class and response format. Gemma 4 31B IT is the best open model we evaluated by aver-age reward and reaches near-perfect JSON and no-prose compliance on the 5-rollout evaluation. The completed OpenAI GPT-5.5 medium-reasoning run is the strongest closed-model comparison currently reported here; however, its remaining errors still concentrate in the same structural at-tributes, especially faults and unconformities on the highest-complexity scenes. This strong closed-model result should not be interpreted as evidence that small task-specific RLVR is already the main driver of frontier-model performance on this benchmark. Recent reasoning-model reports show that large-scale reinforcement learning on verifiable tasks can improve general reasoning, while multimodal systems such as Kimi k1.5 and Kimi K2.5 combine RL with mul-timodal or joint text-vision training (DeepSeek-AI, 2025; Kimi Team, 2025; 2026). At the same time, recent VLM reports attribute gains to stronger visual processing and mul-timodal reasoning machinery, including dynamic-resolution vision transformers in Qwen2.5-VL and multi-level vision transformer (ViT) feature fusion in Qwen3-VL (Qwen Team, 2025a;b). The GPT-5.5 result is therefore consistent with at least two nonexclusive explanations: broad frontier-scale RL/post-training over many verifiable tasks, and substan-tially stronger visual recognition and visual-temporal rea-soning without any geology-specific adaptation. It is not known which RLVR environments are used in the GPT-5.5 training recipe, and some of the improvement could come from geology-relevant tasks or specific geological training environments. The present experiments cannot separate these mechanisms, and require deeper investigation of train-ing recipes and ablations to determine how much of the improvement comes from general training versus geology-specific RLVR, as well as how much of the improvement comes from visual recognition versus temporal reasoning. Second, the GRPO LoRA runs substantially improve smaller open VLMs. Among the local open base/LoRA rows, the Qwen3-VL-4B diagram LoRA adapter has the highest av-erage reward and strongest event-count, event-order, event-type, deposition, fault, intrusion, unconformity, no-extra-event, and no-prose means. This suggests that executable geological rewards can shape both the response interface and parts of the visual-temporal interpretation. However, the per-fect format scores also show that some reward improvement comes from learning the compact schema, so future abla-tions should separate schema learning from event-history reasoning. Third, structural attributes remain the hardest part of the task. Even the best diagram-domain GRPO LoRA row reaches only 0.328 on unconformity attributes and 0.428 on fault attributes. This is consistent with the qualitative difficulty of deciding which structures are visibly truncated, which layers a dike cuts, and which units are affected by younger faults after erosion and redeposition. Future benchmark passes should keep the same prompt, reward, JSON-mode, and no-output-cap protocol so that closed-model compar-isons remain complete and auditable. This also means that there is significant room for improvement in RLVR train-ing recipes, model architectures, and pretraining data that can improve structural reasoning and interpretation of ge-ological relationships. The availability of the benchmark environment will allow future updates to the test dataset to prevent overfitting and to track progress on this challenging aspect of geological reasoning. Fourth, the seismic-style transfer experiments are the first evidence that the learned behavior is not strongly tied to the stratigraphic diagram domain. The results of applying the diagram-pretrained models to seismic-style observations show that the same geological event structure can be ex-tracted from a different visual domain, even without any seismic-specific training examples. This does not prove ro-9Geo-Strat-RL 
+
+Figure 6. Held-out test performance by generator complexity on porestar/geo-strat-rl-test . Each complexity bucket contains 20 examples, and the same held-out examples are evaluated for the pretrained models, RLVR LoRA adapters, and OpenAI GPT-5.5 medium reasoning. Dashed lines show pretrained open models; solid lines show RLVR LoRA adapters; the dotted line shows GPT-5.5. RLVR improves both aggregate reward and geology-only score at every complexity level, while GPT-5.5 remains strongest at lower complexity and competitive at higher complexity. 
+
+Table 4. Cross-domain transfer on paired held-out examples. Arrows indicate that higher values are better; bold underlined values mark the best value in each numeric column. The geology-only score averages event count, event order, event types, deposition units, fault attributes, intrusion attributes, and unconformity attributes; format and prose components are excluded. N/A indicates that no Qwen2.5-VL-3B seismic-domain adapter is reported.                                       
+
+> Model Test domain Pretrained Rgeo ↑Diagram LoRA Rgeo ↑∆Rgeo ↑Seismic LoRA Rgeo ↑∆Rgeo ↑
+> Qwen2.5-VL-3B diagram 0.189 0.609 +0.420 N/A N/A Qwen2.5-VL-3B seismic 0.171 0.588 +0.417 N/A N/A Qwen3-VL-4B diagram 0.287 0.664 +0.377 0.652 +0.365 Qwen3-VL-4B seismic 0.220 0.639 +0.419 0.670 +0.449
+
+bust seismic interpretation: the renderer deliberately makes contacts and structural relationships distinguishable, and it is still generated from the same symbolic scene model. The result should therefore be read as evidence about reuse of verifier-trained reasoning concepts across controlled obser-vation formats, not as a claim that the model has learned an operational seismic-interpretation workflow. It supports the narrower hypothesis that verifier-driven training can teach reusable geological event structure across controlled obser-vation domains, not just a response template. This raises the question of which other verifiable domains and observation formats can share geological reasoning concepts, and how far such transfer can be pushed toward real-world geolog-ical data. The ultimate goal is not to reproduce synthetic benchmarks, but to learn geological reasoning useful for real geoscience tasks where verification is difficult. 
+
+Limitations 
+
+This benchmark is synthetic, stylized, and intentionally re-stricted to a small set of event types. The generated dia-grams and seismic-style observations do not capture the full ambiguity, acquisition physics, processing artifacts, noise distributions, or interpretive richness of field geology and real seismic interpretation. Although the seismic-style ren-derer includes acoustic finite-difference propagation, sur-face acquisition, absorbing padding, simple depth imag-ing, coherent noise, and trace-gain variation, it should be treated as a controlled transfer proxy rather than as a realis-tic seismic processing workflow. The setup also differs from how geoscientists normally interpret outcrops or seismic data. Sequence-stratigraphic and subsurface interpretation commonly integrate multiple evidence sources, including outcrop analogs, cores, well logs, regional geological con-text, and multiple seismic sections or volumes with different imaging quality (Catuneanu et al., 2009; Posamentier & Kolla, 2003). Real interpretations are often revised through 10 Geo-Strat-RL   
+
+> Figure 7. Before/after geology-only scores for diagram-only RLVR. Vertical bars show 95% bootstrap confidence intervals over held-out examples. The right panel isolates transfer to seismic-style observations: no seismic-style examples are used for these two RLVR runs, yet both tuned adapters improve on the paired amplitude test.
+> Table 5. Detailed geology-component scores on seismic-style held-out examples. Arrows indicate that higher scores are better; bold underlined values mark the best non-delta method score in each component column. Diagram-domain LoRA adapters improve every geological component on the seismic-style test, and the Qwen3-VL-4B seismic-domain adapter further improves seismic event count, event order, event types, deposition units, fault attributes, and unconformity attributes.
+
+Model Method Count ↑ Order ↑ Types ↑ Dep. ↑ Fault ↑ Intr. ↑ Unc. ↑
+
+Qwen2.5-VL-3B pretrained 0.245 0.090 0.257 0.107 0.165 0.244 0.089 Qwen2.5-VL-3B diagram LoRA 0.758 0.492 0.905 0.660 0.428 0.600 0.275 Qwen2.5-VL-3B delta +0.513 +0.402 +0.649 +0.553 +0.263 +0.356 +0.186 Qwen3-VL-4B pretrained 0.267 0.176 0.336 0.241 0.180 0.238 0.105 Qwen3-VL-4B diagram LoRA 0.846 0.610 0.904 0.744 0.448 0.605 0.318 Qwen3-VL-4B diagram delta +0.580 +0.434 +0.568 +0.503 +0.268 +0.367 +0.213 Qwen3-VL-4B seismic LoRA 0.863 0.663 0.974 0.768 0.457 0.603 0.360 
+
+Qwen3-VL-4B seismic delta +0.596 +0.487 +0.638 +0.527 +0.277 +0.365 +0.255 
+
+this integrated comparison process, whereas Geo-Strat-RL gives the model a single isolated image and evaluates it against one simulator-defined visible-evidence target. This design is useful for controlled RLVR experiments but should not be confused with the broader expert workflow used for field, reservoir, or exploration interpretation. 
+
+Future Work 
+
+Future work should add human geological baselines, richer depositional environments, uncertainty-aware targets, ad-ditional VLM families, and ablations that separate visual recognition errors from temporal-ordering errors. The benchmark also makes a natural test bed for interpretability. Because every response is decomposed into event-count, order, type, deposition, fault, intrusion, and unconformity scores, failures can be tied to specific geological operations rather than only to an aggregate reward. Future work could combine component-level errors with VLM interpretability methods, such as visual-token attribution, attention or activa-tion analysis, patch ablations, and representation probes, to test which image regions and visual relationships drive each predicted event. When models expose visible rationales or chain-of-thought traces under an appropriate evaluation protocol, those traces could also be inspected against the executable event history to distinguish perceptual failures from failures of chronological or cross-cutting reasoning. 11 Geo-Strat-RL 
+
+Impact Statement 
+
+This paper studies synthetic evaluation and training envi-ronments for geological reasoning with vision-language models. The primary intended impact is improved measure-ment of domain-specific visual reasoning, with potential downstream relevance to geoscience education and model-evaluation methodology. The benchmark is not intended for operational subsurface interpretation or safety-critical geological decision making. 
+
+Acknowledgments 
+
+I thank Håkon Nese and Ashley Clarke for their reviews and for providing improvement suggestions for the manuscript and method. 
+
+References 
+
+Allan, U. S. Model for hydrocarbon migration and entrap-ment within faulted structures. AAPG Bulletin , 73(7): 803–811, 1989. Bergen, K. J., Johnson, P. A., de Hoop, M. V., and Beroza, G. C. Machine learning for data-driven discovery in solid earth geoscience. Science , 363(6433):eaau0323, 2019. doi: 10.1126/science.aau0323. Bressan, T. S., de Souza, M. K., Girelli, T. J., and Chemale, F. Evaluation of machine learning methods for lithology classification using geophysical data. Computers & Geo-sciences , 139:104475, 2020. doi: 10.1016/j.cageo.2020. 104475. Catuneanu, O. Principles of Sequence Stratigraphy . Else-vier, 2006. Catuneanu, O., Abreu, V., Bhattacharya, J. P., Blum, M. D., Dalrymple, R. W., Eriksson, P. G., Fielding, C. R., Fisher, W. L., Galloway, W. E., Gibling, M. R., Giles, K. A., Hol-brook, J. M., Jordan, R., Kendall, C. G. S. C., Macurda, B., Martinsen, O. J., Miall, A. D., Neal, J. E., Nummedal, D., Pomar, L., Posamentier, H. W., Pratt, B. R., Sarg, J. F., Shanley, K. W., Steel, R. J., Strasser, A., Tucker, M. E., and Winker, C. Towards the standardization of sequence stratigraphy. Earth-Science Reviews , 92(1–2):1–33, 2009. doi: 10.1016/j.earscirev.2008.10.003. DeepSeek-AI. DeepSeek-R1: Incentivizing reasoning ca-pability in LLMs via reinforcement learning. arXiv preprint arXiv:2501.12948 , 2025. URL https:// arxiv.org/abs/2501.12948 .Deng, C., Zhang, T., He, Z., Xu, Y., Chen, Q., Shi, Y., Fu, L., Zhang, W., Wang, X., Zhou, C., Lin, Z., and He, J. K2: A foundation language model for geo-science knowledge understanding and utilization. arXiv preprint arXiv:2306.05064 , 2023. URL https:// arxiv.org/abs/2306.05064 .Dramsch, J. S. 70 years of machine learning in geoscience in review. Advances in Geophysics , 61:1–55, 2020. doi: 10.1016/bs.agph.2020.08.002. Hall, B. Facies classification using machine learning. The Leading Edge , 35(10):906–909, 2016. doi: 10.1190/ tle35100906.1. Hu, E. J., Shen, Y., Wallis, P., Allen-Zhu, Z., Li, Y., Wang, S., Wang, L., and Chen, W. LoRA: Low-rank adaptation of large language models. arXiv preprint arXiv:2106.09685 , 2021. URL https://arxiv. org/abs/2106.09685 .Hugging Face. TRL GRPOTrainer documentation, 2026. URL https://huggingface.co/docs/ trl/en/grpo_trainer .Kimi Team. Kimi k1.5: Scaling reinforcement learning with LLMs. arXiv preprint arXiv:2501.12599 , 2025. URL 
+
+https://arxiv.org/abs/2501.12599 .Kimi Team. Kimi k2.5: Visual agentic intelligence. arXiv preprint arXiv:2602.02276 , 2026. URL https:// arxiv.org/abs/2602.02276 .Kuckreja, K., Danish, M. S., Naseer, M., Das, A., Khan, S., and Khan, F. S. GeoChat: Grounded large vision-language model for remote sensing. In Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition , 2024. URL https://openaccess. thecvf.com/content/CVPR2024/html/ Kuckreja_GeoChat_Grounded_Large_ Vision-Language_Model_for_Remote_ Sensing_CVPR_2024_paper.html .Lhoest, Q., Villanova del Moral, A., Jernite, Y., Thakur, A., von Platen, P., Patil, S., Chaumond, J., Drame, M., Plu, J., Tunstall, L., Davison, J., Sajjad, H., Chhablani, G., Malik, B., Brandeis, S., Le Scao, T., Sanh, V., Xu, C., Patry, N., McMillan-Major, A., Schmid, P., Gugger, S., Delangue, C., Matussiere, T., Debut, L., Bekman, S., Cistac, P., Goehringer, T., Mustar, V., Lagunas, F., Rush, A. M., and Wolf, T. Datasets: A community library for natural language processing. In Proceedings of the 2021 Conference on Empirical Methods in Natural Lan-guage Processing: System Demonstrations , pp. 175–184, 2021. URL https://aclanthology.org/2021. emnlp-demo.21/ .Lin, Z., Deng, C., Zhou, L., Zhang, T., Xu, Y., Xu, Y., He, Z., Shi, Y., Dai, B., Song, Y., Zeng, B., Chen, Q., Miao, Y., Xue, B., Wang, S., Fu, L., Zhang, W., He, J., Zhu, Y., Wang, X., and Zhou, C. GeoGalac-tica: A scientific large language model in geoscience. 12 Geo-Strat-RL 
+
+arXiv preprint arXiv:2401.00434 , 2024. URL https: //arxiv.org/abs/2401.00434 .Liu, H., Li, C., Wu, Q., and Lee, Y. J. Visual instruction tuning. In Advances in Neural Information Processing Systems , volume 36, 2023. URL https://arxiv. org/abs/2304.08485 .Mosser, L., Dubrule, O., and Blunt, M. J. Reconstruc-tion of three-dimensional porous media using generative adversarial neural networks. Physical Review E , 96(4): 043309, 2017. doi: 10.1103/PhysRevE.96.043309. URL 
+
+https://arxiv.org/abs/1704.03225 .Mosser, L., Dubrule, O., and Blunt, M. J. Stochastic seismic waveform inversion using generative adversarial networks as a geological prior. Mathematical Geosciences , 52(1): 53–79, 2020. doi: 10.1007/s11004-019-09832-6. URL 
+
+https://arxiv.org/abs/1806.03720 .Mosser, L., Aursand, P., Brakstad, K. S., Lehre, C., and Myhre-Bakkevig, J. Exploration robot chat: Uncovering decades of exploration knowledge and data with conversa-tional large language models. In SPE Norway Subsurface Conference , 2024. doi: 10.2118/218439-MS. OpenAI. GPT-5.5 system card, 2026. URL https://openai.com/index/ gpt-5-5-system-card/ .Paszke, A., Gross, S., Massa, F., Lerer, A., Bradbury, J., Chanan, G., Killeen, T., Lin, Z., Gimelshein, N., Antiga, L., Desmaison, A., Kopf, A., Yang, E., DeVito, Z., Raison, M., Tejani, A., Chilamkurthy, S., Steiner, B., Fang, L., Bai, J., and Chintala, S. PyTorch: An imper-ative style, high-performance deep learning library. In 
+
+Advances in Neural Information Processing Systems , vol-ume 32, 2019. URL https://papers.neurips. cc/paper_files/paper/2019/hash/ bdbca288fee7f92f2bfa9f7012727740-Abstract. html .Posamentier, H. W. and Kolla, V. Seismic geomorphology and stratigraphy of depositional elements in deep-water settings. Journal of Sedimentary Research , 73(3):367– 388, 2003. doi: 10.1306/111302730367. Qwen Team. Qwen2.5-VL technical report. arXiv preprint arXiv:2502.13923 , 2025a. URL https://arxiv. org/abs/2502.13923 .Qwen Team. Qwen3-VL technical report. arXiv preprint arXiv:2511.21631 , 2025b. URL https://arxiv. org/abs/2511.21631 .Shao, Z., Wang, P., Zhu, Q., Xu, R., Song, J., Bi, X., Zhang, H., Zhang, M., Li, Y. K., Wu, Y., and Guo, D. DeepSeekMath: Pushing the limits of mathemati-cal reasoning in open language models. arXiv preprint arXiv:2402.03300 , 2024. URL https://arxiv. org/abs/2402.03300 .von Werra, L., Belkada, Y., Tunstall, L., Beeching, E., Thrush, T., Lambert, N., Huang, S., Rasul, K., and Gallouédec, Q. TRL: Transformers reinforce-ment learning, 2020. URL https://github.com/ huggingface/trl .Waldeland, A. U., Jensen, A. C., Gelius, L.-J., and Solberg, A. H. S. Convolutional neural networks for automated seismic interpretation. The Leading Edge , 37(7):529–537, 2018. doi: 10.1190/tle37070529.1. Wu, X., Liang, L., Shi, Y., and Fomel, S. FaultSeg3D: Using synthetic data sets to train an end-to-end con-volutional neural network for 3d seismic fault segmen-tation. Geophysics , 84(3):IM35–IM45, 2019. doi: 10.1190/geo2018-0646.1. Zhu, X. X., Tuia, D., Mou, L., Xia, G.-S., Zhang, L., Xu, F., and Fraundorfer, F. Deep learning in remote sensing: A comprehensive review and list of resources. IEEE Geoscience and Remote Sensing Magazine , 5(4):8–36, 2017. doi: 10.1109/MGRS.2017.2762307. 13 Geo-Strat-RL 
+
+A. Compact Target Schema 
+
+The compact target is a JSON object with optional metadata fields and a required chronological sequence: 
+
+Target Schema 
+
+{"id": string, "seed": integer, "seq": [event, ...]} 
+
+Each event is one of: 
+
+Event Forms 
+
+["D", "basement" | "layer_N"] ["T", ["basement" | "layer_N", ...], "clockwise" | "counterclockwise"] ["F", "fault_id", "normal" | "reverse"] ["E", "angular_unconformity", ["basement" | "layer_N" | "fault_id" | "intrusion_id", ...]] ["I", "intrusion_id", start, end, ["basement" | "layer_N", ...]] 
+
+Intrusion endpoints are strings: "bottom" or "top" for diagram boundaries, "layer_N" for a preserved layer endpoint, and "angular_unconformity" when erosion truncates the intrusion. Every target starts with ["D","basement"] ;other fully eroded or occluded events are omitted even if they occurred in the hidden simulator history. Basement denotes pre-existing rock below the first deposited layer. In diagram-domain images, it is rendered as a gray/taupe unit with a rock texture made of dark diagonal crack lines and small dark speckles, and can be visible either at the bottom of the frame or where deformation exposes lower material. All non-basement diagram colors and textures are randomized per example, with contrast constraints between neighboring depositional units, so they are not semantic layer identifiers. For seismic-domain scoring, we accept either a leading ["D","basement"] event or a sequence that starts directly at ["D","layer_1"] ,because basement is not always uniquely distinguishable in seismic-style images. 
+
+B. Model Prompts 
+
+The benchmark uses a single user message containing the image and one of the following domain-specific text prompts. The first sentence identifies the rendered image domain; the remaining instructions define the compact JSON interface, visible-evidence convention, and basement convention. 
+
+Diagram-Domain Prompt 
+
+You are given a synthetic sequence stratigraphic cross-section image. Infer the chronological geological event sequence. Return ONLY compact JSON. No markdown. No prose. No descriptions. Use exactly this schema: {"seq":[[CODE,...],[CODE ,...]]}. Codes: D=deposition as ["D","basement"] or ["D","layer_N"]; T=tilting as ["T",[affected_layers],"clockwise| counterclockwise"]; F=faulting as ["F","fault_id","normal|reverse"]; E=erosion/unconformity as ["E"," angular_unconformity",[truncated_layers_or_structures]]; I=intrusion as ["I","intrusion_id",start,end,[cut_layers]]. For intrusions, start/end are visible preserved endpoints: use "bottom" or "top" for diagram boundaries, "layer_N" for a layer endpoint, and "angular_unconformity" when the intrusion is visibly truncated by the unconformity. For erosion, list visible older layers, faults, and intrusions truncated by the unconformity. Use only D,T,F,E,I. Always start with ["D","basement"]. Include ["D","basement"] even if basement is not visible in the final image. Do not group deposition events. Emit one D event per layer. Basement is the pre-existing rock below the first deposited layer. In diagram images, visible basement is the gray/taupe unit with a rock texture made of dark diagonal crack lines and small dark speckles; it may appear at the base or in deformation-created exposures. For all non-basement events, only include events with visible evidence in the final image; omit fully eroded or occluded events. 
+
+Seismic-Domain Prompt 
+
+You are given a seismic-style stratigraphic cross-section image. Infer the chronological geological event sequence. Return ONLY compact JSON. No markdown. No prose. No descriptions. Use exactly this schema: {"seq":[[CODE,...],[CODE,...]]}. Codes: D=deposition as ["D","basement"] or ["D","layer_N"]; T=tilting as ["T",[affected_layers],"clockwise| counterclockwise"]; F=faulting as ["F","fault_id","normal|reverse"]; E=erosion/unconformity as ["E"," angular_unconformity",[truncated_layers_or_structures]]; I=intrusion as ["I","intrusion_id",start,end,[cut_layers]]. For intrusions, start/end are visible preserved endpoints: use "bottom" or "top" for diagram boundaries, "layer_N" for a layer endpoint, and "angular_unconformity" when the intrusion is visibly truncated by the unconformity. For erosion, list visible older layers, faults, and intrusions truncated by the unconformity. Use only D,T,F,E,I. Always start with ["D","basement"]. Include ["D","basement"] even if basement is not visible in the final image. Do not group deposition events. Emit one D event per layer. Basement is the pre-existing rock below the first deposited layer. In diagram images, visible basement is the gray/taupe unit with a rock texture made of dark diagonal crack lines and small dark speckles; it may appear at the base or in deformation-created exposures. For all non-basement events, only include events with visible evidence in the final image; omit fully eroded or occluded events. 
+
+14 Geo-Strat-RL 
+
+C. Extended Paired Transfer Examples 
+
+Figure 8 shows additional held-out diagram and seismic-style observations for the same hidden scenes and compact targets. 
+
+Figure 8. Additional paired held-out transfer examples. Each row uses the same hidden scene and answer key, observed once as the diagram task and once as a seismic-style amplitude section. This pairing isolates observation-domain transfer from changes in geological history. 
+
+15 Geo-Strat-RL 
+
+D. Generator and Renderer Specification 
+
+This appendix records the code-level generator and renderer used for the results in this paper. The generator is deterministic conditional on seed s and complexity c, but it samples a geological event program before rendering. Let Ω = [ m, W −
+
+m] × [m, H − m] be the visible frame, with W = 900 , H = 520 , and m = 70 pixels. The frame margin keeps contacts, faults, and intrusion endpoints away from image boundaries, leaving visible context for clipping and reducing ambiguous edge-touching geometries. For a given seed, the simulator samples an ordered event program 
+
+Es,c = ( e1, . . . , e T ), Gt = Aet (Gt−1; θt), (9) where Gt is the geometric scene state after event t, Aet is the event operator, and θt are event parameters. The final visible target is derived from GT by retaining only events with visible evidence in the rendered scene.      
+
+> seed s
+> complexity c
+> sample event program Es,c
+> apply geological operators Ae
+> clip and scale final geom-etry GT
+> visible-event JSON target
+> diagram or seismic image
+
+D.1. Stratigraphic Event Program 
+
+The default random generator samples N ∼ U {4, . . . , 9} total depositional layers. A lower package size Npre is sampled uniformly from 
+
+Npre ∼ U {max(2 , ⌊N/ 2⌋), . . . , max(2 , N − 1) } . (10) The event order is constrained to remain geologically plausible: lower deposition, optional tilting, optional faults and intrusion, erosion, upper deposition, and for the highest complexity optional later faulting, erosion, and additional deposition. Depositional lithology is sampled from sandstone, shale, limestone, conglomerate, and siltstone. The numerical constants in Tables 6 and 7 are synthetic generator defaults chosen to keep contacts, offsets, intrusions, and unconformities visible at the benchmark image resolution. They are not calibrated field or restoration parameters. 
+
+Table 6. Stratigraphic event-program sampling used by generate_random_scenario . Uniform ranges are inclusive for integer variables and continuous for real-valued variables. Quantity Range or rule Role Total layers N U {4, . . . , 9} Number of depositional units in the base program. Lower package Npre U {LN , . . . , N − 1}, LN =max(2 , ⌊N/ 2⌋)
+
+Layers deposited before deformation and erosion. Layer thickness hi U {34 , . . . , 62 } px Depositional-unit thickness before later deformation. Tilt angle α U (−10 ◦, 10 ◦), active if c ≥ 2
+
+with probability 0.75 
+
+Rotates the existing lower sequence. Fault count one if 3 ≤ c < 5; U {1, 2, 3} if 
+
+c = 5 
+
+Number of early finite faults. Fault center xf U (0 .28 , 0.72) of frame width Horizontal fault anchor. Fault throw τ ±U (45 , 95) px Vertical throw magnitude and sense. Fault dip ϕ U (44 ◦, 72 ◦) Fault-trace inclination. Fault half length L U (280 , 430) px Finite along-fault support. Damage width D U (62 , 95) px Across-fault attenuation scale. Core width wc U (2 .5, 5.5) px Side disambiguation near the fault core. Intrusion probability 0.45 before erosion for c ≥ 4;guaranteed later if absent Ensures complex examples include igneous cross-cutting evi-dence. Intrusion width U (24 , 48) px Dike width. Intrusion top/bottom top U (0 .08 , 0.45) H, bottom 
+
+U (0 .70 , 0.97) H
+
+Vertical endpoints before clipping. Erosion relief and slope relief U (−22 , 26) px, slope 
+
+U (−0.04 , 0.04) 
+
+Defines the angular-unconformity surface. Late complexity branch probability 0.4 if c = 5 Adds a younger fault, second erosion, and U {1, 2} layers. 
+
+16 Geo-Strat-RL 
+
+D.2. Geometric Operators 
+
+The initial basement is a polygon below the first depositional surface and is rendered with the fixed gray/taupe crack-and-speckle basement texture. Deposition uses the current top surface st−1(x) to create a polygonal layer. With contact overlap 
+
+δ = 2 px and thickness hi, the nominal top and bottom surfaces are 
+
+bi(x) = st−1(x) + δ, (11) 
+
+ui(x) = max( m, b i(x) − hi). (12) If the current surface is an unconformity, the new layer top is horizontal at min x bi(x) − hi; otherwise it follows the prior top surface. When the scene approaches the top frame, all previous geometry is translated downward to leave at least 24 px of visible thickness for the next deposition. Tilting rotates all existing layer polygons around the lower-frame pivot o = ( W/ 2, H − m):
+
+P ′ 
+
+> i
+
+= Rα(Pi; o). (13) Faulting uses a finite displacement field in local fault coordinates. For a point p = ( x, y ), center q = ( xf , 0.55 H), fault tangent 
+
+t = ( d cos ϕ, sin ϕ), n = ( −ty , t x), (14) and local coordinates a = ( p − q) · t, b = ( p − q) · n, the displacement amplitude is 
+
+λ(a, b ) = 
+
+r
+
+max 
+
+
+
+0, 1 − (a/L )2
+
+exp 
+
+h
+
+− (|b|/D )2i
+
+· max 
+
+
+
+1[mf b > 0] , 0.18 exp 
+
+h
+
+− (b/ (0 .45 D)) 2i 
+
+, (15) where mf ∈ {− 1, 1} is the moving-side sign. The slip vector is v = ( τ /t y )t, so the deformed point is 
+
+p′ = p + λ(a, b )v. (16) Layer and intrusion polygons are split by the fault trace before this deformation is applied. If a younger fault terminates against an older fault, the trace is truncated at their intersection and deformation is applied only on the active side. Erosion constructs a linear unconformity 
+
+ue(x) = y0 + β(x − W/ 2) , (17) where β is the sampled slope and y0 is the largest value required to keep the surface at least 8 px below the visible top of the eroded package. All material above ue(x) is clipped. Intrusion inserts a six-vertex dike polygon with sampled center, width, top, and bottom; later erosion and faulting can clip or deform this polygon like any other geometry. Finally, all visible geometry is vertically scaled into the frame if the constructed scene does not fill the available height. Remaining visible voids are made explicit: voids connected to the top frame extend the youngest visible layer upward, while lower voids become basement exposure. 
+
+D.3. Seismic-Domain Synthetic Renderer 
+
+The seismic-style renderer consumes the same final scene GT and answer key as the diagram renderer. It does not resample the geology. Instead, it maps the final geometry to acoustic material properties, simulates simple surface seismic acquisition with a two-dimensional acoustic wave equation, images the simulated records back into depth, and displays the result as a grayscale amplitude section. The goal is not survey realism; it is a controlled observation domain in which the same layers, faults, unconformities, and intrusions are visible through seismic-style amplitudes. 
+
+> final geometry
+> rasterize
+> vp, ρ, Z
+> surface shots acoustic finite difference (FD)
+> depth imaging
+> contact image and cleanup
+> noise, gain, display scaling
+
+17 Geo-Strat-RL                             
+
+> Table 7. Main geometric constants and operators in the stratigraphic generator. Symbol or setting Value Meaning
+> W, H 900 ,520 px Native scene width and height.
+> m70 px Visible frame margin for boundary context and stable clipping.
+> δ2px Contact overlap used to avoid raster gaps. Minimum visible thickness 24 px Downward translation threshold before a new layer is de-posited. Fault sample spacing 12 px Polygon-edge densification before fault deformation. Fault trace length 1.28 Lon each side of center Displayed and splitting trace for a finite fault. Erosion clearance 8px below visible top Ensures erosion cuts existing material rather than floating above it. Final vertical scaling bottom-fixed affine scale Expands constructed material into the visible frame. Void fill convention explicit basement or top-layer ex-tension Prevents deformation gaps from being rendered as unlabeled geology.
+
+Let Mk(x, y ) be the raster mask for deposited unit k in the final deformed scene. For each unit, we assign density 
+
+ρk = clip (1980 + 36 k + dℓk , 1850 , 2850) , (18) where dℓk is a small lithology-dependent density offset. We then assign acoustic impedance 
+
+Zk = 3 .8 + 0 .95 k + 0 .08 ℓk, (19) where ℓk is a bounded lithology offset. The fixed 0.95 step guarantees that every successive deposited layer differs in acoustic impedance enough to produce a visible contact reflection. The P-wave velocity is derived from the impedance and density, 
+
+vp,k = clip 
+
+ 10 6Zk
+
+ρk
+
+, 1750 , 4300 
+
+
+
+, (20) where the factor 10 6 converts the compact impedance units used in the renderer to International System of Units (SI)-like units. The raster fields are 
+
+vp(x, y ) = X
+
+> k
+
+Mk(x, y )vp,k , ρ(x, y ) = X
+
+> k
+
+Mk(x, y )ρk, Z(x, y ) = ρ(x, y )vp(x, y )/10 6. (21) Intrusions are assigned a high-impedance body with vp = 4300 and ρ = 2920 . After imaging, amplitudes inside the intrusion mask are smoothed and attenuated so that intrusions appear as coherent bodies that cut layers rather than as strings of point-diffraction artifacts. The velocity raster is resized to a compact modeling grid and padded by 32 cells on all sides. We use a second-order acoustic finite-difference update for pressure p,
+
+pt+1  
+
+> i,j
+
+= 2 pti,j − pt−1 
+
+> i,j
+
++
+
+ vp(i, j )∆ t
+
+∆x
+
+2
+
+∇2pti,j + sti,j , (22) where ∇2 is the five-point spatial Laplacian, ∆x = 12 m, ∆t = 0 .001 s, and st is a Ricker source wavelet. A multiplicative sponge taper in the padded region absorbs outgoing energy and keeps boundary reflections outside the displayed domain. The default acquisition uses 11 surface shots and 88 surface receivers, both placed just below the top boundary. For each shot, recorded traces are direct-arrival muted using the near-surface velocity and then de-meaned across receivers and time to reduce source and receiver imprint. The simulated shot gathers are imaged back to depth by a lightweight Kirchhoff-style condition. For image point (x, z ),shot position xs, receiver position xr , and depth-dependent root-mean-square (RMS) velocity vrms (z), we use the two-way travel-time approximation 
+
+T (x, z ; xs, x r ) = 
+
+p(x − xs)2 + z2 + p(x − xr )2 + z2
+
+vrms (z) . (23) 18 Geo-Strat-RL 
+
+The image is the illumination-normalized weighted sum of trace amplitudes sampled at T :
+
+Imig (x, z ) = 
+
+P 
+
+> s,r
+
+Ds,r (T (x, z ; xs, x r )) a(x, z ; xs, x r )
+
+P 
+
+> s,r
+
+a(x, z ; xs, x r ) + 10 −6 , (24) where Ds,r is a modeled shot gather and a is a geometric spreading weight. The very shallow part of the image is tapered to suppress source and receiver artifacts. The broad migration background is removed by subtracting a smoothed copy, leaving a wave-propagation texture term. To keep the section interpretable as a depth-domain observation, the displayed image is dominated by the impedance-contact image. We compute vertical reflectivity from Z,
+
+RZ (y, x ) = Z(y + 1 , x ) − Z(y, x )max( Z(y + 1 , x ) + Z(y, x ), 10 −6) , (25) convolve it vertically with a short Ricker wavelet, normalize it, and blend it with the high-pass migration texture: 
+
+S0 = 0 .12 norm( Imig − G 6,10 ∗ Imig ) + 0 .88 norm( w ∗y RZ ). (26) Here ∗y denotes vertical convolution. The migration texture is suppressed in a halo around intrusions, and the intrusion body is smoothed after blending and again after display-grid resizing. Finally, trace-gain variation, coherent noise, and white noise are applied: 
+
+˜S(x, y ) = S0(x, y ) (1 + σg ˜g(x)) + σc std( S0) ˜C(x, y )+ ϵ(x, y ), ϵ ∼ N  0, σ 2
+
+> n
+
+std( S0)2 , (27) where ˜g and ˜C are unit-standard-deviation smoothed random fields. The grayscale image intensity is 
+
+I(x, y ) = clip 
+
+
+
+127 .5
+
+h
+
+1 − ˜S(x, y )/Q 98 .5(| ˜S|)
+
+i
+
+, 0, 255 
+
+
+
+. (28) The numerical constants in Table 8 are synthetic renderer defaults chosen to keep contact amplitudes, offsets, intrusions, and unconformities visible at the benchmark image resolution. They are not calibrated field-seismic or rock-physics parameters. 19 Geo-Strat-RL 
+
+Table 8. Seismic-domain renderer parameters. These values are the defaults in SeismicRenderConfig .Parameter Value Role Model grid 176 × 104 cells Acoustic finite-difference grid before resizing to the image domain. Boundary padding 32 cells Absorbing sponge thickness around the modeled domain. Shot count 11 Surface source positions used for illumination. Receiver count 88 Surface receiver positions per shot. Grid spacing ∆x 12 m Spatial sampling for the acoustic model. Time step ∆t 0.001 s Temporal sampling for wave propagation. Record length 1.15 s Modeled shot-gather duration. Source frequency 24 Hz Ricker source peak frequency. Direct mute 0.16 s Extra direct-arrival mute after the source–receiver travel time. Base impedance 3.8 Compact acoustic-impedance value for the pre-deposition base-line. Layer impedance step 0.95 Guaranteed minimum trend separating successive deposited units. Lithology impedance scale 0.08 Small lithology perturbation added to the layer trend. Structural blend 0.88 Weight of the impedance-contact image relative to migration texture. White-noise scale σn 0.025 Independent noise as a fraction of signal standard deviation. Coherent-noise scale σc 0.09 Smoothed band-limited noise amplitude. Coherent-noise blur σy = 1 .0, σx = 7 .0 px Vertical and lateral smoothing for coherent noise. Trace-gain scale σg 0.05 Lateral trace-amplitude variation. Trace-gain smoothing 28 .0 px Lateral Gaussian smoothing for trace gain. Display percentile 98 .5 Robust amplitude normalization. Intrusion texture suppression 0.95 Suppresses migration texture in and around high-contrast intru-sion bodies. Intrusion smoothing σy = 8 .0, σx = 2 .5 px Smooths the final amplitude inside intrusion masks. Intrusion amplitude scale 0.05 Residual amplitude retained inside smoothed intrusion bodies. Colormap gray Display mode used for paper and evaluation. 
+
+20 Geo-Strat-RL 
+
+E. Artifacts and Benchmark Details 
+
+The repository, fixed dataset identifiers, model references, and LoRA adapter identifiers used for this paper are collected here; anonymous review access is provided for non-public artifacts.                            
+
+> Table 9. Repository and dataset artifacts. Artifact Link Role Code repository https://github.com/LukasMosser/ geo-strat-rl
+> Source code, notebooks, figure scripts, and paper assets. Training dataset https://huggingface.co/datasets/porestar/ geo-strat-rl-train
+> Seeds 50000–66383 for fixed cached training examples. Validation dataset https://huggingface.co/datasets/porestar/ geo-strat-rl-val
+> Seeds 10000–10099 for prompt, re-ward, and checkpoint selection. Held-out test dataset https://huggingface.co/datasets/porestar/ geo-strat-rl-test
+> Seeds 11000–11099 for final report-ing.
+> Table 10. Model and adapter artifacts. Artifact Link or identifier Role Qwen2.5-VL-3B base https://huggingface.co/Qwen/Qwen2. 5-VL-3B-Instruct
+> Local pretrained baseline and RLVR base model. Qwen3-VL-4B base https://huggingface.co/Qwen/ Qwen3-VL-4B-Instruct
+> Local pretrained baseline and RLVR base model. Qwen2.5-VL-3B diagram ng16 LoRA
+> https://huggingface.co/porestar/ qwen25vl3b_g4_seed50000_ng16-lora
+> Diagram-domain adapter used for final diagram and transfer evaluation. Qwen3-VL-4B diagram ng16 LoRA
+> https://huggingface.co/porestar/ qwen3vl4b_g4_seed80000_ng16-lora
+> Diagram-domain adapter used for final diagram and transfer evaluation. Qwen3-VL-4B seismic ng16 LoRA
+> https://huggingface.co/porestar/ qwen3vl4b_g4_seed80000_seismic_ ng16-lora
+> Seismic-domain adapter used for re-verse transfer evaluation. Gemma 4 31B IT https://openrouter.ai/google/ gemma-4-31b-it
+> Pretrained baseline. Qwen3-VL-30B-A3B https://openrouter.ai/qwen/ qwen3-vl-30b-a3b-instruct
+> Pretrained baseline. Mistral Small 3.2 24B https://openrouter.ai/mistralai/ mistral-small-3.2-24b-instruct
+> Pretrained baseline with a100-example, 5-rollout confidence interval. Gemini 2.5 Flash Lite https://openrouter.ai/google/gemini-2. 5-flash-lite
+> Pretrained baseline.
+
+The current held-out test split is porestar/geo-strat-rl-test , split train , containing 100 examples with seeds 11000–11099. The pretrained-model notes in docs/benchmarks/ record API-service run context, and the machine-checkable artifact manifest records the canonical API uncertainty summaries used for the main OpenRouter rows. The GPT-5.5 diagram comparison is backed by the Azure OpenAI 100-example, 3-rollout summary; the GPT-5.5 seismic compar-ison is backed by the Azure OpenAI 100-example, 5-rollout seismic summary. The canonical local base and RLVR evaluation artifacts are bundled in docs/assets/eval_loras_15_06_2026/batched_geo_strat_evals.zip ; it con-tains per-rollout JSON Lines (JSONL) rows with prompts, targets, generated responses, parsed outputs, reward components, bootstrap summaries, and uncertainty files for the 100-example, 5-rollout diagram and seismic-style runs. Bootstrap confidence intervals for any evaluation JSONL can be computed with geo-strat-rl-eval-uncertainty . The interval calculation groups rows by example, averages all rollouts for each example, and bootstraps over example-level means; final intervals should be recomputed after target-schema refreshes rather than copied across schema versions. The reported GRPO training curves are tracked in Weights & Biases and rendered in Figure 5. The reproduction notebook is 
+
+notebooks/colab_batched_post_rl_eval.ipynb ; it evaluates the Qwen2.5-VL-3B and Qwen3-VL-4B base checkpoints, the diagram ng16 LoRA adapters, and the Qwen3-VL-4B seismic ng16 LoRA adapter on both the diagram and seismic-style domains. All paper figure assets are regenerated by scripts/generate_paper_figures.py ; the optional -refresh-wandb-history flag refreshes the cached W&B reward history used for Figure 5. 21
