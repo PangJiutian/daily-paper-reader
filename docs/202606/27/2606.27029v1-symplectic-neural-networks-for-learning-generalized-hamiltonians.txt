@@ -1,0 +1,1300 @@
+Title: Symplectic Neural Networks for learning Generalized Hamiltonians
+
+URL Source: https://arxiv.org/pdf/2606.27029v1
+
+Published Time: Fri, 26 Jun 2026 01:00:25 GMT
+
+Number of Pages: 22
+
+Markdown Content:
+IOP Publishing Journal vv (yyyy) aaaaaa Author et al 
+
+# Journal of Physics A: Mathematical and Theoretical 
+
+> PAPER
+
+Crossmark 
+
+> RECEIVED
+
+dd Month yyyy 
+
+> REVISED
+
+dd Month yyyy 
+
+# Symplectic Neural Networks for learning Generalized Hamiltonians 
+
+Harsh Choudhary 1,∗ , Vyacheslav Kungurtsev 1 , Chandan Gupta 2 Melvin Leok 3 and Georgios Korpas 1,4,5    
+
+> 1Computer Science Department, Czech Technical University in Prague, Prague 2, Czechia 12000
+> 2Computer Science Department, Indraprasth Institute of Information Technology, New Delhi, India 110020
+> 3Department of Mathematics, University of California at San Diego, La Jolla, CA 92093
+> 4Athena Research and Innovation Center, Marousi, Greece 15125
+> 5HSBC Holdings, Singapore
+> ∗Computer Science Department, Czech Technical University in Prague, Prague 2, Czechia 12000
+> E-mail: choudhar@fel.cvut.cz
+> Keywords: Hamiltonian Neural Nets, Symplectic Integrators, Adjoint Sensitivity, Dynamical Systems
+
+Abstract 
+
+Hamiltonian Neural Networks (HNNs) integrate physical priors into neural models by learning a system’s Hamiltonian, improving generalization and sample efficiency. Identifying the system Hamiltonian from noisy observations of state variables is a challenging task. For simulations to faithfully reflect the long-term behavior of Hamiltonian systems, especially energy conservation, it is essential to use symplectic integrators, which preserve the system’s geometric structure. This fidelity comes at a cost: implicit symplectic integrators are more computationally intensive and make backpropagation through the ODE solver non-trivial. However, by leveraging the fact that symplectic discretizations of the adjoint system yield the same sensitivities associated by backpropagation, we obtain an efficient method of training the Neural Network parameters. In our work, we explore this alternate method of HNN training under noisy observation of trajectories with our HNN model based on an implicit symplectic integrator. Computationally, a predictor-corrector based ODE solver and fixed point iteration help to mitigate the computational cost of the implicit timestepping, resulting in more efficient generation of gradient updates. We showcase the numerical advantage, in experiments, in system identification and energy preservation on a range of non-separable, chaotic systems and the efficient computation and memory complexity of our method. We also observe that the post-processing of the learned Hamiltonian using backward error analysis yields a modified Hamiltonian that is a more accurate approximation of the true Hamiltonian without the need to use more accurate discretizations of the flow map. 
+
+1 Introduction 
+
+The Hamiltonian formalism is standard in mathematical physics for expressing dynamics in many physical systems. Beyond yielding a systematic framework for deriving the dynamics of the system, there are deep structural, geometric, topological, and analytic properties of Hamiltonian functions that can be used to understand the physics of the system and its dynamics [1, 2]. Hamiltonian systems are described by a single scalar function in the phase space H : Ω ⊆ R2d → R and the corresponding system for y ∈ Ω in Hamilton’s equations [3, 4]. 
+
+˙y = J−1∇H (y), J =
+
+ 0 1
+
+−1 0
+
+
+
+, (1) where J is the canonical symplectic matrix, which we will refer to repeatedly in subsequent sections. The solutions of the system are trajectories y(t). If the Hamiltonian does not have an explicit time-dependence, then it is the Noether quantity associated with time-translational symmetry and is conserved along the flow, i.e., H(y(t)) remains constant along trajectories. This implies many important conservation properties across physical systems of interest. For a set of canonical coordinates { pi, qi} ∈ R2d, an integrator, or numerical simulation method, is said to be symplectic if it preserves the canonical symplectic form, ω = Pni=1 dp i ∧ dq i; see subsequent sections and also [5]. 1 
+
+> arXiv:2606.27029v1 [cs.LG] 25 Jun 2026 IOP Publishing
+
+Journal vv (yyyy) aaaaaa Author et al 
+
+Geometric integrators preserve geometric invariants of the flow, and the use of such integrators has been instrumental in understanding the long-term qualitative properties of many important physical systems [6, 7, 8, 9, 10]. As such, by learning the Hamiltonian itself rather than seeking to learn trajectories, we are able to directly learn the qualitative properties of the system. In contrast, non-geometric numerical methods such as the Euler and explicit Runge–Kutta methods do not conserve the Hamiltonian [7]. A result in [11] shows that it is not possible for a fixed-timestep integrator to simultaneously preserve the energy and the symplectic structure unless it samples the exact solution, and this result inspired the development of energy-preserving and symplectic integration schemes. In recent years, the field of Physics-Informed Machine Learning has brought significant advances in architecture and learning techniques. By enforcing physical inductive biases while learning the dynamics through appropriate structural modifications to standard NN training, the learning process requires much fewer samples to accurately fit the data and achieves better out-of-distribution accuracy. This includes the recent development of Hamiltonian Neural Networks [12]. By representing the Hamiltonian as a Neural Network, a more physical representation of the system is available. While incorporating symplectic integrators yields more qualitatively accurate approximations of the Hamiltonian dynamics, it poses technical challenges, namely (i) reconstructing a learned Hamiltonian function from noisy trajectory observations, (ii) solving the implicit equations required by symplectic integration methods, and (iii) ensuring that the learned Hamiltonian model generalizes to out-of-distribution data. Motivated by these technical challenges, the remainder of this paper is structured as follows: In Section 2, we provide background on two complementary formulations of dynamical systems: the Lagrangian and Hamiltonian perspectives. Section 3 reviews symplectic integrators and their application to solving general Hamiltonian systems. We also discuss briefly backward error analysis in the context of symplectic methods. In Section 4, we describe the architecture of our Hamiltonian Neural Network and introduce an implicit symplectic integrator that is implemented with a predictor-corrector method in the forward pass. Section 4.2 describes the backward pass and introduces the adjoint sensitivity equations for Hamiltonian Learning. Finally, Section 5 presents numerical experiments. 
+
+1.1 Contributions 
+
+The paper makes the following contributions: 
+
+• Showing that a neural framework can be constructed which learns generalized Hamiltonians up to some error tolerance from noisy observations of trajectories without having any implicit structural bias (no assumptions on the separability of the Hamiltonian). 
+
+• Showing that the Hamiltonian Neural Net generalizes to out-of-distribution data and is able to learn the governing Hamiltonians for systems with chaotic dynamics. 
+
+• Using the fact that the adjoint sensitivity of a symplectic discretization of a Hamiltonian ODE can be computed using the same symplectic discretization applied to the adjoint system, we are able to compute exact gradients of the loss with respect to neural network parameters without the need for backpropagation. 
+
+• We also describe in brief how backward error analysis applied to our Learned Hamiltonian results in a higher order reconstruction of the true Hamiltonian. 
+
+2 Hamiltonian Dynamics: A Background 
+
+Before discussing the Hamiltonian formulations, we recall the definition of a manifold in the context of mechanics. 
+
+Definition 2.1. A manifold Q is a space that is locally Euclidean and it serves as the geometric setting for describing the state of a system. The configuration space of a mechanical system is modeled as a smooth manifold Q, where each point q ∈ Q represents a possible configuration of the system. Associated with Q are two fundamental constructions: 
+
+• The tangent bundle T Q , whose elements are pairs (q, ˙q), representing positions and velocities. This is the natural domain of the Lagrangian formalism. 
+
+• The cotangent bundle T ∗Q, whose elements are pairs (q, p ), representing positions and momenta. This serves as the phase space in Hamiltonian mechanics. 2IOP Publishing Journal vv (yyyy) aaaaaa Author et al 
+
+These bundles are themselves smooth manifolds of dimension 2d, where d = dim Q. The dynamics of mechanical systems are described by differential equations on these manifolds, and respect their geometric structure. There are two equivalent and foundational approaches to formulating classical mechanics, rooted in geometric and variational principles: the Lagrangian and Hamiltonian frameworks. These frameworks describe the evolution of physical systems using generalized coordinates and velocities or momenta, rather than relying directly on Newton’s second law. The Lagrangian formalism is based on the principle of stationary action and encodes the dynamics in terms of the Lagrangian, which is difference between kinetic and potential energy. The Hamiltonian formalism reformulates the problem as a system of first-order differential equations on phase space, where the state of the system is expressed through canonical coordinates and conjugate momenta. These approaches systematically reveal conserved quantities through symmetries, as formalized by Noether’s theorem, and reveals the mathematical structure underlying the dynamics, including the preservation of the symplectic geometric structure in the Hamiltonian setting. Beyond their classical role, these formulations have become central in the analysis of dynamical systems, numerical methods, and emerging applications in optimization and machine learning. 
+
+2.1 The Lagrangian formulation 
+
+Lagrangian mechanics describes the motion in a mechanical system by means of the configuration space. The configuration space of a mechanical system has the structure of a differentiable manifold, on which its group of diffeomorphisms acts. The basic ideas and theorems of Lagrangian mechanics are invariant under the right action of this group [13], which reflect the coordinate independence of this formulation. A Lagrangian mechanical system is given by a configuration manifold and a Lagrangian function on its tangent bundle. Every one-parameter group of diffeomorphisms of the configuration space induces a tangent lifted action on the tangent bundle. If the Lagrangian is invariant under this tangent lifted action, then there is an associated Noether quantity that is conserved. A Newtonian potential system is a particular case of a Lagrangian system where the configuration space is Euclidean and the Lagrangian function is the difference between kinetic and potential energies. The equations of motion are derived via the variational principle by extremizing the action functional (2) whose domain is the infinite-dimensional space of curves and the dynamics is defined by the curve that extremizes this action 1.Let Q be a d-dimensional smooth manifold representing the configuration space of a mechanical system. The tangent bundle T Q of Q consists of all pairs (q, ˙q), where q ∈ Q denotes a configuration and ˙q ∈ Tq Q is a tangent vector representing the velocity at q. Given local coordinates (q1, . . . , q d)
+
+on Q, the tangent bundle has local coordinates (qi, ˙qi) for i = 1 , . . . , d . Lagrangian mechanics is formulated on T Q with the action functional S : C2([ t0, t 1], Q ) → R is defined as: 
+
+S[q] = 
+
+Z t1
+
+> t0
+
+L(t, q (t), ˙q(t)) dt. (2) Then, the dynamics of the system is governed by Hamilton’s principle: 
+
+δS [q] = 0 ,
+
+for all variations δq (t) of q(t) that vanish at the endpoints, i.e., δq (t0) = δq (t1) = 0 . Computing the variation, integrating by parts, and evoking the fundamental theorem of the calculus of variations yields the Euler–Lagrange equations: 
+
+ddt 
+
+ ∂L ∂ ˙qi
+
+
+
+− ∂L ∂q i
+
+= 0 , for i = 1 , . . . , d. (3) 
+
+2.2 The Hamiltonian formulation 
+
+Another approach is the Hamiltonian formulation of dynamics, which provides an alternative (but equivalent) description of the system on phase space when the Lagrangian is hyperregular. In this picture, one works on the cotangent bundle T ∗Q (the space of pairs (q, p ) of generalized coordinates and conjugate momenta) instead of the tangent bundle T Q consisting of (q, ˙q) used in Lagrangian mechanics. The cotangent bundle T ∗Q carries a natural symplectic structure, which is central to Hamiltonian mechanics. Specifically, let M = T ∗Q be a 2d-dimensional smooth manifold. Then the 
+
+> 1The action functional is extremized when the first variation vanishes; it may correspond to a minimum, maximum, or saddle point.
+
+3IOP Publishing Journal vv (yyyy) aaaaaa Author et al 
+
+symplectic form ω is a closed, non-degenerate 2-form on M, and in canonical (Darboux) coordinates 
+
+(q1, . . . , q d, p 1, . . . , p d) on T ∗Q, it is given by: 
+
+ω =
+
+> d
+
+X
+
+> i=1
+
+dq i ∧ dp i. (4) To transition from the Lagrangian L : T Q → R to the Hamiltonian formalism, we first define the conjugate momenta by taking partial derivatives of L with respect to the generalized velocities. In local coordinates qi2 on Q , the i-th component of momentum is defined as: 
+
+pi = ∂L ∂ ˙qi
+
+, for i = 1 , . . . , d 
+
+This definition induces a map known as the Legendre transform, often denoted FL : T Q → T ∗Q.The Legendre transform sends a point (q, ˙q) in the tangent bundle to a corresponding point (q, p ) in the cotangent bundle by pairing velocities with momenta. In coordinates, FL(q, ˙q) = ( q, p ), where 
+
+pi = ∂L/∂ ˙qi3.Given this correspondence, we define the Hamiltonian H : T ∗Q → R as the Legendre transform of the Lagrangian, i.e., the function whose value is the “energy” obtained by trading the velocity dependence of L for momentum dependence. It is given by the formula, 
+
+H(q, p ) = 
+
+> d
+
+X
+
+> i=1
+
+pi ˙qi − L(q, ˙q), (5) where ˙qi is expressed as a function of (q, p ) by inverting the Legendre transform. Equivalently, the dependence on the velocities on the right-hand side can be eliminated by extremizing with respect to the velocities, which is analogous to the approach adopted in the Pontryagin maximum principle. Given H, we can define a unique vector field XH on T ∗Q, the Hamiltonian vector field, by the condition 
+
+dH = ω(XH , ·). (6) The Hamiltonian vector field XH takes the form 
+
+XH =
+
+> d
+
+X
+
+> i=1
+
+∂H ∂p i
+
+∂∂q i
+
+− ∂H ∂q i
+
+∂∂p i
+
+. (7) The integral curves of XH are the solutions to Hamilton’s equations 
+
+˙pi = − ∂H ∂q i
+
+, ˙qi = ∂H ∂p i
+
+, for i = 1 , . . . , d. 
+
+While we have derived Hamilton’s equations using local canonical coordinates, (6) defines a global vector field on M. These equations describe the flow of the system in phase space and are equivalent to the Euler–Lagrange equations (3) derived from Hamilton’s principle if the Legendre transformation is globally invertible and the Lagrangian L is related to the Hamiltonian H by (5). For completeness, the Hamilton–Jacobi partial differential equation, 
+
+∂tS + H(q, ∂ q S) = 0 ,
+
+describes the generating function S for the canonical transformation that maps (q(t0), p (t0)) to 
+
+(q(t1), p (t1)) . This provides an alternative method for solving Hamilton’s equations [ 14 ], and Jacobi’s solution to the Hamilton–Jacobi equation is given in terms of the action functional evaluated along the two-point boundary value solution of the Euler–Lagrange equations.                       
+
+> 2Strictly speaking, qishould be written as qi, since it denotes a component of a vector, while piis a component of a covector. However, for notational simplicity and because we work primarily with individual components when formulating our loss functionals, we use subscripts for both.
+> 3We assume Lis regular, meaning the Hessian matrix  ∂2L/∂ ˙qi∂˙qj
+> is nonsingular, so that this transformation is locally invertible. If this induces a global diffeomorphism T Q ∼=T∗Q, then the Lagrangian is said to be hyperregular. Under this assumption, for each (q, p ), there is a unique ˙qsuch that pi=∂L/∂ ˙qi.
+
+4IOP Publishing Journal vv (yyyy) aaaaaa Author et al 
+
+3 Symplectic Integrators 
+
+This section presents symplectic integration in the context of the current Hamiltonian learning literature. Then, we will review some properties of symplectic flow maps which motivate their incorporation into the learning process for dynamical systems. Finally, we present some standard methods for constructing symplectic integrators that we later use in this work. 
+
+3.1 Symplectic Integration in NNs: Previous Work 
+
+Since the original proposal by [15] and the concurrent work by [12], HNNs have generated much scientific interest. This has spawned generative [ 16 ], recurrent [ 17 ], and constrained [ 18 ] versions, as well as Lagrangian Neural Networks [19] have been proposed. In contrast to standard HNNs, the approach introduced in [ 17 ] directly optimizes the actual states observed at each timestep for a given initialization by integrating the Hamiltonian vector field using a symplectic integrator (leapfrog algorithm) and backpropagating each squared error through time. The state at the next timestep is predicted using the symplectic integrator; in this way the entire time series is predicted, which is then compared with the observed data. Note that they make the assumption that the Hamiltonian is separable, which is significant as the leapfrog algorithm is generally implicit, but if the Hamiltonian is separable, then the algorithm becomes explicit. Notably, the work in [ 20 ] uses an implicit midpoint scheme to train a Poisson Neural Net, which learns the Poisson structure of a dynamical system, and the network is trained using a standard backpropagation technique. Most of these works considered either explicit integration schemes, some semi-implicit schemes, or used a separable ansatz for the neural nets. In [ 21 , 22 ], additive separability biases were introduced in the HNN architecture/training, allowing the network to learn Hamiltonians of the form 
+
+H(q, p ) = T (p) + V (q) + const. This yields better performance by making the Störmer–Verlet (leapfrog) integrators fully explicit and easier to train, at least when the true Hamiltonian is well-approximated by a separable Hamiltonian. The error bounds for such symplectic HNNs have been analyzed for the noiseless case in recent works (e.g., showing that energy error grows linearly in time under a symplectic integrator) [ 23 , 24 ], and it was established that the learned H is reasonable but is slightly perturbed from the true H. These limitations highlight that while semi-implicit methods make training feasible, they come at the cost of a small modeling bias as the integrator inherently assumes that the Hamiltonian is separable in order to simplify the computation. More details can be found in [25, 26]. A generalized HNN framework is proposed in [ 27 ] proposes, which can be used for non-separable Hamiltonians where they approximate the original non-separable Hamiltonian by an augmented one that was introduced in [ 28 ], with an extended phase space and a tunable parameter ω which controls the binding between the two copies of the Hamiltonian and model them using NNs. The approach in [ 28 ] yields an explicit symplectic integration scheme for non-separable Hamiltonians, at the expense of increased complexity associated with two coupled Hamiltonian systems, and the need to tune the coupling parameter. As we mentioned earlier, all such Symplectic HNN architectures learn a valid Hamiltonian which is a perturbation of the true Hamiltonian, due to the approximation error in replacing the exact flow map with a numerical integrator. Establishing the error bounds is necessary, and there have been a few classic works which derive these error bounds for symplectic integrators, notably [25, 24]. Most existing works have either relied on explicit methods or employed imperfect implicit schemes, often limited to noiseless settings. This is largely due to the computational cost of the nonlinear solves, which can be addressed by using a predictor-corrector approach. The predictor is an explicit one-step method with the same order as the implicit symplectic integrator, and the corrector involves a few fixed-point iterations of the symplectic integrator. Another challenge is posed by backpropagation through implicit ODE solvers, which scales in memory with the simulation length and number of parameters. In [ 29 ], a backpropagation-free framework using sampled neural networks is proposed for learning Hamiltonians, which is effective with rich trajectory data but assumes access to the true time derivatives, which is unrealistic in practice. Notably another approach that avoids solving a forward integral is in form of SympNets[30] which learn the Neural NEt itself as a symplectic map but this comes with restrictions on freedom of choosing an arbitrary stepsize during simulation. In contrast, the adjoint method offers greater generality and handles sparse supervision. If the Hamiltonian is separable, it has the form, 
+
+H(q, p ) = T (p) + V (q) (8) 5IOP Publishing Journal vv (yyyy) aaaaaa Author et al 
+
+and the Hamiltonian vector field can be written as 
+
+˙q = ∂T (p)
+
+∂p 
+
+˙p = − ∂V (q)
+
+∂q 
+
+(9) For separable Hamiltonians, one can then use the standard Störmer-Verlet method, whose numerical update is given by 
+
+pn+ 12 = pn − h
+
+2 ∇V (qn),qn+1 = qn + h∇T (qn+ 12 ),pn+1 = pn+ 12 − h
+
+2 V (qn+1 ).
+
+(10) The method is second-order accurate but is only defined when the Hamiltonian is separable and the Hamiltonian vector field is given by (9). In the next part, we will describe a well-known second-order symplectic method that works for general (non-separable) Hamiltonians. 
+
+3.2 Symplectic Integrators for Nonseparable Hamiltonians 
+
+When simulating physical systems, it is desirable to consider geometric integrators that preserve the geometric properties of the flow. More specifically, for Hamiltonian systems, this property is the preservation of the symplectic 2-form described in (4) . An automatic consequence of preserving the symplectic form is that the numerical integrator preserves the phase space volume on the cotangent bundle T ∗Q.There are various kinds of symplectic methods, the simplest of which are the first-order symplectic Euler schemes, which we will not discuss here. Consider the canonical Hamiltonian dynamics where we do not assume separability, 
+
+˙q = ∂H
+
+∂p ,
+
+˙p = − ∂H
+
+∂q .
+
+(11) Observe that we cannot use methods of the form (10). For systems with stiff dynamics or strongly nonlinear Hamiltonians, the semi-implicit methods may suffer from poor accuracy or numerical instability. In such cases, a fully implicit method is often desirable. The implicit midpoint method is often used to integrate such stiff dynamics, and it is symplectic and thus automatically phase space volume-preserving. Additionally, we observe that the map is symmetric, i.e., Φ−1 
+
+> h
+
+= Φ −h. For the Hamiltonian vector field, the implicit midpoint method is written as 
+
+qn+1 = qn + h∇pH
+
+ qn + qn+1 
+
+2 , pn + pn+1 
+
+2
+
+
+
+,pn+1 = pn − h∇q H
+
+ qn + qn+1 
+
+2 , pn + pn+1 
+
+2
+
+
+
+,
+
+(12) This update scheme is second-order accuracy and it is fully implicit in both variables q and p. Hence, it requires a nonlinear solver. 
+
+3.3 The Numerical Advantage of Using Symplectic methods 
+
+Consider an initial value problem, 
+
+y′ = f (y), y(0) = y0,
+
+and a numerical method Φh which approximates the trajectory with a sequence of points 
+
+y0, y 1, . . . , y n. Then, the forward error is concerned with the extent to which the numerical method approximates the exact flow, 
+
+ϵ = |y(nh ) − Φnh (y0)|.
+
+In contrast, backward error analysis is concerned with constructing a modified differential equation 
+
+˜y′ = fh(˜ y) whose exact flow agrees with the numerical method. This relationship is expressed in 6IOP Publishing Journal vv (yyyy) aaaaaa Author et al 
+
+Figure 1, where φt is the exact flow map for the ODE. It is in this context that the true power of symplectic integrators for simulating Hamiltonian dynamics is revealed. In general, a one-step method cannot be exactly expressed as the time-h flow of a differential equation, but we can construct an asymptotic expansion for this modified equation, 
+
+˙˜y = fh(˜ y) = f (˜ y) + hf 1(˜ y) + h2f2(˜ y) . . . , ˜y(0) = y0 (13) Where fi denotes terms involving up to i-th derivatives of f . If the numerical method is p-th order accurate, then the expansion fh agrees with f up to the hp−1 term, or that the first nontrivial correction term is hp. This backward error analysis can be applied to any numerical method, but 
+
+> Figure 1: Original and modified ODE
+
+when applied to a symplectic integrator, the modified vector field is Hamiltonian, which allows us to view a symplectic integrator as being very well approximated by the exact flow of a modified Hamiltonian. The precise theorem is as follows: 
+
+Theorem 3.1 ([31]) . If a symplectic method Φh(y) is applied to a Hamiltonian system with a smooth Hamiltonian H : R2d → R, then the modified equation (13) is also Hamiltonian, more precisely, there exist smooth functions Hj : R2d → R for j = 2 , 3, . . . such that fj (y) = J−1Hj (y).
+
+The theorem above implies that the numerical flow generated by the numerical map Φ is well approximated by the exact flow the modified Hamiltonian: 
+
+˜H = H + hpHp + . . . (14) where p denotes the order of accuracy of the numerical integrator and Hp satisfies fj = J−1Hj in the modified vector field. This is significant as symplectic integrators can be viewed as the flow of a modified Hamiltonian whereas the modified vector field associated with a non-symplectic integrator cannot be associated with a modified Hamiltonian flow. This ensures that the numerical reconstruction more physical by preserving the total energy. Moreover, we will show in Section 5.4.1 an additional benefit this presents for learning physical systems. In essence, it allows us to use a lower-order symplectic integrator to learn a lower-order approximation of the true Hamiltonian, and use backward error analysis to post-process the learned Hamiltonian to obtain a higher-order approximation of the true Hamiltonian. For the implicit midpoint method (12) that we use in our analysis, the modified Hamiltonian is given by 
+
+˜H = H − h2
+
+24 ∇2H(J−1∇H , J −1∇H ) + O(h4). (15) Note that there terms involving odd powers of h vanish, which is a consequence of the fact that the method is symmetric. The expression ∇2H(J∇H , J ∇H ) represents a bilinear form that is explicitly given by 
+
+∇2H(J−1∇H , J −1∇H ) = ( J−1∇H )⊤∇2H(J−1∇H ).
+
+More about the modified Hamiltonian will be presented in the numerical section. 
+
+3.4 Constructing Symplectic integrators 
+
+Partitioned Runge–Kutta Methods Partitioned Runge–Kutta (PRK) methods are a class of numerical integrators that are particularly well-suited for systems where the state can be naturally 7IOP Publishing Journal vv (yyyy) aaaaaa Author et al 
+
+split into multiple components, such as position and momentum in Hamiltonian systems as given by: 
+
+dq dt = ∂H(q, p, t )
+
+∂p , dp dt = − ∂H(q, p, t )
+
+∂q . (16) Now generally, when we are solving for systems, we can combine these equations in a single vector of state y(t) and iteratively solve for yn using RK methods, however, for Hamiltonian systems these variables play different roles and may evolve at different rates hence these methods treat these two set of variables differently. Now, equation (16) can be integrated using a partitioned Runge–Kutta scheme: 
+
+qn+1 = qn + hnsX
+
+> i=1
+
+bikn,i ,pn+1 = pn + hnsX
+
+> i=1
+
+Biln,i ,
+
+where 
+
+kn,i = f (Qn,i , P n,i , t n + cihn),ln,i = g(Qn,i , P n,i , t n + Cihn).
+
+which are evaluated at the internal stages, 
+
+Qn,i = qn + hnsX
+
+> j=1
+
+aij kn,j , Pn,i = pn + hnsX
+
+> j=1
+
+Aij lnj . (17) A partitioned Runge–Kutta scheme is symplectic if the following conditions hold: 
+
+ci = Ci, b i = Bi, i = 1 , ..., s ;
+
+biAij + Bj aji − biBj = 0 , i, j = 1 , ..., s. (18) All the symplectic integrators discussed above, including the one used in our subsequent analysis, are examples of symplectic PRK schemes. 
+
+Hamiltonian Variational Integrators Discrete variational analysis is another way to construct symplectic integrators. These apply a discrete variational principle, which automatically guarantees symplecticity. In fact, discrete Lagrangian mechanics is expressed in terms of a discrete Lagrangian 
+
+L(qk, q k+1 ) that is a Type I generating function and can be used to generate symplectic maps. However, if the Hamiltonian is not hyperregular and the Legendre transformation is not invertible, as is the case for H = qp , it is not possible to transform the Hamiltonian into an equivalent Lagrangian and apply the discrete Lagrangian construction. Instead, it was showed in [32] that a discrete Hamiltonian H+ 
+
+> d
+
+(qk, p k+1 ) that is a Type II generating function can be constructed directly from the continuous Hamiltonian, thereby avoiding the need to evoke the Lagrangian perspective. As with the Lagrangian theory, the discrete Hamiltonian perspective extremizes a discrete action sum, yielding a Hamiltonian variational integrator that is automatically symplectic. 
+
+4 Fully Symplectic Hamiltonian Neural Network 
+
+Now, we are at the point where we can apply the insights from symplectic integration theory to the data-driven setting. Consider the problem of learning a Hamiltonian H from data, with noisy observations (˜ q, ˜p) ∈ R2d. At this point let us set up a few assumptions 
+
+• We have a set of noisy trajectories Ntrain in the training set and Nval in the validation set. 
+
+• Our integrator is represented by a flow map Φ such that yT = Φ( y, f (y), 0, T, h ), where y is the initial state, f (y), the generator of dynamics, T is the final time and h is stepsize of the integrator. 
+
+• The Hamiltonian Neural Network is represented by Hθ (q, p) where θ ∈ Rp, (q, p) ∈ R2d is a combined vector of phase space coordinates and are also the inputs to our neural network. 8IOP Publishing Journal vv (yyyy) aaaaaa Author et al 
+
+Now, the problem boils down to learning the functional form of Hamiltonian Hθ∗ (q, p) where inference in the network, for given trained θ∗, amounts to computing the value of Hamiltonian function Hθ∗ (q, p) over phase space at a point (q, p) ∈ R2d. We start at a set of initial phase space coordinates (q, p) and simulate the trajectory forward using a symplectic integrator to compute up to final time T to get {qT , pT }. At this stage, we construct a loss function 
+
+Loss = 1
+
+n
+
+ NX
+
+> i=1
+
+∥qiT − ˜qiT ∥2 + ∥piT − ˜piT ∥2
+
+. (19) Here, i represents a data sample/trajectory in phase space and n is the batch size since we compute a gradient estimate over a minbatch. The vector (˜ q, ˜p) represents the noisy ground truth values. 
+
+Figure 2: The schematic of the Hamiltonian Identification framework, where the network represents a parametrized Hamiltonian, the block in the blue below represents the ODE solver in the forward pass, and the block in the orange above represents the same ODE solver but for adjoint dynamics to get the loss gradients. 
+
+Algorithm 1: Hamiltonian Identification and Optimization  
+
+> 1:
+
+Input: Initial θ0, Train data {( ˜qi, ˜pi)}i=0  
+
+> Ntrain
+
+, Val data {( ˜qi, ˜pi)}i=0  
+
+> Nval
+
+, learning rate η, max_epochs  
+
+> 2:
+
+Output: Optimized parameter θ∗ 
+
+> 3:
+
+for k = 0 to max_epochs do  
+
+> 4:
+
+Forward pass  
+
+> 5:
+
+Define Hθ (q, p) and get ∇qH, ∇pH using autodiff  
+
+> 6:
+
+(q, p) ← (˜ q, ˜p) ▷ initialize state with noisy i/p data  
+
+> 7:
+
+for i = 0 to N − 1 do  
+
+> 8:
+
+(qT , pT ) ← Φ q, p; Hθk (q, p), 0, T, h  ▷ implicit map (21), see Alg. 2  
+
+> 9:
+
+end for  
+
+> 10:
+
+Loss (θ(k)) ← 1
+
+> n
+
+Pni=1 
+
+ ∥qiT − ˜qiT ∥22 + ∥piT − ˜piT ∥22
+
+ ▷ Compute loss  
+
+> 11:
+
+Adjoint backward pass  
+
+> 12:
+
+λqN ← ∂Loss/∂ qN ; λpN ← ∂Loss/∂ pN ▷ Adjoint terminal states  
+
+> 13:
+
+for i = N to 1 do  
+
+> 14:
+
+(λq 
+
+> {T−1,..., 0}
+
+, λp 
+
+> {T−1,..., 0}
+
+) ← Φ λqT , λpT ; Hθk (q, p), T, 0, −h ▷ adjoint implicit map  
+
+> 15:
+
+end for  
+
+> 16:
+
+gk ← d(Loss )/d θk ▷ Loss gradient (26)  
+
+> 17:
+
+Parameter update  
+
+> 18:
+
+θk+1 ← θk − η g k 
+
+> 19:
+
+end for  
+
+> 20:
+
+Return: θ∗, Hθ∗ (q, p)
+
+4.1 Numerical Forward Pass with Implicit-Midpoint method 
+
+In the forward pass, as represented by lower block in schematic 2, we solve the Hamiltonian ODEs in equation (20) to generate the forward trajectory up to final time T .      
+
+> 3The quantities like λ∂2H
+> ∂p∂q and λ∂2H
+> ∂q∂p are computed via vector-Jacobian products in reverse-mode automatic differentiation, avoiding explicit Hessian construction.
+
+9IOP Publishing Journal vv (yyyy) aaaaaa Author et al 
+
+dq i
+
+dt = ∂H
+
+∂p i
+
+, dp i
+
+dt = − ∂H
+
+∂q i
+
+. (20) As a choice of integrator, we choose the second-order implicit midpoint method with updates given by equation (21), 
+
+qi+1 = qi + h∇pHθ
+
+ qi + qi+1 
+
+2 , pi + pi+1 
+
+2
+
+
+
+,pi+1 = pi − h∇q Hθ
+
+ qi + qi+1 
+
+2 , pi + pi+1 
+
+2
+
+
+
+.
+
+(21) The above equations are implicit in the unknowns and thus requires a fixed-point iteration scheme to solve. The details of the integrator with fixed-point iteration is discussed in Algorithm 2. Algorithm 2: Predictor-Corrector with Fixed-Point Iteration (PC + FPI) 
+
+Require: Current state y ≡ (q, p), stepsize h, dynamics ∇yH, number of fixed-point iterations τ 
+
+> 1:
+
+y′ ← RK2( y) ▷ Predictor  
+
+> 2:
+
+for j = 1 to τ do  
+
+> 3:
+
+y′ ← y′ + h · ∇ yH
+
+ y+y′
+
+> 2
+
+
+
+▷ Implicit Midpoint Update  
+
+> 4:
+
+y ← y′ 
+
+> 5:
+
+end for  
+
+> 6:
+
+return y′
+
+Starting from an initial point y ≡ (q, p), a preliminary estimate for the next step y′ is first obtained using an explicit predictor, followed by refinement through repeated application of the implicit midpoint update via fixed-point iteration. Alternatively, when access to the full trajectory 
+
+(qi, pi) is available, as is the case in training against noisy trajectories, one may optionally bypass the predictor step and directly use the noisy values as an initial guess. In our implementation, the simulation starts from an initial point y ≡ (q, p). Algorithm 2 is first applied with an explicit update to obtain a predicted value y′, which is then used as the initial guess for the fixed-point iteration. For simulating up to final time T , each solve runs for τ fixed-point iterations. 
+
+4.2 Backward pass with gradient computation via the Adjoint Sensitivity method 
+
+To perform an optimization over parameters θ to obtain the final θ∗, we need to compute the sensitivity of the loss function w.r.t the parameters. As discussed in the previous section, pairing the ODE solver with fixed-point iterations incurs multiple function evaluations per timestep. To compute gradients for optimization, the automatic differentiation engine must retain the entire sequence of intermediate operations, to backpropagate gradients through the solver and evaluate the sensitivity of the loss with respect to θ. This standard approach, often implemented via reverse-mode automatic differentiation (backpropagation), is memory-intensive, as it requires storing all intermediate values of (qt, pt) and internal solver states across the entire integration window. This memory overhead grows linearly with the number of timesteps and becomes prohibitive for long-horizon simulations or high-dimensional dynamical systems. To overcome this bottleneck, one can instead formulate the gradient computation as a boundary-value problem via the adjoint sensitivity method. This method derives a backward-in-time differential equation for the adjoint variables (or co-states), which represent the sensitivity of the loss functional with respect to the trajectory. Crucially, the backward pass is decoupled from the original forward pass: the adjoint equations can be solved without retaining the entire forward trajectory. This reformulation allows memory-efficient gradient computation, particularly when the number of scalar outputs (loss terms) is much smaller than the number of parameters. In this section, we merely give the form of adjoint equations that we solve to get the gradient of the loss function w.r.t network parameters. In the next section, we give a detailed discussion of this 10 IOP Publishing Journal vv (yyyy) aaaaaa Author et al 
+
+approach. Given a Neural Network parameter estimation model subject to Hamiltonian ODEs 
+
+minimize 
+
+θ J (θ, q, p ) = 1
+
+n
+
+> n
+
+X
+
+> i=0
+
+∥qiT − ˜qiT ∥22 + ∥piT − ˜piT ∥22
+
+subject to ˙q(t) − ∂Hθ (q, p )
+
+∂p = 0 , q(0) = q0,
+
+˙p(t) + ∂Hθ (q, p )
+
+∂q = 0 , p(0) = p0,
+
+(22) where (qT , p T ) is the predicted value of states through the symplectic map Φh at final tim T , h is the stepsize, and ( ˜qT , ˜pT ) is the true value of those variables. For simplicity, here we consider q and p as scalar functions. Now, considering Φh as our symplectic map (21) and using a shorthand notation yt
+
+for (qt, p t), we can write 
+
+yt = Φ h(yt, yt−1).
+
+In the usual cases where a neural network is used as a function approximator, the gradients are computed using backpropagation which is a standard way to optimize the loss function by adjusting the network weights. In our case, the forward pass includes a symplectic ODE solver which means we have to backpropagate through this solver which will drastically increase the memory requirements, which can be understood if we consider our loss function 
+
+J = 1
+
+n
+
+> n
+
+X
+
+> i=1
+
+(yT − ˜yT )2,
+
+where each yT is obtained via forward propagation through a symplectic ODE solver. It is clear that if we are solving for larger simulation times, the number of evaluations in the backward pass will scale with the number of timesteps as shown below: 
+
+dJ
+
+dθ =
+
+> t
+
+X
+
+> j=1
+
+ tY
+
+> k=j+1
+
+∂y k
+
+∂y k−1
+
+ ∂y j
+
+∂θ ,
+
+where each yt is a function of yt, y t−1, y t−2, . . . , y 1. In contrast to this, if we use adjoint sensitivity analysis, we first have to derive the adjoint equations which is a system of ODEs in the adjoint variable λ(t) which is a time dependent version of Lagrange multiplier which get introduced while solving equation (22) using variational calculus. Given Hamiltonian ODEs in matrix notation 
+
+ddt 
+
+q(t)
+
+p(t)
+
+
+
+=
+
+ ∇pH(q, p, θ)
+
+−∇ q H(q, p, θ)
+
+
+
+, (23) the system of adjoint ODEs is then given as: 
+
+ddt 
+
+λq
+
+λp
+
+
+
+= −
+
+∇qp H −∇ qq H∇pp H −∇ pq H
+
+  λq
+
+λp
+
+
+
+. (24) Solving these equations backward in time subject to terminal conditions: 
+
+λq (T ) = − ∂J
+
+∂q (t=T )
+
+and λp(T ) = − ∂J
+
+∂p (t=T )
+
+, (25) gives the adjoint state which is in turn used to calculate the loss gradients by computing the following integral: 
+
+dJ
+
+dθ = ∂J
+
+∂θ −
+
+Z T
+
+> 0
+
+λT ∂f aug 
+
+∂θ dt. (26) Introducing the adjoint sensitivity method for gradient calculation will amount to solving the adjoint equations backward in time which is a constant memory task where we only need to store the current variable and its partial derivatives in the memory at any particular instant. The complete derivation of HNN adjoint state and gradients is provided in the subsequent section. Notice that to get the adjoint state, we have to solve equation (24) subject to the terminal conditions (25) t = T to t = 0 and store the results λ(t) in memory to later compute the integral. Now compare it to backpropagation, where the memory requirements scale with simulation length T ,where we have to store all intermediate sensitivities ∂yi 
+
+> ∂yj
+
+, 0 ≤ j ≤ i, but here, we only need to solve the two equations for each pair of states, hence a constant memory operation 4.
+
+> 4An important point to note is that the continuous adjoint computes gradients of the underlying ODE, whereas
+
+11 IOP Publishing Journal vv (yyyy) aaaaaa Author et al 4.3 Derivation of Adjoint sensitivity for Hamiltonian system from variational perspective 
+
+Here, we will present a proof of adjoint sensitivity rooted in variational analysis. For that consider a continuous version of the problem that we are solving: 
+
+minimize 
+
+y J (θ, y ) = 
+
+> T
+
+Z
+
+> 0
+
+f (θ, y, t )dt 
+
+subject to ˙y − f (y, θ ) = 0 ,y(0) = y0.
+
+(27) where θ ∈ Rp is a vector of unknown parameters, y ∈ R2d is a vector of state variables and 
+
+h : R2d → R2d is the forward dynamics. In our case, we use a forward map Φh to generate the flow y1, y 2 . . . y T and evaluate the loss/mismatch at the terminal point yT .The loss over a batch of trajectories can be written as: 
+
+Loss = 1
+
+N
+
+> N
+
+X
+
+> i=1
+
+∥yi(T ) − ˜yi(T )∥2.
+
+In the continuous limit, this can be written as 
+
+J (y) = ( y(T ) − ˜y(T )) 2.
+
+Writing the Lagrangian for this, we get 
+
+L = J (y(T )) + 
+
+Z T
+
+> 0
+
+λT ( ˙ y − f (y, θ )) dt + μT (y(0) − y0). (28) Taking variation w.r.t y of the Lagrangian and following a similar procedure as above after integration by parts gives us 
+
+δL = ∂J (y(T )) 
+
+∂y δy −
+
+Z T
+
+> 0
+
+ ˙λT y + ∂f ∂y λ
+
+
+
+δydt +
+
+h
+
+λ(t) ∂y ∂y δy 
+
+iT
+
+> 0
+
+.
+
+Solving further, and collecting terms, we get 
+
+δL =
+
+ ∂J (y(T )) 
+
+∂y + λ(T )T 
+
+δy (T ) −
+
+Z T
+
+> 0
+
+ ˙λT y + ∂f ∂y λ
+
+
+
+δydt − λ(0) δy (0) .
+
+Now, by the fundamental theorem of the calculus of variations, the coefficients of δy must vanish, which yields the adjoint equation 
+
+˙λ(t) = − ∂f ∂y λ(t), s.t. λ(T ) = − ∂J (T )
+
+∂y (T ) . (29) 
+
+Gradient w.r.t parameters: During the optimization, we require that the forward ODE and the boundary value constraint is always satisfied, formally: 
+
+˙y − f (y, θ ) = 0 , y(0) − y0 = 0 .
+
+Thus, the gradient of the loss w.r.t. the parameters is just the gradient of Lagrangian as the other two terms are identically zero, 
+
+dJ
+
+dθ = dL
+
+dθ .
+
+Differentiating the Lagrangian again in (28) w.r.t. θ (network parameters): 
+
+dL
+
+dθ = ∂J
+
+∂θ + ∂J
+
+∂y ∂y ∂θ +
+
+Z T
+
+> 0
+
+ ∂ ˙y∂θ − ∂f ∂y ∂y ∂θ − ∂f ∂θ 
+
+
+
+λ
+
+
+
+dt. 
+
+> backpropagation corresponds to the discrete adjoint (cotangent lift) of the numerical integrator; these coincide only in the limit of vanishing stepsize or when the adjoint discretization is the symplectic (cotangent) lift of the forward scheme.
+
+12 IOP Publishing Journal vv (yyyy) aaaaaa Author et al 
+
+We require that J only depends on y(T ), hence the second term vanishes. For the term inside the integral, using integration by parts on R T  
+
+> 0
+> ∂˙y∂θ
+
+λ, we obtain 
+
+dL
+
+dθ = ∂J
+
+∂θ +
+
+Z T
+
+> 0
+
+"
+
+− λT ∂f ∂θ +
+
+
+
+− ˙λ − ∂f ∂y λ
+
+ ∂y ∂θ 
+
+#
+
+dt +
+
+h
+
+λT ∂y ∂θ 
+
+iT
+
+> 0
+
+.
+
+Now, the coefficient to the ∂y ∂θ term is exactly our adjoint equation, so when restricted to solutions 
+
+λ(t) of the adjoint equation, it vanishes identically. Also, we can choose λ such that λ(T ) = 0 , both of these choices help us in the sense that now we do not have to compute and store the derivatives of each intermediate state y(t) w.r.t. θ. This is a huge gain as tracking ∂y (t) 
+
+> ∂θ
+
+for each time is a memory-intensive task. So, by solving λ(t) backward in time from the initial data λ(T ) = 0 along the adjoint equation, we obtain the following expression, 
+
+dL
+
+dθ = ∂J
+
+∂θ −
+
+Z T
+
+> 0
+
+λT ∂f ∂θ dt, 
+
+which is also the gradient of the loss function w.r.t. parameters θ as reasoned above. Therefore, 
+
+dJ
+
+dθ = ∂J
+
+∂θ −
+
+Z T
+
+> 0
+
+λT ∂f ∂θ dt. (30) 
+
+Symplecticity Analysis If we look at the form of the adjoint dynamics for this case 
+
+y ≡
+
+qp
+
+
+
+, f ≡
+
+ ∇pH−∇ q H
+
+
+
+, ∂f ∂y ≡
+
+ ∇qp H ∇pp H−∇ qq H −∇ pq H
+
+
+
+, (31) using these definitions, we see that the adjoint equation can be written as : 
+
+˙λ = −JT ∇2Hλ where J =
+
+ 0 1
+
+−1 0
+
+
+
+.
+
+We see that the adjoint system has a symplectic structure. It should be noted that more generally, the adjoint system of any ODE is symplectic. Given an ODE ˙(y) = f (y), the adjoint system is given by the Hamiltonian vector field associated with the formal Hamiltonian H(y, p ) = pT f (y). In particular, the formal Hamiltonian can be derived from the Pontryagin maximum principle by considering the case of trivial controls. 
+
+5 Numerical Results 
+
+In this section, we present the performance of our method on three representative Hamiltonian systems: the double well potential, the coupled Harmonic Oscillator, the Hénon–Heiles system, and the 2-body Kepler problem. These systems are chosen to cover a range of problems, including separable and generalized non-separable Hamiltonians. For training, the data is generated by sampling initial conditions from a uniform random distribution within a specified bounded domain. In contrast, for evaluation, the model is tested on test data sampled from 3 separate distributions different from training data in order to evaluate the ability of the learned dynamics to generalize. All the computations were performed on the RCI SLURM cluster (2 × Intel Xeon Gold 6146, 46 cores @ 3.2 GHz, 384 GB RAM, 2 TB NVMe). 
+
+5.1 Implementation details 
+
+Below, we provide the main implementation details, including data generation and hyperparameters for our model. 
+
+5.1.1 Data generation For the first three experiments, we generated 16,384 initial conditions for the training set and 8,192 for the validation set. We used a high-order symplectic integrator to ensure that trajectories evolve on a symplectic manifold. All trajectories were simulated with a time discretization of ∆t = 0 .01 using a 4th order integrator. Additive Gaussian noise N (0 , 1) was introduced at each timestep, scaled by a noise level coefficient of 0.01 . The details on the distribution of data and sampling are plotted in the respective figures below. 13 IOP Publishing Journal vv (yyyy) aaaaaa Author et al 5.1.2 Model architecture details: We parametrize the Hamiltonian ansatz with a neural network 
+
+Hθ (q, p) where q and p are one-dimensional vectors of canonical phase space coordinates. Our neural network model has configurable input and hidden layers, which are passed as parameters. The network can learn a Hamiltonian of any number of particles in any number of dimensions as long as we have dim (q) = dim (p) as shown in Figure 3. 
+
+> Figure 3: The model architecture of our Neural Network (the number of hidden layers and input dimension is configurable.)
+
+5.1.3 Hyperparameter details A minibatch size of 512 was used for both the training and validation datasets. The ansatz neural network has a configurable number of layers and dimensions passed by the user as command line arguments. For the first three experiments, we used a single hidden-layer NN model with dimension 32. The input layer had dimension 2d, which again is configurable, where 2d is the dimension of the phase space of system under study. Model parameters were optimized using the Adam optimizer with an initial learning rate of 10 −3 . A learning rate scheduler based on the ReduceLROnPlateau strategy was employed to adapt the learning rate during training in response to stagnation in validation loss. The HNN was trained for 10 epochs. For each batch, the starting point was sampled at a random timestep along the trajectory, allowing the model to observe a wide variety of initial conditions and improve generalization across the phase space. In the forward pass, we simulated trajectories for 2 timesteps and evaluated the loss according to (32) .Gradients were computed using the adjoint state method, employing the same integrator as used in the forward pass, which leverages the fact that a symplectic Runge–Kutta integrator is invariant under cotangent lift. The loss function is 
+
+Loss = 1
+
+n
+
+> n
+
+X
+
+> i=1
+
+∥piT − ˜piT ∥22 + ∥qiT − ˜qiT ∥22 (32) where the state variables (qt, p t) are evolved using’ a symplectic integrator. 
+
+5.1.4 Evaluation Criteria We aim to learn the functional form of the Hamiltonian H(q, p ) beyond simple trajectory matching. Unlike prior works such as Hamiltonian Neural Networks (HNN) and Neural ODEs, which primarily assess the learned models by comparing predicted and ground-truth trajectories, we explicitly evaluate the learned Hamiltonian function HN N across the broader phase space. To do so, we sample test points (qi, p i) from three distinct distributions over the phase space: 
+
+• Random Uniform: Points are sampled independently from a uniform distribution over a fixed bounding box that encompasses the training trajectories. This probes generalization to randomly scattered unseen states. 
+
+• Uniform Square Grid: A structured grid of evenly spaced points is generated within the same bounding box. This enables a systematic and resolution-controlled evaluation of HN N 
+
+over the phase space. 
+
+• Gaussian: Points are sampled from a multivariate Gaussian distribution centered around typical states observed during training. The results for the Hamiltonian prediction error ∥H true − H N N ∥1 over the test domain are plotted in Figures 9, 10 and 12 for the three Hamiltonian systems under evaluation respectively. Table 1 provides a direct comparison of our method against two of the chosen baselines in terms of mean Hamiltonian prediction error over the test domain. 14 IOP Publishing Journal vv (yyyy) aaaaaa Author et al 5.2 Hamiltonian Systems and Results 
+
+System 1: Double Well potential 
+
+The particle in a double-well potential is another commonly studied system in classical and quantum mechanics where the system has 2 stable fixed points. In our case, we consider a symmetrical double potential well with Hamiltonian and governing equations given by 
+
+H = p2
+
+2 + q4
+
+4 − q2
+
+2 ,
+
+˙q = p, ˙p = q − q3.
+
+(33) The plots in Figure 4 show the input data distribution, training and validation loss, and the predicted dynamics for the double well system.    
+
+> (a) (b) (c) (d) Figure 4: Representative plots for (a) distribution of training data (b) training and validation loss (c) true dynamics (d) predicted dynamics for the double well potential.
+
+System 2: Coupled Harmonic Oscillator 
+
+A coupled harmonic oscillator is a simple 1-D non-separable Hamiltonian system with Hamiltonian and governing dynamics given by 
+
+H = p2
+
+2 + q2
+
+2 + αpq, 
+
+˙q =p + αq, ˙p = −(q + αp ).
+
+(34) The plots in Figure 5 show the input data distribution, training and validation loss, and the predicted dynamics for the coupled oscillator system.    
+
+> (a) (b) (c) (d) Figure 5: Representative plots for (a) distribution of training data (b) training and validation loss (c) true dynamics (d) predicted dynamics for the coupled harmonic oscillator.
+
+System 3: Henon-Hieles Potential 
+
+We now explore higher-dimensional systems where chaos can emerge. Chaotic systems are deterministic yet unpredictable over long timescales due to exponential error growth, governed by the Lyapunov exponent. However, since these systems follow well-defined Hamiltonians, their dynamics can still be learned from limited observations. A key example is the Hénon–Heiles (HH) system, a Hamiltonian system describing a star’s planar motion around a galactic center. While the system exhibits chaotic behavior, stable regions exist, aiding in learning its governing dynamics [33]. The Hamiltonian H and the corresponding equations of motion are given by 
+
+H = p2 
+
+> x+p2
+> y
+> 2
+
++ q2 
+
+> x+q2
+> y
+> 2
+
++ q2
+
+> x
+
+qy − q3 
+
+> y
+> 3
+
+,
+
+˙qx = px, ˙qy = py ,
+
+˙px = −qx − 2qxqy , ˙py = −qy − q2 
+
+> x
+
++ q2 
+
+> y
+
+.
+
+(35) 15 IOP Publishing Journal vv (yyyy) aaaaaa Author et al 
+
+The plots in Figure 6 show the input data distribution, training and validation loss, and the predicted dynamics for Hénon–Heiles system. 
+
+(a) (b) (c) (d) Figure 6: Representative plots for (a) distribution of training data (b) training and validation loss (c) true dynamics (d) predicted dynamics for the Hénon–Heiles system. Note that the x and y axes here represent projections of the y-coordinate of position and momentum for fixed (px, q x).
+
+System 4: Kepler’s potential 
+
+Kepler’s potential is a spherically-symmetric central potential given by V (r) = − kr , where r is the radial distance between interacting particles. The problem has a singularity at r = 0 but this is not a fundamental impediment to NN learning and symplectic integrators [34]. However, the trajectories exhibit finer scales and we have to significantly increase the sampling resolution to compensate for this. It represents the potential energy of a particle under gravitational or electrostatic attraction, resulting in elliptical, parabolic, or hyperbolic orbits. It describes Kepler’s laws for planetary motion. These paths, described by Kepler’s Laws, range from bound, closed elliptical orbits to unbounded, open parabolic or hyperbolic trajectories, depending on the system’s total energy as shown in Figure 7. The total energy of a particle is given by 
+
+Etot = 12 m ˙r2 + Vef f , where Vef f = J2
+
+2mr 2 − kr ,
+
+where J is the angular momentum and is a constant of motion. We analyze the Hamiltonian of two interacting particles which, in Cartesian coordinates of position and momenta, is given by 
+
+H = 12m1
+
+(p2 
+
+> x1
+
++ p2 
+
+> y1
+
+) + 12m2
+
+(p2 
+
+> x2
+
++ p2 
+
+> y2
+
+) − Gm 1m2
+
+p(qx1 − qx2 )2 + ( qy1 − qy2 )2 ,
+
+˙qx1 = px1
+
+m1
+
+, ˙qy1 = py1
+
+m1
+
+, ˙qx2 = px2
+
+m2
+
+, ˙qy2 = py2
+
+m2
+
+,
+
+˙px1 = − Gm 1m2(qx1 − qx2 )
+
+r312 
+
+, ˙py1 = − Gm 1m2(qy1 − qy2 )
+
+r312 
+
+,
+
+˙px2 = Gm 1m2(qx1 − qx2 )
+
+r312 
+
+, ˙py2 = Gm 1m2(qy1 − qy2 )
+
+r312 
+
+.
+
+(36) In the equations above, qx1 , p x1 , q y1 , p y1 represent the phase space coordinates of particle 1 and similarly, qx2 , p x2 , q y2 , p y2 represent the phase space coordinates for particle 2. 
+
+Data generation Due to the dimensionality and functional form of the problem, we generated a larger set of training data for Kepler’s problem, where the training set consists of 32768 trajectories and the validation set consists of 8192 trajectories. To avoid sampling at the singularity, we sampled initial conditions such that r ∼ N (μ = 4 , σ = 2 .5) where r is the radial distance between the bodies and N (μ, σ ) represents a random normal distribution. The data was generated with a timestep of 0.01 sec with 100 total timesteps. After data generation, the trajectories were corrupted at each timestep with Gaussian noise sampled from N (μ = 0 , σ = 10 −3). The results for the system are presented in Figure 8. 
+
+5.3 Runtime and Memory performance 
+
+In our study, we systematically analyzed the runtime and memory consumption of the adjoint method and backpropagation across increasing simulation lengths, ranging from 4 to 32 timesteps. The evaluation was conducted on a benchmark problem involving the training of a coupled harmonic oscillator system with a single batch of size 512. The results as shown in Figure 13 show a stark contrast in memory scalability between the two approaches: while the adjoint method maintains a 16 IOP Publishing Journal vv (yyyy) aaaaaa Author et al 
+
+Figure 7: Various orbits in Kepler’s potential 
+
+(a) (b) (c) (d) Figure 8: Representative plots for (a) distribution of training data (b) training and validation loss (c) true dynamics (d) predicted dynamics for the Kepler’s potential. Note that the x and y axes here represent projections of the x-coordinate of position and momentum for particle 1. 
+
+(a) (b) (c) Figure 9: The Hamiltonian prediction error ∥H true − H N N ∥1 in the double well system on test data drawn from 3 different distributions: (a) random uniform; (b) uniform square grid; (c) multivariate Gaussian N (0,
+
+I2). 
+
+(a) (b) (c) Figure 10: The Hamiltonian prediction error ∥H true − H N N ∥1 in the coupled harmonic oscillator system on test data drawn from 3 different distributions: (a) random uniform; (b) uniform square grid; (c) multivariate Gaussian N (0, I2). 
+
+17 IOP Publishing Journal vv (yyyy) aaaaaa Author et al 
+
+(a) (b) (c) Figure 11: The Hamiltonian prediction error ∥H true − H N N ∥1 for the Hénon–Heiles system on test data drawn from 3 different distributions: (a) random uniform; (b) uniform square grid; (c) multivariate Gaussian 
+
+N (0, I2). 
+
+(a) (b) (c) Figure 12: The Hamiltonian prediction error ∥H true − H N N ∥1 in Kepler’s potential system on test data drawn from 3 different distributions: (a) random uniform; (b) uniform square grid; (c) multivariate Gaussian 
+
+N (0, I2). Here, we only show the two coordinates qx0 , p x0 which we sample from the distributions, while the rest of the coordinates are fixed to their respective median values in the test set space. 
+
+constant memory footprint irrespective of the simulation length, the memory usage in backpropagation exhibits a linear growth pattern. This discrepancy arises due to the fundamental difference in how gradients are computed. Backpropagation explicitly stores intermediate states for every timestep, whereas the adjoint method reconstructs gradients via a reverse-time integration of the system dynamics, circumventing the need for extensive memory allocation. Interestingly, our runtime analysis also favors the adjoint method for smaller-scale problems, where it demonstrates superior computational efficiency, surpassing backpropagation in execution speed. 
+
+(a) (b) Figure 13: Comparison of (a) memory and (b) runtime profiles for adjoint and backdrop-based gradient evaluation. Each data point corresponds to the metrics evaluated for a single training iteration for a single batch of size 512 for the coupled harmonic oscillator system where the x-axis represents number of simulation timesteps of h = 0 .01 (Note that as the problem becomes larger, the runtime for adjoint state surpasses the backpropagation as it involves solving the terminal value problem in the backward pass.) 
+
+5.4 Modified Hamiltonian and correction of learned Hamiltonian 
+
+In this section, we will validate the claims in Section 3.3. Let us establish some terminology. 18 IOP Publishing Journal vv (yyyy) aaaaaa Author et al 
+
+Table 1: Comparison of the mean absolute error in Hamiltonian prediction EΩ[∥H pred − H true ∥1], where Ω
+
+denotes the phase-space test domain. Test data are sampled from three different distributions within the domain: RU : (q, p ) ∼ U ([ −L, L ]2) (uniform over a square domain), SG : uniform Cartesian grid on [−L, L ]2,and N : (q, p ) ∼ N (0 , σ 2I2) (isotropic Gaussian with σ = L). Here, Init. indicates the distribution used to generate the test set.                                                                                                                                                                                                         
+
+> System Init. NSSNN [27] SHNN [24] This Work DW RU 7.80 ±0.02 0.40 ±0.001 1.00 ×10 −2±1.00 ×10 −5
+> SG 8.00 ±1.23 0.41 ±0.55 1.2×10 −2±2.6×10 −3
+> N4.81 ±0.02 0.62 ±0.005 1.57 ×10 −1±3.3×10 −3
+> CHO RU 0.80 ±0.002 1.3×10 −2±3×10 −52.5×10 −2±6×10 −5
+> SG 0.86 ±0.14 1.3×10 −2±1.68 ×10 −32.6×10 −2±3.3×10 −3
+> N0.79 ±0.003 1.7×10 −2±1.6×10 −42.8×10 −2±2.7×10 −4
+> HH RU 5.55 ×10 −1±2.63 ×10 −21.51 ×10 −2±4.42 ×10 −41.14 ×10 −2±4.26 ×10 −4
+> SG 5.03 ×10 −1±2.8×10 −31.38 ×10 −2±5.38 ×10 −21.02 ×10 −2±5.12 ×10 −5
+> N1.65 ±9.61 ×10 −31.03 ×10 −1±7.79 ×10 −49.11 ×10 −2±7.69 ×10 −4
+> Kepler RU 1.72 ±1.22 ×10 −20.76 ±6.5×10 −30.88 ±4.37 ×10 −3
+> SG 1.63 ±1.3×10 −20.82 ±6.2×10 −30.86 ±4.30 ×10 −3
+> N2.60 ±1.56 ×10 −21.12 ±8.2×10 −31.52 ±2.22 ×10 −2
+
+Figure 14: The Hamiltonian learning process for a second-order symplectic map 
+
+• Htrue : The true Hamiltonian that we wish to learn. Ideally, it should represent a true physical system from which our training trajectories (q, p ) are generated. 
+
+• Φh: The one-step numerical map which we use in the forward pass to generate the trajectories. 
+
+• HNN : The learned Hamiltonian, represented by a neural network. 
+
+• ˜HNN : The modified Hamiltonian of the learned Hamiltonian, the exact flow of which agrees with the numerical flow of the learned Hamiltonian, i.e., ΦHN N  
+
+> h
+
+= φ ˜HN N  
+
+> h
+
+.If we use a neural network to train over the data (qi, p i) to learn a Hamiltonian Htrue . Let us assume that the data is noiseless and that the learning is perfect, then the symplectic integrator applied to the learned Hamiltonian HN N agrees with the exact flow of the true Hamiltonian Htrue .By definition, the modified Hamiltonian ˜HN N of the learned Hamiltonian HN N is such that the exact flow of the modified Hamiltonian ˜HN N agrees with the symplectic integrator applied to the learned Hamiltonian HN N . From this, we conclude that the modified Hamiltonian of the learned Hamiltonian is the true Hamiltonian that we set out to learn in the first place, as seen in Figure 14. Our neural network model aims to learn the Hamiltonian which, when passed through our one-step method Φh, generates the true flow. 19 IOP Publishing Journal vv (yyyy) aaaaaa Author et al 
+
+Consider a simple Hamiltonian system of a harmonic oscillator given by 
+
+Htrue = 12 (p2 + q2). (37) We use a high-order symplectic integrator (4th order in this case) to generate the trajectory samples 
+
+(ˆ q, ˆp). Now, for our learned Hamiltonian HN N , we consider a very simple 2nd degree polynomial ansatz given by 
+
+HN N = θ0 + θ1q + θ2p + θ3q2 + θ4qp + θ5p2.
+
+We wish to learn the coefficients θi. We use a second-order symplectic map Φh in the forward pass of our neural net, which generates the flow (qh, p h). We use a stepsize h = 0 .1 for the forward map. Now we formulate the loss function over the true and predicted flow and optimize according to the scheme described above. 
+
+5.4.1 Modified Hamiltonian For the implicit midpoint rule, the modified Hamiltonian for the learned Hamiltonian HN N is given using (15) by 
+
+˜HN N = HN N − h2
+
+24 ∇2HN N (J−1∇H N N , J −1∇H N N ) + O(h4), (38) where the term ∇H N N is a vector of gradients w.r.t. q and p. Now, from the training, the learned Hamiltonian is 
+
+HN N = 0 .15410 + (1 .1111 × 10 −7)q − (6 .1064 × 10 −8)p + 0 .500420 q2 − (1 .5463 × 10 −8)qp + 0 .500415 p2.
+
+We can immediately observe that the coefficients of q2 and p2 are not the same as in (37), also we note that there is a non-zero offset which is due to the fact that while training, our symplectic map (21) only sees the derivative of H w.r.t. q and p and hence any Hamiltonian function plus a constant also produces the same dynamics. Neglecting the numerically insignificant terms and correcting for the offset, we can write this as 
+
+HN N = 0 .500420 q2 + 0 .500415 p2. (39) Now, we plug this into the expression for the modified Hamiltonian (38), 
+
+˜H = 0 .500420 q2 + 0 .500415 p2 − (0 .1) 2
+
+24 (1 .00084 q2 + 1 .00083 q2) + O(h4).
+
+Neglecting the fourth-order terms, we obtain the modified Hamiltonian for our learned Hamiltonian, 
+
+˜HN N ≈ 0.500004 q2 + 0 .500001 p2, (40) where we have neglected the fourth-order terms and we observe that it agrees better with the true Hamiltonian, as seen in Figure 15. For the other examples we considered, it is possible to obtain a better approximation of the true Hamiltonian by post-processing the learned Hamiltonian HN N (q, p )
+
+using the modified Hamiltonian approach to obtain an improved approximation. 
+
+6 Conclusion 
+
+The adjoint approach normally results in gradients that differ from backpropagation, unless the adjoint system is computed using the cotangent lift of the numerical integrator used in the forward propagation, in which case the adjoint approach yields gradients that coincide with backpropagation. When the forward flow is integrated using a Runge–Kutta method, the cotangent lift is a symplectic partitioned Runge–Kutta method, where the original Runge–Kutta integrator to the primal variables, and the adjoint variables are integrated by the symplectic adjoint of the original Runge–Kutta integrator, defined by (18). When the forward flow is Hamiltonian, as is the case for Hamiltonian Neural Networks, it is natural to discretize the forward flow using a symplectic integrator. If the forward integrator is a symplectic Runge–Kutta method, then the symplectic adjoint is itself. As such, using the same symplectic integrator on the adjoint variables will lead to a discretization of the adjoint system that yields gradients that also coincide with backpropagation, leading to an efficient method for training Hamiltonian Neural Networks. 20 IOP Publishing Journal vv (yyyy) aaaaaa Author et al                
+
+> (a) (b) Figure 15: Left The error contours for |H true − H N N |and Right |H true −˜HN N |where the modified Hamiltonian is written up to fourth-order (contours now show the O(h4)errors). We can see that the modified Hamiltonian of the learned Hamiltonian is a better approximation of the true Hamiltonian than the learned Hamiltonian.
+
+In our work, we adopt such an approach, using implicit symplectic partitioned Runge–Kutta methods. Symplectic methods are generally implicit for non-separable Hamiltonians, unless one artificially doubles the number of variables in an augmented formulation. However, contrary to conventional wisdom, implicit SPRK methods can be very efficiently implemented by using an explicit RK method of the same order as a predictor, and using a few fixed-point iterations of the SPRK method as a corrector. Therefore, Hamiltonian Neural Networks with a non-separable Hamiltonian ansatz can be efficiently trained using implicit SPRK discretization by applying the adjoint method combined with the predictor-corrector fixed-point iteration. Finally, we observe that the learned Hamiltonian obtained using a lower-order symplectic integrator can be post-processed using backward error analysis to obtain a modified Hamiltonian that better agrees with the true Hamiltonian, without the need to use higher-order integrators in the learning process. 
+
+Acknowledgements 
+
+• HC and VK acknowledge support from the Czech National Science Foundation under Project 24-11664S 
+
+• HC acknowledges the computational resources provided by RCI project. 
+
+Disclaimer 
+
+This paper was prepared for information purposes and is not a product of HSBC Bank Plc. or its affiliates. Neither HSBC Bank Plc. nor any of its affiliates make any explicit or implied representation or warranty and none of them accept any liability in connection with this paper, including, but not limited to, the completeness, accuracy, reliability of information contained herein and the potential legal, compliance, tax or accounting effects thereof. Copyright HSBC Group 2025. 
+
+References 
+
+[1] Marsden J and Ratiu T 1999 Introduction to Mechanics and Symmetry 2nd ed ( Texts in Applied Mathematics vol 17) (New York: Springer-Verlag) ISBN 9780387986436 [2] Kang F and Meng-Zhao Q 1991 Computer Physics Communications 65 173–187 [3] Hand L N and Finch J D 1998 Analytical mechanics (Cambridge: Cambridge University Press) [4] Sanz-Serna J M and Calvo M P 2018 Numerical Hamiltonian Problems Applied Mathematics and Nonlinear Science (Mineola, NY: Courier Dover Publications) [5] Channell P J and Scovel C 1990 Nonlinearity 3 231 [6] Ruth R D 1983 IEEE Transactions on Nuclear Science 30 2669–2671 ISSN 0018-9499 21 IOP Publishing Journal vv (yyyy) aaaaaa Author et al 
+
+[7] Hairer E, Lubich C and Wanner G 2006 Geometric Numerical Integration: Structure-preserving algorithms for ordinary differential equations 2nd ed ( Springer Series in Computational Mathematics vol 31) (Berlin: Springer-Verlag) [8] Feng K and Qin M 2010 Symplectic Geometric Algorithms for Hamiltonian Systems (Berlin: Springer Berlin Heidelberg) [9] Maslovskaya S and Ober-Blöbaum S 2024 IFAC-PapersOnLine 58 85–90 [10] Valperga R, Webster K, Turaev D, Klein V and Lamb J 2022 Learning reversible symplectic dynamics Learning for Dynamics and Control Conference (PMLR) pp 906–916 [11] Zhong G and Marsden J E 1988 Physics Letters A 133 134–139 [12] Bertalan T, Dietrich F, Mezić I and Kevrekidis I G 2019 Chaos: An Interdisciplinary Journal of Nonlinear Science 29 
+
+[13] Arnol’d V I 2013 Mathematical methods of classical mechanics vol 60 (Springer Science & Business Media) [14] Abraham R and Marsden J E 1978 Foundations of Mechanics 2nd ed (Reading, MA: Addison-Wesley) (with the assistance of Tudor Ratiu and Richard Cushman) [15] Greydanus S, Dzamba M and Yosinski J 2019 Advances in neural information processing systems 32 
+
+[16] Toth P, Rezende D J, Jaegle A, Racanière S, Botev A and Higgins I 2019 arXiv preprint arXiv:1909.13789 
+
+[17] Chen Z, Zhang J, Arjovsky M and Bottou L 2019 arXiv preprint arXiv:1909.13334 
+
+[18] Zhong Y D, Dey B and Chakraborty A 2019 arXiv preprint arXiv:1909.12077 
+
+[19] Cranmer M, Greydanus S, Hoyer S, Battaglia P, Spergel D and Ho S 2020 arXiv preprint arXiv:2003.04630 
+
+[20] Šípka M, Pavelka M, Esen O and Grmela M 2023 Journal of Physics A: Mathematical and Theoretical 56 495201 [21] Khoo Z Y, Wu D, Low J S C and Bressan S 2024 Physical Review E 110 044205 [22] Wu X, Wang Y, Sun W, Liu F and Ma D 2024 The Astrophysical Journal Supplement Series 
+
+275 31 [23] Canizares P, Murari D, Schönlieb C B, Sherry F and Shumaylov Z 2024 arXiv preprint arXiv:2410.18262 
+
+[24] David M and Méhats F 2023 Journal of Computational Physics 494 112495 [25] Hairer E, Hochbruck M, Iserles A and Lubich C 2006 Oberwolfach Reports 3 805–882 [26] Yoshida H 1990 Physics letters A 150 262–268 [27] Xiong S, Tong Y, He X, Yang S, Yang C and Zhu B 2020 arXiv preprint arXiv:2010.12636 
+
+[28] Tao M 2016 Physical Review E 94 043303 [29] Rahma A, Datar C and Dietrich F 2024 arXiv preprint arXiv:2411.17511 URL 
+
+https://arxiv.org/abs/2411.17511 
+
+[30] Jin P, Zhang Z, Zhu A, Tang Y and Karniadakis G E 2020 Neural Networks 132 166–179 [31] Hairer E, Lubich C and Wanner G 2003 Acta numerica 12 399–450 [32] Leok M and Zhang J 2011 IMA Journal of Numerical Analysis 31 1497–1532 [33] Barrio R and Wilczak D 2020 Nonlinear Dynamics 102 403–416 [34] Bolte J and Pauwels E 2021 Mathematical Programming 188 19–51 22
