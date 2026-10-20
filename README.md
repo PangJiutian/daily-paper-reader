@@ -186,6 +186,20 @@ https://<你的用户名>.github.io/daily-paper-reader
 
 完成以上步骤后，后续大多数日常使用和配置都可以直接在网页端完成。后续教程参考：[daily-paper-reader 指引](https://ziwenhahaha.github.io/daily-paper-reader/#/tutorial/README)
 
+### Actions + Pages 部署核对
+
+- Pages 使用默认分支 `main` 的 `/(root)`，不是 `/docs`。日常流水线推送后会显式请求 Pages 构建并核验提交；普通 `GITHUB_TOKEN` 推送本身不会触发分支型 Pages 更新。
+- 在 `Settings → Secrets and variables → Actions → Secrets` 设置 `DEEPSEEK_API_KEY`；`DEEPSEEK_BASE_URL` 和 `DEEPSEEK_MODEL` 必须对应你的服务。已有 `SUMMARY_API_KEY / SUMMARY_BASE_URL / SUMMARY_MODEL` 时也需核对，它们会影响摘要链路。
+- embedding 默认调用公共服务。若需要鉴权，在 Secrets 设置 `DPR_EMBED_API_KEY`；公共重排鉴权使用 `PUBLIC_RERANK_API_KEY`。私有端点使用对应的 `DPR_EMBED_API_URL` / `PUBLIC_RERANK_API_BASE_URL`。凭据不得放入 `config.yaml`、前端快照或代码。
+- 当前部署使用四类纯 AI 方向：视频/世界模型、一维序列生成、推理反馈闭环、少量启发性 AI 方法。`arxiv` 是论文来源，并不等于 AI 分类过滤；关键词、语义查询和方向说明共同限定兴趣。
+- 兴趣和 API 配置确认后，在同一设置页的 **Variables** 新增 `DPR_RECOMMENDATIONS_ENABLED=true`，再启用日常工作流。未设置或不为 `true` 时，仅跳过定时任务；手动验证仍可运行。
+- 首次手动执行 `daily-paper-reader`，建议 `fetch_days=1`、`run_enrich=false`、`smoke_test=true`，检查检索、生成、提交和 Pages 验证均成功，再保留定时运行。定时计划为北京时间 02:30，另有 0–59 分钟随机延迟，GitHub 排队可能进一步延迟。
+- 定时流水线使用自动生成的 `GITHUB_TOKEN`，无需新建 PAT，也不必放宽仓库默认 Token 权限；工作流已显式申请所需写权限。README 上方的 PAT 是网页管理/分享功能的可选配置，不是定时部署前提。
+- 使用公共只读论文库时不需要配置数据库管理员密钥或运行 `maintain-*`；这些维护工作流在普通 Fork 中已有仓库限制。
+- `arxiv_paper_setting.daily_selection` 为可选日常配额：本部署最多5篇、最低8分、最多2篇精读、旁支启发类最多1篇，不凑数；10/30天手动回溯保持原逻辑。日常评审最多24篇，小规模验证最多8篇并只生成1篇速览。旧论文和阅读记录保留。
+
+参考：[GitHub Pages 发布源与 Token 触发限制](https://docs.github.com/en/pages/getting-started-with-github-pages/configuring-a-publishing-source-for-your-github-pages-site)。
+
 ## 🧪 本地调试模式
 
 如果你在本机开发，不想点击按钮后触发 GitHub Actions，可以启动本地调试后端：

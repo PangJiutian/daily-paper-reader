@@ -5,6 +5,10 @@ on:
     - cron: "30 18 * * *" # 北京时间次日 02:30（UTC 18:30）
   workflow_dispatch:
     inputs:
+      smoke_test:
+        description: "小规模完整验证：最多评审8篇、生成1篇速览；不启用定时任务"
+        type: boolean
+        default: false
       run_enrich:
         description: "Run 0.enrich_config_queries.py（默认关闭，按需开启）"
         required: false
@@ -35,12 +39,17 @@ concurrency:
 
 jobs:
   run:
+    # 配好 AI 兴趣与 Secrets 后，在 Actions Variables 设置为 true。
+    if: github.event_name == 'workflow_dispatch' || vars.DPR_RECOMMENDATIONS_ENABLED == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 120
     outputs:
       research_days: ${{ steps.window.outputs.days }}
     env:
       DPR_MODELS_REMOTE_ONLY: "1"
+      DPR_SMOKE_TEST: ${{ inputs.smoke_test && '1' || '0' }}
+      DPR_LLM_REVIEW_LIMIT: ${{ inputs.smoke_test && '8' || '24' }}
+      DPR_LLM_MAX_OUTPUT_TOKENS: "8192"
       DPR_EMBED_ALLOW_LOCAL_FALLBACK: "0"
       DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
       DEEPSEEK_BASE_URL: ${{ secrets.DEEPSEEK_BASE_URL }}
@@ -56,7 +65,7 @@ jobs:
       SILICONFLOW_RERANK_URL: ${{ secrets.SILICONFLOW_RERANK_URL }}
       SILICONFLOW_RERANK_MIN_INTERVAL_SECONDS: ${{ secrets.SILICONFLOW_RERANK_MIN_INTERVAL_SECONDS || '8' }}
       MKL_THREADING_LAYER: GNU
-      DPR_RERANK_GLOBAL_POOL_LIMIT: "120"
+      DPR_RERANK_GLOBAL_POOL_LIMIT: ${{ inputs.smoke_test && '16' || '120' }}
       DPR_RERANK_GUARANTEED_PER_LANE: "2"
       DPR_EMBED_API_TIMEOUT: "60"
       DPR_EMBED_API_URL: ${{ secrets.DPR_EMBED_API_URL || 'https://zwwen.online/embed' }}
@@ -89,11 +98,14 @@ jobs:
         id: window
         env:
           REQUESTED_DAYS: ${{ github.event.inputs.fetch_days }}
+          SMOKE_TEST: ${{ inputs.smoke_test }}
         run: |
           python - <<'PY'
           import os
           raw = os.environ.get('REQUESTED_DAYS', '').strip()
-          days = int(raw) if raw else 10
+          days = int(raw) if raw else 9
+          if os.environ.get('SMOKE_TEST') == 'true' and days > 9:
+              raise SystemExit('smoke_test requires fetch_days between 1 and 9')
           if not 1 <= days <= 365:
               raise SystemExit('fetch_days 必须在 1–365 天之间')
           with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
@@ -170,6 +182,10 @@ jobs:
           # 让前端可以在不配置 GitHub Token 的情况下直接读取配置（只读快照）
           cp -f config.yaml docs/config.yaml
 
+
+      - name: Verify small-run reading artifacts
+        if: inputs.smoke_test
+        run: python scripts/verify_daily_smoke.py
 
       - name: Save long-range review progress
         if: always() && (hashFiles('.local-runs/long-range-cache/**') != '' || hashFiles('.local-runs/starter-pack-cache/**') != '')
@@ -268,7 +284,7 @@ jobs:
 
   verify-topic-pages:
     needs: run
-    if: github.repository != 'ziwenhahaha/daily-paper-reader' && (needs.run.outputs.research_days == '90' || needs.run.outputs.research_days == '365')
+    if: github.repository != 'ziwenhahaha/daily-paper-reader'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:

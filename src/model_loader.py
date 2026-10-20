@@ -21,8 +21,7 @@ _DEFAULT_HF_BACKOFF_RETRIES = 1
 _DEFAULT_REMOTE_TIMEOUT_SECONDS = 60
 _DEFAULT_REMOTE_MAX_TEXT_CHARS = 8000
 _DEFAULT_REMOTE_EMBED_ENDPOINT = os.getenv("DPR_EMBED_API_URL") or "https://zwwen.online/embed"
-# 当前服务使用固定 API key 接入。
-_DEFAULT_REMOTE_EMBED_API_KEY = os.getenv("DPR_EMBED_API_KEY") or "26932a86d772001af60cbd9d2c162bfda3a90e094f797f3d6806f6077478b27a"
+# 鉴权凭据只从运行环境读取，不在代码中提供兜底值。
 
 
 def _log_default(message: str) -> None:
@@ -388,7 +387,7 @@ def load_sentence_transformer(
   ),
 ):
   remote_endpoint = _DEFAULT_REMOTE_EMBED_ENDPOINT
-  remote_api_key = _DEFAULT_REMOTE_EMBED_API_KEY
+  remote_api_key = os.getenv("DPR_EMBED_API_KEY") or ""
   if remote_models_required() and (not allow_remote or not remote_endpoint):
     raise RuntimeError('云端模型模式需要有效的 DPR_EMBED_API_URL，不允许本地 embedding。')
   if allow_remote and remote_endpoint:

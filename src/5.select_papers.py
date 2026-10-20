@@ -871,6 +871,40 @@ def build_carryover_payload(
     }
 
 
+def apply_daily_selection(candidates, result, policy):
+    """Optional quality-first daily budget; leave legacy window modes unchanged."""
+    if not policy:
+        return result
+    cap = max(0, int(policy.get("max_papers", 5)))
+    deep_cap = max(0, int(policy.get("deep_papers", 2)))
+    if os.getenv("DPR_SMOKE_TEST") == "1":
+        cap, deep_cap = min(cap, 1), 0
+    discovery_tag = str(policy.get("discovery_tag") or "")
+    discovery_cap = max(0, int(policy.get("discovery_max", 1)))
+    threshold = max(8.0, float(policy.get("min_score", 8)))
+    selected, seen, discovery_count = [], set(), 0
+    for paper in sort_by_score(candidates):
+        if len(selected) >= cap:
+            break
+        key = canonical_paper_id(paper.get("id") or paper.get("paper_id"))
+        tags = sorted({normalize_carryover_tag(t) for t in (paper.get("llm_tags") or []) if t})
+        if not tags:
+            tags = resolve_carryover_tags(paper)
+        discovery_only = bool(discovery_tag) and tags == [discovery_tag]
+        if not key or key in seen or parse_score(paper.get("llm_score")) < threshold:
+            continue
+        if discovery_only and discovery_count >= discovery_cap:
+            continue
+        selected.append(paper)
+        seen.add(key)
+        discovery_count += int(discovery_only)
+    result["deep_dive"] = sanitize_items(selected[:deep_cap])
+    result["quick_skim"] = sanitize_items(selected[deep_cap:])
+    result["stats"].update(daily_max=cap, min_score=threshold,
+        deep_selected=len(result["deep_dive"]), quick_selected=len(result["quick_skim"]))
+    return result
+
+
 def process_mode(
     candidates: List[Dict[str, Any]],
     tag_count: int,
@@ -1226,6 +1260,11 @@ def main() -> None:
                 cfg,
                 carryover_ratio=CARRYOVER_RATIO,
             )
+            if args.all_quick:
+                result = force_all_into_quick(result)
+        # Daily policy is opt-in and does not alter 10/30-day or skims behavior.
+        if "-" not in TODAY_STR and mode == "standard" and args.all_quick_min_score is None:
+            result = apply_daily_selection(candidates, result, setting.get("daily_selection"))
             if args.all_quick:
                 result = force_all_into_quick(result)
         output_path = os.path.join(output_dir, f"arxiv_papers_{TODAY_STR}.{mode}.json")

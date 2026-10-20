@@ -113,7 +113,6 @@ def _resolve_remote_api_key(provider: str) -> str:
     return (
       os.getenv("PUBLIC_RERANK_API_KEY")
       or os.getenv("DPR_PUBLIC_SERVICE_API_KEY")
-      or "26932a86d772001af60cbd9d2c162bfda3a90e094f797f3d6806f6077478b27a"
       or ""
     ).strip()
   return (os.getenv("RERANK_API_KEY") or "").strip()

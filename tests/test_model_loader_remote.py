@@ -133,10 +133,11 @@ class RemoteSentenceTransformerTest(unittest.TestCase):
         os.environ,
         {
             "DPR_EMBED_API_TIMEOUT": "45",
+            "DPR_EMBED_API_KEY": "test-embedding-key",
         },
         clear=False,
     )
-    def test_load_sentence_transformer_returns_remote_wrapper_with_fixed_key(self):
+    def test_load_sentence_transformer_returns_remote_wrapper_with_environment_key(self):
         model = load_sentence_transformer("BAAI/bge-small-en-v1.5", device="cpu")
         self.assertTrue(getattr(model, "is_remote", False))
         self.assertEqual(model.model_name, "BAAI/bge-small-en-v1.5")
@@ -144,8 +145,13 @@ class RemoteSentenceTransformerTest(unittest.TestCase):
         self.assertEqual(model.timeout, 45)
         self.assertEqual(
             model.api_key,
-            "26932a86d772001af60cbd9d2c162bfda3a90e094f797f3d6806f6077478b27a",
+            "test-embedding-key",
         )
+
+    @patch.dict(os.environ, {"DPR_EMBED_API_KEY": ""})
+    def test_missing_embedding_key_has_no_fallback(self):
+        model = load_sentence_transformer("BAAI/bge-small-en-v1.5", device="cpu")
+        self.assertEqual(model.api_key, "")
 
     @patch("src.model_loader._load_local_sentence_transformer")
     def test_load_sentence_transformer_can_force_local(self, mock_load_local):

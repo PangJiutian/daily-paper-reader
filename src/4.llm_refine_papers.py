@@ -22,8 +22,8 @@ CONFIG_FILE = os.getenv("DPR_CONFIG_FILE") or os.path.join(ROOT_DIR, "config.yam
 
 DEFAULT_FILTER_MODEL = (
     os.getenv("DEEPSEEK_FILTER_MODEL")
-    or os.getenv("SUMMARY_MODEL")
     or os.getenv("DEEPSEEK_MODEL")
+    or os.getenv("SUMMARY_MODEL")
     or "deepseek-v4-flash"
 )
 DEFAULT_DEEPSEEK_BASE_URL = os.getenv("DEEPSEEK_BASE_URL") or os.getenv("SUMMARY_BASE_URL") or "https://api.deepseek.com"
@@ -661,7 +661,8 @@ def recover_filter_results(
 
 def _make_filter_client(api_key: str, model: str, max_output_tokens: int) -> DeepSeekClient:
     client = DeepSeekClient(api_key=api_key, model=model, base_url=DEFAULT_DEEPSEEK_BASE_URL)
-    client.kwargs.update({"temperature": 0.1, "max_tokens": max_output_tokens})
+    client.kwargs.update({"temperature": 0.1, "max_tokens": max_output_tokens,
+                          "thinking": {"type": "disabled"}})
     return client
 
 
@@ -833,6 +834,11 @@ def process_file(
 
     candidate_ids = unique_tagged([{"tag": pid} for pid in candidate_ids])
     candidate_ids = [item["tag"] for item in candidate_ids]
+    # Explicit bounded daily review; preserve historical larger-window behavior.
+    review_limit = int(os.getenv("DPR_LLM_REVIEW_LIMIT") or 0) if "-" not in TODAY_STR else 0
+    if review_limit > 0 and len(candidate_ids) > review_limit:
+        log(f"[INFO] bounded LLM review: {len(candidate_ids)} -> {review_limit} candidates")
+        candidate_ids = candidate_ids[:review_limit]
     if not candidate_ids:
         log("[WARN] no candidates found with star_rating >= min_star.")
         save_json(data, output_path)
