@@ -11,7 +11,11 @@ class ConferenceWorkflowAndUiTest(unittest.TestCase):
         text = workflow_path.read_text(encoding="utf-8")
 
         self.assertIn("MKL_THREADING_LAYER: GNU", text)
-        self.assertIn("DPR_RERANK_GLOBAL_POOL_LIMIT: \"120\"", text)
+        env = yaml.safe_load(text)["jobs"]["run"]["env"]
+        self.assertEqual(env["DPR_RERANK_GLOBAL_POOL_LIMIT"],
+                         "${{ inputs.smoke_test && '16' || '120' }}")
+        self.assertEqual(env["DPR_LLM_REVIEW_LIMIT"],
+                         "${{ inputs.smoke_test && '8' || '24' }}")
         self.assertIn("DPR_RERANK_GUARANTEED_PER_LANE: \"2\"", text)
         self.assertIn("RERANK_PROFILE", text)
         self.assertIn("RERANK_API_KEY", text)
