@@ -17,6 +17,8 @@ window.SubscriptionsManager = (function () {
   let quickRun30dStandardBtn = null;
   let quickRunOpenWorkflowPanelBtn = null;
   let quickRunConferenceBtn = null;
+  let starterPackBtn = null;
+  let starterPackAsOf = new Date().toISOString().slice(0, 10);
   let quickRunMsgEl = null;
   let quickRunSelectionCountEl = null;
   let conferenceSelectionCountEl = null;
@@ -33,15 +35,23 @@ window.SubscriptionsManager = (function () {
   const selectedConferenceYearPairs = new Set();
   let resetContentBtn = null;
   let resetContentMsgEl = null;
+  let resetContentPending = false;
   let adminDailyTabBtn = null;
   let adminConferenceTabBtn = null;
   let adminDailyPanel = null;
   let adminConferencePanel = null;
+  let adminTopicTabBtn = null;
+  let adminTopicPanel = null;
+  let topicProfilePickerEl = null;
+  let topicSelectedTag = '';
+  let topicSelectionInitialized = false;
   let activeAdminPanelTab = 'daily';
 
   let draftConfig = null;
   let hasUnsavedChanges = false;
   let isSavingDraftConfig = false;
+  let conferenceStatsSnapshot = { schema_version: 1, generated_at: '', items: [], byKey: new Map() };
+  let conferenceStatsLoadPromise = null;
 
   const defaultPromptTemplate = [
     'You are a retrieval planning assistant.',
@@ -94,14 +104,35 @@ window.SubscriptionsManager = (function () {
   ].join('\n');
 
   const QUICK_RUN_CONFERENCES = [
-    'NeurIPS',
+    'ICLR',
     'ICML',
+    'NeurIPS',
+    'AAAI',
+    'CVPR',
+    'ECCV',
+    'IJCAI',
+    'ACL',
+    'EMNLP',
+    'OSDI',
+    'SOSP',
+    'IEEE S&P',
+    'NDSS',
   ];
+  const CONFERENCE_STATS_SNAPSHOT_URL = 'app/conference-stats.json';
+  // 2026 年已入库并验证检索的会议；正式论文集已开放的 IJCAI 同样可选。
+  const CONFERENCE_2026_AVAILABLE = new Set(['ICLR', 'ICML', 'AAAI', 'ACL', 'CVPR', 'ECCV', 'IJCAI', 'OSDI', 'SOSP', 'IEEE S&P', 'NDSS']);
+  const CONFERENCE_DATA_NOTICES = {};
+  const FEATURED_CONFERENCE_YEAR_PAIRS = new Set(['acl:2026', 'icml:2026']);
+  // ECCV 是双年会议（偶数年）
+  const BIENNIAL_EVEN_CONFERENCES = new Set(['ECCV']);
   const CONFERENCES_WITH_PENDING_CURRENT_YEAR = new Set([
     'NIPS',
     'NEURIPS',
-    'ICML',
   ]);
+  const MAX_CONFERENCE_STORED_TOTAL = 30000;
+  const CONFERENCE_ESTIMATE_PAPERS_UNIT = 10000;
+  const CONFERENCE_ESTIMATE_MINUTES_PER_UNIT = 5;
+  const CONFERENCE_ESTIMATE_COST_PER_UNIT = 0.2;
 
   const normalizeText = (v) => String(v || '').trim();
   const truncateDisplayText = (value, maxChars) => {
@@ -115,6 +146,193 @@ window.SubscriptionsManager = (function () {
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#39;');
+  const toSafeInteger = (value) => {
+    const num = parseInt(String(value ?? '').trim(), 10);
+    return Number.isFinite(num) ? num : 0;
+  };
+  const formatCount = (value) => toSafeInteger(value).toLocaleString('en-US');
+  const formatEstimateMinutes = (value) => {
+    const num = Number(value);
+    if (!Number.isFinite(num) || num <= 0) return '0';
+    if (Math.abs(num - Math.round(num)) < 0.05) return String(Math.round(num));
+    return num.toFixed(1);
+  };
+  const estimateConferenceRetrieval = (storedTotal, profileCount) => {
+    const estimatedPapers = Math.max(0, toSafeInteger(storedTotal)) * Math.max(0, toSafeInteger(profileCount));
+    const units = estimatedPapers / CONFERENCE_ESTIMATE_PAPERS_UNIT;
+    return {
+      estimatedPapers,
+      minutes: units * CONFERENCE_ESTIMATE_MINUTES_PER_UNIT,
+      cost: units * CONFERENCE_ESTIMATE_COST_PER_UNIT,
+    };
+  };
+  const normalizeConferenceStatsKey = (value) => {
+    const compact = normalizeText(value)
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '_')
+      .replace(/^_+|_+$/g, '');
+    if (!compact) return '';
+    if (['ieee_s_p', 'ieee_sp', 's_p', 'sp'].includes(compact)) return 'ieee_sp';
+    if (compact === 'nips') return 'neurips';
+    return compact;
+  };
+  const normalizeConferenceStatsSnapshot = (snapshot) => {
+    const rawItems = Array.isArray(snapshot && snapshot.items) ? snapshot.items : [];
+    const byKey = new Map();
+    const items = rawItems
+      .map((item) => {
+        const conferenceKey = normalizeConferenceStatsKey(item && (item.conference_key || item.conference_label));
+        const year = toSafeInteger(item && item.year);
+        if (!conferenceKey || !year) return null;
+        return {
+          id: normalizeText(item.id || `${conferenceKey}-${year}`),
+          conference_key: conferenceKey,
+          conference_label: normalizeText(item.conference_label || conferenceKey.toUpperCase()),
+          year,
+          official_accepted_count: toSafeInteger(item.official_accepted_count),
+          stored_total_count: toSafeInteger(item.stored_total_count),
+          stored_accepted_count: toSafeInteger(item.stored_accepted_count),
+          stored_rejected_count: toSafeInteger(item.stored_rejected_count),
+          stored_other_count: toSafeInteger(item.stored_other_count),
+          generated_at: normalizeText(item.generated_at || snapshot.generated_at || ''),
+        };
+      })
+      .filter(Boolean);
+    items.forEach((item) => byKey.set(`${item.conference_key}:${item.year}`, item));
+    return {
+      schema_version: toSafeInteger(snapshot && snapshot.schema_version) || 1,
+      generated_at: normalizeText(snapshot && snapshot.generated_at),
+      items,
+      byKey,
+    };
+  };
+  const setConferenceStatsSnapshot = (snapshot) => {
+    conferenceStatsSnapshot = normalizeConferenceStatsSnapshot(snapshot || {});
+  };
+  const getConferenceYearStats = (conference, year) => {
+    const conferenceKey = normalizeConferenceStatsKey(conference);
+    const yearNum = toSafeInteger(year);
+    if (!conferenceKey || !yearNum) return null;
+    return conferenceStatsSnapshot.byKey.get(`${conferenceKey}:${yearNum}`) || null;
+  };
+  const getConferenceYearStoredTotal = (conference, year) => {
+    const stats = getConferenceYearStats(conference, year);
+    return stats ? toSafeInteger(stats.stored_total_count) : 0;
+  };
+  const getSelectedConferenceStoredTotal = () => {
+    let total = 0;
+    selectedConferenceYearPairs.forEach((item) => {
+      const [conference, year] = String(item || '').split(':');
+      if (!conference || !year) return;
+      total += getConferenceYearStoredTotal(conference, year);
+    });
+    return total;
+  };
+  const getSelectedConferencePairSpecs = () => {
+    const out = [];
+    const seen = new Set();
+    selectedConferenceYearPairs.forEach((item) => {
+      const [conferenceRaw, yearRaw] = String(item || '').split(':');
+      const conference = normalizeConferenceStatsKey(conferenceRaw);
+      const year = toSafeInteger(yearRaw);
+      if (!conference || !year) return;
+      const pair = `${conference}:${year}`;
+      if (seen.has(pair)) return;
+      seen.add(pair);
+      out.push({ conference, year, pair });
+    });
+    out.sort((a, b) => (b.year - a.year) || a.conference.localeCompare(b.conference));
+    return out.map((item) => item.pair);
+  };
+  const getSelectedConferenceYearsForWorkflow = () => {
+    const seen = new Set();
+    return getSelectedConferencePairSpecs()
+      .map((item) => item.split(':')[1])
+      .filter((year) => {
+        if (!year || seen.has(year)) return false;
+        seen.add(year);
+        return true;
+      });
+  };
+  const formatConferenceShortYear = (year) => {
+    const yearText = normalizeText(year);
+    return yearText.length === 4 ? yearText.slice(2) : yearText;
+  };
+  const formatConferenceYearStatsLabel = (conference, year) => {
+    const shortYear = formatConferenceShortYear(year);
+    const stats = getConferenceYearStats(conference, year);
+    if (!stats) return shortYear;
+    return `${shortYear} (${stats.stored_total_count})`;
+  };
+  const buildConferenceChoiceRowsHtml = () => QUICK_RUN_CONFERENCES
+    .map((name) => {
+      const yearButtons = getConferenceYearOptions()
+        .map((year) => {
+          const active = selectedConferenceYearPairs.has(`${name}:${year}`);
+          const reason = getConferenceYearDisabledReason(name, year);
+          const dataNotice = CONFERENCE_DATA_NOTICES[`${name}:${year}`] || '';
+          const disabled = !!reason;
+          const stats = getConferenceYearStats(name, year);
+          const classes = [
+            'dpr-choice-pill',
+            stats ? 'has-conference-stats' : '',
+            FEATURED_CONFERENCE_YEAR_PAIRS.has(`${normalizeConferenceStatsKey(name)}:${year}`) ? 'is-featured-conference-year' : '',
+            active ? 'is-active' : '',
+            disabled ? 'is-disabled' : '',
+          ].filter(Boolean).join(' ');
+          const shortYear = formatConferenceShortYear(year);
+          const visibleLabel = formatConferenceYearStatsLabel(name, year);
+          const labelHtml = stats
+            ? `<span class="dpr-choice-year">${escapeHtml(shortYear)}</span><span class="dpr-choice-total-wrap"> (<span class="dpr-choice-total">${escapeHtml(String(stats.stored_total_count))}</span>)</span>`
+            : `<span class="dpr-choice-year">${escapeHtml(shortYear)}</span>`;
+          const featureStar = FEATURED_CONFERENCE_YEAR_PAIRS.has(`${normalizeConferenceStatsKey(name)}:${year}`)
+            ? '<span class="dpr-choice-feature-star" aria-hidden="true">★</span>'
+            : '';
+          return `<button
+            class="${classes}"
+            type="button"
+            data-conference="${escapeHtml(name)}"
+            data-conference-year="${escapeHtml(year)}"
+            aria-pressed="${active ? 'true' : 'false'}"
+            aria-label="${escapeHtml(`${name} ${visibleLabel}${dataNotice ? `；${dataNotice}` : ''}`)}"
+            ${disabled ? 'disabled' : ''}
+            ${reason || dataNotice ? `title="${escapeHtml(reason || dataNotice)}"` : ''}
+          ><span class="dpr-choice-pill-main">${labelHtml}</span>${featureStar}</button>`;
+        })
+        .join('');
+      return `<div class="dpr-conference-choice-row">
+        <div class="dpr-conference-choice-label">${escapeHtml(name)}</div>
+        <div class="dpr-choice-row">${yearButtons}</div>
+      </div>`;
+    })
+    .join('');
+  const loadConferenceStatsSnapshot = () => {
+    if (conferenceStatsLoadPromise) return conferenceStatsLoadPromise;
+    const preloadedStats =
+      window.DPR_ASSET_JSON_PROMISES &&
+      window.DPR_ASSET_JSON_PROMISES[CONFERENCE_STATS_SNAPSHOT_URL];
+    if (!preloadedStats && typeof fetch !== 'function') return Promise.resolve(null);
+    conferenceStatsLoadPromise = (preloadedStats
+      ? Promise.resolve(preloadedStats)
+      : fetch(CONFERENCE_STATS_SNAPSHOT_URL, { cache: 'force-cache' })
+      .then((response) => {
+        if (!response || !response.ok) {
+          throw new Error(`conference stats load failed: ${response ? response.status : 'no-response'}`);
+        }
+        return response.json();
+      }))
+      .then((snapshot) => {
+        if (!snapshot) return null;
+        setConferenceStatsSnapshot(snapshot);
+        renderConferenceChoiceButtons();
+        return snapshot;
+      })
+      .catch((error) => {
+        console.warn('[DPR] 会议统计快照加载失败', error);
+        return null;
+      });
+    return conferenceStatsLoadPromise;
+  };
   const MAX_PROFILE_TAG_CHARS = 12;
   const sanitizeProfileTag = (value) => {
     const base = normalizeText(value);
@@ -456,14 +674,7 @@ window.SubscriptionsManager = (function () {
   };
 
   const initializeConferenceChoices = () => {
-    if (!selectedConferenceYearPairs.size) {
-      const defaultYear = '2025';
-      QUICK_RUN_CONFERENCES.forEach((conference) => {
-        if (isConferenceYearSelectable(conference, defaultYear)) {
-          selectedConferenceYearPairs.add(`${conference}:${defaultYear}`);
-        }
-      });
-    }
+    // 不默认勾选任何会议年份，由用户手动选择
   };
 
   const getConferenceYearOptions = () => {
@@ -472,42 +683,56 @@ window.SubscriptionsManager = (function () {
   };
 
   const isConferenceYearSelectable = (conference, year) => {
+    return !getConferenceYearDisabledReason(conference, year);
+  };
+
+  /**
+   * 返回不可选的原因文案；可选时返回空字符串。
+   */
+  const getConferenceYearDisabledReason = (conference, year) => {
     const conf = normalizeText(conference).toUpperCase();
-    const yearText = normalizeText(year);
+    const yearNum = parseInt(normalizeText(year), 10);
+    if (!Number.isFinite(yearNum)) return '无效年份';
+    // ECCV 双年（偶数年才有）
+    if (BIENNIAL_EVEN_CONFERENCES.has(conf) && yearNum % 2 !== 0) {
+      return `${conf} 为双年会议，仅偶数年举办（如 2024、2026）`;
+    }
+    // 2026 年可用性
+    const currentYear = new Date().getFullYear();
+    if (yearNum >= currentYear && !CONFERENCE_2026_AVAILABLE.has(conf)) {
+      const ESTIMATED_DATES = {
+        ICML:    '2026 年 7 月会后',
+        ACL:     '2026 年 7 月会后',
+        EMNLP:   '2026 年 10 月中下旬（以官方论文集开放时间为准）',
+        NEURIPS: '2026 年 12 月会后',
+        NIPS:    '2026 年 12 月会后',
+        OSDI:    '2026 年会后论文 PDF 公开后',
+        'IEEE S&P': '2026 年 CSDL 论文 PDF 公开后',
+      };
+      const est = ESTIMATED_DATES[conf];
+      if (est) return `预计 ${est} 纳入`;
+      return `${yearNum} 年暂无数据`;
+    }
+    // 原有的"当年待定"逻辑
     if (
       CONFERENCES_WITH_PENDING_CURRENT_YEAR.has(conf)
-      && yearText === String(new Date().getFullYear())
+      && yearNum === currentYear
     ) {
-      return false;
+      const PENDING_DATES = {
+        ICML:    '预计 2026 年 7 月会后纳入',
+        NEURIPS: '预计 2026 年 12 月会后纳入',
+        NIPS:    '预计 2026 年 12 月会后纳入',
+      };
+      return PENDING_DATES[conf] || `${yearNum} 年论文尚未公开`;
     }
-    return true;
+    return '';
   };
 
   const renderConferenceChoiceButtons = () => {
+    if (!document || typeof document.getElementById !== 'function') return;
     const conferenceWrap = document.getElementById('arxiv-admin-conference-choice-group');
     if (conferenceWrap) {
-      conferenceWrap.innerHTML = QUICK_RUN_CONFERENCES
-        .map((name) => {
-          const yearButtons = getConferenceYearOptions()
-            .map((year) => {
-              const active = selectedConferenceYearPairs.has(`${name}:${year}`);
-              const disabled = !isConferenceYearSelectable(name, year);
-              return `<button
-                class="dpr-choice-pill${active ? ' is-active' : ''}${disabled ? ' is-disabled' : ''}"
-                type="button"
-                data-conference="${name}"
-                data-conference-year="${year}"
-                aria-pressed="${active ? 'true' : 'false'}"
-                ${disabled ? `disabled title="${year} 暂未接入，暂不可选择"` : ''}
-              >${year}</button>`;
-            })
-            .join('');
-          return `<div class="dpr-conference-choice-row">
-            <div class="dpr-conference-choice-label">${name}</div>
-            <div class="dpr-choice-row">${yearButtons}</div>
-          </div>`;
-        })
-        .join('');
+      conferenceWrap.innerHTML = buildConferenceChoiceRowsHtml();
     }
   };
 
@@ -550,7 +775,7 @@ window.SubscriptionsManager = (function () {
       return;
     }
     targetEl.innerHTML = filtered.map((profile) => {
-      const selected = !!profile.selected;
+      const selected = mode === 'topic' ? normalizeText(profile.tag) === topicSelectedTag : !!profile.selected;
       const tag = normalizeText(profile.tag);
       const desc = normalizeText(profile.description);
       const shortDesc = truncateDisplayText(desc, 10);
@@ -571,6 +796,28 @@ window.SubscriptionsManager = (function () {
   const renderProfilePickers = () => {
     renderProfilePicker(dailyProfilePickerEl, 'daily');
     renderProfilePicker(conferenceProfilePickerEl, 'conference');
+    renderProfilePicker(topicProfilePickerEl, 'topic');
+  };
+  const initializeTopicSelection = () => {
+    if (topicSelectionInitialized) return;
+    const selected = getSelectedProfilesForRun();
+    topicSelectedTag = selected.length === 1 ? normalizeText(selected[0].tag) : '';
+    topicSelectionInitialized = true;
+    renderProfilePicker(topicProfilePickerEl, 'topic');
+  };
+  const setTopicProfileSelection = profileId => {
+    const profile = getProfilesForRun().find(item => String(item.id) === String(profileId));
+    if (!profile) return;
+    topicSelectedTag = normalizeText(profile.tag);
+    topicSelectionInitialized = true;
+    renderProfilePicker(topicProfilePickerEl, 'topic');
+  };
+  const getTopicResearchProfiles = () => {
+    const bridge = window.SubscriptionsSmartQuery;
+    const profiles = bridge && typeof bridge.getResearchProfiles === 'function'
+      ? bridge.getResearchProfiles()
+      : ((draftConfig && draftConfig.subscriptions && draftConfig.subscriptions.intent_profiles) || []);
+    return profiles.filter(profile => topicSelectedTag && normalizeText(profile.tag) === topicSelectedTag).map(cloneDeep);
   };
   const setProfileSelection = (profileId, selected) => {
     if (!window.SubscriptionsSmartQuery || typeof window.SubscriptionsSmartQuery.setProfileSelection !== 'function') {
@@ -618,7 +865,7 @@ window.SubscriptionsManager = (function () {
     if (!window.SubscriptionsSmartQuery || typeof window.SubscriptionsSmartQuery.setRunSelectionMode !== 'function') {
       return;
     }
-    window.SubscriptionsSmartQuery.setRunSelectionMode(activeAdminPanelTab, () => {
+    window.SubscriptionsSmartQuery.setRunSelectionMode(activeAdminPanelTab === 'topic' ? 'daily' : activeAdminPanelTab, () => {
       refreshQuickRunButtons();
     });
   };
@@ -626,10 +873,25 @@ window.SubscriptionsManager = (function () {
   const refreshQuickRunButtons = () => {
     const selectedProfiles = getSelectedProfilesForRun();
     const selectedProfileCount = selectedProfiles.length;
+    if (starterPackBtn) {
+      const runner = window.DPRWorkflowRunner;
+      const supported = runner && typeof runner.isStarterPackSupported === 'function' && runner.isStarterPackSupported();
+      starterPackBtn.disabled = hasUnsavedChanges || selectedProfileCount !== 1 || !supported;
+      starterPackBtn.title = !supported ? '请在 GitHub Pages 站点使用此功能；入门包仅由 GitHub Actions 执行。'
+        : hasUnsavedChanges ? '请先保存修改。' : selectedProfileCount !== 1 ? '请恰好勾选一个词条。' : '生成或按相同截止日期续跑入门包。';
+    }
     const dailySelectedProfileCount = selectedProfileCount;
+    const MAX_CONFERENCE_PROFILES = 2;
+    const profileOverLimit = selectedProfileCount > MAX_CONFERENCE_PROFILES;
+    const conferenceStoredTotal = getSelectedConferenceStoredTotal();
+    const conferenceTotalOverLimit = conferenceStoredTotal >= MAX_CONFERENCE_STORED_TOTAL;
     const dailyBlocked = hasUnsavedChanges || dailySelectedProfileCount < 1;
     const conferenceBlocked =
-      hasUnsavedChanges || selectedProfileCount < 1 || selectedConferenceYearPairs.size < 1;
+      hasUnsavedChanges
+      || selectedProfileCount < 1
+      || selectedConferenceYearPairs.size < 1
+      || profileOverLimit
+      || conferenceTotalOverLimit;
     renderProfilePickers();
     [
       [quickRunStartBtn, dailyBlocked],
@@ -642,6 +904,10 @@ window.SubscriptionsManager = (function () {
       if (blocked) {
         if (hasUnsavedChanges) {
           title = btn === quickRunConferenceBtn ? '请先保存后再检索会议论文。' : '请先保存后再抓取。';
+        } else if (btn === quickRunConferenceBtn && profileOverLimit) {
+          title = `会议检索最多选择 ${MAX_CONFERENCE_PROFILES} 个词条，当前已选 ${selectedProfileCount} 个。`;
+        } else if (btn === quickRunConferenceBtn && conferenceTotalOverLimit) {
+          title = `会议年份库内总数需小于 ${formatCount(MAX_CONFERENCE_STORED_TOTAL)} 篇，当前已选 ${formatCount(conferenceStoredTotal)} 篇。`;
         } else if (selectedProfileCount < 1) {
           title = '请先在上方选择至少一个词条。';
         } else if (btn === quickRunConferenceBtn && !selectedConferenceYearPairs.size) {
@@ -658,9 +924,33 @@ window.SubscriptionsManager = (function () {
         : '请选择至少一个词条。';
     }
     if (conferenceHintEl) {
-      conferenceHintEl.textContent = selectedProfileCount > 0
-        ? `已选 ${selectedProfileCount} 个词条。`
-        : '先勾选词条，再勾选年份。';
+      const confCount = selectedConferenceYearPairs.size;
+      const profCount = selectedProfileCount;
+      if (profCount > MAX_CONFERENCE_PROFILES) {
+        conferenceHintEl.textContent = `会议检索最多选择 ${MAX_CONFERENCE_PROFILES} 个词条，当前已选 ${profCount} 个，请取消部分词条。`;
+        conferenceHintEl.style.color = '#c00';
+      } else if (conferenceTotalOverLimit) {
+        conferenceHintEl.textContent = `会议年份库内总数需小于 ${formatCount(MAX_CONFERENCE_STORED_TOTAL)} 篇，当前已选 ${formatCount(conferenceStoredTotal)} 篇，请取消部分会议年份。`;
+        conferenceHintEl.style.color = '#c00';
+      } else if (confCount > 0 && profCount > 0) {
+        const totalTasks = confCount * profCount;
+        const estimate = estimateConferenceRetrieval(conferenceStoredTotal, profCount);
+        conferenceHintEl.textContent = `${profCount} 个词条 × ${confCount} 个会议（库内约 ${formatCount(conferenceStoredTotal)} 篇，估算处理 ${formatCount(estimate.estimatedPapers)} 篇）= ${totalTasks} 组任务，预计耗时约 ${formatEstimateMinutes(estimate.minutes)} 分钟，费用约 ¥${estimate.cost.toFixed(2)}`;
+        conferenceHintEl.style.color = '';
+      } else if (confCount > 0 && profCount === 0) {
+        conferenceHintEl.textContent = '请先在上方勾选词条（最多 2 个）。';
+        conferenceHintEl.style.color = '';
+      } else if (profCount > 0 && confCount === 0) {
+        conferenceHintEl.textContent = `请勾选会议年份。库内总数需小于 ${formatCount(MAX_CONFERENCE_STORED_TOTAL)} 篇；每组任务约需 5 分钟，费用约 ¥0.2`;
+        conferenceHintEl.style.color = '';
+      } else {
+        conferenceHintEl.textContent = `先勾选词条（最多 2 个），再勾选会议年份（库内总数 < ${formatCount(MAX_CONFERENCE_STORED_TOTAL)} 篇）。每组约 5 分钟 / ¥0.2`;
+        conferenceHintEl.style.color = '';
+      }
+      // 元数据可检索不代表全文可读；复用现有说明区，移动端选择后也能看到。
+      const dataNotices = Array.from(selectedConferenceYearPairs)
+        .map((pair) => CONFERENCE_DATA_NOTICES[pair]).filter(Boolean);
+      if (dataNotices.length) conferenceHintEl.textContent += ` ${dataNotices.join(' ')}`;
     }
     if (hasUnsavedChanges && quickRunMsgEl) {
       quickRunMsgEl.textContent = '有未保存修改，请先保存。';
@@ -702,10 +992,11 @@ window.SubscriptionsManager = (function () {
   };
 
   const syncAdminPanelTabs = () => {
-    const active = activeAdminPanelTab === 'conference' ? 'conference' : 'daily';
+    const active = ['conference', 'topic'].includes(activeAdminPanelTab) ? activeAdminPanelTab : 'daily';
     [
       [adminDailyTabBtn, active === 'daily'],
       [adminConferenceTabBtn, active === 'conference'],
+      [adminTopicTabBtn, active === 'topic'],
     ].forEach(([btn, isActive]) => {
       if (!btn) return;
       btn.classList.toggle('is-active', !!isActive);
@@ -718,13 +1009,16 @@ window.SubscriptionsManager = (function () {
     if (adminConferencePanel) {
       adminConferencePanel.hidden = active !== 'conference';
     }
+    if (adminTopicPanel) adminTopicPanel.hidden = active !== 'topic';
     if (panel) {
       panel.classList.toggle('is-conference-tab', active === 'conference');
+      panel.classList.toggle('is-topic-tab', active === 'topic');
     }
   };
 
   const switchAdminPanelTab = (tab) => {
-    const nextTab = tab === 'conference' ? 'conference' : 'daily';
+    const nextTab = ['conference', 'topic'].includes(tab) ? tab : 'daily';
+    if (nextTab === 'topic') initializeTopicSelection();
     if (activeAdminPanelTab === nextTab) {
       syncAdminPanelTabs();
       return;
@@ -787,8 +1081,8 @@ window.SubscriptionsManager = (function () {
     };
     const fetchMode = normalizeText(options.fetchMode).toLowerCase();
     const modeText = fetchMode === 'standard'
-      ? '30 天标准抓取任务'
-      : (fetchMode === 'skims' ? '30 天速览抓取任务' : `${days} 天抓取任务`);
+      ? `${days} 天标准抓取任务`
+      : (Number(days) > 30 ? `${days} 天 arXiv 专题回溯任务` : (fetchMode === 'skims' ? `${days} 天速览抓取任务` : `${days} 天抓取任务`));
     const tip = `已发起词条「${normalizedTag}」的${modeText}。`;
     return runQuickFetch(days, quickRunMsgEl || msgEl, tip, options);
   };
@@ -802,8 +1096,8 @@ window.SubscriptionsManager = (function () {
     }
     const fetchMode = normalizeText(runOptions.fetchMode).toLowerCase();
     const modeText = fetchMode === 'standard'
-      ? '30 天全标准 / 精读'
-      : (fetchMode === 'skims' ? '30 天全速览' : `${days} 天`);
+      ? `${days} 天全标准 / 精读`
+      : (Number(days) > 30 ? `${days} 天 arXiv 专题回溯` : (fetchMode === 'skims' ? `${days} 天全速览` : `${days} 天`));
     const options = runOptions && typeof runOptions === 'object' ? cloneDeep(runOptions) : {};
     const dispatchInputs = isPlainObject(options.dispatchInputs) ? options.dispatchInputs : {};
     options.dispatchInputs = {
@@ -816,6 +1110,10 @@ window.SubscriptionsManager = (function () {
     return success;
   };
   const runSelectedQuickFetchByMode = () => {
+    if (quickRunMode === '90' || quickRunMode === '365') {
+      if (!window.confirm('将对所选词条进行 arXiv 长周期回溯，只检索 arXiv。全部候选需调用 DeepSeek 评审，宽泛专题可能有上万篇，耗时和费用按实际量增长；不下载全量PDF。确认开始？')) return false;
+      return runSelectedQuickFetch(Number(quickRunMode), { fetchMode: 'skims' });
+    }
     if (quickRunMode === '30-skims') {
       return runSelectedQuickFetch(30, { fetchMode: 'skims' });
     }
@@ -845,19 +1143,21 @@ window.SubscriptionsManager = (function () {
       refreshQuickRunButtons();
       return false;
     }
-    const grouped = {};
-    selectedConferenceYearPairs.forEach((item) => {
-      const [conference, year] = String(item || '').split(':');
-      if (!conference || !year) return;
-      if (!grouped[conference]) grouped[conference] = [];
-      grouped[conference].push(year);
-    });
-    const groups = Object.entries(grouped).filter(([, years]) => years.length);
-    if (!groups.length) {
+    const selectedPairSpecs = getSelectedConferencePairSpecs();
+    if (!selectedPairSpecs.length) {
       if (msgEl) {
         msgEl.textContent = '请先选择至少一个会议年份。';
         msgEl.style.color = '#c00';
       }
+      return false;
+    }
+    const selectedStoredTotal = getSelectedConferenceStoredTotal();
+    if (selectedStoredTotal >= MAX_CONFERENCE_STORED_TOTAL) {
+      if (msgEl) {
+        msgEl.textContent = `会议年份库内总数需小于 ${formatCount(MAX_CONFERENCE_STORED_TOTAL)} 篇，当前已选 ${formatCount(selectedStoredTotal)} 篇，请取消部分会议年份。`;
+        msgEl.style.color = '#c00';
+      }
+      refreshQuickRunButtons();
       return false;
     }
     if (!window.DPRWorkflowRunner || typeof window.DPRWorkflowRunner.runConferenceRetrieval !== 'function') {
@@ -867,30 +1167,63 @@ window.SubscriptionsManager = (function () {
       }
       return false;
     }
-    const groupText = groups.map(([conf, years]) => `${conf} ${years.join(', ')}`).join('；');
-    const results = await Promise.all(groups.map(([conf, years]) =>
-      window.DPRWorkflowRunner.runConferenceRetrieval(conf, years, {
-        dispatchInputs: {
-          profile_tag: profileTags.join(','),
-        },
-      }),
-    ));
-    if (results.some((item) => item === false)) {
+    const selectedPairText = selectedPairSpecs.join(',');
+    const selectedYears = getSelectedConferenceYearsForWorkflow();
+    const success = await window.DPRWorkflowRunner.runConferenceRetrieval('unified', selectedYears, {
+      dispatchInputs: {
+        profile_tag: profileTags.join(','),
+        conference_pairs: selectedPairText,
+      },
+    });
+    if (success === false) {
       if (msgEl) {
-        msgEl.textContent = '部分会议检索工作流未成功触发，请检查权限或配置。';
+        msgEl.textContent = '会议检索工作流未成功触发，请检查权限或配置。';
         msgEl.style.color = '#c00';
       }
       return false;
     }
     if (msgEl) {
-      msgEl.textContent = `已发起 ${groupText} 会议论文检索任务。`;
+      msgEl.textContent = `已发起 ${selectedPairSpecs.length} 个会议年份的统一会议论文检索任务。`;
       msgEl.style.color = '#080';
     }
     showWorkflowSuccessEffects();
     return true;
   };
 
-  const runResetContent = (msgEl) => {
+  const runStarterPack = async () => {
+    const output = document.getElementById('arxiv-admin-starter-pack-msg');
+    const show = (text, color = '#c00') => { if (output) { output.textContent = text; output.style.color = color; } };
+    try {
+      if (hasUnsavedChanges) throw new Error('请先保存修改，再生成入门包。');
+      const profiles = getSelectedProfilesForRun();
+      if (profiles.length !== 1) throw new Error('入门包需要恰好勾选一个词条。');
+      const runner = window.DPRWorkflowRunner;
+      if (!runner || typeof runner.buildStarterPackRequest !== 'function') throw new Error('工作流触发器未加载，请刷新后重试。');
+      if (!runner.isStarterPackSupported()) throw new Error('请在 GitHub Pages 站点操作；入门包仅通过 GitHub Actions 执行，不在本地运行。');
+      const value = id => { const el = document.getElementById(id); return el ? el.value : ''; };
+      const selected = getSelectedConferencePairSpecs();
+      const request = runner.buildStarterPackRequest({
+        profile_tag: profiles[0].tag,
+        as_of: value('arxiv-admin-starter-pack-as-of'),
+        conferences: selected.map(pair => pair.split(':')[0]),
+        max_new_reviews: value('arxiv-admin-starter-pack-budget'),
+        content_limit: value('arxiv-admin-starter-pack-content-limit'),
+      });
+      starterPackAsOf = request.inputs.as_of;
+      const scope = selected.length ? request.inputs.conferences : '全库支持会议';
+      if (!window.confirm(`生成/续跑词条「${request.inputs.profile_tag}」的入门包：\nUTC 截止日期 ${request.inputs.as_of}（不含当天）\n近365天 arXiv + 近24个月会议；范围：${scope}\n会议年份勾选不限制滚动24个月窗口。\n新增评审上限 ${request.inputs.max_new_reviews} 篇；内容生成上限 ${request.inputs.content_limit} 篇。\n模型调用按实际用量计费，新增评审为0仅复用已有评审，内容生成仍可能调用模型。\n进度未完成时，请保持相同截止日期、词条和会议范围续跑。确认开始？`)) return false;
+      const success = await runner.runWorkflowByKey(request.key, request.inputs);
+      if (success === false) throw new Error('入门包工作流未成功触发，请检查权限或工作流配置。');
+      show(`已发起入门包任务；若仅生成进度提示，请保持 ${starterPackAsOf} 和相同词条、会议范围续跑。`, '#080');
+      return true;
+    } catch (error) {
+      show(error.message || String(error));
+      return false;
+    }
+  };
+
+  const runResetContent = async (msgEl) => {
+    if (resetContentPending) return;
     if (String(window.DPR_ACCESS_MODE || '') !== 'full') {
       if (msgEl) {
         msgEl.textContent = '未检测到完整登录权限，危险操作未开启。';
@@ -918,10 +1251,34 @@ window.SubscriptionsManager = (function () {
       return;
     }
 
-    window.DPRWorkflowRunner.runWorkflowByKey('reset-content');
+    resetContentPending = true;
+    if (resetContentBtn) resetContentBtn.disabled = true;
+    const warnBeforeDispatch = (event) => {
+      event.preventDefault();
+      event.returnValue = '';
+    };
+    window.addEventListener('beforeunload', warnBeforeDispatch);
     if (msgEl) {
-      msgEl.textContent = '已发起论文内容重置任务。';
-      msgEl.style.color = '#080';
+      msgEl.textContent = '正在提交论文内容重置任务，请勿关闭页面…';
+      msgEl.style.color = '#666';
+    }
+    try {
+      const accepted = await window.DPRWorkflowRunner.runWorkflowByKey('reset-content');
+      if (msgEl) {
+        msgEl.textContent = accepted === true
+          ? '论文内容重置任务已提交，请在工作流面板查看进度。'
+          : '重置任务提交未获确认，请在工作流面板检查状态。';
+        msgEl.style.color = accepted === true ? '#080' : '#c00';
+      }
+    } catch (error) {
+      if (msgEl) {
+        msgEl.textContent = `重置任务提交失败：${error.message || error}`;
+        msgEl.style.color = '#c00';
+      }
+    } finally {
+      resetContentPending = false;
+      if (resetContentBtn) resetContentBtn.disabled = false;
+      window.removeEventListener('beforeunload', warnBeforeDispatch);
     }
   };
 
@@ -1135,6 +1492,7 @@ window.SubscriptionsManager = (function () {
               >
                 会议论文
               </button>
+              <button id="dpr-admin-tab-topic" class="dpr-admin-tab" type="button" role="tab" aria-selected="false" aria-controls="arxiv-topic-control-side">专题研究</button>
             </div>
           </div>
           <div style="display:flex; gap:8px; align-items:center;">
@@ -1149,11 +1507,9 @@ window.SubscriptionsManager = (function () {
             <div id="dpr-smart-query-section" class="arxiv-pane dpr-smart-pane">
               <div class="dpr-display-card">
                 <div id="dpr-sq-display" class="dpr-sq-display"></div>
-                <div class="dpr-input-card">
-                  <div class="dpr-inline-row">
-                    <button id="dpr-sq-open-chat-btn" class="arxiv-tool-btn" style="background:#2e7d32; color:#fff;">新增</button>
-                  </div>
-                </div>
+              </div>
+              <div class="dpr-admin-add-row">
+                <button id="dpr-sq-open-chat-btn" class="arxiv-tool-btn" type="button">新增研究方向</button>
               </div>
             </div>
 
@@ -1216,6 +1572,7 @@ window.SubscriptionsManager = (function () {
                 <div id="arxiv-admin-reset-content-msg" class="chat-quick-run-msg"></div>
               </div>
             </div>
+            <div class="dpr-topic-invitation"><span>想更深入了解一个研究方向？</span><button id="dpr-admin-go-topic" class="arxiv-tool-btn" type="button">前往专题研究</button></div>
           </div>
 
           <div
@@ -1257,6 +1614,9 @@ window.SubscriptionsManager = (function () {
               </div>
             </div>
           </div>
+          <div id="arxiv-topic-control-side" class="dpr-admin-task-panel" role="tabpanel" aria-labelledby="dpr-admin-tab-topic" hidden>
+            ${window.DPRTopicResearch ? window.DPRTopicResearch.render() : '<p class="dpr-task-hint">专题模块尚未加载，请刷新重试。</p>'}
+          </div>
         </div>
       </div>
     `;
@@ -1271,6 +1631,18 @@ window.SubscriptionsManager = (function () {
     adminConferenceTabBtn = document.getElementById('dpr-admin-tab-conference');
     adminDailyPanel = document.getElementById('arxiv-search-quick-run-side');
     adminConferencePanel = document.getElementById('arxiv-conference-control-side');
+    adminTopicTabBtn = document.getElementById('dpr-admin-tab-topic');
+    adminTopicPanel = document.getElementById('arxiv-topic-control-side');
+    topicProfilePickerEl = document.getElementById('arxiv-admin-topic-profile-picker');
+    if (adminTopicTabBtn) adminTopicTabBtn.addEventListener('click', () => switchAdminPanelTab('topic'));
+    const topicInvitation = document.getElementById('dpr-admin-go-topic');
+    if (topicInvitation) topicInvitation.addEventListener('click', () => switchAdminPanelTab('topic'));
+    if (window.DPRTopicResearch) window.DPRTopicResearch.mount(adminTopicPanel, {
+      getProfiles: getTopicResearchProfiles,
+      getConfig: () => cloneDeep(draftConfig || {}),
+      hasUnsaved: () => hasUnsavedChanges,
+      getConferences: () => getSelectedConferencePairSpecs().map(pair => pair.split(':')[0]),
+    });
 
     const reloadAll = () => {
       renderFromDraft();
@@ -1467,6 +1839,16 @@ window.SubscriptionsManager = (function () {
     quickRunConferenceBtn = document.getElementById(
       'arxiv-admin-quick-run-conference-run-btn',
     );
+    starterPackBtn = document.getElementById('arxiv-admin-starter-pack-btn');
+    if (starterPackBtn && !starterPackBtn._bound) {
+      starterPackBtn._bound = true;
+      starterPackBtn.addEventListener('click', runStarterPack);
+    }
+    const starterDateInput = document.getElementById('arxiv-admin-starter-pack-as-of');
+    if (starterDateInput && !starterDateInput._bound) {
+      starterDateInput._bound = true;
+      starterDateInput.addEventListener('change', () => { starterPackAsOf = starterDateInput.value; });
+    }
     quickRunMsgEl = document.getElementById('arxiv-admin-quick-run-msg');
     quickRunSelectionCountEl = null;
     conferenceSelectionCountEl = null;
@@ -1486,6 +1868,7 @@ window.SubscriptionsManager = (function () {
     }
     initializeConferenceChoices();
     renderConferenceChoiceButtons();
+    loadConferenceStatsSnapshot();
     if (quickRunStartBtn && !quickRunStartBtn.dataset.defaultTitle) {
       quickRunStartBtn.setAttribute('data-default-title', quickRunStartBtn.textContent || '');
     }
@@ -1513,7 +1896,8 @@ window.SubscriptionsManager = (function () {
     [
       [dailyProfilePickerEl, 'daily'],
       [conferenceProfilePickerEl, 'conference'],
-    ].forEach(([picker]) => {
+      [topicProfilePickerEl, 'topic'],
+    ].forEach(([picker, mode]) => {
       if (!picker || picker._bound) return;
       picker._bound = true;
       picker.addEventListener('click', (event) => {
@@ -1522,6 +1906,7 @@ window.SubscriptionsManager = (function () {
           : null;
         if (!chip) return;
         const profileId = chip.getAttribute('data-profile-id') || '';
+        if (mode === 'topic') { setTopicProfileSelection(profileId); return; }
         const selected = chip.getAttribute('aria-pressed') !== 'true';
         setProfileSelection(profileId, selected);
       });
@@ -1647,16 +2032,35 @@ window.SubscriptionsManager = (function () {
     validateDraftConfig: () => validateIntentProfiles(draftConfig || {}),
     runProfileQuickFetch: (profileTag, days, runOptions) => runProfileQuickFetch(profileTag, days, runOptions),
     __test: {
+      initializeTopicSelection,
+      setTopicProfileSelection,
+      getTopicResearchProfiles,
+      __resetTopicSelection: () => { topicSelectedTag = ''; topicSelectionInitialized = false; },
+      __setTopicProfilePickerEl: el => { topicProfilePickerEl = el; },
+      runStarterPack,
+      __setQuickRunMode: (value) => { quickRunMode = value; },
+      runSelectedQuickFetchByMode,
       normalizeSubscriptions: (config) => normalizeSubscriptions(config),
       ensureSourceBackendsForProfiles: (config) => ensureSourceBackendsForProfiles(cloneDeep(config || {})),
       buildDefaultSourceBackend: (sourceKey, config) => buildDefaultSourceBackend(sourceKey, cloneDeep(config || {})),
       normalizePaperSources: (values, options) => normalizePaperSources(values, options),
       isConferenceYearSelectable: (conference, year) => isConferenceYearSelectable(conference, year),
+      __setConferenceStatsSnapshot: (snapshot) => setConferenceStatsSnapshot(snapshot),
+      __loadConferenceStatsSnapshot: () => loadConferenceStatsSnapshot(),
+      __resetConferenceStatsLoadPromise: () => {
+        conferenceStatsLoadPromise = null;
+        setConferenceStatsSnapshot(null);
+      },
+      __buildConferenceChoiceRowsHtml: () => buildConferenceChoiceRowsHtml(),
+      formatConferenceYearStatsLabel: (conference, year) => formatConferenceYearStatsLabel(conference, year),
       __setQuickRunMsgEl: (el) => {
         quickRunMsgEl = el || null;
       },
       __setQuickRunConferenceBtn: (el) => {
         quickRunConferenceBtn = el || null;
+      },
+      __setConferenceHintEl: (el) => {
+        conferenceHintEl = el || null;
       },
       __setUnsavedChanges: (value) => {
         hasUnsavedChanges = !!value;
@@ -1670,6 +2074,7 @@ window.SubscriptionsManager = (function () {
       },
       __initializeConferenceChoices: () => initializeConferenceChoices(),
       __getSelectedConferenceYearPairs: () => Array.from(selectedConferenceYearPairs),
+      runQuickConferenceRetrieval,
       runSelectedQuickFetch,
       refreshQuickRunButtons,
       clearQuickRunUnsavedMessage,

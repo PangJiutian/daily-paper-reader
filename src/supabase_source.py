@@ -17,11 +17,23 @@ except Exception:  # pragma: no cover - 兼容 package 导入路径
 
 
 DEFAULT_TIMEOUT = 20
+# 与 sql/match_arxiv_papers.sql 的函数级预算对应，预留网络传输时间。
+_RPC_DEFAULT_TIMEOUTS = {
+    "match_arxiv_papers_exact": 75,
+    "match_arxiv_papers_bm25": 45,
+}
 _DEFAULT_SUPABASE_RETRY = 3
 _DEFAULT_SUPABASE_RETRY_WAIT_SECONDS = 1.0
 
 # PostgreSQL error code for "canceling statement due to statement timeout"
 _PG_STATEMENT_TIMEOUT_CODE = "57014"
+
+
+def _resolve_rpc_timeout(rpc_name: str, timeout: int | None) -> int:
+    # 显式参数仍由调用方控制；只调整 arXiv RPC 的默认值。
+    if timeout is not None:
+        return max(int(timeout or DEFAULT_TIMEOUT), 1)
+    return _RPC_DEFAULT_TIMEOUTS.get(rpc_name, DEFAULT_TIMEOUT)
 
 
 def _is_statement_timeout(resp: requests.Response) -> bool:
@@ -482,11 +494,12 @@ def match_papers_by_embedding(
     query_embedding: List[float],
     match_count: int,
     schema: str = "public",
-    timeout: int = DEFAULT_TIMEOUT,
+    timeout: int | None = None,
     start_dt: datetime | None = None,
     end_dt: datetime | None = None,
     time_fields: tuple[str, ...] = ("published",),
     filter_sources: List[str] | None = None,
+    extra_payload: Dict[str, Any] | None = None,
 ) -> Tuple[List[Dict[str, Any]], str]:
     """
     调用 Supabase RPC，在数据库侧执行向量相似度检索。
@@ -511,6 +524,8 @@ def match_papers_by_embedding(
     }
     if isinstance(filter_sources, list) and filter_sources:
         payload["filter_sources"] = [str(item).strip() for item in filter_sources if str(item).strip()]
+    if isinstance(extra_payload, dict):
+        payload.update({key: value for key, value in extra_payload.items() if key})
     try:
         resp = _request_with_retries(
             "POST",
@@ -520,7 +535,7 @@ def match_papers_by_embedding(
                 "Content-Type": "application/json",
             },
             json=payload,
-            timeout=max(int(timeout or DEFAULT_TIMEOUT), 1),
+            timeout=_resolve_rpc_timeout(safe_rpc, timeout),
             retries=_DEFAULT_SUPABASE_RETRY,
             retry_wait_seconds=_DEFAULT_SUPABASE_RETRY_WAIT_SECONDS,
             log_prefix="[Supabase RPC]",
@@ -555,6 +570,7 @@ def match_papers_by_embedding(
                     "abstract": _norm(r.get("abstract")),
                     "published": _norm(r.get("published")) or None,
                     "link": _norm(r.get("link")) or None,
+                    "pdf_url": _norm(r.get("pdf_url")) or None,
                     "authors": r.get("authors") if isinstance(r.get("authors"), list) else [],
                     "primary_category": _norm(r.get("primary_category")) or None,
                     "categories": r.get("categories") if isinstance(r.get("categories"), list) else [],
@@ -575,11 +591,12 @@ def match_papers_by_bm25(
     query_text: str,
     match_count: int,
     schema: str = "public",
-    timeout: int = DEFAULT_TIMEOUT,
+    timeout: int | None = None,
     start_dt: datetime | None = None,
     end_dt: datetime | None = None,
     time_fields: tuple[str, ...] = ("published",),
     filter_sources: List[str] | None = None,
+    extra_payload: Dict[str, Any] | None = None,
 ) -> Tuple[List[Dict[str, Any]], str]:
     """
     调用 Supabase RPC，在数据库侧执行 BM25 风格检索（PostgreSQL FTS）。
@@ -604,6 +621,8 @@ def match_papers_by_bm25(
     }
     if isinstance(filter_sources, list) and filter_sources:
         payload["filter_sources"] = [str(item).strip() for item in filter_sources if str(item).strip()]
+    if isinstance(extra_payload, dict):
+        payload.update({key: value for key, value in extra_payload.items() if key})
     try:
         resp = _request_with_retries(
             "POST",
@@ -613,7 +632,7 @@ def match_papers_by_bm25(
                 "Content-Type": "application/json",
             },
             json=payload,
-            timeout=max(int(timeout or DEFAULT_TIMEOUT), 1),
+            timeout=_resolve_rpc_timeout(safe_rpc, timeout),
             retries=_DEFAULT_SUPABASE_RETRY,
             retry_wait_seconds=_DEFAULT_SUPABASE_RETRY_WAIT_SECONDS,
             log_prefix="[Supabase RPC]",
@@ -643,6 +662,7 @@ def match_papers_by_bm25(
                     "abstract": _norm(r.get("abstract")),
                     "published": _norm(r.get("published")) or None,
                     "link": _norm(r.get("link")) or None,
+                    "pdf_url": _norm(r.get("pdf_url")) or None,
                     "authors": r.get("authors") if isinstance(r.get("authors"), list) else [],
                     "primary_category": _norm(r.get("primary_category")) or None,
                     "categories": r.get("categories") if isinstance(r.get("categories"), list) else [],

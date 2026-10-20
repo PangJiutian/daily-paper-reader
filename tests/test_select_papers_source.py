@@ -194,6 +194,143 @@ class SelectPapersSourceTagTest(unittest.TestCase):
         self.assertEqual(seen_ahd, {"paper-ahd"})
         self.assertEqual(seen_all, {"paper-ahd", "paper-gene"})
 
+    def test_normalize_carryover_tag_strips_composite_suffix(self):
+        for raw_tag in (
+            "query:ATSP",
+            "query:ATSP:composite",
+            "keyword:ATSP:composite",
+        ):
+            with self.subTest(raw_tag=raw_tag):
+                self.assertEqual(self.mod.normalize_carryover_tag(raw_tag), "ATSP")
+
+    def test_resolve_carryover_tags_accepts_original_tags_without_llm_metadata(self):
+        self.assertEqual(
+            self.mod.resolve_carryover_tags({"tags": ["keyword:ATSP"]}),
+            ["ATSP"],
+        )
+
+    def test_collect_seen_ids_uses_original_retrieval_tags_when_llm_tag_is_wrong(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = pathlib.Path(tmpdir)
+            recommend_dir = root / "20260915" / "recommend"
+            recommend_dir.mkdir(parents=True, exist_ok=True)
+            payload = {
+                "deep_dive": [
+                    {
+                        "id": "2609.11452v1",
+                        "tags": ["keyword:ATSP", "query:ATSP"],
+                        "matched_query_tag": "query:ad:composite",
+                        "llm_tags": ["query:ad:composite"],
+                    }
+                ],
+                "quick_skim": [],
+            }
+            (recommend_dir / "arxiv_papers_20260915.standard.json").write_text(
+                json.dumps(payload, ensure_ascii=False),
+                encoding="utf-8",
+            )
+
+            seen_atsp = self.mod.collect_seen_ids(
+                str(root), "20260916", active_tags=["ATSP"]
+            )
+            seen_other = self.mod.collect_seen_ids(
+                str(root), "20260916", active_tags=["symbolic-regression"]
+            )
+
+        self.assertEqual(seen_atsp, {"2609.11452"})
+        self.assertEqual(seen_other, set())
+
+    def test_second_day_candidate_filters_same_canonical_arxiv_paper(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = pathlib.Path(tmpdir)
+            recommend_dir = root / "20260915" / "recommend"
+            recommend_dir.mkdir(parents=True, exist_ok=True)
+            payload = {
+                "deep_dive": [
+                    {
+                        "id": "2609.11452v1",
+                        "tags": ["keyword:ATSP", "query:ATSP"],
+                        "matched_query_tag": "query:ad:composite",
+                    }
+                ],
+                "quick_skim": [],
+            }
+            (recommend_dir / "arxiv_papers_20260915.standard.json").write_text(
+                json.dumps(payload, ensure_ascii=False),
+                encoding="utf-8",
+            )
+
+            seen_atsp = self.mod.collect_seen_ids(
+                str(root), "20260916", active_tags=["ATSP"]
+            )
+            candidates = self.mod.build_candidates(
+                [
+                    {
+                        "id": "2609.11452v2",
+                        "title": "Already recommended yesterday",
+                        "llm_score": 9.4,
+                    },
+                    {"id": "2609.99999v1", "title": "Fresh", "llm_score": 8.1},
+                ],
+                [],
+                seen_atsp,
+            )
+
+        self.assertEqual([item.get("id") for item in candidates], ["2609.99999v1"])
+
+    def test_collect_seen_ids_canonicalizes_arxiv_versions(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = pathlib.Path(tmpdir)
+            recommend_dir = root / "20260421" / "recommend"
+            recommend_dir.mkdir(parents=True, exist_ok=True)
+            payload = {
+                "deep_dive": [{"id": "2604.10929v1"}],
+                "quick_skim": [{"id": "math.GT/0309136v2"}],
+            }
+            (recommend_dir / "arxiv_papers_20260421.standard.json").write_text(
+                json.dumps(payload, ensure_ascii=False),
+                encoding="utf-8",
+            )
+
+            seen = self.mod.collect_seen_ids(str(root), "20260422")
+
+        self.assertIn("2604.10929", seen)
+        self.assertIn("math.GT/0309136", seen)
+        self.assertNotIn("2604.10929v1", seen)
+
+    def test_build_candidates_filters_seen_arxiv_version_variants(self):
+        scored = [
+            {"id": "2604.10929v2", "title": "Same Paper New Version", "llm_score": 9.1},
+            {"id": "fresh-1", "title": "Fresh", "llm_score": 8.4},
+        ]
+
+        out = self.mod.build_candidates(scored, [], {"2604.10929v1"})
+
+        self.assertEqual([item.get("id") for item in out], ["fresh-1"])
+
+    def test_build_candidates_dedupes_arxiv_versions_by_canonical_id(self):
+        scored = [
+            {"id": "2604.10929v1", "title": "Older", "llm_score": 8.2},
+            {"id": "2604.10929v2", "title": "Newer", "llm_score": 8.7},
+        ]
+
+        out = self.mod.build_candidates(scored, [], set())
+
+        self.assertEqual(len(out), 1)
+        self.assertEqual(out[0].get("id"), "2604.10929v2")
+
+    def test_build_carryover_out_skips_recommended_arxiv_variant(self):
+        out = self.mod.build_carryover_out(
+            [
+                {"id": "2604.10929v1", "llm_score": 8.5, "title": "Older"},
+                {"id": "fresh-1", "llm_score": 8.6, "title": "Fresh"},
+            ],
+            {"2604.10929v2"},
+            5,
+        )
+
+        self.assertEqual([item.get("id") for item in out], ["fresh-1"])
+
 
 class SelectPapersDeepPriorityModeTest(unittest.TestCase):
     @classmethod

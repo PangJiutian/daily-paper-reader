@@ -130,6 +130,11 @@ def resolve_papers_table(args_table: str, backend_key: str = "arxiv") -> str:
     backend = get_source_backend(cfg, backend_key)
     if backend:
         return _norm((backend or {}).get("papers_table") or "")
+    # 全局 supabase.papers_table 是 arXiv 的历史配置，只对 arXiv 生效。
+    # 其它源落到这里说明配置缺失，必须返回空让调用方显式报错——
+    # 否则会静默把该源的论文写进 arxiv_papers，造成跨源数据污染。
+    if _norm(backend_key).lower() not in ("", "arxiv"):
+        return ""
     sb = (cfg.get("supabase") or {}) if isinstance(cfg, dict) else {}
     return _norm((sb or {}).get("papers_table") or "")
 
@@ -153,6 +158,20 @@ def resolve_default_raw_path(date_str: str, backend_key: str) -> str:
         prefix = "emnlp_papers"
     elif safe_backend == "aaai":
         prefix = "aaai_papers"
+    elif safe_backend == "cvpr":
+        prefix = "cvpr_papers"
+    elif safe_backend == "eccv":
+        prefix = "eccv_papers"
+    elif safe_backend == "ijcai":
+        prefix = "ijcai_papers"
+    elif safe_backend == "osdi":
+        prefix = "osdi_papers"
+    elif safe_backend == "sosp":
+        prefix = "sosp_papers"
+    elif safe_backend == "ieee_sp":
+        prefix = "ieee_sp_papers"
+    elif safe_backend == "ndss":
+        prefix = "ndss_papers"
     return os.path.join(ROOT_DIR, "archive", date_str, "raw", f"{prefix}_{date_str}.json")
 
 
@@ -400,7 +419,7 @@ def normalize_paper(x: Dict[str, Any]) -> Dict[str, Any] | None:
     pid = _norm(x.get("id"))
     if not pid:
         return None
-    return {
+    row = {
         "id": pid,
         "title": _norm(x.get("title")),
         "abstract": _norm(x.get("abstract")),
@@ -412,6 +431,14 @@ def normalize_paper(x: Dict[str, Any]) -> Dict[str, Any] | None:
         "source": _norm(x.get("source") or "supabase"),
         "updated_at": _now_iso(),
     }
+    pdf_url = _norm(x.get("pdf_url"))
+    if pdf_url:
+        row["pdf_url"] = pdf_url
+    for key in ("source_paper_id", "doi", "version"):
+        value = _norm(x.get(key))
+        if value:
+            row[key] = value
+    return row
 
 
 def deduplicate_rows_by_id(rows: List[Dict[str, Any]]) -> tuple[List[Dict[str, Any]], int]:
@@ -499,6 +526,14 @@ def upsert_papers(
     def _upsert_with_split(chunk: List[Dict[str, Any]], depth: int = 0) -> None:
         nonlocal uploaded
         if not chunk:
+            return
+        # PostgREST 要求批内字段一致；省略的可选字段不能补 null，以免覆盖旧 PDF。
+        field_groups: Dict[frozenset[str], List[Dict[str, Any]]] = {}
+        for row in chunk:
+            field_groups.setdefault(frozenset(row), []).append(row)
+        if len(field_groups) > 1:
+            for group in field_groups.values():
+                _upsert_with_split(group, depth)
             return
         try:
             used_attempt = _post_chunk(chunk)
@@ -668,7 +703,13 @@ def main() -> None:
     backend_key = _norm(args.backend_key) or "arxiv"
     url = resolve_supabase_url(args.url, backend_key)
     key = _norm(args.service_key)
-    papers_table = resolve_papers_table(args.papers_table, backend_key) or "arxiv_papers"
+    papers_table = resolve_papers_table(args.papers_table, backend_key)
+    if not papers_table:
+        raise SystemExit(
+            f"[FATAL] 无法为 backend={backend_key} 解析目标表名："
+            "请设置 SUPABASE_PAPERS_TABLE 或在 config.yaml 的 source_backends 中配置。"
+            "拒绝回退到 arxiv_papers，以免把该源的论文写进 arXiv 表。"
+        )
     if not url or not key:
         log("[INFO] 缺少 Supabase 连接信息（url 或 service key），跳过同步。")
         return

@@ -15,11 +15,20 @@ const {
   clearQuickRunUnsavedMessage,
   __setQuickRunMsgEl,
   __setQuickRunConferenceBtn,
+  __setConferenceHintEl,
   __setUnsavedChanges,
   __setRunSelectionState,
   __initializeConferenceChoices,
   __getSelectedConferenceYearPairs,
+  __setConferenceStatsSnapshot,
+  __loadConferenceStatsSnapshot,
+  __resetConferenceStatsLoadPromise,
+  __buildConferenceChoiceRowsHtml,
+  formatConferenceYearStatsLabel,
+  runQuickConferenceRetrieval,
   runSelectedQuickFetch,
+  runSelectedQuickFetchByMode,
+  __setQuickRunMode,
 } = global.window.SubscriptionsManager.__test;
 
 function buildBaseConfig() {
@@ -154,19 +163,168 @@ function testConferenceCurrentYearDisabledForPendingSources() {
   const currentYear = String(new Date().getFullYear());
   const previousYear = String(new Date().getFullYear() - 1);
 
+  // Pending current year: NeurIPS is disabled for current year.
   assert.equal(isConferenceYearSelectable('NeurIPS', currentYear), false);
   assert.equal(isConferenceYearSelectable('NIPS', currentYear), false);
-  assert.equal(isConferenceYearSelectable('ICML', currentYear), false);
   assert.equal(isConferenceYearSelectable('NeurIPS', previousYear), true);
   assert.equal(isConferenceYearSelectable('NIPS', previousYear), true);
-  assert.equal(isConferenceYearSelectable('ICML', previousYear), true);
+  // 2026 available sources are explicitly whitelisted; pending/future sources stay disabled
+  assert.equal(isConferenceYearSelectable('ICLR', currentYear), true);
+  assert.equal(isConferenceYearSelectable('ICML', currentYear), true);
+  assert.equal(isConferenceYearSelectable('AAAI', currentYear), true);
+  assert.equal(isConferenceYearSelectable('ACL', currentYear), true);
+  assert.equal(isConferenceYearSelectable('OSDI', currentYear), true);
+  assert.equal(isConferenceYearSelectable('IEEE S&P', currentYear), true);
+  assert.equal(isConferenceYearSelectable('CVPR', currentYear), true);
+  assert.equal(isConferenceYearSelectable('ECCV', currentYear), true);
+  assert.equal(isConferenceYearSelectable('IJCAI', currentYear), true);
+  // ECCV biennial: odd years disabled
+  assert.equal(isConferenceYearSelectable('ECCV', '2024'), true);
+  assert.equal(isConferenceYearSelectable('ECCV', '2025'), false);
+  assert.equal(isConferenceYearSelectable('ECCV', '2023'), false);
 }
 
 function testConferenceDefaultYearOnlySelects2025() {
   __setRunSelectionState({ conferencePairs: [] });
   __initializeConferenceChoices();
   const pairs = __getSelectedConferenceYearPairs().sort();
-  assert.deepEqual(pairs, ['ICML:2025', 'NeurIPS:2025']);
+  // 不再默认勾选，由用户手动选择
+  assert.deepEqual(pairs, []);
+}
+
+function testSosp2026FormalMetadataChoiceHasNoLegacyWarning() {
+  __setConferenceStatsSnapshot({ items: [{ conference_key: 'sosp', year: 2026, stored_total_count: 62 }] });
+  __setRunSelectionState({ conferencePairs: ['SOSP:2026'] });
+  assert.equal(isConferenceYearSelectable('SOSP', '2026'), true);
+  const button = __buildConferenceChoiceRowsHtml().match(/<button\b[^>]*data-conference="SOSP"[^>]*data-conference-year="2026"[^>]*>[\s\S]*?<\/button>/)[0];
+  assert.equal(/\bdisabled\b/.test(button), false);
+  assert.ok(button.includes('aria-pressed="true"'));
+  assert.ok(button.includes('dpr-choice-total">62</span>'));
+  assert.equal(button.includes('标题和作者'), false);
+  assert.equal(button.includes('摘要/PDF'), false);
+  const hint = { textContent: '', style: {} };
+  __setConferenceHintEl(hint);
+  refreshQuickRunButtons();
+  assert.equal(hint.textContent.includes('SOSP 2026'), false);
+  assert.equal(hint.textContent.includes('标题和作者'), false);
+  assert.equal(hint.textContent.includes('摘要/PDF'), false);
+  __setRunSelectionState({ conferencePairs: ['SOSP:2025'] });
+  refreshQuickRunButtons();
+  assert.equal(hint.textContent.includes('标题和作者'), false);
+  __setConferenceHintEl(null);
+  __setRunSelectionState({ conferencePairs: [] });
+}
+
+function testIjcai2026CanBeSelectedWithDistinctOfficialAndStoredCounts() {
+  const snapshot = require('../app/conference-stats.json');
+  const stats = snapshot.items.find(item => item.id === 'ijcai-2026');
+  assert.equal(stats.official_accepted_count, 989);
+  assert.equal(stats.stored_total_count, 971);
+  __setConferenceStatsSnapshot(snapshot);
+  __setRunSelectionState({ conferencePairs: ['IJCAI:2026'] });
+  const button = __buildConferenceChoiceRowsHtml().match(/<button\b[^>]*data-conference="IJCAI"[^>]*data-conference-year="2026"[^>]*>[\s\S]*?<\/button>/)[0];
+  assert.equal(/\bdisabled\b/.test(button), false);
+  assert.ok(button.includes('aria-pressed="true"'));
+  assert.ok(button.includes('class="dpr-choice-total">971</span>'));
+  assert.ok(!button.includes('预计 2026 年 8 月会后'));
+  __setRunSelectionState({ conferencePairs: [] });
+}
+
+function testAvailable2026ConferenceChoicesAndEmnlpEstimate() {
+  __setConferenceStatsSnapshot(require('../app/conference-stats.json'));
+  __setRunSelectionState({ conferencePairs: ['CVPR:2026'] });
+  const html = __buildConferenceChoiceRowsHtml();
+  const buttonFor = (name) => html.match(new RegExp(`<button\\b[^>]*data-conference="${name}"[^>]*data-conference-year="2026"[^>]*>[\\s\\S]*?<\\/button>`))[0];
+  const cvpr = buttonFor('CVPR');
+  assert.equal(isConferenceYearSelectable('CVPR', '2026'), true);
+  assert.equal(/\bdisabled\b/.test(cvpr), false);
+  assert.ok(cvpr.includes('aria-pressed="true"'));
+  assert.ok(cvpr.includes('class="dpr-choice-total">4042</span>'));
+  const emnlp = buttonFor('EMNLP');
+  const eccv = buttonFor('ECCV');
+  assert.equal(/\bdisabled\b/.test(eccv), false);
+  const eccvStats = require('../app/conference-stats.json').items.find(item => item.id === 'eccv-2026');
+  assert.ok(eccvStats.stored_total_count > 0);
+  assert.ok(eccv.includes(`class="dpr-choice-total">${eccvStats.stored_total_count}</span>`));
+  assert.ok(/\bdisabled\b/.test(emnlp));
+  assert.ok(emnlp.includes('10 月中下旬'));
+  assert.ok(emnlp.includes('以官方论文集开放时间为准'));
+  assert.equal(emnlp.includes('11 月会后'), false);
+  __setRunSelectionState({ conferencePairs: [] });
+}
+
+function testConferenceYearChoicesShowTwoDigitYearAndStoredTotalOnly() {
+  __setRunSelectionState({ conferencePairs: ['ICLR:2025'] });
+  __setConferenceStatsSnapshot({
+    generated_at: '2026-06-30T00:00:00Z',
+    items: [
+      {
+        conference_key: 'iclr',
+        conference_label: 'ICLR',
+        year: 2025,
+        official_accepted_count: 379,
+        stored_total_count: 401,
+        stored_accepted_count: 379,
+        stored_rejected_count: 22,
+      },
+      {
+        conference_key: 'icml',
+        conference_label: 'ICML',
+        year: 2026,
+        official_accepted_count: 6341,
+        stored_total_count: 6555,
+        stored_accepted_count: 6341,
+        stored_rejected_count: 214,
+      },
+      {
+        conference_key: 'acl',
+        conference_label: 'ACL',
+        year: 2026,
+        official_accepted_count: 4459,
+        stored_total_count: 4459,
+        stored_accepted_count: 4459,
+        stored_rejected_count: 0,
+      },
+    ],
+  });
+
+  assert.equal(formatConferenceYearStatsLabel('ICLR', '2025'), '25 (401)');
+  const html = __buildConferenceChoiceRowsHtml();
+  assert.ok(html.includes('ICLR'));
+  assert.ok(html.includes('25 (401)'));
+  assert.ok(html.includes('class="dpr-choice-year">25</span>'));
+  assert.ok(html.includes('class="dpr-choice-total">401</span>'));
+  assert.equal(html.includes('拒稿'), false);
+  assert.equal(html.includes('379'), false);
+  assert.ok(html.includes('aria-pressed="true"'));
+  assert.equal((html.match(/is-featured-conference-year/g) || []).length, 2);
+  assert.equal((html.match(/dpr-choice-feature-star/g) || []).length, 2);
+}
+
+async function testConferenceStatsLoadReusesBootstrappedJsonPromise() {
+  const oldFetch = global.fetch;
+  let fetchCalls = 0;
+  global.fetch = () => {
+    fetchCalls += 1;
+    return Promise.reject(new Error('late fetch should not be used'));
+  };
+  global.window.DPR_ASSET_JSON_PROMISES = {
+    'app/conference-stats.json': Promise.resolve({
+      items: [
+        { conference_key: 'iclr', year: 2025, stored_total_count: 321 },
+      ],
+    }),
+  };
+  __resetConferenceStatsLoadPromise();
+
+  await __loadConferenceStatsSnapshot();
+
+  assert.equal(fetchCalls, 0);
+  assert.equal(formatConferenceYearStatsLabel('ICLR', '2025'), '25 (321)');
+
+  delete global.window.DPR_ASSET_JSON_PROMISES;
+  __resetConferenceStatsLoadPromise();
+  global.fetch = oldFetch;
 }
 
 function testQuickRunUnsavedMessageClearsAfterSave() {
@@ -238,6 +396,76 @@ function testConferenceRunDisabledWhenUnsaved() {
   delete global.window.SubscriptionsSmartQuery;
 }
 
+function testConferenceRunAllowsMoreThanFiveYearsWhenStoredTotalUnderLimit() {
+  const btn = buildMockButton();
+  const hintEl = { textContent: '', style: { color: '' } };
+  global.window.SubscriptionsSmartQuery = {
+    getSelectedProfileTags() {
+      return ['GENE'];
+    },
+  };
+  __setConferenceStatsSnapshot({
+    items: [
+      { conference_key: 'aaai', year: 2026, stored_total_count: 1000 },
+      { conference_key: 'aaai', year: 2025, stored_total_count: 1000 },
+      { conference_key: 'aaai', year: 2024, stored_total_count: 1000 },
+      { conference_key: 'acl', year: 2025, stored_total_count: 1000 },
+      { conference_key: 'acl', year: 2024, stored_total_count: 1000 },
+      { conference_key: 'ndss', year: 2026, stored_total_count: 1000 },
+    ],
+  });
+  __setQuickRunConferenceBtn(btn);
+  __setConferenceHintEl(hintEl);
+  __setRunSelectionState({
+    conferencePairs: ['AAAI:2026', 'AAAI:2025', 'AAAI:2024', 'ACL:2025', 'ACL:2024', 'NDSS:2026'],
+  });
+  __setUnsavedChanges(false);
+  refreshQuickRunButtons();
+
+  assert.equal(btn.disabled, false);
+  assert.equal(hintEl.textContent.includes('最多同时选择 5 个会议年份'), false);
+  assert.equal(hintEl.textContent.includes('库内约 6,000 篇'), true);
+  assert.equal(hintEl.textContent.includes('预计耗时约 3 分钟'), true);
+  assert.equal(hintEl.textContent.includes('费用约 ¥0.12'), true);
+  assert.equal(hintEl.textContent.includes('6 组任务，预计耗时约 30 分钟'), false);
+
+  __setQuickRunConferenceBtn(null);
+  __setConferenceHintEl(null);
+  __setRunSelectionState({});
+  delete global.window.SubscriptionsSmartQuery;
+}
+
+function testConferenceRunDisabledWhenSelectedStoredTotalReachesLimit() {
+  const btn = buildMockButton();
+  const hintEl = { textContent: '', style: { color: '' } };
+  global.window.SubscriptionsSmartQuery = {
+    getSelectedProfileTags() {
+      return ['GENE'];
+    },
+  };
+  __setConferenceStatsSnapshot({
+    items: [
+      { conference_key: 'iclr', year: 2025, stored_total_count: 20000 },
+      { conference_key: 'neurips', year: 2025, stored_total_count: 10000 },
+    ],
+  });
+  __setQuickRunConferenceBtn(btn);
+  __setConferenceHintEl(hintEl);
+  __setRunSelectionState({ conferencePairs: ['ICLR:2025', 'NeurIPS:2025'] });
+  __setUnsavedChanges(false);
+  refreshQuickRunButtons();
+
+  assert.equal(btn.disabled, true);
+  assert.equal(btn.title, '会议年份库内总数需小于 30,000 篇，当前已选 30,000 篇。');
+  assert.equal(hintEl.textContent, '会议年份库内总数需小于 30,000 篇，当前已选 30,000 篇，请取消部分会议年份。');
+  assert.equal(hintEl.style.color, '#c00');
+
+  __setQuickRunConferenceBtn(null);
+  __setConferenceHintEl(null);
+  __setRunSelectionState({});
+  delete global.window.SubscriptionsSmartQuery;
+}
+
 async function testQuickFetchIncludesAnySelectedProfile() {
   const calls = [];
   const msgEl = {
@@ -281,6 +509,61 @@ async function testQuickFetchIncludesAnySelectedProfile() {
   delete global.window.confirm;
 }
 
+async function testConferenceRetrievalDispatchesUnifiedConferencePairs() {
+  const calls = [];
+  const msgEl = { textContent: '', style: { color: '' } };
+  __setConferenceStatsSnapshot({
+    items: [
+      { conference_key: 'iclr', year: 2025, stored_total_count: 1000 },
+      { conference_key: 'neurips', year: 2024, stored_total_count: 1000 },
+      { conference_key: 'ieee_sp', year: 2026, stored_total_count: 1000 },
+    ],
+  });
+  __setRunSelectionState({ conferencePairs: ['ICLR:2025', 'NeurIPS:2024', 'IEEE S&P:2026'] });
+  __setUnsavedChanges(false);
+  global.window.SubscriptionsSmartQuery = {
+    getSelectedProfileTags() {
+      return ['GENE'];
+    },
+  };
+  global.window.DPRWorkflowRunner = {
+    runConferenceRetrieval(conference, years, options) {
+      calls.push({ conference, years, options });
+      return true;
+    },
+  };
+
+  assert.equal(await runQuickConferenceRetrieval(msgEl), true);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].conference, 'unified');
+  assert.deepEqual(calls[0].years, ['2026', '2025', '2024']);
+  assert.equal(calls[0].options.dispatchInputs.conference_pairs, 'ieee_sp:2026,iclr:2025,neurips:2024');
+  assert.equal(calls[0].options.dispatchInputs.profile_tag, 'GENE');
+
+  __setRunSelectionState({});
+  delete global.window.DPRWorkflowRunner;
+  delete global.window.SubscriptionsSmartQuery;
+}
+
+async function testLongRangeSelectionDispatchesAndCanCancel() {
+  const calls = [];
+  window.SubscriptionsSmartQuery = { getSelectedProfilesForRun: () => [{tag: 'ATSP', paused: false}] };
+  window.DPRWorkflowRunner = { runQuickFetchByDays: (days, options) => { calls.push({days, options}); return true; } };
+  window.confirm = () => true;
+  __setUnsavedChanges(false);
+  for (const days of [90, 365]) {
+    __setQuickRunMode(String(days));
+    assert.equal(await runSelectedQuickFetchByMode(), true);
+    assert.equal(calls.at(-1).days, days);
+    assert.equal(calls.at(-1).options.dispatchInputs.profile_tag, 'ATSP');
+  }
+  window.confirm = () => false;
+  assert.equal(await runSelectedQuickFetchByMode(), false);
+  assert.equal(calls.length, 2);
+  __setQuickRunMode('10');
+  delete window.confirm; delete window.SubscriptionsSmartQuery; delete window.DPRWorkflowRunner;
+}
+
 (async () => {
   testNormalizeSubscriptionsAddsBiorxivBackend();
   testNormalizeSubscriptionsPreservesCustomBiorxivBackendFields();
@@ -288,9 +571,18 @@ async function testQuickFetchIncludesAnySelectedProfile() {
   await testRunProfileQuickFetchPassesProfileTagToWorkflow();
   testConferenceCurrentYearDisabledForPendingSources();
   testConferenceDefaultYearOnlySelects2025();
+  testSosp2026FormalMetadataChoiceHasNoLegacyWarning();
+  testIjcai2026CanBeSelectedWithDistinctOfficialAndStoredCounts();
+  testAvailable2026ConferenceChoicesAndEmnlpEstimate();
+  testConferenceYearChoicesShowTwoDigitYearAndStoredTotalOnly();
+  await testConferenceStatsLoadReusesBootstrappedJsonPromise();
   testQuickRunUnsavedMessageClearsAfterSave();
   testConferenceRunDisabledWhenUnsaved();
+  testConferenceRunAllowsMoreThanFiveYearsWhenStoredTotalUnderLimit();
+  testConferenceRunDisabledWhenSelectedStoredTotalReachesLimit();
   await testQuickFetchIncludesAnySelectedProfile();
+  await testConferenceRetrievalDispatchesUnifiedConferencePairs();
+  await testLongRangeSelectionDispatchesAndCanCancel();
 
   console.log('subscriptions manager tests passed');
 })().catch((error) => {
