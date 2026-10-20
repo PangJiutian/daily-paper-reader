@@ -1,0 +1,2506 @@
+World-T3: Test-Time Training as Persistent
+Memory for Real-Time Video World Models
+Junyi Wu1,2,∗, Zekun Li1,3,∗, Chenhongyi Yang1, Chen Guo1, Lingchen Yang1, Yongan Zhang1,
+Xinyi Zhang1, Hongbing Hu1, Bartek Rymkowski1, Srinath Sridhar3,†, Yan Yan2,†, Xijie Huang1,†,‡
+1Meta Reality Labs, 2University of Illinois Chicago, 3Brown University
+∗Equal contribution, †Joint last author, ‡Project Lead
+Recent advances in video world models have enabled plausible interactive environments, yet long-horizon
+generation places a fundamental demand on visual memory: the previously observed world must remain
+consistent as the model continues to generate. Existing autoregressive approaches often implicitly rely on
+the generative model itself to retain such information, leading to spatial memory decay beyond the active
+context. We introduce World-T3, a camera-controlled video world model with a test-time training memory
+that consolidates past observations into dedicated model parameters. To robustly update this memory, we
+propose a recursive least-squares rule that incrementally absorbs novel visual features via online pose-keyed
+memory updates. Our TTT memory reads out previously observed scene features from the fast-weight state
+by camera pose, enabling consistent generation with constant storage and per-step computation regardless of
+rollout length. To facilitate real-time interactive generation with this robust memory, we further distill the
+autoregressive model into a few-step generator via dual-teacher distribution matching. On a long-horizon revisit
+benchmark, World-T3 raises revisit PSNR from 13.52 to 18.31 dB and reduces absolute rotation error from
+3.344◦to 1.075◦relative to the strongest baseline on both metrics, while sustaining 20.6 FPS at 1280 × 704
+on a single NVIDIA B200 GPU.
+Date: October 14, 2026
+Correspondence: huangxijie1108@meta.com
+Project Page: https://adreamwu.github.io/World-T3/
+First Visit
+Exploration
+Reverse Direction
+Revisit Pose
+Ours
+Consistent Scene on Revisit
+SANA-WM
+Scene Changes on Revisit
+W
+A
+S
+D
+I
+J
+K
+L
+W
+A
+S
+D
+I
+J
+K
+L
+W
+A
+S
+D
+I
+J
+K
+L
+W
+A
+S
+D
+I
+J
+K
+L
+W
+A
+S
+D
+I
+J
+K
+L
+W
+A
+S
+D
+I
+J
+K
+L
+W
+A
+S
+D
+I
+J
+K
+L
+W
+A
+S
+D
+I
+J
+K
+L
+0.5
+1
+2
+4
+8
+16
+Seconds per video second
+10
+14
+18
+Revisit PSNR (dB)
+real-time
+Ours
+SANA-WM
+DreamX-AR
+Matrix-Game 3.0
+HY-World 1.5
+LingBot-Fast
+Figure 1 Left: Revisit consistency. When returning to a previously visited viewpoint, our World-T3 enables faithful scene recall,
+whereas existing autoregressive baselines forget earlier observations beyond the context window and resynthesize new content. Right:
+Speed vs. quality on one NVIDIA B200 GPU. x-axis: wall-clock seconds required per second of generated 16 FPS 1280 × 704
+video (points left of the dashed line are real-time). y-axis: PSNR on the long-horizon revisit benchmark.
+1
+Introduction
+Video world models aim to simulate how a world evolves in response to user control, emerging as a powerful interface
+for embodied simulation, playable environment generation, and virtual exploration (Yang et al., 2023; Wang et al.,
+2026c; Bruce et al., 2024; Che et al., 2025; Zhang et al., 2025; Feng et al., 2026a; Shen et al., 2026). Conditioned on a
+reference image and a scene description, recent work utilizes autoregressive video diffusion models (VDMs) to allow
+1
+arXiv:2610.17434v1  [cs.CV]  12 Oct 2026
+
+
+users to explore and interact with generated environments through sequential control inputs, such as 6-DoF camera
+poses and natural language instructions (Team et al., 2026c,b; Zhu et al., 2026a; Team et al., 2026a; Xu et al., 2026a).
+However, as these models move from short-horizon generation toward sustained interaction, generating a plausible next
+observation is no longer sufficient. The autoregressive VDMs tend to remain locally coherent while gradually losing
+earlier scene information once it falls outside the active history context, causing previously established content to be
+resynthesized from the generative prior rather than preserved as persistent world state.
+Existing approaches attempt to preserve scene information beyond the local generation window by maintaining explicit
+3D scene representations (Huang et al., 2025; Zhao et al., 2026a; Wang et al., 2026b), retrieving historical frames via
+camera and geometric cues (Li et al., 2025; Yu et al., 2025; Xiao et al., 2026; Xu et al., 2026b; Wang et al., 2026d), or
+compressing past features into compact memory tokens (Kim et al., 2026; Bian et al., 2026; Wei et al., 2026). While
+these methods improve long-horizon consistency, maintaining an expanding collection of reconstructed geometry,
+historical frames, or tokens often introduces unbounded storage overhead and escalating attention complexity as rollouts
+progress. This motivates a complementary question: can a video world model consolidate successive observations into
+an online-updated, parametric memory that enables recovery of previous scene content, while keeping memory storage
+and per-step access costs independent of rollout length?
+To this end, we propose World-T3, a camera-controlled video world model that consolidates observation history into
+a fixed-size, pose-indexed parametric memory via test-time training (TTT). As generated video blocks leave the
+local context, their pose-content associations are written into dedicated fast-weight memory, which is subsequently
+queried by incoming camera poses to recover features of previously observed regions. A critical challenge in online
+parametric updating is handling smooth camera trajectories, where highly correlated pose features naturally introduce
+spatial redundancy across consecutive frames. To ensure that each update selectively incorporates novel visual content
+without degrading previously stored information, we propose Test-Time Memory Consolidation (§3.2.2), an online
+recursive least-squares update rule that incorporates the accumulated covariance of pose keys into each write. By
+solving a regularized regression objective over past pose-content associations, our method preconditions incoming key
+features to isolate non-redundant spatial information. Our TTT memory storage and per-step update complexity remain
+independent of rollout length, allowing history to be sequentially consolidated and accessed within a fixed budget.
+Specifically, starting from a pretrained video diffusion model (Wan et al., 2025), we develop World-T3 through a
+progressive three-stage training pipeline that establishes camera control, learns persistent scene memory, and enables
+few-step autoregressive generation (§3). Training draws on a curated corpus of 908K camera-annotated clips from
+real-world footage and synthetic environments (§B). In Stage 1, we adapt the pretrained backbone into a bidirectional
+teacher conditioned on 6-DoF camera trajectories. In Stage 2, we then convert it into a block-causal autoregressive
+model with bounded visual context and jointly train the backbone and memory module to consolidate past observations
+and retrieve them by camera pose. In Stage 3, to achieve real-time interactive generation, we design a dual-teacher
+distribution matching distillation framework (Song et al., 2023; Yin et al., 2024; Zhao et al., 2026b; Yin et al., 2025)
+that compresses the multi-step autoregressive model into a 4-step generator, leveraging both the bidirectional and
+memory-augmented teachers to balance local visual quality and long-horizon memory consistency. At deployment, our
+World-T3 sustains 20.6 FPS generation at 1280 × 704 on a single NVIDIA B200 GPU with live online memory updates.
+Our main contributions are: (i) We introduce World-T3, a camera-controlled video world model that incorporates a
+pose-indexed test-time training memory. Through an online recursive least-squares update rule, our model robustly
+consolidates historical observations into a parametric memory whose storage and per-step computation remain constant
+regardless of rollout length. (ii) We design a progressive three-stage training framework that converts a pretrained
+video diffusion backbone into an autoregressive world model with TTT memory, and further turn it into a few-step
+generator via dual-teacher distribution matching distillation. (iii) Against five recent video world models, the four-step
+World-T3 ranks first on all six evaluated revisit-consistency measures and is the only evaluated model to exceed the
+16 FPS playback rate for real-time generation on a single NVIDIA B200 GPU.
+2
+Related Work
+Video World Models. Recent advances in video generation have given rise to interactive world models that condition
+future observations on camera trajectories or action sequences (Team et al., 2026c,b; Zhu et al., 2026a; Team et al.,
+2026a; Xu et al., 2026a; Bruce et al., 2024; Che et al., 2025; Zhang et al., 2025; Yang et al., 2023). To incorporate
+2
+
+
+camera control, various representations have been explored, including pose vectors, dense Plücker ray maps, and relative
+positional encodings that integrate the geometric signal directly into the attention mechanism (He et al., 2024; Wang
+et al., 2024; Yin et al., 2026; Zhang et al., 2026a). While these approaches produce visually compelling results over short
+horizons, they suffer from progressive camera drift and temporal incoherence as the generation window extends (Xu
+et al., 2026a; Chen et al., 2026a; Ye et al., 2026; Li et al., 2026). The fundamental issue is persistence: a revisited
+region should faithfully preserve the state it exhibited on first encounter, rather than being hallucinated anew from the
+model’s learned prior (Lian et al., 2025; Lu et al., 2026). A parallel line of studies tackles this desideratum, whether
+by reconstructing and reprojecting previously observed geometry (Huang et al., 2025; Zhao et al., 2026a; Wang et al.,
+2026b), retrieving earlier frames according to spatial coverage (Li et al., 2025; Yu et al., 2025; Xiao et al., 2026; Xu
+et al., 2026b; Wang et al., 2026d), or distilling the ever-growing observation history into a fixed-size token buffer (Kim
+et al., 2026; Bian et al., 2026; Wei et al., 2026). These strategies, however, face an inherent dilemma: structured
+memory grows in cost with rollout length, while fixed-capacity alternatives inevitably dilute earlier observations as
+new content is compressed. In contrast, World-T3 absorbs the growing history into the network weights via test-time
+training, incurring constant memory cost regardless of sequence length while preserving previously encountered states
+within the expressive capacity of the parameter space.
+Test-Time Training as Memory. Test-time training casts persistent memory as an online associative-memory
+problem that continuously absorbs new observations into a fixed-size parametric state (Behrouz et al., 2026). Successive
+works have progressively coarsened the write granularity from a single gradient step per token (Sun et al., 2024), to
+objectives amortised over windows (Behrouz et al., 2025), to chunk-level updates sized to saturate modern accelera-
+tors (Zhang et al., 2026b). The same principle has since migrated to visual and embodied domains: video diffusion
+models adopt it for minute-long coherent generation (Dalal et al., 2025), 3D reconstruction systems recast recurrent
+updating as online learning over image streams (Chen et al., 2026b), and spatial understanding and robot control leverage
+it to maintain persistent state over long streams or to distill reusable memory from unlabelled demonstrations (Liu
+et al., 2026; Jiang et al., 2026; Feng et al., 2026b). Throughout this progression, a shared assumption remains: the
+gradient-based write presumes successive keys are diverse enough for a local step to meaningfully separate them. When
+keys are nearly collinear along camera poses in a smooth trajectory, each update largely reiterates what the store already
+contains. World-T3 addresses this redundancy by solving the minimiser of the accumulated objective, providing video
+world models with a memory faithfully preserving scene state across long camera trajectories.
+3
+World-T3
+World-T3 is built on three successive stages from a pretrained text-image-conditioned video diffusion model (VDM).
+(i) Bidirectional SFT endows VDM with camera control and adapts it to the domain of freely navigated scenes using
+bidirectional attention, establishing high-fidelity generative priors (§3.1). (ii) Autoregressive Training introduces
+block-causal attention to enable interactive generation, augmented with persistent test-time training (TTT) memory for
+scene consistency (§3.2). (iii) Few-Step Distillation further distills denoising sampling to only four steps for real-time
+streaming, leveraging dual-teacher guidance to preserve short-term visual quality and long-term memory (§3.3).
+3.1
+Stage 1: Bidirectional Camera-Conditioned Teacher
+Plücker
+Encoder̄
+,̅
+Camera Modulation
+Video Latent
+Video Latent
+Camera Modeling
+Plücker Rays
+Self-Attention Block
+Cross-Attention Block
+FFN Block
+ℎ←(1 +̄
+)ℎ+̅
+DiT Block
+Text
+×  ώ
+Figure 2 Camera Conditioning. Plücker raymaps mod-
+ulate each DiT block via camera-dependent scale and shift.
+To establish a strong foundation capable of producing globally
+coherent geometry and motion, Stage 1 adapts the pretrained
+VDM backbone with low-rank adapters on all attention and
+feed-forward projections, trained jointly with a newly intro-
+duced camera conditioning module, while the remaining back-
+bone weights stay frozen. By attending over the entire temporal
+horizon simultaneously, the teacher constructs each latent frame
+with global awareness of all others, thereby realizing a given tra-
+jectory as a single coherent motion. This bidirectional teacher
+model serves two pivotal roles in subsequent stages: it provides
+weight initialization for the autoregressive student model in
+Stage 2 (§3.2), and supplies the reference score function for the
+distribution matching objective in Stage 3 (§3.3).
+3
+
+
+We encode camera geometry using Plücker raymaps (He et al., 2024; Yin et al., 2026), with all poses expressed
+relative to the first frame. For a latent frame f with rotation Rf, camera origin of, and intrinsics K, the ray
+at spatial position (u, v) has direction df,uv ∝RfK−1[u, v, 1]⊤and is represented by its direction and moment:
+rf,uv =
+ df,uv, of × df,uv
+
+∈R6.
+These rays form a six-channel field Π aligned with the latent grid, providing spatially resolved camera conditioning.
+Identical viewpoints yield identical raymaps, which also serve as the basis for pose-keyed retrieval in our TTT memory
+module (§3.2.2). An embedding layer projects Π into the VDM backbone’s feature space and injects the features into
+every transformer block through adaptive layer-norm, with zero-initialized output projection for training stability.
+3.2
+Stage 2: Autoregressive Teacher with TTT Memory
+Stage 1 endows the bidirectional backbone with camera control over fixed-length sequences. Despite strong generative
+priors, its non-causal nature precludes interactive and extended rollout. In Stage 2, we convert this model into an
+autoregressive VDM via block-causal attention. However, autoregressive generation over extended horizons inherently
+suffers from context decay, leading to severe visual hallucinations upon revisiting previous viewpoints. To bridge this
+gap, we integrate a test-time training (TTT) memory into the autoregressive framework, preserving long-horizon scene
+consistency across rollout trajectories.
+Specifically, generation produces a sequence of N latent blocks x1:N = (x1, . . . , xN), each containing B latent frames.
+The rollout is conditioned on a text prompt c, a reference image cI, and a 6-DoF camera trajectory T1:N. To keep
+per-block computation O(1) w.r.t. rollout length, we construct a bounded visual context Cb and an evolving TTT
+memory state Mb. The joint distribution factorizes block-causally as:
+pθ(x1:N | T1:N, cI, c) =
+N
+Y
+b=1
+pθ(xb | Cb, Mb, T1:b, cI, c) .
+(1)
+3.2.1
+Block-Causal Adaptation
+To maintain global identity while ensuring local continuity, as shown in Figure 3 (a), we construct the bounded visual
+context Cb for each generation step b as Cb =
+
+s ; xb−K:b−1
+
+, where the first generated block s = x1 acts as a
+persistent sink to anchor long-term visual appearance, and the sliding window of K recent clean blocks provides local
+temporal continuity across block boundaries.
+We fine-tune the Stage 1 model using masked teacher forcing (Chen et al., 2024; Zhu et al., 2026b; Zhao et al., 2026b).
+A block-causal attention mask ensures that the target block attends only to Cb and its own noisy latents, excluding
+future blocks to allow parallel teacher-forced training.
+3.2.2
+Test-Time Memory Consolidation
+Long-horizon scene generation with viewpoint revisits demands that the model consistently recovers previously observed
+visual content. To achieve this, we propose Test-Time Memory Consolidation, a test-time training module that represents
+each generated block as a key-value association between its camera pose and visual content. As generation progresses,
+blocks evicted from the active context window are consolidated into a fast-weight memory state via closed-form online
+updates (Sun et al., 2024; Behrouz et al., 2026, 2025; Zhang et al., 2026b; Dalal et al., 2025; Chen et al., 2026b). The
+updated memory reconciles new observations with scene history, enabling subsequent generation steps to query and
+retrieve long-term visual information using camera pose as the key.
+Pose-Keyed Fast Weights. Each transformer layer in the backbone is augmented with a lightweight TTT module as
+parametric scene memory. The memory architecture consists of a two-layer MLP: a fixed projection layer W1 that
+maps pose keys into a non-linear feature space via ϕ(k) = gelu(W1k), and a dynamically updated readout matrix W2
+that stores accumulated scene representations across time. Crucially, memory operations are decoupled from diffusion
+noise, as keys depend solely on camera raymaps, while values are derived from clean latent representations.
+Consolidating Writes via Recursive Least Squares. When block ej is evicted from the context window at the
+j-th write step, its camera raymap Πej and hidden state hej are projected into a key-value association:
+kj = φK(Πej),
+vj = φV (hej),
+(2)
+4
+
+
+(a) Context Window Modeling and Camera Revisit
+Sink
+Evicted Block
+K Recent Clean Blocks
+Current Block
+Ϳ = ΄1
+΄ϡϞ
+΄Ϟ−ύ
+΄Ϟ−ύ+1
+⋯
+΄Ϟ−1
+΄Ϟ
+Noisy Target
+Consolidate on Eviction
+Never Evicted
+ϡϥ
+Ϟ
+ЋϞ =  Ћϡϥ
+Revisit Viewpoint
+(b) Test-Time Memory Consolidation
+WRITE
+Ћϡϥ̟
+ύ
+ͷϥ
+cϡϞ̟
+Ϙ
+΂ϥ
+RLS update
+͵ =͉ͤ ϲ−1 +͉
+⊤͉ͤͫ
+2  ← ͫ
+2 + (΂ −ͫ
+2͉ )͵⊤ͤ
+  ← ͤ
+−͵͉
+⊤ͤ
+ℳϞ
+Fast Weights RLS Stateͤ
+όϞ
+update
+READ
+ЋϞ̟
+ύ
+ͷϞ
+(c) DiT Integration
+Block-Causal Self-Attention
+Camera Modulation
+Gated Memory Residual
+cϞ  ← cϞ +̿
+⊙ͫ
+out͹Ϟ
+Cross-Attention Block
+FFN Block
+Text
+Video Latent
+×  ώͫ
+2
+(όϞ)
+Persistent Memory
+Pose-Keyed Retrieval
+͹Ϟ =ͫ
+2͉ (ͷϞ)͉
+(ͷ) = gelu(ͫ
+1ͷ)
+Figure 3 Stage 2: Autoregressive Teacher with TTT Memory. (a) Overview of the context window modeling, which
+consists of a sink block, K recent clean blocks, and the current block. The revisit viewpoint may be evicted and thus fall outside the
+active context window. (b) WRITE encodes an evicted block’s raymap Πej and clean hidden state hej into a key-value pair and
+updates TTT memory state Mb by recursive least squares (Eq. 4). READ uses the target pose key kb to retrieve memory feature
+mb from the fast weights (Eq. 5), without distorting the memory state with Jb writes before block b. (c) The retrieved memory is
+adaptively injected into each DiT block through a gated residual (Eq. 6) for long-horizon consistency during viewpoint revisits.
+where φK and φV denote spatial pose and content encoders, respectively. As illustrated in Figure 3 (b), upon context
+eviction, the pair (kj, vj) is consolidated into the TTT memory state Mb.
+Memory updates are conducted in an online manner, with key-value blocks presented sequentially upon context
+eviction. However, when a camera traverses a scene smoothly, consecutive evictions often originate from closely aligned
+viewpoints, resulting in correlated and near-collinear pose keys. A naive write strategy would repeatedly reinforce these
+dominant directions, allowing redundant observations to bias the stored memory. To ensure each write contributes
+novel information, we formulate memory consolidation as a weighted ridge regression problem over the key-value pairs
+observed up to write j:
+min
+W2
+X
+i≤j
+wi
+vi −W2ϕi
+2 + λ
+W2 −W(0)
+2
+2
+F ,
+(3)
+where ϕj = gelu(W1kj) is the pose key feature, wj is a learned scalar weight, and W(0)
+2
+is the learned base readout
+matrix. To solve Eq. 3 online per eviction, we recursively track the inverse regularized feature correlation matrix
+Pj =
+ P
+i≤j wiϕiϕ⊤
+i + λI
+−1. Starting from pre-write states W2 = W(j−1)
+2
+and P = Pj−1, the recursive least
+squares update rule for the j-th write is:
+g =
+Pϕ
+w−1 + ϕ⊤Pϕ,
+W2 ←W2 +
+ v −W2ϕ
+
+g⊤,
+P ←P −g ϕ⊤P,
+(4)
+where index j is omitted for brevity. The update direction Pϕ acts as a whitening preconditioner that attenuates feature
+components along directions already spanned by prior memory, ensuring that only the novel residual updates W2.
+Since W1 remains fixed, Eq. 4 yields the exact minimizer of Eq. 3 at every step, and therefore the consolidated memory
+state is invariant to the observation order.
+We apply Eq. 4 once per eviction step per layer and yield the memory state Mb =
+ W(Jb)
+2
+, PJb
+
+for generating target
+block b, where Jb counts the total writes completed prior to block b. We set λ = 10−3 and initialize P0 = I/λ. This
+5
+
+
+incorporates the base prior W(0)
+2
+while stabilizing the whitening process to prevent unbounded amplification of subtle
+key residuals.
+Memory Retrieval and Injection. During generation of a target block b, memory reading operates using the target
+camera raymap Πb via its pose key kb = φK(Πb). As shown in Figure 3 (b), memory retrieval is performed via a
+forward pass:
+mb = read(kb) = W2 ϕ(kb) = W2 gelu(W1kb).
+(5)
+The retrieved memory feature mb is then projected back to the backbone feature dimension and injected into the layer’s
+hidden state hb via a learned per-channel gate γ as shown in Figure 3 (c):
+hb ←hb + γ ⊙Wout mb.
+(6)
+Outer-Loop Learning. The TTT memory module is trained jointly with the DiT backbone. Gradients from the
+standard VDM objective propagate through the recursive update in Eq. 4 to optimize the key projector W1, the base
+readout matrix W(0)
+2 , the encoders φK, φV , the adaptive sample weights w, and the gating parameters γ. By jointly
+optimizing the update mechanism, this outer-loop training aligns the TTT memory with the DiT backbone, enabling the
+model to dynamically adapt its internal state while preserving a shared representation space. The distinction between
+learned parameters and online state is central to our formulation. During deployment, the backbone, pose and content
+encoders, and key projector remain fixed, and only the readout matrix and inverse feature-correlation state evolve
+through Eq 3. Each write therefore incorporates a clean observation without backpropagating through the diffusion
+transformer, while subsequent reads condition generation on the accumulated scene history.
+3.3
+Stage 3: Dual-Teacher Few-Step Distillation
+The autoregressive model in Stage 2 requires tens of sampling steps per block during generation, which is computation-
+ally incompatible with real-time interactive generation. Therefore, the goal of Stage 3 is to accelerate the generation
+process to a few steps while preserving both visual quality and long-term memory.
+Following Zhao et al. (2026b), we initialize the few-step student via Consistency Distillation, which discretizes the
+continuous flow-matching into a 4-step schedule.
+Dual-Teacher Distribution Matching Distillation. While consistency distillation enables fast sampling, direct
+multi-step jumps tend to degrade frame-level visual fidelity and spatial consistency across frames. To recover both, we
+design a dual-teacher framework with Distribution Matching Distillation (DMD) (Yin et al., 2024; Huang et al., 2026),
+which factorizes the real-data score into complementary guidance:
+• Bidirectional Score (sbidir), provided by the Stage 1 teacher operating over its fixed temporal window, enforcing
+short-range visual realism and motion coherence.
+• Memory-Augmented Autoregressive Score (smem), provided by the Stage 2 teacher with TTT memory, evaluating
+latents along extended rollouts to preserve long-horizon spatial consistency.
+To compute distribution matching gradients, each teacher is paired with an architecturally isomorphic critic network
+trained on student-generated samples. Specifically, criticbidir mirrors the bidirectional teacher for local quality, while
+criticmem mirrors the autoregressive teacher with an identical TTT memory module. The generator gradient is then
+formulated by distribution matching updates:
+∇θLDMD = ∇θLDMD
+ teacherbidir, criticbidir
+
++ ∇θLDMD
+ teachermem, criticmem
+
+,
+(7)
+where each term computes the score-difference gradient on student rollout latents by:
+∇θLDMD(teacher, critic) = −Et,zt
+"
+ ˆx0,teacher(zt) −ˆx0,critic(zt)
+∂xθ
+∂θ
+#
+.
+(8)
+Here, xθ is the clean block generated by the few-step student under parameters θ, and zt is its noised counterpart at a
+randomly sampled timestep t. Prior to computing smem, the memory states of both the autoregressive teacher and its
+critic are initialized by running their memory update schedule over the student’s rollout. Thus, the memory-augmented
+guidance penalizes cumulative trajectory drift and inconsistent generation of the student under its own rollout conditions.
+6
+
+
+4
+Experiments
+In this section, we evaluate whether World-T3 recovers previously observed scenes beyond its recent context window
+while following the requested camera trajectory. We measure revisit fidelity, camera control, and visual quality,
+then examine larger camera sweeps and 4-step distillation. Together, these experiments assess the two requirements
+motivating our design: retaining scene history within a bounded memory budget and supporting real-time generation.
+Ours
+Matrix Game 3.0
+HY-World 1.5
+SANA-WM
+LingBot Fast
+Forward Camera Sequence
+Reverse Camera Sequence
+W
+A
+S
+D
+I
+J
+K
+L
+W
+A
+S
+D
+I
+J
+K
+L
+W
+A
+S
+D
+I
+J
+K
+L
+W
+A
+S
+D
+I
+J
+K
+L
+W
+A
+S
+D
+I
+J
+K
+L
+W
+A
+S
+D
+I
+J
+K
+L
+W
+A
+S
+D
+I
+J
+K
+L
+W
+A
+S
+D
+I
+J
+K
+L
+W
+A
+S
+D
+I
+J
+K
+L
+W
+A
+S
+D
+I
+J
+K
+L
+W
+A
+S
+D
+I
+J
+K
+L
+W
+A
+S
+D
+I
+J
+K
+L
+W
+A
+S
+D
+I
+J
+K
+L
+W
+A
+S
+D
+I
+J
+K
+L
+W
+A
+S
+D
+I
+J
+K
+L
+W
+A
+S
+D
+I
+J
+K
+L
+W
+A
+S
+D
+I
+J
+K
+L
+W
+A
+S
+D
+I
+J
+K
+L
+W
+A
+S
+D
+I
+J
+K
+L
+W
+A
+S
+D
+I
+J
+K
+L
+W
+A
+S
+D
+I
+J
+K
+L
+W
+A
+S
+D
+I
+J
+K
+L
+W
+A
+S
+D
+I
+J
+K
+L
+W
+A
+S
+D
+I
+J
+K
+L
+W
+A
+S
+D
+I
+J
+K
+L
+W
+A
+S
+D
+I
+J
+K
+L
+W
+A
+S
+D
+I
+J
+K
+L
+W
+A
+S
+D
+I
+J
+K
+L
+W
+A
+S
+D
+I
+J
+K
+L
+W
+A
+S
+D
+I
+J
+K
+L
+Forward Camera Sequence
+Ours
+Matrix Game 3.0
+HY-World 1.5
+SANA-WM
+LingBot Fast
+Reverse Camera Sequence
+W
+A
+S
+D
+I
+J
+K
+L
+W
+A
+S
+D
+I
+J
+K
+L
+W
+A
+S
+D
+I
+J
+K
+L
+W
+A
+S
+D
+I
+J
+K
+L
+W
+A
+S
+D
+I
+J
+K
+L
+W
+A
+S
+D
+I
+J
+K
+L
+W
+A
+S
+D
+I
+J
+K
+L
+W
+A
+S
+D
+I
+J
+K
+L
+W
+A
+S
+D
+I
+J
+K
+L
+W
+A
+S
+D
+I
+J
+K
+L
+W
+A
+S
+D
+I
+J
+K
+L
+W
+A
+S
+D
+I
+J
+K
+L
+W
+A
+S
+D
+I
+J
+K
+L
+W
+A
+S
+D
+I
+J
+K
+L
+W
+A
+S
+D
+I
+J
+K
+L
+W
+A
+S
+D
+I
+J
+K
+L
+W
+A
+S
+D
+I
+J
+K
+L
+W
+A
+S
+D
+I
+J
+K
+L
+W
+A
+S
+D
+I
+J
+K
+L
+W
+A
+S
+D
+I
+J
+K
+L
+W
+A
+S
+D
+I
+J
+K
+L
+W
+A
+S
+D
+I
+J
+K
+L
+W
+A
+S
+D
+I
+J
+K
+L
+W
+A
+S
+D
+I
+J
+K
+L
+W
+A
+S
+D
+I
+J
+K
+L
+W
+A
+S
+D
+I
+J
+K
+L
+W
+A
+S
+D
+I
+J
+K
+L
+W
+A
+S
+D
+I
+J
+K
+L
+W
+A
+S
+D
+I
+J
+K
+L
+W
+A
+S
+D
+I
+J
+K
+L
+Figure 4 Scene Consistency along Out-and-Back Camera Trajectories. Qualitative comparisons on an indoor scene
+(top) and an outdoor scene (bottom). Each 10-second camera input follows the forward trajectory for 5 seconds and then retraces it
+in reverse for 5 seconds. Columns show selected timestamps shared across methods, and the first and last columns compare the
+initial and return viewpoints.
+7
+
+
+4.1
+Evaluation Protocol
+Revisit Benchmark. To rigorously test persistent scene memory upon viewpoint revisits, we construct a dedicated
+benchmark comprising 120 clips with out-and-back camera trajectories sampled from the test set of our curated data.
+Each sequence spans 160 frames (10 s at 16 FPS) at 1280×704 resolution, with the camera reversing its path at frame
+80. By design, these trajectories force the camera to re-observe the initial environment after a substantial temporal
+excursion. All evaluated methods are conditioned on identical initial frames, text prompts, and prescribed 6-DoF camera
+trajectories. Appendix D.1 provides more details on the curation and preprocessing.
+Baselines. We compare against Matrix-Game 3.0 (Wang et al., 2026d), HY-World 1.5 (Sun et al., 2025), DreamX-
+AR (Team et al., 2026b), LingBot-Fast (Team et al., 2026c), and SANA-WM (Zhu et al., 2026a), using their official
+checkpoints and code. We evaluate both the Stage 2 autoregressive teacher and the Stage 3 few-step student of World-T3.
+Revisit Fidelity. Adapting the revisit protocol of WorldMark (Xu et al., 2026c), we quantify persistent memory
+retention by aggregating revisit consistency across four temporal gaps. Since the trajectory reverses at frame 80, we
+pair outbound frames t with return frames 160 −t at the identical requested camera pose. Specifically, we evaluate
+the zero-indexed frame pairs (8, 152), (16, 144), (24, 136), and (32, 128), corresponding to temporal separations of
+36, 32, 28, and 24 latent frames, respectively. Crucially, all four intervals exceed our 21-latent-frame active context
+window. We average the DINOv2 cosine distances over these pairs and report one minus this mean distance as
+semantic similarity. To assess reference fidelity, we also compute the PSNR between each generated return view and
+its corresponding VAE-decoded ground-truth (GT) view, averaging across the four paired frames. We compare all
+views at their prescribed timestamps without post-hoc alignment, ensuring both metrics remain naturally sensitive to
+trajectory-following deviations. Further details are provided in Appendix D.2.
+Camera Control and Visual Quality. We reconstruct camera trajectories from generated videos using VGGT-
+Ω(Wang et al., 2026a) and report absolute rotation error (RotErr), camera-matrix error (CamMC), alongside consecutive-
+frame rotational and translational relative pose errors (RPE). We align translations using a globally fitted scalar,
+preserving the unified initial-frame coordinate system. All camera-following metrics are macro-averaged across
+source datasets, with VAE-decoded GT serving as a reference for estimation error. For visual quality, we report the
+average across seven VBench (Huang et al., 2024) dimensions: imaging quality, aesthetic quality, subject consistency,
+background consistency, motion smoothness, temporal flickering, and overall consistency. Detailed metric definitions
+and aggregation rules are provided in Appendix D.2. Statistical significance in paired comparisons is assessed using
+exact two-sided sign tests, as elaborated in Appendix D.5.
+Table 1 Comparison on the Revisit Set. We average across seven VBench visual quality dimensions (0-100 scale). Revisit
+fidelity evaluates scene consistency via DINOv2 similarity (“Semantic Sim.”) between paired views and via PSNR against ground
+truth (GT). “Mem” is peak memory during generation on a single NVIDIA B200 GPU in GB. Bold marks the best generated result,
+and underline indicates the second best. VAE-decoded GT provides a reference for the evaluation.
+Visual Quality ↑
+Revisit Fidelity ↑
+Camera Following ↓
+Efficiency
+Method
+Steps
+VBench
+Semantic Sim. PSNR RotErr◦CamMC RPE Rot.◦RPE Trans. FPS ↑Mem ↓
+GT (VAE-decoded)
+–
+75.69
+0.9982
+–
+0.194
+0.0055
+0.073
+0.00102
+–
+–
+Matrix-Game 3.0
+3
+74.72
+0.8225
+11.15
+11.179
+0.2958
+0.357
+0.00285
+7.1
+76
+HY-World 1.5
+4
+75.32
+0.8563
+10.84
+12.864
+0.3484
+0.315
+0.00395
+4.5
+110
+DreamX-AR
+4
+74.83
+0.8768
+11.66
+8.011
+0.2276
+0.448
+0.00508
+11.0
+76
+LingBot-Fast
+4
+74.98
+0.8580
+10.59
+9.817
+0.2639
+0.317
+0.00290
+1.6
+144
+SANA-WM
+4+3†
+72.87
+0.9200
+13.52
+3.344
+0.1200
+0.253
+0.00439
+14.2
+48
+World-T3 Stage 2
+50
+75.15
+0.9476
+16.69
+1.308
+0.0381
+0.157
+0.00199
+4.4
+54
+World-T3 Stage 3
+4
+74.52
+0.9610
+18.31
+1.075
+0.0318
+0.159
+0.00196
+20.6
+54
+†We follow the official SANA-WM inference implementation, using four denoising steps followed by three refinement steps.
+4.2
+Revisit Fidelity and Camera Control
+Revisits beyond the Recent Context. Our World-T3 significantly improves both semantic return consistency
+and pixel-level reference fidelity (Table 1). Compared with SANA-WM, the strongest baseline on revisit fidelity, our
+8
+
+
+Stage 3 model roughly halves the DINOv2 feature distance (reducing error from 0.0800 to 0.0390) and raises PSNR
+by 4.79 dB. Both gains are supported by paired sign tests (Appendix D.5). These two metrics provide complementary
+evidence: outbound-return similarity measures the retention of generated content, whereas GT-referenced PSNR
+measures agreement with the reference scene. Their joint improvement demonstrates superior faithful scene recovery
+ability of our method beyond the active context. Additional comprehensive evaluations across DINOv2, PSNR, SSIM,
+and LPIPS (Appendix D.4) show that both our Stage 2 teacher and Stage 3 student consistently outperform all baselines
+on the revisit measures.
+Trajectory Following. Faithful scene revisits inherently necessitate precisely reaching the requested camera viewpoint.
+Relative to SANA-WM, our World-T3 Stage 3 reduces absolute RotErr from 3.344◦to 1.075◦, alongside lower rotational
+and translational RPE (Table 1). Notably, several baselines exhibit small consecutive-frame errors with markedly higher
+absolute errors, a pattern reflecting accumulated trajectory drift. The lower errors of World-T3 on both local and global
+scales indicate more coherent local motion and overall camera following. Together with the revisit results, these findings
+show improved scene recovery while executing the prescribed camera excursion.
+Qualitative Revisits. Figure 4 compares our World-T3 with representative baselines on out-and-back camera
+trajectories. In the indoor scene featuring complex geometries (e.g., staircases, windows, and reflections), and the
+outdoor environment containing fine structures, comparing the initial and return views reveals that existing baselines
+often suffer from changes in scene layout, object appearance, and viewpoint upon revisiting. In contrast, our method
+accurately retains object identities and structural alignment. Additional qualitative results along 30-second real-world
+camera trajectories are provided in Appendix A.
+Table 2 Revisit Consistency under Increasing Camera
+Sweep. T1–T3 are equal-sized terciles (40 clips each) of yaw
+sweep normalized by horizontal field of view. Higher tiers indicate
+larger sweeps. Bold and underline mark the best and second-best
+generated similarities in each tier, respectively.
+Method
+T1
+T2
+T3
+T3−T1
+GT (VAE-decoded)
+0.9981
+0.9983
+0.9981
+0.000
+Matrix-Game 3.0
+0.8743
+0.8196
+0.7737
+−0.101
+HY-World 1.5
+0.8612
+0.8581
+0.8497
+−0.012
+DreamX-AR
+0.9074
+0.8941
+0.8289
+−0.079
+LingBot-Fast
+0.8532
+0.8701
+0.8506
+−0.003
+SANA-WM
+0.9201
+0.9311
+0.9090
+−0.011
+World-T3 Stage 2
+0.9434
+0.9501
+0.9494
++0.006
+World-T3 Stage 3
+0.9582 0.9644 0.9603 +0.002
+Larger Camera Sweeps.
+We partition the bench-
+mark clips post-hoc into three equal-sized tiers based on
+total yaw sweep normalized by horizontal field of view,
+serving as a proxy for the volume of spatial content that
+leaves the active field of view. This stratification relies
+only on the prescribed camera trajectories. As reported in
+Table 2, our Stage 3 student model consistently maintains
+high revisit semantic similarity across all sweep tiers. In
+contrast, Matrix-Game 3.0 and DreamX-AR significantly
+degrade under larger sweeps, while other baselines re-
+main lower in absolute similarity despite flatter trends.
+Notably, our student model achieves advantages over
+SANA-WM across all tiers, with the most pronounced
+performance margin observed in the highest-sweep tier
+(T3). The concurrently lower camera-following error of
+our student model in this challenging tier further supports its robust and accurate revisit under substantial viewpoint
+changes (Appendix D.6).
+4.3
+Step Distillation and Efficiency
+Stage 3 distillation (§3.3) drastically reduces sampling from 50 to 4 steps while retaining strong revisit performance. The
+student model increases revisit PSNR from 16.69 to 18.31 dB and improves revisit LPIPS, with both gains supported
+by paired statistical tests (Appendix D.4). Its mean DINOv2 revisit distance is also lower, achieving 72/120 paired
+wins (p = 0.0353) against the teacher. Paired tests detect no statistically significant discrepancy between the teacher
+and student models across all four camera metrics (Appendix D.7). The primary trade-off is in visual quality and local
+consistency: VBench decreases from 75.15 to 74.52, and Local Memory from 0.9442 to 0.9258. The 4-step student
+therefore combines enhanced pixel-level revisit fidelity with modest compromises in these localized perceptual scores.
+To enable real-time interactive generation, we combine memory-read caching, compilation, efficient attention kernels,
+and optimized VAE decoding to reduce the end-to-end latency and peak memory of the model inference (Appendix E).
+With online TTT memory updates active, the 4-step student sustains an end-to-end throughput of 20.6 FPS at 1280×704
+on a single NVIDIA B200 GPU (Table 1, Figure 1), exceeding the 16 FPS real-time rate. The fixed-size parametric
+memory and bounded recent context keep memory storage and per-step costs independent of rollout duration (§3.2).
+9
+
+
+5
+Conclusion
+We presented World-T3, a camera-controlled world model that consolidates historical observations into a parametric
+memory by test-time training (TTT). To address spatial redundancy along smooth camera trajectories, we introduced
+an online recursive least-squares update rule that selectively writes novel visual contexts while preventing stored
+scene memory from degradation. We instantiated World-T3 through progressive three-stage training that transitions
+a pretrained video diffusion model into an autoregressive world model with TTT memory, followed by dual-teacher
+distillation for few-step generation. Evaluations show that World-T3 reliably preserves persistent world state, achieving
+superior revisit consistency and sustaining 20.6 FPS at 1280 × 704 on one NVIDIA B200 GPU.
+References
+Jason Ansel, Edward Yang, Horace He, Natalia Gimelshein, Animesh Jain, Michael Voznesensky, Bin Bao, Peter Bell, David
+Berard, Evgeni Burovski, et al. Pytorch 2: Faster machine learning through dynamic python bytecode transformation and graph
+compilation. In Proceedings of the 29th ACM international conference on architectural support for programming languages and
+operating systems, volume 2, pages 929–947, 2024.
+Ali Behrouz, Zeman Li, Praneeth Kacham, Majid Daliri, Yuan Deng, Peilin Zhong, Meisam Razaviyayn, and Vahab Mirrokni. Atlas:
+Learning to optimally memorize the context at test time. arXiv preprint arXiv:2505.23735, 2025.
+Ali Behrouz, Peilin Zhong, and Vahab Mirrokni. Titans: Learning to memorize at test time. Advances in Neural Information
+Processing Systems, 38:113506–113543, 2026.
+Yuxuan Bian, Zeyue Xue, Songchun Zhang, Shiyi Zhang, Weiyang Jin, Yaowei Li, Junhao Zhuang, Haoran Li, Jie Huang, Haoyang
+Huang, et al. Echo-infinity: Learning evolving memory for real-time infinite video generation. arXiv preprint arXiv:2606.04527,
+2026.
+Jake Bruce, Michael D Dennis, Ashley Edwards, Jack Parker-Holder, Yuge Shi, Edward Hughes, Matthew Lai, Aditi Mavalankar,
+Richie Steigerwald, Chris Apps, et al. Genie: Generative interactive environments. In Forty-first international conference on
+machine learning, 2024.
+Haoxuan Che, Xuanhua He, Quande Liu, Cheng Jin, and Hao Chen. Gamegen-x: Interactive open-world game video generation. In
+International Conference on Learning Representations, volume 2025, pages 37546–37593, 2025.
+Boyuan Chen, Diego Martí Monsó, Yilun Du, Max Simchowitz, Russ Tedrake, and Vincent Sitzmann. Diffusion forcing: Next-token
+prediction meets full-sequence diffusion. Advances in Neural Information Processing Systems, 37:24081–24125, 2024.
+Shuo Chen, Cong Wei, Sun Sun, Ping Nie, Kai Zhou, Ge Zhang, Ming-Hsuan Yang, and Wenhu Chen. Context forcing: Consistent
+autoregressive video generation with long context. arXiv preprint arXiv:2602.06028, 2026a.
+Xingyu Chen, Yue Chen, Yuliang Xiu, Andreas Geiger, and Anpei Chen. Ttt3r: 3d reconstruction as test-time training. In
+International Conference on Learning Representations, volume 2026, pages 50694–50718, 2026b.
+Sharan Chetlur, Cliff Woolley, Philippe Vandermersch, Jonathan Cohen, John Tran, Bryan Catanzaro, and Evan Shelhamer. cudnn:
+Efficient primitives for deep learning. arXiv preprint arXiv:1410.0759, 2014.
+Karan Dalal, Daniel Koceja, Jiarui Xu, Yue Zhao, Shihao Han, Ka Chun Cheung, Jan Kautz, Yejin Choi, Yu Sun, and Xiaolong
+Wang. One-minute video generation with test-time training. In 2025 IEEE/CVF Conference on Computer Vision and Pattern
+Recognition (CVPR), pages 17702–17711. IEEE, 2025.
+Juechu Dong, Boyuan Feng, Driss Guessous, Yanbo Liang, and Horace He. Flex attention: A programming model for generating
+optimized attention kernels. In Proceedings of Machine Learning and Systems, 2025.
+Ruili Feng, Han Zhang, Zhilei Shu, Zhantao Yang, Longxiang Tang, Zhicai Wang, Andy Zheng, Jie Xiao, Zhiheng Liu, Ruihang Chu,
+et al. The matrix: Infinite-horizon world generation with real-time moving control. Advances in Neural Information Processing
+Systems, 38:87318–87344, 2026a.
+Yusen Feng, Bingchen Han, Jiangran Lyu, Kai Liu, Yixin Zheng, Yuxuan Wan, Weiheng Liu, Sun Han, Ruiqin Li, Yulong Zhang,
+et al. Wam-ttt: Steering world-action models by watching human play at test time. arXiv preprint arXiv:2607.06988, 2026b.
+Hao He, Yinghao Xu, Yuwei Guo, Gordon Wetzstein, Bo Dai, Hongsheng Li, and Ceyuan Yang. Cameractrl: Enabling camera
+control for text-to-video generation. arXiv preprint arXiv:2404.02101, 2024.
+10
+
+
+Tianyu Huang, Wangguandong Zheng, Tengfei Wang, Yuhao Liu, Zhenwei Wang, Junta Wu, Jie Jiang, Hui Li, Rynson Lau,
+Wangmeng Zuo, et al. Voyager: Long-range and world-consistent video diffusion for explorable 3d scene generation. ACM
+Transactions on Graphics (TOG), 44(6):1–15, 2025.
+Xun Huang, Zhengqi Li, Guande He, Mingyuan Zhou, and Eli Shechtman. Self forcing: Bridging the train-test gap in autoregressive
+video diffusion. Advances in Neural Information Processing Systems, 38:167283–167308, 2026.
+Ziqi Huang, Yinan He, Jiashuo Yu, Fan Zhang, Chenyang Si, Yuming Jiang, Yuanhan Zhang, Tianxing Wu, Qingyang Jin, Nattapol
+Chanpaisit, et al. Vbench: Comprehensive benchmark suite for video generative models. In 2024 IEEE/CVF Conference on
+Computer Vision and Pattern Recognition (CVPR), pages 21807–21818. IEEE, 2024.
+Sam Ade Jacobs, Masahiro Tanaka, Chengming Zhang, Minjia Zhang, Shuaiwen Leon Song, Samyam Rajbhandari, and Yuxiong He.
+Deepspeed ulysses: System optimizations for enabling training of extreme long sequence transformer models. arXiv preprint
+arXiv:2309.14509, 2023.
+Yunfan Jiang, Yevgen Chebotar, Ruijie Zheng, Fengyuan Hu, Yunhao Ge, Jimmy Wu, Tianyuan Dai, Scott Reed, Li Fei-Fei, Yuke
+Zhu, et al. Robottt: Context scaling for robot policies. arXiv preprint arXiv:2607.15275, 2026.
+Youngrae Kim, Qixin Hu, C-C Jay Kuo, and Peter A Beerel. Memrope: Training-free infinite video generation via evolving memory
+tokens. arXiv preprint arXiv:2603.12513, 2026.
+Runjia Li, Philip Torr, Andrea Vedaldi, and Tomas Jakab. Vmem: Consistent interactive video scene generation with surfel-indexed
+view memory. In 2025 IEEE/CVF International Conference on Computer Vision (ICCV), pages 25690–25699. IEEE, 2025.
+Zekun Li, Xiaoyan Cong, Hongyu Li, Zhiyang Dou, Chuan Guo, Abhay Mittal, Sizhe An, and Srinath Sridhar. Ms. forcing: Efficient
+streaming video generation with multi-scale patchification and attention. arXiv preprint arXiv:2607.20940, 2026.
+Kewei Lian, Shaofei Cai, Yitao Liang, and Anji Liu. Loopnav: Benchmarking spatial consistency in world models. arXiv preprint
+arXiv:2505.22976, 2025.
+Fangfu Liu, Diankun Wu, Jiawei Chi, Yimo Cai, Yi-Hsin Hung, Xumin Yu, Hao Li, Han Hu, Yongming Rao, and Yueqi Duan.
+Spatial-ttt: Streaming visual-based spatial intelligence with test-time training. arXiv preprint arXiv:2603.12255, 2026.
+Jinpeng Lu, Dexu Zhu, Haoyuan Shi, Linghan Cai, Guo Tang, Yinda Chen, Jie Cao, Duyu Tang, Yi Zhang, Yong Dai, et al. Current
+world models lack a persistent state core. arXiv preprint arXiv:2606.20545, 2026.
+NVIDIA.
+CUDA
+C++
+programming
+guide:
+CUDA
+graphs.
+https://docs.nvidia.com/cuda/
+cuda-c-programming-guide/, 2025.
+Tianchang Shen, Sherwin Bahmani, Kai He, Sangeetha Grama Srinivasan, Tianshi Cao, Jiawei Ren, Ruilong Li, Zian Wang, Nicholas
+Sharp, Zan Gojcic, et al. Lyra 2.0: Explorable generative 3d worlds. arXiv preprint arXiv:2604.13036, 2026.
+Yang Song, Prafulla Dhariwal, Mark Chen, and Ilya Sutskever. Consistency models. arXiv preprint arXiv:2303.01469, 2023.
+Jianlin Su, Murtadha Ahmed, Yu Lu, Shengfeng Pan, Wen Bo, and Yunfeng Liu. Roformer: Enhanced transformer with rotary
+position embedding. Neurocomputing, 568:127063, 2024.
+Wenqiang Sun, Haiyu Zhang, Haoyuan Wang, Junta Wu, Zehan Wang, Zhenwei Wang, Yunhong Wang, Jun Zhang, Tengfei Wang,
+and Chunchao Guo. Worldplay: Towards long-term geometric consistency for real-time interactive world modeling. arXiv preprint
+arXiv:2512.14614, 2025.
+Yu Sun, Xinhao Li, Karan Dalal, Jiarui Xu, Arjun Vikram, Genghan Zhang, Yann Dubois, Xinlei Chen, Xiaolong Wang, Sanmi
+Koyejo, et al. Learning to (learn at test time): Rnns with expressive hidden states. arXiv preprint arXiv:2407.04620, 2024.
+AlayaWorld Team, Kaipeng Zhang, Chuanhao Li, Yifan Zhan, Yongtao Ge, Yuanyang Yin, Jiaming Tan, Kang He, Liaoyuan Fan, Min-
+gliang Zhai, et al. Alayaworld: Interactive long-horizon world modeling–full technical report. arXiv preprint arXiv:2607.18367,
+2026a.
+DreamX Team, Yancheng Bai, Rui Chen, Xiangxiang Chu, Rujing Dang, Hao Dou, Bingjie Gao, Qiwen Gu, Siyu Hong, Jiachen Lei,
+et al. Dreamx-world 1.0: A general-purpose interactive world model. arXiv preprint arXiv:2606.16993, 2026b.
+Robbyant Team, Zelin Gao, Qiuyu Wang, Yanhong Zeng, Jiapeng Zhu, Ka Leong Cheng, Yixuan Li, Hanlin Wang, Yinghao Xu,
+Shuailei Ma, et al. Advancing open-source world models. arXiv preprint arXiv:2601.20540, 2026c.
+Team Wan, Ang Wang, Baole Ai, Bin Wen, Chaojie Mao, Chen-Wei Xie, Di Chen, Feiwu Yu, Haiming Zhao, Jianxiao Yang, et al.
+Wan: Open and advanced large-scale video generative models. arXiv preprint arXiv:2503.20314, 2025.
+11
+
+
+Jianyuan Wang, Minghao Chen, Shangzhan Zhang, Nikita Karaev, Johannes Schönberger, Patrick Labatut, Piotr Bojanowski, David
+Novotny, Andrea Vedaldi, and Christian Rupprecht. Vggt-omega. arXiv preprint arXiv:2605.15195, 2026a.
+Weijie Wang, Haoyu Zhao, Yifan Yang, Feng Chen, Zeyu Zhang, Yefei He, Zicheng Duan, Donny Y Chen, Yuqing Yang, and Bohan
+Zhuang. Latent spatial memory for video world models. arXiv preprint arXiv:2606.09828, 2026b.
+Yixuan Wang, Rhythm Syed, Fangyu Wu, Mengchao Zhang, Aykut Onol, Jose Barreiros, Hooshang Nayyeri, Tony Dear, Huan
+Zhang, and Yunzhu Li. Interactive world simulator for robot policy training and evaluation. arXiv preprint arXiv:2603.08546,
+2026c.
+Zhouxia Wang, Ziyang Yuan, Xintao Wang, Yaowei Li, Tianshui Chen, Menghan Xia, Ping Luo, and Ying Shan. Motionctrl: A
+unified and flexible motion controller for video generation. In ACM SIGGRAPH 2024 Conference Papers, pages 1–11, 2024.
+Zile Wang, Zexiang Liu, Jiaxing Li, Kaichen Huang, Baixin Xu, Fei Kang, Mengyin An, Peiyu Wang, Biao Jiang, Yichen Wei, et al.
+Matrix-game 3.0: Real-time and streaming interactive world model with long-horizon memory. arXiv preprint arXiv:2604.08995,
+2026d.
+Zhengxuan Wei, Xu Guo, Xinghui Li, Xunzhi Xiang, Min Wei, Yiran Zhu, Qiulin Wang, Xintao Wang, Pengfei Wan, Xiangwang
+Hou, et al. Geometry-aware implicit memory for video world models. arXiv preprint arXiv:2606.02436, 2026.
+Haoning Wu, Erli Zhang, Liang Liao, Chaofeng Chen, Jingwen Hou, Annan Wang, Wenxiu Sun, Qiong Yan, and Weisi Lin.
+Exploring video quality assessment on user generated contents from aesthetic and technical perspectives. In 2023 IEEE/CVF
+International Conference on Computer Vision (ICCV), pages 20087–20097. IEEE, 2023.
+Zeqi Xiao, Yushi Lan, Yifan Zhou, Wenqi Ouyang, Shuai Yang, Yanhong Zeng, and Xingang Pan. Worldmem: Long-term consistent
+world simulation with memory. Advances in Neural Information Processing Systems, 38:49632–49652, 2026.
+Haofei Xu, Jing Zhang, Jianfei Cai, Hamid Rezatofighi, Fisher Yu, Dacheng Tao, and Andreas Geiger. Unifying flow, stereo and
+depth estimation. IEEE Transactions on Pattern Analysis and Machine Intelligence, 45(11):13941–13958, 2023.
+Jiacong Xu, Hanwen Jiang, Zhixin Shu, Kalyan Sunkavalli, Vishal M Patel, and Yiqun Mei. Wonder: Video world model done better.
+arXiv preprint arXiv:2607.26037, 2026a.
+Tian-Xing Xu, Zi-Xuan Wang, Guangyuan Wang, Li Hu, Zhongyi Zhang, Peng Zhang, Bang Zhang, and Song-Hai Zhang. Ucm:
+Unified modeling of camera control and memory with time-aware positional encoding warping for world models. In Proceedings
+of the Special Interest Group on Computer Graphics and Interactive Techniques Conference Conference Papers, pages 1–12,
+2026b.
+Xiaojie Xu, Zhengyuan Lin, Kang He, Yukang Feng, Xiaofeng Mao, Yuanyang Yin, Kaipeng Zhang, and Yongtao Ge. Worldmark:
+A unified benchmark suite for interactive video world models. arXiv preprint arXiv:2604.21686, 2026c.
+Sherry Yang, Yilun Du, Kamyar Ghasemipour, Jonathan Tompson, Leslie Kaelbling, Dale Schuurmans, and Pieter Abbeel. Learning
+interactive real-world simulators. arXiv preprint arXiv:2310.06114, 2023.
+Yixuan Ye, Xuanyu Lu, Yuxin Jiang, Yuchao Gu, Rui Zhao, Qiwei Liang, Jiachun Pan, Fengda Zhang, Weijia Wu, and Alex Jinpeng
+Wang. Mind: Benchmarking memory consistency and action control in world models. arXiv preprint arXiv:2602.08025, 2026.
+Minghao Yin, Jiahao Lu, Wenbo Hu, Wang Zhao, Shan Ying, and Kai Han. Scope: Sightline-coordinate positional encoding for
+video diffusion transformers, 2026. https://arxiv.org/abs/2606.27345.
+Tianwei Yin, Michaël Gharbi, Richard Zhang, Eli Shechtman, Fredo Durand, William T Freeman, and Taesung Park. One-step
+diffusion with distribution matching distillation, 2024. URL https://arxiv. org/abs/2311.18828, 3, 2024.
+Tianwei Yin, Qiang Zhang, Richard Zhang, William T Freeman, Fredo Durand, Eli Shechtman, and Xun Huang. From slow
+bidirectional to fast autoregressive video diffusion models. In 2025 IEEE/CVF Conference on Computer Vision and Pattern
+Recognition (CVPR), pages 22963–22974. IEEE, 2025.
+Jiwen Yu, Jianhong Bai, Yiran Qin, Quande Liu, Xintao Wang, Pengfei Wan, Di Zhang, and Xihui Liu. Context as memory: Scene-
+consistent interactive long video generation with memory retrieval. In Proceedings of the SIGGRAPH Asia 2025 Conference
+Papers, pages 1–11, 2025.
+Ted Zadouri, Markus Hoehnerbach, Jay Shah, Timmy Liu, Vijay Thakkar, and Tri Dao. Flashattention-4: Algorithm and kernel
+pipelining co-design for asymmetric hardware scaling. arXiv preprint arXiv:2603.05451, 2026.
+Cheng Zhang, Boying Li, Meng Wei, Yan-Pei Cao, Camilo Gambardella, Dinh Phung, and Jianfei Cai. Unified camera positional
+encoding for controlled video generation. In Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern
+Recognition, pages 38027–38037, 2026a.
+12
+
+
+Tianyuan Zhang, Sai Bi, Yicong Hong, Kai Zhang, Fujun Luan, Songlin Yang, Kalyan Sunkavalli, William Freeman, and Hao Tan.
+Test-time training done right. In International Conference on Learning Representations, volume 2026, pages 157604–157638,
+2026b.
+Yifan Zhang, Chunli Peng, Boyang Wang, Puyi Wang, Qingcheng Zhu, Fei Kang, Biao Jiang, Zedong Gao, Eric Li, Yang Liu, et al.
+Matrix-game: Interactive world foundation model. arXiv preprint arXiv:2506.18701, 2025.
+Jinjing Zhao, Fangyun Wei, Zhening Liu, Hongyang Zhang, Chang Xu, and Yan Lu. Spatia: Video generation with updatable spatial
+memory. In Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition, pages 4245–4257, 2026a.
+Min Zhao, Hongzhou Zhu, Kaiwen Zheng, Zihan Zhou, Bokai Yan, Xinyuan Li, Xiao Yang, Chongxuan Li, and Jun Zhu. Causal
+forcing++: Scalable few-step autoregressive diffusion distillation for real-time interactive video generation. arXiv preprint
+arXiv:2605.15141, 2026b.
+Haoyi Zhu, Haozhe Liu, Yuyang Zhao, Tian Ye, Junsong Chen, Jincheng Yu, Tong He, Song Han, and Enze Xie. Sana-wm: Efficient
+minute-scale world modeling with hybrid linear diffusion transformer. arXiv preprint arXiv:2605.15178, 2026a.
+Hongzhou Zhu, Min Zhao, Guande He, Hang Su, Chongxuan Li, and Jun Zhu. Causal forcing: Autoregressive diffusion distillation
+done right for high-quality real-time interactive video generation. arXiv preprint arXiv:2602.02214, 2026b.
+13
+
+
+Appendix
+A
+Additional Qualitative Revisit Results
+Figure 5 provides a qualitative comparison along a 30-second real camera motion sequence, during which World-T3
+continually updates its scene memory through TTT. We select three approximate revisits and enlarge local details to
+inspect scene retention. The 10-second quantitative benchmark uses a prescribed out-and-back trajectory to pair views
+at the same requested pose. Here, the selected views revisit the same scene regions without exact pose matching. At the
+basketball court scene, World-T3 retains the slim blue lower section of the lamp post, whereas DreamX-AR produces
+a broad purple pedestal (crop A). SANA-WM disconnects a backboard from its support (crop B). At the pool scene,
+DreamX-AR changes the pavilion’s flat roof to a pointed roof, and SANA-WM alters the pool-surface pattern. In
+contrast, our World-T3 more consistently retains these structures and appearance cues across visits.
+B
+Training Data
+Learning a camera-controllable video world model that maintains persistent scene memory imposes four complementary
+requirements on the training corpus: visual richness and diversity, precise camera pose annotations to ground the
+control signal, sequence lengths commensurate with the target generation horizon, and viewpoint revisits, whereby a
+previously observed region must be faithfully recalled even after substantial intervening content has elapsed beyond the
+model’s context. To satisfy these desiderata, we curate a base collection of 601K clips that provides broad coverage of
+appearance and camera motion and an augmented set of 307K clips designed for viewpoint recurrence.
+B.1
+Corpus Composition
+Following recently released work in video world models (Zhu et al., 2026a; Team et al., 2026b), our training corpus
+draws on both real-world footage and synthetic renderings to jointly cover natural appearance, diverse camera dynamics,
+and precise geometric annotation. Every clip is preprocessed into a unified data structure comprising video latents,
+per-frame camera intrinsics and extrinsics, and a free-form language scene caption, then resampled to 1280 × 704
+resolution at 16 FPS.
+Real-World Sources. Captured video provides the naturalistic appearance and complex illumination. Our real-world
+subset spans indoor and outdoor environments, encompassing casual orbiting and sweeping motions around objects
+or scenes, egocentric urban traversal through city streets, and smooth architectural walkthroughs of interior spaces.
+Together, these sources furnish a broad distribution over both scene category and camera trajectory, with an emphasis
+on forward-moving, first-person viewpoints in open environments.
+Synthetic Sources. Game-engine renderings complement real capture along two axes. First, they supply ground-truth
+camera pose free of estimation error, serving as a noise-free supervision signal. Second, they introduce trajectory
+patterns such as sustained aerial flight and systematic ground-level exploration that are difficult to acquire in the physical
+world, thereby extending the motion distribution covered by the corpus.
+B.2
+Camera Annotation
+To obtain coherent camera parameterization, we apply VGGT-Ω(Wang et al., 2026a) to all training clips, recovering
+per-frame intrinsics and extrinsics within a unified scale and anchoring each trajectory to the initial frame as the world
+origin. The resulting camera trajectories serve as the conditioning signal for controllable video generation and further
+induce a per-clip co-visibility matrix that encodes pairwise surface overlap between frames, quantifying the degree of
+viewpoint revisit throughout each sequence.
+B.3
+Data Filtering
+We filter each clip through a two-stage pipeline: objective criteria drawn from the imagery and the recovered geometry,
+and a semantic assessment produced by vision-language models.
+14
+
+
+Visit 0
+Visit 1
+Visit 2
+Visit 3
+Ours
+A
+B
+A
+B
+DreamX
+A
+A
+Sana-WM
+B
+B
+A
+DreamX
+Ours
+B
+Sana-WM
+Ours
+Ours
+A
+B
+A
+B
+DreamX
+A
+A
+Sana-WM
+B
+B
+A
+DreamX
+Ours
+B
+Sana-WM
+Ours
+Figure 5 Scene Consistency across Approximate Revisits. We identify three approximate revisits within a 30-second real
+camera motion sequence. Unlike the prescribed out-and-back trajectory used for quantitative evaluation, these revisits observe the
+same scene regions from similar, rather than identical, camera poses. Visit 0 denotes the initial observation, and Visits 1, 2, and 3
+mark the selected revisits in temporal order. Colored boxes link full views to enlarged crops comparing local details in the baselines
+and World-T3. All enlarged crops compare Visits 0 and 3.
+15
+
+
+Objective Scoring. The objective criteria span both visual content and camera geometry, following the conventions
+established for camera-controllable corpora (Zhu et al., 2026a; Team et al., 2026c; Xu et al., 2026a; Team et al., 2026a).
+Perceptual quality is assessed with DOVER (Wu et al., 2023), which produces complementary technical and aesthetic
+scores: the technical score captures low-level distortions such as blur and artefacts, while the aesthetic score reflects
+content and composition. To characterize scene dynamics, we compute optical flow magnitude via UniMatch (Xu et al.,
+2023) between frames and impose bilateral bounds. Clips whose flow falls below a lower threshold convey negligible
+information per unit duration, whereas those exceeding an upper threshold suffer from motion blur and inter-frame
+disocclusion. Mean luminance is similarly constrained to a permissible band, eliminating under-exposed footage in
+which scene structure is irrecoverable and over-exposed footage in which highlight detail is clipped. On the geometric
+side, we retain only clips whose estimated field of view and focal variation remain within the regime where the Plücker
+ray representation of §3.1 provides a faithful camera embedding.
+Semantic Profiling. Beyond photometric and geometric criteria, we employ a vision-language model to perform
+semantic assessment. Video frames are sampled uniformly across each clip and presented to the model, which annotates
+the scene along several aspects: the count of dynamic entities (pedestrians, vehicles, animals), the presence of synthetic
+overlays (UI chrome, loading screens, watermarks), perceptual blur, and viewpoint characterization. Responses conform
+to a structured schema in which factual observations and a concise rationale precede the binary usability verdict,
+enforcing a chain-of-thought discipline that grounds the decision in explicit evidence. Final admission into the corpus is
+gated jointly on the entity count and the usability label.
+B.4
+Text Captioning
+Captions serve as the textual conditioning signal and are generated by a vision-language model prompted to produce
+scene-static descriptions (Team et al., 2026c; Zhu et al., 2026a) in a single paragraph. A scene-static caption characterizes
+the environment in terms of its constituent objects, spatial arrangement, materials, colour palette, and illumination,
+together with dynamics intrinsic to the scene itself, such as flowing water or drifting fog. Crucially, the caption abstracts
+away all camera-related language: viewpoint references, cinematographic terminology, and motion verbs such as
+pan, dolly, or fly over are systematically excluded. The guiding principle is invariance: a given scene should elicit
+semantically equivalent captions regardless of the trajectory along which it is observed, ensuring that camera motion
+is communicated exclusively through the pose conditioning branch and that the two modalities of control remain
+disentangled.
+B.5
+Revisit Construction
+Revisits, denoting returns to previously observed regions, arise sparingly in natural video, since a camera traversing
+a scene seldom retraces its path. As a result, the co-visibility statistic remains low across most of the base set. This
+scarcity hinders learning an effective memory mechanism, which relies on repeated observations of the same content.
+To expose the model to such recurrence in real-world data, we construct revisits through a clip replay procedure.
+Specifically, we loop and re-index the camera trajectory of a video sequence so that the temporal path periodically
+returns to previously observed viewpoints at distinct temporal intervals within the same training sequence. We confine
+the replay to static scenes and exclude dynamic entities that change between visits to avoid abnormal movements. For
+synthetic data, we further design camera trajectories as closed loops through the rendered environments, so that the
+viewpoint deliberately returns to previously visited locations. Taken together, these procedures yield 307K clips with
+recurring viewpoints.
+C
+Training Details
+The three stages of our method are implemented as five consecutive training runs: bidirectional camera-conditioned
+supervised fine-tuning (SFT), block-causal adaptation, memory-augmented training, consistency distillation (CD),
+and distribution matching distillation (DMD). Specifically, the first run constitutes Stage 1, the subsequent two runs
+comprise Stage 2, and the final two runs complete Stage 3. Table 3 outlines the training configurations across all runs.
+16
+
+
+Table 3 Training Configuration. “AR” denotes block-causal autoregressive adaptation, and “Memory” represents the subsequent
+memory-augmented fine-tuning stage. Learning rates correspond to peak values, and gradient clipping thresholds are specified as
+gradient norms. DMD iteration counts represent critic updates, with generator updates executed every five iterations.
+Stage 1
+Stage 2
+Stage 3
+SFT
+AR
+Memory
+CD
+DMD
+Training iterations
+6000
+10,000
+15,000
+2500
+800
+Latent frames
+21
+21
+63
+63
+63
+GPUs
+512
+256
+128
+128
+128
+Batch per GPU
+2
+2
+1
+1
+1
+Global batch
+1024
+512
+128
+128
+128
+Backbone/generator LR 5×10−5 5×10−5 5×10−5 2×10−6 2×10−6
+Memory LR multiplier
+–
+–
+15
+1
+–
+Critic LR
+–
+–
+–
+–
+4×10−7
+Warm-up iterations
+500
+500
+500
+200
+50
+LR floor / peak
+0.01
+0.1
+0.1
+0.1
+0.1
+AdamW β1
+0.9
+0.9
+0.9
+0
+0
+AdamW β2
+0.999
+0.999
+0.999
+0.999
+0.999
+Weight decay
+0.01
+0.01
+0.01
+0
+0
+Gradient clipping
+0.5
+0.5
+0.5
+0.5
+1.0
+C.1
+Shared Configuration
+We initialize from Wan2.2-TI2V-5B, whose diffusion transformer (DiT) consists of 30 layers, a hidden dimension of
+3072, and 24 attention heads with a head dimension of 128. All training runs use 1280 × 704 videos at 16 FPS and
+BF16 mixed precision. The frozen WanVideoVAE compresses raw input videos into 48-channel latents with 16×
+spatial and 4× temporal downsampling factors. Specifically, a video clip of T frames maps to F = 1 + (T −1)/4
+latent frames over a 44 × 80 spatial grid, with the DiT processing patches of size (1, 2, 2). Accordingly, 21 and 63
+latent frames correspond to 81 and 249 raw video frames, respectively. Unless otherwise specified, all temporal metrics
+below, including context windows, sinks, block sizes, and rollout lengths, are quantified in terms of latent frames.
+The initial video frame conditions generation via its clean latent at diffusion timestep zero, which is directly concatenated
+along the temporal sequence. The standard denoising loss excludes this clean initial frame. Textual conditioning
+is injected via cross-attention over cached T5 embeddings, with both the text encoder and VAE remaining frozen
+throughout training. Camera control is parameterized using Plücker raymaps injected through camera-dependent
+adaptive layer normalization (CamAdaLN).
+Optimization is performed using AdamW across all training runs, adhering to the stage-specific schedules listed in
+Table 3. With a gradient accumulation factor of one, the effective global batch size equals the per-GPU batch size
+multiplied by the number of active data-parallel workers.
+C.2
+Stage 1: Bidirectional Camera-Conditioned SFT
+In Stage 1, we train rank-stabilized LoRA adapters of rank r = 256 and scaling factor α = 16 on all attention
+projections (query, key, value, output) and feed-forward networks, alongside rank-512 CamAdaLN modules. All
+remaining pretrained backbone weights are held frozen. Training optimizes a camera-conditioned denoising loss with
+full bidirectional attention across sequences of 21 latent frames. To enable classifier-free guidance, camera conditioning
+is randomly dropped with a probability of 0.05, with the dropout decision synchronized across the batch. We employ
+distributed data parallelism with AdamW. The learning rate linearly warms up for 500 iterations to a peak of 5 × 10−5,
+followed by cosine decay toward a floor of 5 × 10−7 over the total horizon.
+C.3
+Stage 2: Autoregressive Adaptation and Memory Training
+Block-Causal Adaptation. Starting from the Stage 1 checkpoint, we continue training the same LoRA adapters
+and camera modules for 10,000 iterations using masked teacher forcing. Attention is converted to block-causal, with
+17
+
+
+three latent frames per block, and each target block attends to itself and preceding context within a 21-latent window.
+We retain distributed data parallelism, AdamW, and the peak learning rate of 5 × 10−5. After 500 warm-up iterations,
+cosine decay reaches 5 × 10−6 at iteration 10,000.
+Memory-Augmented Fine-Tuning. We merge the iteration-10,000 LoRA weights into the backbone, instantiate the
+TTT memory modules, and jointly fine-tune the entire DiT backbone, camera modules, and TTT memory parameters
+for 15,000 iterations. The memory parameter group uses a learning-rate multiplier of 15, giving a peak learning rate of
+7.5 × 10−4, while the backbone peak remains 5 × 10−5. The backbone schedule uses 500 warm-up iterations followed
+by global-step cosine decay with a floor of 5 × 10−6. We employ FSDP2 full sharding for the DiT backbone and
+replicate the memory modules across workers.
+Each training episode contains 63 latent frames, with three latent frames per autoregressive block, a 21-latent sliding
+attention window, and a persistent three-latent sink block. Memory writes use the recursive least-squares readout update
+(rls_w2) with regularization λ = 10−3, performing 14 online memory consolidation updates per episode. Keys and
+values from clean context blocks are cached and detached from the compute graph. Revisit clips are constructed by
+decoding an 81-frame source segment, alternating forward and reverse traversal to form 249 frames, and re-encoding to
+63 latents, with camera poses following the same temporal indexing.
+C.4
+Stage 3: Few-Step Distillation
+Consistency Distillation. We initialize the student model weights from the Stage 2 memory teacher, and jointly
+train DiT backbone, camera modules, and TTT memory parameters for 2500 iterations on the same training corpus in
+this stage. Consistency Distillation (CD) retains the configuration from the previous stage, including 63-latent episodes,
+three-latent blocks, 21-latent window, three-latent sink, and the RLS memory update rules. The generation schedule
+employs a discretization grid of N = 48, with a 4-step sampling schedule evaluated at step indices [0, 12, 24, 36]. The
+teacher guidance scale is fixed to 1.0. All trainable parameter groups, including the memory modules, adopt a peak
+learning rate of 2 × 10−6, with 200 warm-up iterations and cosine decay to 10% of the peak value. Gradient norms are
+clipped at 0.5, with a gradient-spike threshold set to 3.0. We use FSDP2, seed 0, and an exponential moving average
+(EMA) with a decay factor of 0.99, starting at iteration 200 and updated every iteration. The iteration-2500 EMA
+checkpoint serves as the initializer for the DMD generator.
+Dual-Teacher Distribution Matching Distillation. DMD initializes the generator weights from the trained CD
+model while resetting the optimizer state. It incorporates both the frozen Stage 1 bidirectional teacher and the frozen
+Stage 2 memory-augmented teacher to provide dual-teacher guidance. Each teacher is paired with a trainable critic
+network possessing an identical architecture, initialized via weight copies. Both memory-augmented scoring networks
+construct their fast-weight memory states directly from the student’s own generated rollouts.
+The DMD training phase spans 800 iterations. Iterations 1–399 use only the bidirectional score term, while iterations
+400–800 use guidance from both the bidirectional and memory-augmented teachers. At iteration 400, the generator
+learning rate undergoes an additional 50-step boundary warm-up. Critics are updated every iteration, whereas the
+generator updates every fifth iteration, yielding 160 generator optimization steps across the run. The peak learning rates
+are 2 × 10−6 for the generator and 4 × 10−7 for the critics, with 50 initial warm-up iterations and cosine decay to 10%
+of each peak value. AdamW hyperparameters are set to (β1, β2) = (0, 0.999) with zero weight decay and a gradient
+clipping threshold of 1.0. We use FSDP2, seed 0, and generator EMA with decay 0.99 starting from iteration 200.
+For each training iteration, the rollout length is sampled uniformly from {21, 24, . . . , 63} latent frames and synchronized
+across parallel workers. The DMD loss is applied to the final contiguous 21 latent frames, using the same 4-step
+denoising schedule as CD. The final model is taken from the iteration-800 EMA checkpoint after the dual-teacher
+distillation phase.
+D
+Long-Horizon Revisit: Protocol and Additional Results
+D.1
+Evaluation Set and Shared Preprocessing
+The revisit evaluation benchmark consists of 120 video clips curated from an unseen, held-out test split of our dataset.
+For rigorous and unbiased evaluation of memory retention, clip selection is governed by a filtering pipeline based
+18
+
+
+on trajectory geometry. Specifically, we enforce a geometric constraint requiring a normalized angular yaw sweep
+(total sweep relative to horizontal field of view) of at least 0.30. The resulting benchmark exhibits a median angular
+sweep of 38◦and a median sweep/FOV ratio of 0.46. To guarantee fair representation, clips are stratified across source
+domains according to their natural proportions in the dataset pool, mitigating motion distribution bias and avoiding
+overrepresentation of specific camera dynamics.
+All evaluated methods are conditioned on identical per-clip random seeds, text prompts, and prescribed 6-DoF camera
+trajectories. Every sequence is generated and evaluated for exactly 160 frames at 16 FPS and 1280×704 resolution. We
+enforce strict frame-count truncation (rather than time-based truncation) to ensure uniform evaluation sequence lengths.
+Videos are encoded using standard H.264 (CRF 12, yuv420p). The ground-truth (GT) reference is decoded from 41
+cached VAE latents (161 frames) and truncated to 160 frames. Note that GT passes through one video-encoding stage,
+whereas generated outputs are re-encoded from their native videos and thus pass through two. This minor encoding
+asymmetry can slightly favor GT.
+D.2
+Metric Definitions
+Revisit Similarity. For a generated video clip xm, let f(I) denote the L2-normalized mean of non-CLS patch tokens
+extracted from DINOv2 ViT-B/14. Input images are resized to a short side of 256, center-cropped to 224 × 224, and
+normalized using standard ImageNet statistics. Given the zero-indexed frame pairs P = {(8, 152), (16, 144), (24, 136),
+(32, 128)}, we define:
+d(I, I′) = 1 −f(I)⊤f(I′),
+¯dm = 1
+4
+X
+(a,b)∈P
+d(xm
+a , xm
+b ),
+Sm = 1 −¯dm.
+(9)
+We report the aggregate DINOv2 similarity averaged across all 120 benchmark clips. The temporal separations between
+these paired frames correspond to 36, 32, 28, and 24 latent frames, respectively, all strictly exceeding the model’s
+21-latent-frame active context window. This explicitly tests the model’s ability to recall return views beyond its
+transient attention context. Our protocol adapts WorldMark’s revisit evaluation framework (Xu et al., 2026c), but
+employs fixed-index frame pairs rather than optical-flow-matched pairs. Fixed-time pairing evaluates the commanded
+camera trajectory and intentionally retains camera-following errors. To complement self-consistency, we evaluate each
+generated outbound and return view against its corresponding VAE-decoded ground-truth reference g, averaging over
+the same four pairs:
+dfirst = 1
+4
+X
+(a,b)∈P
+d(xm
+a , ga),
+dreturn = 1
+4
+X
+(a,b)∈P
+d(xm
+b , gb).
+(10)
+We average these per-clip scores over the 120 clips and report ∆= dreturn −dfirst, the mean increase in reference
+distance between the initial and return visits. These reference-based comparisons and camera trajectory errors distinguish
+faithful memory retention from self-consistent but incorrect scene content. Center cropping additionally restricts metric
+sensitivity to peripheral image boundary artifacts.
+Pixel Fidelity. For each outbound-return pair (a, b) ∈P, we compute revisit PSNR and SSIM between the gen-
+erated return view xm
+b and its VAE-decoded reference gb at the full 1280 × 704 resolution. Scores are averaged
+across the four pairs per clip and subsequently aggregated across the benchmark. For RGB values normalized
+to [0, 1], PSNR = 10 log10(1/MSE), with MSE values below 10−12 capped at 99 dB. SSIM is calculated via
+skimage.metrics.structural_similarity with channel_axis=2, data_range=1.0, and default
+7×7 Gaussian windowing. First-visit PSNR is computed analogously between xm
+a and ga over the same four pairs. Our
+4-step student model achieves a first-visit PSNR of 19.99 dB and a return-visit PSNR of 18.31 dB (a modest degradation
+of 1.68 dB). We additionally report Self-SSIM averaged across the generated outbound and return views (xm
+a , xm
+b ).
+Crucially, pixel-level metrics penalize camera control drift alongside appearance degradation, serving as a holistic
+measure of spatial and structural alignment.
+Camera Following. Camera poses are extracted from all generated videos and GT sequences using the VGGT-
+Ω(Wang et al., 2026a), enforcing 160 reconstructed poses per video. Recovered and prescribed camera-to-world poses
+are expressed relative to frame 0. We align translations with a scalar s∗= P
+t t⊤
+t ett/ P
+t ∥ett∥2
+2, without fitting global
+rotation or translation offsets. This scale-only convention preserves the shared initial-frame coordinate system and
+avoids unstable rotational alignment for nearly planar trajectories. Let Pt = [Rt, tt; 0⊤, 1] and ePt denote the reference
+19
+
+
+Table 4 Visual Quality on the Revisit Benchmark. All seven VBench dimensions are scored on a 0–100 scale (higher is
+better). “Avg.” is their unweighted mean and equals the VBench column of Table 1. Bold indicates the best generated result and
+underline indicates the second best.
+Method
+Imaging
+Aesthetic
+Subject
+Background
+Motion
+Flicker
+Overall
+Avg.
+GT (VAE-decoded)
+74.00
+53.84
+91.27
+93.44
+98.27
+94.37
+24.65
+75.69
+Matrix-Game 3.0
+74.03
+50.66
+89.53
+91.81
+98.42
+94.59
+24.00
+74.72
+HY-World 1.5
+76.29
+52.44
+90.72
+92.34
+97.79
+93.82
+23.87
+75.32
+DreamX-AR
+73.59
+52.49
+88.53
+91.99
+97.67
+94.48
+25.05
+74.83
+LingBot-Fast
+74.13
+52.84
+88.97
+91.97
+97.08
+94.62
+25.22
+74.98
+SANA-WM
+65.21
+47.04
+88.40
+91.46
+98.86
+95.40
+23.75
+72.87
+World-T3 Stage 2
+73.17
+51.96
+90.56
+92.99
+98.35
+94.70
+24.29
+75.15
+World-T3 Stage 3
+71.46
+50.14
+90.04
+92.56
+98.47
+95.28
+23.67
+74.52
+and scale-aligned recovered poses. With θ(R) = 180
+π arccos(clip((tr R −1)/2, −1, 1)), absolute trajectory errors are
+defined as:
+RotErr = 1
+T
+X
+t
+θ(R⊤
+t eRt),
+CamMC = 1
+T
+X
+t
+∥Pt −ePt∥F ,
+T = 160.
+(11)
+For consecutive frames, set At = P −1
+t
+Pt+1, eAt = eP −1
+t
+ePt+1, and Et = A−1
+t
+eAt. Relative Pose Errors (RPE) for
+rotation and translation are computed as the average of θ(Et[1:3, 1:3]) and ∥Et[1:3, 4]∥2 across T −1 adjacent frame
+pairs, respectively. Rotation metrics apply no alignment, whereas translation metrics employ the same scalar factor s∗.
+Following temporal averaging per clip, dataset-macro averages are reported across the source domains. The non-zero
+error of GT in Table 1 quantifies the intrinsic baseline noise of the pose estimator. Absolute errors reveal accumulated
+pose drift, whereas RPE measures consecutive-frame motion.
+Visual Quality and Aggregation. We use the unmodified VBench 0.1.5 evaluator (Huang et al., 2024) in custom_-
+input mode with its default temporal sampling and image preprocessing. Table 4 reports all seven dimensions on
+a 0–100 scale: imaging quality, aesthetic quality, subject consistency, background consistency, motion smoothness,
+temporal flickering, and overall consistency, the last evaluated against the source-video text prompts. Each dimension
+is the mean of per-video scores over all benchmark clips, and the unweighted average of the seven dimensions is the
+VBench score reported in Table 1. Note that VBench downsamples images to 512 on the longest side for imaging quality
+and evaluates aesthetic quality on 224 × 224 center crops, reflecting perceptual appeal rather than native-resolution
+boundary fidelity.
+Local Temporal Consistency. Inspired by WorldMark, we additionally report Local Memory score LM =
+(1 −rcut)(1 −rmut). Hard scene cuts are detected using TransNetV2 at threshold 0.5, while visual mutations are
+defined as adjacent sampled frames with a DINOv2 feature distance exceeding 0.10. Frames are sampled at fixed 0.5 s
+intervals (excluding pairs within 0.5 s of a detected cut). LM evaluates localized temporal smoothness and short-term
+frame transitions.
+D.3
+Additional Results and Trade-offs
+As detailed in Tables 1 and 4, the student model’s revisit fidelity gains coexist with slightly lower VBench visual quality
+scores compared to its teacher. Notably, the decoded GT reference achieves an imaging quality score of 74.00, lower
+than several generated baselines, highlighting that VBench imaging quality measures stylized sharpness rather than
+absolute distance to real-world ground truth.
+Table 5 shows that our Stage 3 student and Stage 2 teacher rank first and second among all methods in most DINOv2
+and SSIM metrics for both self-consistency and GT reference. Interestingly, while the student exhibits a higher
+GT-referenced distance on initial visits compared to the teacher (0.0281 vs. 0.0158), it achieves superior fidelity on
+return visits (0.0499 vs. 0.0581). Conversely, baselines like HY-World 1.5 and DreamX-AR score higher on Local
+Memory (LM), and the teacher has higher LM than the student. This occurs because LM prioritizes adjacent-frame
+temporal smoothness, which can be artificially elevated by static or over-smoothed predictions that fail to preserve
+long-range scene identity.
+20
+
+
+Table 5 Complementary Revisit Consistency Measures. ¯d denotes the DINOv2 self-distance across four outbound-return
+pairs. dfirst and dreturn evaluate feature distance against GT for outbound and return frames, respectively (∆= dreturn −dfirst).
+Self-SSIM compares generated return views to outbound views, and GT-SSIM compares return views to GT references. Bold marks
+the best generated result and underline denotes the second best.
+Method
+¯d ↓
+dfirst ↓
+dreturn ↓
+∆↓
+Self-SSIM↑
+GT-SSIM↑
+LM↑
+GT (VAE-decoded)
+0.0018
+–
+–
+–
+0.9470
+–
+0.9756
+Matrix-Game 3.0
+0.1775
+0.0411
+0.2185
+0.1774
+0.3759
+0.3748
+0.8875
+HY-World 1.5
+0.1437
+0.0274
+0.1867
+0.1593
+0.3576
+0.3526
+0.9874
+DreamX-AR
+0.1232
+0.0327
+0.1610
+0.1282
+0.3805
+0.3781
+0.9838
+LingBot-Fast
+0.1420
+0.0279
+0.1832
+0.1553
+0.3431
+0.3409
+0.9703
+SANA-WM
+0.0800
+0.0587
+0.1218
+0.0631
+0.4704
+0.4360
+0.9006
+World-T3 Stage 2
+0.0476
+0.0158
+0.0581
+0.0423
+0.5968
+0.5313
+0.9442
+World-T3 Stage 3
+0.0390
+0.0281
+0.0499
+0.0218
+0.7201
+0.5795
+0.9258
+Table 6 Comprehensive Revisit Fidelity Metrics. Scores are averaged over the four outbound-return pairs per clip across all
+120 benchmark clips. Outbound-return consistency compares each generated return view with its generated outbound view using
+DINOv2 feature distance ( ¯d), SSIM, and LPIPS. GT-referenced fidelity compares generated return views with the GT references
+using PSNR, SSIM, and LPIPS. The VAE-decoded GT row gives the reference level for self-consistency. Bold marks the best
+generated result and underline denotes the second best.
+Outbound-Return Consistency
+GT-Referenced Fidelity
+Method
+DINO ¯d ↓
+SSIM ↑
+LPIPS ↓
+PSNR ↑
+SSIM ↑
+LPIPS ↓
+GT (VAE-decoded)
+0.0018
+0.9470
+0.0221
+–
+–
+–
+Matrix-Game 3.0
+0.1775
+0.3759
+0.4478
+11.15
+0.3748
+0.4629
+HY-World 1.5
+0.1437
+0.3576
+0.4687
+10.84
+0.3526
+0.4784
+DreamX-AR
+0.1232
+0.3805
+0.4619
+11.66
+0.3781
+0.4699
+LingBot-Fast
+0.1420
+0.3431
+0.4775
+10.59
+0.3409
+0.4911
+SANA-WM
+0.0800
+0.4704
+0.3805
+13.52
+0.4360
+0.4272
+World-T3 Stage 2
+0.0476
+0.5968
+0.1932
+16.69
+0.5313
+0.2261
+World-T3 Stage 3
+0.0390
+0.7201
+0.1278
+18.31
+0.5795
+0.1822
+Memory Retention during Rollout. We evaluate scene retention by tracking the degradation from first-visit to
+return-visit GT-referenced distances. For example, as shown in Table 5, HY-World and our student model exhibit
+similar first-visit distances (both approximately 0.028), but HY-World’s return-visit error surges to 0.1867, whereas our
+student’s error increases marginally to 0.0499. This markedly lower error accumulation (∆= 0.0218 vs. 0.1593) of
+our student indicates better retention of scene content across the evaluated revisit intervals. These comparisons assess
+scene retention of the models and distinguish it from aggregate visual quality.
+D.4
+Complementary Metrics for Revisit Fidelity
+Table 6 extends the main comparison in Table 1 to feature, perceptual, and pixel-level measures. Outbound-return
+consistency evaluates self-consistency and retention of generated content, while GT-referenced fidelity evaluates strict
+compliance with the reference scene. Across all six measures, our World-T3 Stage 3 and Stage 2 models consistently
+secure the top two ranks among all evaluated methods, validating the robust memory retention enabled by our framework.
+D.5
+Paired Statistical Comparisons
+To rigorously assess performance margins, all pairwise comparisons employ clip-level paired outcomes evaluated via
+exact two-sided sign tests. Compared to SANA-WM, our Stage 3 student model achieves lower DINOv2 revisit distance
+on 111/120 clips (p = 1.7 × 10−23) and higher revisit PSNR on 112/120 clips (p = 1.4 × 10−24). Similarly, the
+Stage 2 teacher model outperforms SANA-WM in DINOv2 distance on 108/120 clips (p = 1.8 × 10−20). On 96/120
+clips, the student model simultaneously surpasses every external baseline in both memory similarity and revisit PSNR.
+Overall, our student model closes the DINOv2 feature distance gap between SANA-WM and the ground-truth limit
+(0.0018) by approximately 52%.
+21
+
+
+For the seven-dimensional VBench visual quality, paired sign tests favor Matrix-Game 3.0 and HY-World 1.5 over our
+student, while showing no statistically significant differences against DreamX-AR and LingBot-Fast. These statistical
+evaluations document the trade-off between peak perceptual sharpness and long-horizon memory retention.
+D.6
+Camera-Sweep Analysis
+Clips are post-hoc partitioned into three equal tiers (40 clips each) in Table 2 based on the total yaw sweep normalized
+by the horizontal field of view. This stratification measures camera rotation severity without relying on model outputs.
+Against SANA-WM, the student model achieves lower DINOv2 distances on 37/40, 36/40, and 38/40 clips in tiers T1,
+T2, and T3, respectively (p = 1.95 × 10−8, 1.86 × 10−7, and 1.49 × 10−9). The largest performance margin occurs in
+the most challenging high-sweep tier (T3). In T3, our student achieves a rotational camera error (RotErr) of 1.288◦,
+outperforming the teacher (2.241◦), SANA-WM (4.316◦), and remaining baselines (11.075◦-15.477◦).
+D.7
+Teacher-Student Comparisons
+With self-forcing distillation, the Stage 3 student improves over the Stage 2 teacher on revisit PSNR in 91/120 clips
+(p = 1.2 × 10−8) and on revisit LPIPS in 86/120 (p = 2.3 × 10−6). Its lower mean DINOv2 revisit distance is also
+supported by 72/120 wins (p = 0.0353). First-visit PSNR and all four camera metrics yield p-values between 0.14 and
+0.36, indicating comparable trajectory control between teacher and student. As shown in Table 6, revisit SSIM also
+improves descriptively from 0.5313 to 0.5795, while Local Memory (LM) decreases modestly from 0.9442 to 0.9258,
+mirroring the perceptual quality trade-offs observed under VBench.
+E
+Inference Efficiency
+Our 4-step World-T3 student achieves 20.6 FPS at 1280 × 704 on a single NVIDIA B200 GPU with online memory
+updates enabled, as shown in Figure 1b. The teacher uses 50 denoising steps per block and the student uses 4, a 12.5×
+reduction in step count. We report measured speedup separately from this ratio. This section describes how the 4-step
+student reaches real-time generation on a single GPU. All runtime efficiency optimizations do not change the model
+architecture and preserve the numerical fidelity: the student weights, its 4-step schedule, the latent-frame context
+window size, and the TTT memory with online updates are unchanged. Appendix E.1 defines the workload and settings,
+Appendix E.2 introduces the optimizations, Appendix E.3 demonstrates their measured effect, and Appendix E.4 tests
+that the optimization remains numerically equivalent to the baseline. Appendix E.5 compares inference cost across the
+baselines of Table 1 on the same hardware.
+E.1
+Workload and Measurement Settings
+Per-Block Workload. The World-T3 student inherits the Wan2.2-TI2V-5B backbone (Wan et al., 2025): 30 DiT
+blocks of width 3072 with 24 attention heads, and a causal 3D VAE with 16× spatial and 4× temporal compression.
+At 1280 × 704, a latent frame contains 880 tokens. A generation block holds B = 3 latent frames (2,640 tokens)
+and decodes to 12 video frames, i.e., 0.75 s at 16 FPS. For every block, the implementation performs four steps: (i) it
+encodes the clean context, i.e., the persistent sink and the most recent clean blocks, at most 18 latent frames or 15,840
+tokens, under the block-causal mask and caches the resulting keys and values, (ii) it runs the four denoising forwards of
+the target block, each attending to the cached context and to the block itself, (iii) it writes the block evicted from the
+window into the TTT memory (Eq. 4) and reads the memory at the target pose (Eq. 5), and (iv) it decodes the finished
+block with the causal VAE decoder, carrying the decoder’s temporal convolution cache from block to block. The context
+is re-encoded at every block rather than extended incrementally: when the window slides, each context block loses
+its oldest predecessor, so its hidden states change. Once the window is full, the per-block cost is therefore constant
+and does not depend on the rollout length. The fixed-size fast-weight and RLS states likewise keep memory storage
+constant (Sec. 3.2).
+Metrics. End-to-end latency is the wall-clock time from the inputs on disk (camera trajectory, first frame, and text
+prompt) to the last generated frame as 8-bit RGB in host memory. It includes first-frame VAE encoding, text encoding,
+camera embedding, sampling, TTT memory updates, decoding, and the device-to-host copy, and it excludes one-time
+model loading and video-container writing. We report it directly, as frames divided by latency (FPS), and as wall-clock
+22
+
+
+seconds per second of generated video. Peak memory is the device memory in use, polled through NVML every
+50–100 ms during the timed rollouts.
+Settings. Every configuration runs in its own warm process on NVIDIA B200 GPUs (180 GB HBM3e): one discarded
+warm-up rollout absorbs compilation, kernel autotuning, and allocator growth, and we report the median of three timed
+rollouts. Runs execute one at a time on an 8-GPU node. We time two lengths: L5 (81 frames, 5.06 s), the training
+horizon, and L30 (465 frames, 29.06 s), where the window has been full for most of the rollout. Our model runs in
+default bf16 with PyTorch 2.15 (development build), CUDA 12.8, and cuDNN 9.18.
+E.2
+Optimizations
+We group the optimizations by the source of the saving. Table 7 applies them cumulatively, in the order in which we
+added them.
+Reusing Features across Denoising Steps and Blocks. The keys and values of the clean context are computed
+once per block and reused by all four denoising steps. This KV cache is part of the starting point. We extend reuse
+in three places. First, the TTT memory state Mb and the target pose key kb do not change during the four steps, so
+the memory feature mb of Eq. 5 is computed once per block instead of once per step, and the output is bit-identical.
+Second, context keys are cached before rotary position embedding (RoPE) (Su et al., 2024) because their positions shift
+as the window slides, and we rotate them once per block rather than at every step. Third, under the block-causal mask,
+the keys and values of a context block depend only on that block and the context blocks before it. Blocks that form an
+unchanged prefix of the previous block’s context therefore have unchanged keys and values and are not recomputed: all
+earlier context blocks while the window is still filling, and the sink afterwards.
+Compilation and Attention Kernels. We compile the per-layer bodies of the denoising forward and of the context
+encoder with torch.compile (Ansel et al., 2024), which fuses the elementwise chains around attention (adaptive
+layer-norm modulation, gating, normalization) and keeps their intermediates in FP32. Self-attention in both passes uses
+FlashAttention-4 (Zadouri et al., 2026), which targets the Blackwell architecture, in place of FlexAttention (Dong et al.,
+2025). The block-causal context attention is issued as one dense call per query block over its visible key prefix, and
+both calls are registered as custom operators so that they remain inside the compiled graphs. The reference RoPE casts
+queries and keys to FP64 and multiplies them by complex128 frequencies, and inside a compiled graph this runs as
+separate unfused kernels with FP64 temporaries. We apply the same rotation in real FP32 arithmetic, whose relative
+error (about 6 × 10−8) is far below the bf16 resolution of the rotated tensors, so the rotation fuses with the preceding
+normalization.
+VAE Decoding. We enable cuDNN 9 (Chetlur et al., 2014) convolutions, store decoder weights and activations in
+channels-last (NDHWC) layout, and let cuDNN select its fastest engine for each convolution shape by benchmarking
+all candidates, restricting the compiler’s autotuning to cuDNN convolutions. The causal convolutions of the reference
+decoder also materialize a zero-padded copy of every input. We pass the spatial padding to the convolution itself and
+keep only the temporal padding, which comes from the causal cache. Decoding block by block with the causal cache
+performs the same convolutions as decoding the full latent sequence at once.
+Host-Side Overhead. Two host-side operations left the GPU idle between kernels. The RoPE frequency tables were
+rebuilt on the CPU and copied from pageable host memory at every denoising step, five 16 MB transfers per block. We
+build them once per window shape and keep them on the device. The per-block Gaussian noise is drawn from a CPU
+generator for reproducibility, and each draw with its synchronous copy stalled the stream. A background thread now
+draws the noise of upcoming blocks from the same generator in the same order into pinned memory, so the transfer is
+asynchronous. Both changes leave the output bit-identical.
+Multiple GPUs. In the Pipelined Streaming Rollout, a second GPU decodes block b while the first samples block b+1.
+The decoder state stays on the second GPU, so the decoding is the same as in the serial schedule. For higher single-stream
+throughput, we additionally split the tokens of each forward across GPUs with Ulysses sequence parallelism (Jacobs
+et al., 2023), which exchanges them through all-to-all communication before and after attention, replay the per-layer
+loops as CUDA graphs (NVIDIA, 2025) to remove kernel-launch overhead, and split the decoder layer-wise into a
+two-stage pipeline over two further GPUs.
+23
+
+
+Table 7 Cumulative Effect of the Optimizations on one B200. Each
+row is a separate warm process, and values are medians of three generations
+of a 30 s video (465 frames at 16 FPS). E2E is end-to-end latency, FPS is
+frames per second of latency, and Mem. is peak GPU memory in GB.
+# Change (cumulative)
+E2E (s) FPS Mem.
+1 Baseline
+70.48
+6.6
+72.1
+2 + torch.compile
+63.55
+7.3
+71.6
+3 + cuDNN 9, channels-last VAE decoder
+37.23
+12.5
+52.8
+4 + FlashAttention-4 for self-attention
+30.00
+15.5
+52.8
+5 + memory read once per block
+29.55
+15.7
+52.8
+6 + RoPE of cached keys once per block
+29.05
+16.0
+52.8
+7 + context prefix reuse
+27.56
+16.9
+54.9
+8 + shape-aware conv. engines
+24.25
+19.2
+54.4
+9 + prefetch Gaussian noise
+23.83
+19.5
+53.5
+10 + FP32 Rotation
+22.59
+20.6
+54.3
+Figure 6 Time per Steady-State Block on one
+GPU, start (#1) vs. final (#10): CUDA-event timers
+over the 32 full-window blocks of a 30 s rollout.
+Start (#1)
+Final (#10)
+0
+500
+1000
+1500
+2000
+ms per block
+530
+386
+888
+1855 ms
+202
+184
+179
+589 ms
+(3.1× faster)
+VAE decoding
+Context encoding
+TTT mem. + emb.
+Denoising (4 steps)
+Table 8 Numerical Fidelity of the Accelerated Implementation. Operator-level errors use the captured inputs of block 5 of
+a held-out clip and an FP32 copy of the model with TF32 disabled, and the decoder decodes the same 21 latent frames. Rollout rows
+compare full 81-frame bf16 rollouts with FP32 rollouts from the same inputs and seed.
+Test
+Measure
+Reference bf16
+Accelerated
+Denoising forward
+rel. RMS error to FP32 ↓
+1.54 × 10−2
+8.46 × 10−3
+Context encoding
+rel. RMS error to FP32 ↓
+1.28 × 10−2
+8.25 × 10−3
+VAE decoder
+rel. RMS error to FP32 ↓
+7.17 × 10−3
+5.95 × 10−3
+PSNR to FP32 (dB) ↑
+53.82
+55.44
+Rollout
+PSNR to FP32 rollout (dB) ↑
+27.40
+29.61
+SSIM to FP32 rollout ↑
+0.9034
+0.9257
+E.3
+Results
+Table 7 applies the optimizations cumulatively to a 30 s rollout on one GPU. End-to-end latency falls from 70.48 to
+22.59 s (3.12×). Both stages contribute: sampling time per block falls from 943 to 391 ms and decoding time from 890
+to 182 ms.
+Figure 6 splits a steady-state block into its phases. In the starting point, decoding takes almost half of the block (888 of
+1855 ms). After optimization, the four denoising forwards and the context encoding account for about two thirds of
+the block (386 of 589 ms), and decoding for 179 ms. One context encoding costs about as much as all four denoising
+forwards together (184 vs. 202 ms): with the sink reused, it still processes five times as many query tokens as a single
+forward (13,200 vs. 2,640). The remaining 24 ms include the TTT memory write, the timestep and camera embeddings,
+scheduling, and host-side work.
+E.4
+Numerical Fidelity
+Most of the proposed optimizations in Table 7 produce bit-identical outputs. The remaining optimizations reorder
+floating-point operations (row 3, 8), select different kernels (row 4), change the precision of the RoPE rotation (row 10),
+so their outputs differ from the reference at the level of floating-point rounding. Comparing generated videos against the
+reference would not measure this difference: the autoregressive sampler amplifies rounding differences into a different
+but equally valid rollout. We therefore test at two levels (Table 8).
+Operator Level. For each implementation, we capture the inputs of one denoising forward and one context encoding
+at a steady-state block (block 5) of a held-out clip, and compare its bf16 outputs with those of an FP32 copy of the
+model evaluated on FP32 copies of the same inputs, with TF32 disabled. The accelerated implementation passes if
+its relative RMS error to the FP32 output is at most 1.05 times that of the reference. This criterion was fixed before
+measurement. The decoder is tested analogously on the same latents: the eager bf16 decoder, the accelerated decoder,
+and an FP32 decoder decode the 21 latent frames of one clip. The accelerated implementation is closer to the FP32
+24
+
+
+Table 9 Inference Cost Comparison on NVIDIA B200 GPUs. Metrics are the median over three generations, run one at a
+time. L30 is the 30 s video setting. Mem. is peak memory in GB per GPU. For multi-GPU rows, we use maximum peak memory
+over GPUs.
+E2E latency (s)
+L30
+Method
+Steps
+GPUs
+5s
+30s
+s / video s
+FPS
+Peak Mem (GB)
+One GPU
+Matrix-Game 3.0
+3
+1
+12.23
+69.73
+2.24
+7.1
+76
+HY-World 1.5
+4
+1
+7.96
+107.04
+3.59
+4.5
+110
+DreamX-AR
+4
+1
+7.23
+42.22
+1.45
+11.0
+76
+LingBot-Fast
+4
+1
+44.56
+292.54
+10.07
+1.6
+144
+SANA-WM
+4
+1
+6.69
+32.75
+1.13
+14.2
+48
+World-T3 Stage 3
+4
+1
+3.63
+22.59
+0.78
+20.6
+54
+Multiple GPUs
+Matrix-Game 3.0
+3
+8
+6.50
+41.95
+1.35
+11.8
+61
+HY-World 1.5
+4
+8
+2.30
+24.16
+0.81
+19.7
+70
+LingBot-Fast
+4
+8
+16.72
+100.32
+3.45
+4.6
+107
+World-T3 Stage 3
+4
+8
+1.79
+8.28
+0.28
+56.2
+47
+result than the reference in all three cases, mainly because compiled kernels keep fused intermediates in FP32 where
+the reference rounds to bf16 after every operation.
+Rollout Level. We generate complete 81-frame rollouts with an FP32 model and measure how closely each bf16
+implementation reproduces them. The accelerated rollout is closer to the FP32 rollout than the reference bf16 rollout on
+7 of 8 clips. For scale, the reference rollout with a different noise seed reaches only 17.90 dB against the FP32 rollout,
+so the differences between bf16 implementations are small compared with sampling variability. The sequence-parallel
+sampler with CUDA graphs, tested with three GPUs, and the layer-pipelined decoder pass the same operator-level
+criterion (error ratios 0.56 for the denoising forward, 0.62 for the context encoding, and a decoder error of 5.96 × 10−3
+against 7.19 × 10−3 for the eager decoder). The replay-benchmark videos in Sec. 4 were generated with the evaluation
+implementation and were not regenerated with the accelerated one. The tests above address their equivalence directly.
+E.5
+Efficiency Comparison with Other Video World Models
+Table 9 gives a more detailed measurement of all the baselines in Table 1 with both the single-GPU and multiple-GPU
+settings. Each baseline runs its official inference code with the configuration used for its quality results in Table 1.
+Because the models produce different numbers of frames per chunk, their clips differ slightly in length (between 464
+and 497 frames for L30), while seconds per second of video normalizes for this. On one GPU, our student is the only
+model that generates a 30 s rollout faster than real time. SANA-WM reports peak memory from the PyTorch allocator
+instead of the device, and runs its 4-step generator followed by a 3-step refiner. With multiple GPUs, HY-World 1.5
+also becomes faster than real time, while our model remains the most efficient. Multi-GPU baselines use their official
+parallel modes, which is not supported by DreamX-AR and SANA-WM.
+F
+Limitations
+Although World-T3 demonstrates robust persistent scene memory and interactive generation in real-time, several
+limitations remain to be addressed in future work.
+Our framework relies on 3D foundation models, such as VGGT-Ω(Wang et al., 2026a), to extract 6-DoF camera
+trajectories from video corpora for conditioning. However, off-the-shelf pose estimators occasionally exhibit tracking
+noise or subtle drift, particularly in challenging visual environments with weak textures or rapid camera maneuvers.
+Since our test-time memory consolidation performs pose-keyed retrieval, such inaccuracies in the camera trajectory
+can degrade the alignment between queries and fast-weight states. Over extended generation horizons, such pose
+estimation errors may also accumulate and lead to suboptimal memory recall during viewpoint revisits. Addressing
+25
+
+
+this limitation necessitates training on higher-quality camera trajectory datasets or incorporating more robust camera
+estimation pipelines.
+Additionally, while our pose-indexed test-time training memory improves temporal stability and viewpoint revisit
+consistency over extended rollouts, maintaining pristine visual fidelity and generating well beyond the training context
+length remain open challenges in video world modeling. As autoregressive rollouts proceed significantly past the
+temporal window seen during training, video frames can occasionally experience gradual visual attenuation or fine-
+grained texture degradation due to compounding errors. Achieving photorealistic high-resolution generation and
+unbounded temporal extrapolation demands further advances in scalable generative architectures, higher-capacity latent
+spaces, and dynamic context management strategies.
+Despite these limitations, World-T3 provides a viable and efficient path toward persistent memory in interactive video
+world models, and we hope our TTT memory formulation inspires future explorations in real-time long-horizon scene
+generation.
+26
