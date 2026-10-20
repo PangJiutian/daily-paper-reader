@@ -1,6 +1,9 @@
 * <a class="dpr-sidebar-root-link" href="#/">首页</a>
 * <a class="dpr-sidebar-root-link dpr-sidebar-noactive-link" href="javascript:void(0)" data-dpr-hash="#/tutorial/README">使用教程</a>
 * Daily Papers
+  * 2026-10-20 <!--dpr-date:20261020-->
+    * 速读区
+      * <a class="dpr-sidebar-item-link dpr-sidebar-item-structured" href="#/202610/20/2610.15900v1-gen-through-the-lens-camera-controllable-video-generation-via-cross-coordinate-conditioning-fusion" data-sidebar-item="{&quot;title&quot;: &quot;Gen Through the Lens: Camera-Controllable Video Generation via Cross-Coordinate Conditioning Fusion&quot;, &quot;link&quot;: &quot;https://arxiv.org/abs/2610.15900v1-gen-through-the-lens-camera-controllable-video-generation-via-cross-coordinate-conditioning-fusion&quot;, &quot;score&quot;: &quot;9.0&quot;, &quot;tags&quot;: [{&quot;kind&quot;: &quot;query&quot;, &quot;label&quot;: &quot;video-world-models&quot;}], &quot;evidence&quot;: &quot;结合空间几何提示的相机可控视频生成&quot;}">Gen Through the Lens: Camera-Controllable Video Generation via Cross-Coordinate Conditioning Fusion</a>
   * 2026-06-27 <!--dpr-date:20260627-->
     * 精读区
       * <a class="dpr-sidebar-item-link dpr-sidebar-item-structured" href="#/202606/27/2606.27029v1-symplectic-neural-networks-for-learning-generalized-hamiltonians" data-sidebar-item="{&quot;title&quot;: &quot;Symplectic Neural Networks for learning Generalized Hamiltonians&quot;, &quot;link&quot;: &quot;https://arxiv.org/abs/2606.27029v1-symplectic-neural-networks-for-learning-generalized-hamiltonians&quot;, &quot;score&quot;: &quot;9.0&quot;, &quot;tags&quot;: [{&quot;kind&quot;: &quot;query&quot;, &quot;label&quot;: &quot;geo-phys-ai&quot;}], &quot;evidence&quot;: &quot;辛神经网络通过哈密顿量学习保持能量守恒&quot;}">Symplectic Neural Networks for learning Generalized Hamiltonians</a>
