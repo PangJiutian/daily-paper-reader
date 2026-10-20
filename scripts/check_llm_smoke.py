@@ -18,7 +18,7 @@ def configurations(env):
     result = [('pipeline_effective', key, base, model)]
     if env.get('DEEPSEEK_API_KEY'):
         result.append(('deepseek', env['DEEPSEEK_API_KEY'], env.get('DEEPSEEK_BASE_URL') or 'https://api.deepseek.com', env.get('DEEPSEEK_MODEL') or 'deepseek-v4-flash'))
-    if env.get('SUMMARY_API_KEY'):
+    if env.get('SUMMARY_API_KEY') and not env.get('DIAGNOSE_ONLY'):
         result.append(('summary', env['SUMMARY_API_KEY'], env.get('SUMMARY_BASE_URL') or base, env.get('SUMMARY_MODEL') or model))
     return result
 
@@ -45,9 +45,15 @@ def check(key, base, model):
         return {'status': 'failed', 'reason': 'network_or_timeout'}
     if response.status_code != 200:
         return {'status': 'failed', 'http_status': response.status_code}
+    diagnostics = {'response_is_html': 'text/html' in response.headers.get('Content-Type', '').lower(), 'response_is_json': 'json' in response.headers.get('Content-Type', '').lower(), 'base_has_surrounding_whitespace': base != base.strip(), 'key_has_surrounding_whitespace': key != key.strip(), 'path_has_repeated_v1': '/v1/v1/' in parsed.path}
     try:
         data = response.json()
+        diagnostics['body_json_parsed'] = True
+        diagnostics['has_choices'] = isinstance(data, dict) and bool(data.get('choices'))
+        diagnostics['has_error'] = isinstance(data, dict) and bool(data.get('error'))
         choice = data['choices'][0]
+        diagnostics['finish_reason_is_length'] = choice.get('finish_reason') == 'length'
+        diagnostics['has_content'] = bool(choice.get('message', {}).get('content'))
         valid = json.loads(choice['message']['content']) == {'ok': True}
         usage = data.get('usage') or {}
         return {
@@ -58,7 +64,7 @@ def check(key, base, model):
             'returned_model_matches': data.get('model') == model,
         }
     except (ValueError, KeyError, IndexError, TypeError):
-        return {'status': 'failed', 'reason': 'invalid_response', 'http_status': 200}
+        return {'status': 'failed', 'reason': 'invalid_response', 'http_status': 200, **diagnostics}
 
 
 def main():
