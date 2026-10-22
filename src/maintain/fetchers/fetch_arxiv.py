@@ -72,12 +72,12 @@ def resolve_supabase_time_window(
     days: int,
 ) -> tuple[datetime, datetime, str]:
     """
-    区分单天/大区间窗口：
+    区分单天/大区间窗口（优先 DPR_RETRIEVAL_DATE，归档日期可使用北京时间）：
     - 若存在 DPR_RUN_DATE=YYYYMMDD：拉取该自然日 [00:00, +1d)
     - 若存在 DPR_RUN_DATE=YYYYMMDD-YYYYMMDD：拉取该区间 [start_day 00:00, end_day+1d 00:00)
     - 否则回退旧逻辑：最近 days 天 [now-days, now)
     """
-    token = str(os.getenv("DPR_RUN_DATE") or "").strip()
+    token = str(os.getenv("DPR_RETRIEVAL_DATE") or os.getenv("DPR_RUN_DATE") or "").strip()
     if re.match(r"^\d{8}$", token):
         # 关键修复：
         # main.py 在小窗口（<=7天）下会使用单日 token（如 20260208）作为目录标识，

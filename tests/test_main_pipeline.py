@@ -4,6 +4,7 @@ import os
 import sys
 import tempfile
 import unittest
+from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import patch
 
@@ -25,6 +26,26 @@ class MainPipelineTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.mod = _load_module()
+
+    def test_daily_archive_uses_beijing_date(self):
+        for instant, expected in [
+            ("2026-10-21T15:59:59+00:00", "20261021"),
+            ("2026-10-21T16:00:00+00:00", "20261022"),
+            ("2026-12-31T18:30:00+00:00", "20270101"),
+        ]:
+            with self.subTest(instant=instant), patch.object(self.mod, "datetime") as clock, patch.object(
+                self.mod, "load_arxiv_paper_setting", return_value={"days_window": 9}
+            ):
+                clock.now.side_effect = lambda tz: datetime.fromisoformat(instant).astimezone(tz)
+                self.assertEqual(self.mod.resolve_run_date_token(9), expected)
+                self.assertEqual(self.mod.resolve_run_date_token(None), expected)
+                self.assertIsNone(self.mod.resolve_sidebar_date_label(9))
+
+    def test_range_dates_keep_utc_boundaries(self):
+        with patch.object(self.mod, "datetime") as clock:
+            clock.now.side_effect = lambda tz: datetime(2026, 10, 21, 18, 30, tzinfo=timezone.utc).astimezone(tz)
+            self.assertEqual(self.mod.resolve_run_date_token(10), "20261012-20261021")
+            self.assertEqual(self.mod.resolve_sidebar_date_label(10), "2026-10-12 ~ 2026-10-21")
 
     def _write_rrf_input(self, root: Path, token: str) -> Path:
         filtered_dir = root / "archive" / token / "filtered"

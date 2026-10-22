@@ -24,6 +24,7 @@ ROOT_DIR = os.path.abspath(os.path.join(SRC_DIR, ".."))
 CONFIG_FILE = os.getenv("DPR_CONFIG_FILE") or os.path.join(ROOT_DIR, "config.yaml")
 LONG_RANGE_DAYS_THRESHOLD = 10
 MAIN_DEFAULT_DAYS = 9
+BEIJING_TIMEZONE = timezone(timedelta(hours=8))
 SKIMS_FETCH_DAYS_THRESHOLD = 11
 
 
@@ -85,12 +86,12 @@ def resolve_run_date_token(fetch_days: int | None) -> str:
     """
     统一运行日期标识：
     - 大窗口（>=阈值）使用区间 token：YYYYMMDD-YYYYMMDD
-    - 其它情况使用单日 token：YYYYMMDD
+    - 其它情况使用北京时间单日 token：YYYYMMDD
     """
     if fetch_days is not None:
         if fetch_days >= LONG_RANGE_DAYS_THRESHOLD:
             return build_run_date_token(fetch_days)
-        return datetime.now(timezone.utc).strftime("%Y%m%d")
+        return datetime.now(BEIJING_TIMEZONE).strftime("%Y%m%d")
 
     setting = load_arxiv_paper_setting()
     try:
@@ -99,7 +100,7 @@ def resolve_run_date_token(fetch_days: int | None) -> str:
         days_window = MAIN_DEFAULT_DAYS
     if days_window >= LONG_RANGE_DAYS_THRESHOLD:
         return build_run_date_token(days_window)
-    return datetime.now(timezone.utc).strftime("%Y%m%d")
+    return datetime.now(BEIJING_TIMEZONE).strftime("%Y%m%d")
 
 
 def resolve_sidebar_date_label(fetch_days: int | None) -> str | None:
@@ -574,6 +575,11 @@ def main() -> None:
     sidebar_date_label = resolve_sidebar_date_label(args.fetch_days)
     run_date_token = resolve_run_date_token(args.fetch_days)
     os.environ["DPR_RUN_DATE"] = run_date_token
+    # 日报按北京时间归档；检索仍沿用 UTC 日期，避免凌晨单天窗口查到未来。
+    os.environ["DPR_RETRIEVAL_DATE"] = (
+        run_date_token if "-" in run_date_token
+        else datetime.now(timezone.utc).strftime("%Y%m%d")
+    )
     print(f"[INFO] DPR_RUN_DATE={run_date_token}", flush=True)
     profile_tag = str(args.profile_tag or os.getenv("DPR_FILTER_PROFILE_TAG") or "").strip()
     if profile_tag:
