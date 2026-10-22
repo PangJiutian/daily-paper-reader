@@ -1,0 +1,2052 @@
+GeoART: Geometry-Aware Refinement via Test-Time Scaling for
+Camera-Conditioned Video Diffusion
+Liudi Yang
+University of Freiburg
+Ziyuan Liu
+Huawei Heisenberg Research Center (Munich)
+Figure 1. Overview of GeoART. Through inference-time self-refinement, GeoART achieves better camera fidelity and geometric consis-
+tency than standard flow-matching (FM) sampling and existing baselines [5, 27].
+Abstract
+Camera-conditioned video diffusion models often suffer
+from inaccurate camera control and geometric inconsisten-
+cies because camera constraints and estimated geometry
+are only weakly enforced during denoising. Existing reme-
+dies often require costly geometry-aware fine-tuning or ad-
+ditional 3D supervision. We introduce GeoART, a training-
+free self-refinement framework that improves camera con-
+trollability through geometry-aware test-time scaling. At
+selected denoising steps, GeoART generates multiple can-
+didates within the Predict-and-Perturb [27] cycle and eval-
+uates them using a geometry prior, without directly modify-
+ing the denoising trajectory. A confidence gate suppresses
+unreliable geometric evidence, while rank-calibrated prob-
+abilistic selection combines score magnitude and relative
+rank to choose the next refinement state.
+Experiments
+demonstrate consistent improvements in camera controlla-
+bility, multi-view consistency, and visual quality over exist-
+ing sampling and self-refinement methods, without training
+or modifying the pretrained video diffusion model.
+1. Introduction
+Controllable video generation models have enabled camera-
+guided novel-view synthesis [3, 18, 44, 64, 74, 81], interac-
+tive world simulation [21, 23, 55, 66, 79], and embodied
+navigation [7, 48, 75, 80]. In these applications, camera tra-
+jectories or agent actions condition the generation of future
+observations. Despite substantial progress, existing meth-
+ods still suffer from camera misalignment, geometric in-
+consistencies, and rendering artifacts. Even with 3D priors,
+denoising operates in a spatiotemporal latent space without
+a persistent 3D scene representation, limiting pose fidelity
+and cross-view consistency under large viewpoint changes
+and long-horizon generation.
+To address these limitations, recent work has pursued
+two complementary directions: (1) more effectively in-
+tegrating 3D priors through geometry-aware condition-
+ing [11, 22, 51, 70, 73], and (2) optimizing pretrained mod-
+els with geometry-aware rewards to improve camera align-
+ment and geometric consistency [1, 2, 32, 36, 71]. Despite
+these advances, geometry-conditioned approaches often re-
+quire large-scale training datasets with 3D supervision and
+remain sensitive to errors in estimated geometry, whereas
+reward-based approaches introduce a costly post-training
+stage. Inference-time self-refinement offers a training-free
+alternative but remains largely unexplored for improving
+geometric consistency [5, 27, 58].
+Existing methods re-
+fine intermediate samples by steering them toward the data
+manifold, improving semantic fidelity and physical plau-
+sibility. However, their lack of geometry-aware feedback
+limits improvements in camera controllability and geome-
+try consistency. A natural extension is to incorporate ge-
+arXiv:2610.25273v1  [cs.CV]  18 Oct 2026
+
+
+ometric objectives through gradient-based diffusion guid-
+ance [6, 9, 12, 45, 72]. However, balancing geometric con-
+straints with the generative prior requires carefully tuned
+guidance weights, while noisy or incomplete geometry can
+misdirect the update and degrade generation quality.
+These observations motivate a different use of geome-
+try: as an evaluation signal rather than a direct intervention
+in denoising. Inspired by verifier-based test-time scaling in
+LLMs and diffusion models [10, 41, 46, 49, 53], we extend
+Predict-and-Perturb self-refinement [27] by sampling multi-
+ple candidates at selected perturbation stages and evaluating
+their geometric consistency (Fig. 1). In this way, geometry
+guides candidate selection without directly altering the la-
+tent updates.
+Based on this principle,
+we propose GeoART, a
+geometry-aware self-refinement framework for test-time
+scaling.
+GeoART scores candidate refinements using
+confidence-aware geometric criteria and converts these
+scores into a rank-calibrated sampling distribution. Rather
+than greedily selecting the candidate with the highest raw
+score, GeoART probabilistically chooses the next refine-
+ment state based on both score magnitude and relative rank,
+preserving exploration and reducing sensitivity to noisy
+evaluations. By separating geometric evaluation from la-
+tent optimization, GeoART improves camera adherence and
+cross-view consistency without modifying or retraining the
+underlying video diffusion model.
+Our contributions are summarized as follows:
+• We introduce GeoART, a training-free framework that
+formulates geometry-aware self-refinement as test-time
+scaling, using geometry priors to evaluate local refine-
+ment candidates rather than directly guide denoising.
+• We develop a confidence-gated geometry evaluator that
+suppresses unreliable geometric evidence when scoring
+candidate refinements.
+• We propose rank-calibrated probabilistic selection that
+balances score magnitude and relative rank, improving
+robustness to noisy geometry scores.
+2. Related Work
+2.1. Camera-Conditioned Video Diffusion
+Recent video diffusion models enable controllable view-
+point generation by conditioning on prescribed camera tra-
+jectories [3, 4, 15, 18, 20, 31, 35, 64, 81, 82].
+To im-
+prove cross-view consistency, subsequent methods incorpo-
+rate explicit geometric cues through depth or point-cloud
+priors [11, 24, 51, 70, 73, 74, 77], 3D Gaussian Splatting
+representations [16, 17, 37, 40, 44, 54], or geometry-aware
+supervision [22, 42, 67, 76]. Another line of research is
+geometry-aware alignment methods that improve consis-
+tency using epipolar, reconstruction, or latent 3D rewards
+for preference learning and reinforcement learning [1, 2,
+13, 32, 62, 65]. VIGOR [71] further employs geometric
+rewards for verifier-based test-time scaling.
+In contrast,
+GeoART performs geometry-aware test-time search locally
+within self-refinement, without post-training or modifying
+the underlying video diffusion model.
+2.2. Self-Refined Sampling for Diffusion Models
+Self-refinement allows a pretrained diffusion model to re-
+visit intermediate states at inference time, typically by per-
+turbing, inverting, or restarting denoising and regenerating
+from the revised state. Existing approaches use inversion–
+denoising cycles, restart sampling, reward-guided explo-
+ration, or uncertainty-aware perturbations to escape subop-
+timal trajectories and improve semantic fidelity and phys-
+ical plausibility [5, 14, 27, 28, 47, 58, 69]. Complemen-
+tary methods refine the initial noise or incorporate auxiliary-
+model feedback to improve temporal coherence [33, 68].
+Other approaches directly update intermediate samples us-
+ing gradients from external objectives [6, 45, 72], including
+epipolar, depth, and multi-view constraints [9, 12]. How-
+ever, such guidance directly alters the denoising trajec-
+tory and requires careful balancing of geometric constraints
+against the generative prior. GeoART instead treats geom-
+etry as an evaluator: it scores multiple self-refinement can-
+didates and probabilistically selects the next state without
+gradient-based geometric intervention.
+2.3. Test-Time Scaling for Diffusion Models
+Test-time scaling improves diffusion generation by allo-
+cating additional inference computation to explore multi-
+ple samples or denoising trajectories without further train-
+ing.
+Existing approaches use random search, particle-
+based resampling, or tree search to identify trajectories
+with higher verifier or reward scores [29, 46, 49, 52, 78].
+EvoSearch [19] evolves populations of image and video
+trajectories through iterative selection and mutation, while
+Video-T1 [41] applies verifier-guided trajectory search to
+video generation. However, these methods can incur sub-
+stantial inference overhead and remain sensitive to ver-
+ifier reliability.
+Hard selection and pruning are brit-
+tle under noisy scores, while commonly used perceptual
+and semantic rewards provide limited geometric feedback.
+GeoART instead performs periodic local branching within
+self-refinement and combines confidence-aware geometric
+evaluation with rank-calibrated probabilistic selection.
+3. Preliminaries: Predict-and-Perturb Refine-
+ment
+Predict-and-Perturb (P&P) [27] is a training-free self-
+refinement procedure for flow-matching models [39, 43],
+motivated by the denoising autoencoder perspective [8].
+Given a noisy latent zt, conditioning input y, noise level
+
+
+Figure 2. GeoART framework. At selected denoising intervals, GeoART generates multiple self-refinement candidates, evaluates them
+using confidence-gated geometric scores, and probabilistically selects promising candidates. After (Kt) refinement iterations, the refined
+state is returned to the original denoising trajectory without model updates or geometry-based gradient guidance.
+σt, and model prediction ϵθ(zt, t, y), P&P first predicts a
+clean latent and then re-noises it to the current noise level.
+We define the predict and perturb operators as
+Dθ(zt, t, y) = zt −σtϵθ(zt, t, y)
+(1)
+Pη(z, t) = (1 −σt)z + σtη,
+η ∼N(0, I)
+(2)
+The predict operator moves the current latent toward the
+clean-data manifold, while the perturb operator performs
+local resampling around the prediction. Their alternation
+allows the model to revisit and refine its denoising trajec-
+tory without modifying its parameters.
+At solver step t, let Kt denote the number of refinement
+iterations and initialize z0
+t = zt. Standard P&P repeatedly
+applies the two operators and then advances the refined la-
+tent through the original ODE solver:
+zk
+t = Pηk
+ Dθ(zk−1
+t
+, t, y), t
+
+,
+k = 1, . . . , Kt
+(3)
+zt+1 = zKt
+t
++ (σt+1 −σt)ϵθ(zKt
+t , t, y)
+(4)
+When Kt = 0, we define zKt
+t
+= zt, recovering stan-
+dard flow-matching sampling. Although P&P provides ad-
+ditional opportunities for refinement, each iteration follows
+only one randomly perturbed direction and does not explic-
+itly evaluate geometric quality.
+4. Method
+Fig. 2 provides an overview of GeoART. We keep the
+camera-conditioned video diffusion model frozen and refine
+its latent trajectory only at inference time. The condition-
+ing input y comprises the input views {Iinput}, prescribed
+target-camera poses {P cam
+ℓ
+}, and a text prompt. GeoART
+extends P&P with geometry-aware local test-time scaling.
+At selected solver steps, it: (1) generates multiple candi-
+dates by independently perturbing a shared clean predic-
+tion, (2) evaluates each candidate using a confidence-gated
+geometry prior, and (3) probabilistically selects the next re-
+finement state based on score magnitude and relative rank.
+These components are detailed in Secs. 4.1, 4.2, and 4.3.
+4.1. Geometry-Guided Test-Time Scaling
+A standard P&P iteration generates only one random per-
+turbation from the predicted clean latent. If this perturba-
+tion leads toward an unfavorable region, subsequent iter-
+ations may reinforce the resulting trajectory. This limita-
+tion is particularly pronounced in camera-controlled video
+generation, where the denoiser primarily promotes visual
+quality and temporal coherence without explicitly enforc-
+ing camera-motion or cross-frame geometry constraints.
+We address this limitation through local test-time search.
+Unlike conventional Best-of-N sampling, which generates
+multiple complete videos [41, 46], GeoART branches the
+trajectory only at selected solver steps. All branches origi-
+nate from the same clean prediction and therefore preserve
+similar semantic and appearance content while exploring
+different local refinement directions.
+Let Kt = R(t) denote the number of refinement it-
+erations at step t, where Kt = 0 skips refinement, and
+
+
+initialize z0
+t
+= zt.
+At refinement iteration k, GeoART
+evaluates the frozen denoiser at the current state, obtaining
+ϵk = ϵθ(zk−1
+t
+, t, y). Using this prediction, it estimates the
+corresponding clean latent:
+ˆzk
+t = zk−1
+t
+−σtϵk
+(5)
+At selection steps satisfying t ≡0 (mod ∆), where
+∆denotes the selection interval in solver steps, GeoART
+branches the refinement trajectory by independently re-
+noising the shared clean prediction ˆzk
+t . Specifically, it gen-
+erates N candidates:
+zk(i)
+t
+= (1 −σt)ˆzk
+t + σtηi,
+ηi ∼N(0, I)
+(6)
+Because the candidates differ only in their sampled pertur-
+bations, they provide alternative local directions around the
+same clean prediction.
+Each candidate is denoised once
+more to obtain a look-ahead clean prediction for geometry-
+aware evaluation. The resulting scores define a soft selec-
+tion distribution from which we sample i⋆and update the
+refinement state as zk
+t = zk(i⋆)
+t
+. At non-selection steps,
+GeoART retains the standard single-perturbation P&P up-
+date.
+4.2. Confidence-Gated Geometry Scoring
+Reliable candidate evaluation requires a geometry prior
+aligned with the target video trajectory. However, off-the-
+shelf geometry estimators can be inaccurate in occluded or
+textureless regions. Treating all geometric estimates equally
+may therefore corrupt the score and lead to unreliable can-
+didate selection.
+Geometry-prior construction. Before diffusion sampling,
+VGGT [59] processes the conditioning views {Iinput} to
+reconstruct a scene point cloud and estimate corresponding
+point-wise confidence. We project the reconstructed point
+cloud and its confidence to the prescribed target-camera
+poses {P cam
+ℓ
+}, producing a geometry-projected video and
+a spatially aligned confidence video. Pixels without a valid
+point projection, including missing and disoccluded re-
+gions, are assigned zero confidence.
+The projected point-cloud video is encoded once using
+the frozen video VAE [30], producing the geometry latent g.
+The confidence video is linearly interpolated to the spatial
+and temporal resolution of g and broadcast across the latent
+channels to obtain c. Pixels without valid projections are set
+to zero. Consequently, g, c, and the diffusion latent share
+the same dimensions. Both g and c are computed once and
+reused throughout sampling.
+Candidate evaluation. We construct a confidence gate that
+removes unreliable regions while weighting retained ele-
+ments according to their confidence:
+wj =
+(
+cj,
+cj ≥τc,
+0,
+cj < τc,
+(7)
+where j indexes the spatiotemporal latent elements and τc
+is the confidence threshold. Thus, low-confidence elements
+are discarded, while reliable elements contribute propor-
+tionally to their confidence. For each re-noised candidate
+zk(i)
+t
+, we perform one look-ahead clean-latent prediction:
+ˆzk(i)
+t
+= zk(i)
+t
+−σtϵθ(zk(i)
+t
+, t, y)
+We then compare this prediction with the geometry latent g
+using
+sk(i) = −mean
+
+w ⊙
+
+ˆzk(i)
+t
+−g
+2
+(8)
+A higher score indicates stronger agreement with reliable
+regions of the geometry prior.
+4.3. Rank-Calibrated Soft Selection
+Given N candidate scores, a direct strategy is to retain the
+candidate with the highest score. However, this hard Best-
+of-N decision can follow an incorrect refinement direction
+when the geometry estimates are noisy or candidate scores
+are similar. Applying a softmax directly to the raw scores
+preserves exploration but remains sensitive to changes in
+score scale across solver steps and scenes.
+We therefore combine absolute score magnitude with
+relative rank. Let S denote a random candidate score with
+cumulative distribution function F(s) = Pr(S ≤s). For
+a candidate with score s, the probability of outperforming
+N −1 independent competitors is F(s)N−1. This order-
+statistic interpretation motivates weighting each candidate
+according to its empirical percentile within the current can-
+didate set. Because F is unknown, we estimate it using
+the self-inclusive empirical CDF and combine the rank
+weighting with exponential score weighting:
+bF k(i) = 1
+N
+N
+X
+j=1
+1
+n
+sk(j) ≤sk(i)o
+,
+pk(i) =
+exp
+ λsk(i) 
+bF k(i)N−1
+PN
+j=1 exp
+ λsk(j) 
+bF k(j)
+N−1 .
+(9)
+The empirical CDF measures the fraction of candidates
+whose scores do not exceed that of candidate i, providing
+scale-invariant relative calibration. The exponential term
+retains sensitivity to score magnitude, while the rank term
+favors candidates that consistently outperform their com-
+petitors. We set λ = 3 in all experiments.
+Finally, we sample i⋆∼Categorical(pk) and update
+zk
+t = zk(i⋆)
+t
+. This preserves local exploration and avoids
+deterministically following a potentially noisy maximum
+score.
+The complete procedure is summarized in Algo-
+rithm 1.
+
+
+Figure 3. Comparison with baseline methods. Our method achieves higher visual quality, fewer artifacts, and more accurate camera
+control. Red lines mark the ground-truth positions of selected vertical structures (e.g., columns and poles) and remain fixed across methods
+to visualize positional drift.
+5. Experiment
+Implementation details.
+We evaluate GeoART on two
+camera-conditioned video diffusion backbones, Wan2.1-
+Fun-Control-Camera [57] and Uni3C [11], to assess its gen-
+eralizability across architectures. Both backbones are fine-
+tuned on a combined training set of 800 sequences: 200
+from DL3DV [38] and 600 from CO3D [50]. All frames are
+resized to 256 × 256, and 33 frames are uniformly sampled
+from each sequence to form a training clip. Each backbone
+is fine-tuned for 20K iterations, requiring approximately 24
+hours on a single GPU. GeoART is subsequently applied
+without further training or model modification.
+Evaluation protocol. We consider two levels of input spar-
+sity: single-view conditioning and two-view head-and-tail
+conditioning, where the first and last views are provided to
+the video diffusion model. We evaluate all methods on 100
+held-out scenes from CO3D and DL3DV using five random
+seeds per scene. All metrics are averaged over the 500 gen-
+erations. Each inference run requires approximately 30 GB
+of GPU memory. Following Self-Refine [27], the refine-
+ment schedule is R = {(5, 15, 2), (40, 45, 1)}, where each
+tuple specifies the start step, end step, and number of re-
+finement iterations, respectively. Additional implementa-
+tion details are provided in the supplementary material.
+Evaluation Metrics. We first evaluate novel-view recon-
+struction fidelity using PSNR, SSIM, and LPIPS. We then
+measure camera controllability using translation error (ET )
+and rotation error (ER) with respect to the target trajec-
+tory. Let (Ri, ti) and ( ˆRi,ˆti) denote the target pose and
+the aligned pose estimated by Pi3 [63] and Umeyama al-
+gorithm [56] at frame i, respectively. The two errors are
+computed as
+ET = 1
+M
+M
+X
+i=1
+ˆti −ti
+
+2
+(10)
+ER = 1
+M
+M
+X
+i=1
+arccos
+
+
+tr
+
+ˆR⊤
+i Ri
+
+−1
+2
+
+
+(11)
+
+
+Model Views Method
+NFE ↓PSNR ↑SSIM ↑LPIPS ↓Trans. ↓Rot. ↓FID ↓FVD ↓BG Cons. ↑Subj. Cons. ↑
+Wan
+One
+FM
+50
+15.23
+0.409
+0.415
+0.332
+0.247
+109.43 108.47
+0.908
+0.805
+FM (2× NFE)
+100
+15.12
+0.404
+0.403
+0.297
+0.225
+105.83 102.16
+0.917
+0.807
+Self-Refine [27]
+78
+15.26
+0.425
+0.399
+0.285
+0.210
+109.28
+88.53
+0.919
+0.822
+CFG-Ctrl [58]
+50
+15.19
+0.406
+0.408
+0.335
+0.266
+127.89 140.85
+0.911
+0.803
+Z-Sample [5]
+130
+14.96
+0.392
+0.425
+0.351
+0.263
+110.86
+98.87
+0.914
+0.821
+Video-T1 [41]
+500
+15.40
+0.411
+0.405
+0.310
+0.225
+105.65 104.33
+0.918
+0.826
+VIGOR [71]
+500
+15.38
+0.428
+0.404
+0.289
+0.208
+107.22
+92.76
+0.918
+0.825
+GC-Ref [9]
+350
+15.26
+0.395
+0.409
+0.298
+0.254
+105.26
+94.23
+0.905
+0.812
+Ours
+118
+16.61
+0.456
+0.399
+0.280
+0.203
+104.77
+84.68
+0.913
+0.825
+Two
+FM
+50
+16.53
+0.429
+0.334
+0.251
+0.189
+101.34 106.90
+0.920
+0.834
+FM (2× NFE)
+100
+16.61
+0.444
+0.333
+0.248
+0.177
+97.10
+92.17
+0.919
+0.836
+Self-Refine [27]
+78
+17.01
+0.446
+0.320
+0.187
+0.137
+91.83
+87.29
+0.923
+0.832
+CFG-Ctrl [58]
+50
+16.94
+0.453
+0.336
+0.287
+0.219
+116.53 145.68
+0.915
+0.808
+Z-Sample [5]
+130
+16.88
+0.432
+0.336
+0.211
+0.161
+89.47
+88.78
+0.914
+0.831
+Video-T1 [41]
+500
+17.08
+0.442
+0.325
+0.196
+0.141
+87.57
+79.80
+0.923
+0.834
+VIGOR [71]
+500
+16.97
+0.444
+0.322
+0.180
+0.128
+87.68
+77.97
+0.926
+0.836
+GC-Ref [9]
+350
+16.85
+0.435
+0.343
+0.208
+0.139
+88.39
+92.43
+0.922
+0.827
+Ours
+118
+17.60
+0.475
+0.318
+0.151
+0.109
+82.22
+76.05
+0.924
+0.837
+Uni3C
+One
+FM
+50
+15.35
+0.402
+0.406
+0.318
+0.232
+106.09 100.14
+0.914
+0.803
+FM (2× NFE)
+100
+15.24
+0.407
+0.405
+0.312
+0.236
+100.93
+95.21
+0.918
+0.812
+Self-Refine [27]
+78
+16.02
+0.436
+0.346
+0.272
+0.195
+96.25
+89.64
+0.921
+0.829
+CFG-Ctrl [58]
+50
+15.97
+0.411
+0.360
+0.290
+0.219
+116.89 140.21
+0.913
+0.816
+Z-Sample [5]
+130
+15.88
+0.412
+0.370
+0.279
+0.217
+94.69
+106.23
+0.919
+0.826
+Video-T1 [41]
+500
+16.05
+0.423
+0.360
+0.280
+0.203
+91.95
+90.66
+0.922
+0.832
+VIGOR [71]
+500
+16.00
+0.422
+0.361
+0.286
+0.206
+92.61
+98.24
+0.922
+0.829
+GC-Ref [9]
+350
+15.93
+0.442
+0.372
+0.309
+0.202
+99.56
+102.44
+0.919
+0.830
+Ours
+118
+16.91
+0.449
+0.328
+0.273
+0.200
+89.50
+81.02
+0.925
+0.832
+Two
+FM
+50
+16.61
+0.441
+0.351
+0.251
+0.192
+104.41 104.09
+0.921
+0.813
+FM (2× NFE)
+100
+16.50
+0.436
+0.340
+0.249
+0.193
+100.20
+98.01
+0.922
+0.825
+Self-Refine [27]
+71
+16.74
+0.441
+0.332
+0.254
+0.201
+91.53
+96.81
+0.927
+0.834
+CFG-Ctrl [58]
+50
+16.19
+0.418
+0.350
+0.229
+0.164
+115.81 132.36
+0.917
+0.806
+Z-Sample [5]
+130
+16.03
+0.417
+0.363
+0.243
+0.181
+92.38
+92.05
+0.922
+0.830
+Video-T1 [41]
+500
+16.39
+0.433
+0.343
+0.217
+0.158
+91.42
+77.73
+0.923
+0.835
+VIGOR [71]
+500
+16.60
+0.429
+0.339
+0.230
+0.167
+95.21
+88.62
+0.919
+0.823
+GC-Ref [9]
+350
+16.64
+0.430
+0.335
+0.241
+0.175
+95.80
+102.36
+0.914
+0.822
+Ours
+118
+17.32
+0.462
+0.319
+0.184
+0.137
+90.42
+74.31
+0.925
+0.836
+Table 1. Quantitative comparison using Wan and Uni3C under one-view and two-view settings. Best, second-best, and third-best values
+within each model/view setting are highlighted in green , blue and yellow , respectively.
+where M is the number of evaluated frames.
+We fur-
+ther report FID and FVD to assess image- and video-
+level generative quality, respectively.
+Finally, we use
+the subject-consistency and background-consistency met-
+rics from VBench [25, 26] to evaluate temporal consistency
+across frames.
+5.1. Comparison with baseline
+Baselines We compare our method with alternative
+inference-time sampling and refinement strategies under
+the experimental setup described above.
+For each back-
+bone and conditioning setting, we evaluate the standard
+flow-matching (FM) sampler of the corresponding base
+model and a higher-compute variant using twice the num-
+ber of function evaluations (FM 2× NFE). We further
+include three training-free sampling-refinement methods:
+Self-Refine [27], Z-Sample [5], and CFG-Ctrl [58], as well
+as the geometry-guided test-time refinement method GC-
+Ref [9]. Finally, we compare against two video test-time
+scaling methods, Video-T1 [41] and VIGOR [71], using a
+Best-of-10 protocol that generates ten candidates per input
+and retains the highest-scoring output. All baselines use
+identical model weights, conditioning inputs, input views,
+and evaluation protocols. We report the effective NFE of
+
+
+Algorithm 1 GeoART Sampling
+Require: Condition y, geometry latent g, confidence c, noise schedule
+{σt}, refinement schedule R, interval ∆, candidates N
+Ensure: Generated video V
+1: z0 ∼N(0, I);
+w ←ConfidenceGate(c)
+2: for t = 0, . . . , T −1 do
+3:
+Kt ←R(t);
+z0
+t ←zt
+4:
+for k = 1, . . . , Kt do
+5:
+ϵk ←ϵθ(zk−1
+t
+, t, y);
+ˆzk
+t ←zk−1
+t
+−σtϵk
+6:
+if t mod ∆= 0 then
+7:
+for i = 1, . . . , N do
+8:
+zk(i)
+t
+←(1 −σt)ˆzk
+t + σtηi,
+ηi ∼N(0, I)
+9:
+ˆzk(i)
+t
+←zk(i)
+t
+−σtϵθ(zk(i)
+t
+, t, y)
+10:
+sk(i) ←−mean[w ⊙(ˆzk(i)
+t
+−g)2]
+11:
+end for
+12:
+pk ←RankCalibratedDistribution({sk(i)}N
+i=1)
+13:
+i⋆∼Categorical(pk);
+zk
+t ←zk(i⋆)
+t
+14:
+else
+15:
+zk
+t ←(1 −σt)ˆzk
+t + σtη,
+η ∼N(0, I)
+16:
+end if
+17:
+end for
+18:
+ϵ ←ϵθ(zKt
+t
+, t, y);
+zt+1 ←zKt
+t
++ (σt+1 −σt)ϵ
+19: end for
+20: return V ←DecodeVAE(zT )
+each method to make differences in inference-time compu-
+tation explicit.
+Table 1 summarizes the quantitative results. GeoART
+achieves the strongest overall performance across both
+backbones and conditioning settings.
+It consistently ob-
+tains the best PSNR, SSIM, LPIPS, FID, and FVD scores,
+while also substantially reducing translation and rotation er-
+rors in three of the four settings. Under Uni3C single-view
+conditioning, its pose accuracy remains competitive, rank-
+ing second in both translation and rotation error. GeoART
+also achieves strong background and subject consistency,
+demonstrating that improved camera adherence does not
+compromise temporal coherence.
+Figure 3 presents qualitative comparisons across both
+backbones and conditioning settings. GeoART more faith-
+fully preserves object geometry and scene structure while
+following the prescribed camera trajectory. In particular, its
+outputs remain closely aligned with the ground truth and the
+red reference lines, whereas competing methods exhibit po-
+sitional drift, geometric deformation, and inconsistent ob-
+ject scale. GeoART also produces sharper object bound-
+aries and fewer rendering artifacts, demonstrating that its
+improved camera fidelity does not compromise visual qual-
+ity. Although GeoART requires additional denoiser evalua-
+tions, its consistent improvements demonstrate a favorable
+quality–computation trade-off.
+5.2. Hyper-parameter Analysis
+Candidate number N. We first investigate the effect of the
+number of candidates sampled at each perturbation step. As
+shown in Fig. 4(a,c), increasing the candidate pool initially
+Figure 4. Hyperparameter analysis. Qualitative and quantitative
+effects of the candidate number N (a,c) and selection interval ∆
+(b,d). The red line in (a) marks the ground-truth object position
+and remains fixed across settings.
+improves geometric consistency and camera alignment by
+providing more diverse refinement directions.
+However,
+the gains gradually saturate and exhibit minor fluctuations,
+while the inference cost grows with the number of candi-
+dates. We therefore use five candidates by default, achiev-
+ing a favorable balance between generation quality and
+computational efficiency.
+Selection interval ∆. As shown in Fig. 4(b,d), performance
+initially improves as the selection interval increases, but
+begins to degrade when the interval becomes excessively
+large. Short intervals invoke candidate selection too fre-
+quently, potentially causing oscillations in the sampling tra-
+jectory and introducing refinement artifacts.
+Conversely,
+long intervals provide insufficient opportunities for test-
+time correction, allowing errors to accumulate and making
+them harder to rectify. These results highlight a trade-off
+between correction frequency and sampling stability, with
+a moderate selection interval achieving the best reconstruc-
+tion quality and pose accuracy. Additional hyperparameter
+analyses are provided in the supplementary material.
+5.3. Ablation Study
+Without candidate-space scaling. Setting N = 1 retains
+P&P refinement but eliminates candidate-space exploration.
+
+
+Configuration
+PSNR ↑
+SSIM ↑
+LPIPS ↓
+Trans. ↓
+Rot. ↓
+Component and selection ablations
+Single candidate (N = 1)
+17.008
+0.429
+0.393
+0.264
+0.192
+Uniform selection
+17.424
+0.435
+0.396
+0.236
+0.173
+Greedy selection
+17.594
+0.433
+0.384
+0.219
+0.194
+w/o rank calibration
+17.602
+0.461
+0.357
+0.228
+0.172
+w/o confidence gate
+17.370
+0.446
+0.363
+0.237
+0.189
+Geometry evaluators
+Ours (Pi3) [63]
+17.762
+0.476
+0.335
+0.202
+0.151
+Ours (VGGT-Ω) [60]
+17.754
+0.475
+0.341
+0.206
+0.158
+Ours (MASt3R) [34]
+17.763
+0.472
+0.333
+0.208
+0.150
+Ours (DUSt3R) [61]
+17.736
+0.472
+0.336
+0.215
+0.156
+Ours (VGGT) [59]
+17.764
+0.475
+0.333
+0.202
+0.149
+Table 2.
+Ablation study.
+Component, selection-strategy, and
+geometry-evaluator ablations using Wan on a fixed subset of 50
+held-out scenes drawn from the evaluation set used for baseline
+comparison with resolution 256 × 256.
+Figure 5. Qualitative ablation study.
+As shown in Table 2 and Fig. 5, expanding the pool to the
+default N = 5 improves all reported metrics and produces
+more faithful appearance and camera alignment, demon-
+strating the benefit of exploring multiple local refinement
+directions.
+Figure 6. Effect of geometry evaluators. GeoART produces con-
+sistent results across different off-the-shelf geometry estimators,
+demonstrating robustness to the choice of geometry prior.
+Candidate selection.
+We compare our rank-calibrated
+probabilistic selection with uniform, greedy, and score-only
+alternatives. Uniform selection ignores geometry, whereas
+greedy selection always chooses the highest-scoring can-
+didate and is therefore sensitive to evaluation noise. Re-
+moving rank calibration reduces the method to score-only
+sampling, pk ∝exp(λsk), whose behavior depends on the
+score scale. Our full strategy achieves the strongest over-
+all performance by combining score magnitude with scale-
+invariant relative rank, favoring geometrically consistent
+candidates while retaining controlled exploration(Table 2,
+Fig. 5).
+Different geometry scoring models. We evaluate GeoART
+using Pi3, VGGT-Ω, MASt3R, DUSt3R, and VGGT. Per-
+formance remains consistently strong across all five evalu-
+ators, demonstrating that GeoART is compatible with dif-
+ferent off-the-shelf geometry priors. Although no evalua-
+tor dominates every metric, VGGT provides the best over-
+all balance, while the small variation across models shows
+that GeoART does not require perfect geometry reconstruc-
+tion(Table 2, Fig. 6).
+Confidence gate. Removing confidence weighting causes
+consistent degradation across reconstruction and pose met-
+rics(Table 2). Without the gate, unreliable evidence from
+occluded, textureless, or poorly reconstructed regions con-
+tributes equally to candidate scoring and can misdirect se-
+lection. Confidence weighting suppresses these regions, im-
+proving the robustness of geometry-aware refinement.
+6. Conclusion
+We introduced GeoART, a training-free geometry-aware
+self-refinement framework that improves camera controlla-
+bility and geometric consistency through test-time scaling.
+GeoART uses geometry only to evaluate refinement candi-
+dates, while confidence-gated scoring and rank-calibrated
+probabilistic selection reduce sensitivity to unreliable es-
+timates. Experiments across two backbones demonstrate
+consistent gains in camera alignment, multi-view consis-
+tency, and visual quality without retraining. Future work
+will focus on reducing inference cost and improving geom-
+etry estimation for videos with moving objects.
+
+
+GeoART: Geometry-Aware Refinement via Test-Time Scaling for
+Camera-Conditioned Video Diffusion
+Supplementary Material
+6.1. More Implementation Details
+Common evaluation setup.
+We evaluate all baselines
+using the same trained Wan2.1-Fun-V1.1-1.3B-Control-
+Camera [57] and Uni3C [11] camera-conditioned video-
+generation checkpoints under both one-view and two-view
+settings. In the one-view setting, a single input image con-
+ditions image-to-video generation.
+In the two-view set-
+ting, the first and last views serve as head-and-tail condi-
+tions for video interpolation. Unless otherwise specified,
+each generated video contains 33 frames at a spatial reso-
+lution of 256 × 256. To improve precise camera control,
+we fine-tune both models on combination of CO3D and
+DL3DV. Each ground-truth clip spans 40 source frames,
+from which 33 frames are randomly sampled for training.
+Camera poses are expressed relative to the first camera, and
+per-pixel Pl¨ucker ray embeddings are computed from the
+corresponding camera intrinsics and extrinsics. All meth-
+ods use identical prompts, conditioning observations, cam-
+era trajectories, model checkpoints, and random seeds. We
+use seed 0,10,20,30,40 and evaluate 50 videos from each
+dataset. Sampling is performed in bfloat16 using a flow-
+matching scheduler with a shift parameter of 5 and tiled
+VAE decoding. The follwing are implementation details of
+other baselines.
+Flow-matching baselines.
+The FM baseline uses the
+standard sampler provided by each video backbone. At ev-
+ery solver step, conventional classifier-free guidance (CFG)
+combines the conditional and unconditional predictions as
+ϵCFG
+θ
+(zt, t, y) = ϵθ(zt, t, ∅)+w [ϵθ(zt, t, y) −ϵθ(zt, t, ∅)]
+where w is the default guidance scale of the correspond-
+ing backbone and selected as 3.0 in experiments.
+Stan-
+dard FM uses 50 solver steps, whereas the higher-compute
+variant, denoted FM (2× NFE), uses 100 steps with all
+other settings unchanged. In our reporting, NFE denotes
+the number of solver steps; the conditional and uncondi-
+tional CFG branches are not counted separately. Neither
+variant uses test-time refinement, candidate selection, rejec-
+tion sampling, or an external verifier.
+Self-Refining
+Video
+Sampling.
+We
+implement
+the
+Predict-and-Perturb strategy of Self-Refining Video Sam-
+pling follwing [27]. At selected noise levels, the current
+noisy latent is first mapped to a predicted clean sample and
+is then perturbed back to the same noise level using newly
+sampled Gaussian noise. Repeated prediction and pertur-
+bation progressively move the latent toward higher-density
+regions of the learned video manifold. For Wan and Uni3C,
+we perform two additional refinement iterations at sampling
+steps 5–15 and one additional iteration at steps 40–45. We
+use an ℓ1 prediction-difference threshold of 0.1 and termi-
+nate refinement at the current noise level when more than
+99.9% of latent locations are considered converged. This
+baseline does not require an external reward model or addi-
+tional training.
+CFG-Ctrl.
+We adapt Sliding-Mode-Control CFG (SMC-
+CFG) from CFG-Ctrl [58] to our two video-generation
+backbones. Let
+et = vcond(zt, t) −vuncond(zt, t)
+(12)
+denote the difference between the conditional and un-
+conditional velocity predictions.
+Following a two-step
+conditional-only warm-up, we construct the sliding variable
+st = (et −et−1) + λet−1,
+(13)
+and modify the guidance signal using
+et = et −K sign(st).
+(14)
+The final guided velocity is
+evt = vuncond(zt, t) + w et,
+(15)
+where w is the CFG scale. We use λ = 5.0, K = 0.3,
+w = 5.0, and 50 sampling steps. All generator parameters
+remain frozen.
+Z-Sampling.
+We implement Zigzag Diffusion Sampling
+(Z-Sampling) following [5]. The standard denoising trajec-
+tory is augmented with a backward–forward refinement dur-
+ing the first 40 of the 50 sampling steps. At each selected
+step, we first perform the ordinary strongly guided denois-
+ing update. The resulting latent is then approximately in-
+verted toward the preceding noise level using weak guid-
+ance γweak = 0, after which it is denoised again using
+strong guidance γstrong = 5. The second denoised result
+replaces the original update. This gives 50 ordinary transi-
+tions and 80 additional zigzag transitions, for a total of 130
+trajectory evaluations.
+
+
+Video-T1.
+We implement the linear-search variant of
+Video-T1 [41]. For each input, we independently gener-
+ate N = 10 complete videos using random seeds s and
+s + 1, with 50 solver steps per candidate. Each candidate
+is evaluated using the released VisionReward-Video veri-
+fier. The verifier uniformly samples 24 frames from the
+generated video and evaluates the released set of prompt-
+conditioned binary quality questions. The binary answers
+are mapped to +1 and −1, weighted using the released
+question weights, and averaged. We retain the candidate
+with the higher prompt-conditioned weighted score.
+We
+use only candidate-level linear search and do not employ
+the Tree-of-Frames search variant.
+VIGOR.
+For VIGOR [71], we use the same best-of-N
+protocol with N = 10, but replace the semantic verifier
+with the released geometry-oriented reward.
+Each can-
+didate is evaluated using the official VGGT-based point-
+wise reprojection-error evaluator, and the candidate with the
+lower reprojection error is selected. We use the default re-
+leased VIGOR configuration and disable the optional sky-
+region filter. The generator is not fine-tuned; VIGOR is
+used exclusively as an inference-time path verifier.
+GC-Ref.
+We adapt Geometric Consistency Refinement
+(GC-Ref) [9] to video by optimizing only the initial diffu-
+sion noise while keeping the generator weights, condition-
+ing observations, and camera parameters frozen. We first
+generate an initial video and use the RoMa matcher in the
+paper to establish dense correspondences between the first
+conditioning image and selected generated frames. The ref-
+erence pixel locations and confidence mask are fixed from
+this initial prediction, while the corresponding target loca-
+tions are recomputed differentiably during optimization.
+The refinement objective is
+LGC-Ref = Lepi + λRGBLRGB,
+(16)
+where Lepi is a Huber penalty on the symmetric point-
+to-epipolar-line distance, and LRGB is the ℓ1 color differ-
+ence between matched pixels. We use five Adam optimiza-
+tion iterations, a learning rate of 0.025, a RoMa confidence
+threshold of 0.15, λRGB = 2.5, a Huber threshold of 2.0, a
+temporal frame stride of 4, and at most two target frames.
+Each optimization iteration performs a complete 50-step de-
+noising trajectory with CFG scale 3. After optimization, a
+final trajectory is generated from the refined initial noise.
+6.2. Inference Hyperparameters
+We use the same configuration for all experiments of all
+methods. The default hyperparameters are provided in Ta-
+ble 3.
+The stochastic refinement schedule uses zero-based
+denoising-step indices. The notation (a:b, r) means that r
+Table 3. Hyperparameters of GeoART.
+Hyperparameter
+Value
+Spatial resolution
+256 × 256
+Number of frames
+33
+Number of denoising steps
+50
+Denoising strength
+1.0
+Classifier-free guidance scale
+3.0
+Flow-scheduler shift
+5.0
+Random seed for diffusion sampling
+0,10,20,30,40
+VAE tile size
+(30, 52)
+VAE tile stride
+(15, 26)
+Geometry estimator
+VGGT
+Number of candidates K
+5
+Selection interval
+5 denoising steps
+Stochastic refinement schedule
+(5:15, 2), (40:45, 1)
+Score-softmax inverse temperature λ
+3.0
+Numerical constant ϵ
+10−6
+confidence gate τ
+0.3
+extra refinement iterations are applied at every step in the
+inclusive interval [a, b]. Candidate search is executed every
+five steps within these refinement intervals.
+6.3. Hyperparameter Analysis
+We analyze two hyperparameters of GeoART: the confi-
+dence threshold used by the geometry score and the tempo-
+ral schedule used for stochastic refinement. All experiments
+use the same seed (0), geometry backbone (VGGT), candi-
+date count (K = 5), and candidate-selection interval (every
+five denoising steps). We evaluate the same matched subset
+of 20 videos from CO3D and DL3DV. Unless it is the vari-
+able being swept, every other hyperparameter is held fixed.
+Confidence gate.
+Let c denote the confidence predicted
+by the geometry backbone and let τc denote the confidence
+threshold. In contrast to a binary mask, we retain the origi-
+nal confidence magnitude above the threshold:
+w(c; τc) = c 1[c ≥τc].
+(17)
+The geometry score for candidate k is therefore
+sk = −mean
+h ˆzk −g
+2 ⊙w(c; τc)
+i
+.
+(18)
+Here, ⊙denotes element-wise multiplication. We sweep
+τc ∈{0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8}
+(19)
+while keeping the refinement schedule fixed to R
+=
+{(5, 15, 2), (40, 45, 1)}. Table 4 shows a clear optimum at
+τc = 0.3, which achieves the best performance across all
+metrics. Lower thresholds retain unreliable geometric esti-
+mates, weakening candidate evaluation. Conversely, higher
+
+
+τc
+PSNR↑
+SSIM↑
+LPIPS↓
+Trans.↓
+Rot.↓
+FVD↓
+0.1
+17.17
+0.400
+0.316
+0.216
+0.187
+103.14
+0.2
+17.64
+0.493
+0.296
+0.159
+0.118
+76.35
+0.3
+17.76
+0.498
+0.275
+0.135
+0.096
+75.99
+0.4
+17.67
+0.490
+0.293
+0.149
+0.105
+77.79
+0.5
+17.53
+0.475
+0.314
+0.172
+0.144
+85.22
+0.6
+17.41
+0.430
+0.306
+0.206
+0.185
+94.36
+0.7
+17.28
+0.423
+0.315
+0.236
+0.194
+105.46
+0.8
+17.04
+0.393
+0.326
+0.249
+0.205
+110.14
+Table 4. Confidence-threshold sensitivity.
+Refinement schedule R
+PSNR↑
+SSIM↑
+LPIPS↓
+Trans.↓
+Rot.↓
+FVD↓
+{(5, 10, 2)}
+17.26
+0.481
+0.298
+0.201
+0.143
+94.73
+{(5, 15, 2)}
+17.64
+0.496
+0.281
+0.162
+0.115
+79.74
+{(5, 20, 2)}
+17.70
+0.496
+0.283
+0.175
+0.124
+80.87
+{(5, 30, 2)}
+17.64
+0.494
+0.286
+0.171
+0.122
+81.12
+{(40, 45, 1)}
+17.48
+0.485
+0.289
+0.168
+0.119
+92.84
+{(5, 15, 2), (40, 45, 1)}
+17.76
+0.498
+0.275
+0.135
+0.096
+75.99
+Table 5. Sensitivity to the stochastic-refinement schedule.
+thresholds discard too many valid regions and reduce the
+coverage of the geometry signal, with performance degrad-
+ing notably at τc ≥0.7. These results demonstrate that
+the confidence gate balances geometric reliability and cov-
+erage; we therefore use τc = 0.3 by default.
+Refinement schedule.
+For this analysis in Table 5, the
+soft confidence threshold is fixed to τc = 0.3. We compare
+early-only, late-only, and combined refinement schedules.
+The combined schedule {(5, 15, 2), (40, 45, 1)} gives
+the best reconstruction quality and camera accuracy, sug-
+gesting that early refinement establishes global geomet-
+ric consistency while a short late-stage refinement interval
+corrects residual geometric drift. Extending early refine-
+ment to step 20 or 30 increases computation without con-
+sistently improving quality, indicating diminishing returns
+from longer refinement windows.
+6.4. Higher Resolution Result
+We additionally evaluate Wan two-view generation at an in-
+ference resolution of 512 × 512, four times the number of
+pixels used in our 256 × 256 evaluation. We use the same
+model checkpoints and compare the baseline methods with
+GeoART (Ours, K = 5). Both methods use seed 40 and
+the same input views and camera trajectories. The quantati-
+tive results are provided in Table 6. The visual results are
+provided in Figure 10, 11.
+6.5. Additional Qualitative Results
+Figure 8 and 9 provide additional qualitative comparisons
+with baseline methods. Across different scenes and camera
+trajectories, GeoART produces more coherent novel views
+with better camera alignment and fewer structural artifacts.
+Method
+PSNR ↑
+SSIM ↑
+LPIPS ↓
+Trans. ↓
+Rot. ↓
+FM
+16.69
+0.386
+0.434
+0.289
+0.243
+Self-Refine [27]
+17.24
+0.394
+0.426
+0.256
+0.204
+CFG-Ctrl [58]
+16.88
+0.388
+0.443
+0.284
+0.253
+Video-T1 [41]
+17.13
+0.392
+0.412
+0.221
+0.183
+Ours
+17.83
+0.439
+0.387
+0.185
+0.144
+Table 6. Higher-resolution evaluation. Comparison at 512×512
+resolution on held-out sequences.
+Figure 7. Failure Case.
+In contrast, the baseline methods more frequently exhibit
+positional drift, geometric deformation, and cross-frame in-
+consistencies. These results further demonstrate the effec-
+tiveness of geometry-aware self-refinement across diverse
+inputs.
+6.6. Failure Cases
+GeoART has two main failure modes. First, it inherits er-
+rors from the geometry estimator. In textureless, reflective,
+transparent, or heavily occluded regions, VGGT may pro-
+duce inaccurate geometry or camera correspondences. Al-
+though confidence gating suppresses uncertain predictions,
+it cannot remove errors assigned high confidence. Such er-
+rors can bias candidate selection and cause warped struc-
+tures, duplicated details, or temporal flickering.
+Second, GeoART searches over a finite, randomly gen-
+erated candidate pool. With N = 5, the pool may not con-
+tain a suitable update at a difficult denoising step. Conse-
+quently, GeoART may preserve the overall geometry and
+camera alignment while sacrificing fine texture quality. To-
+gether, inaccurate geometry estimates and limited candi-
+date coverage account for the primary failure cases of our
+method(Figure 7).
+6.7. Limitations
+The proposed method depends on a pretrained geometry es-
+timator and assumes that camera intrinsics and extrinsics
+are available or can be estimated reliably. Its performance
+
+
+is consequently bounded by the accuracy and domain gen-
+eralization of VGGT. The confidence threshold is also se-
+lected heuristically, and a fixed threshold may not transfer
+optimally to scenes with different image statistics, motion
+patterns, or camera baselines.
+Geometry-guided test-time scaling increases inference
+cost relative to standard diffusion sampling. These opera-
+tions increase runtime and memory consumption, limiting
+the practicality of the current implementation for extremely
+long or high-resolution videos.
+Future work could replace dataset-specific thresholds
+with learnable uncertainty calibration, incorporate tempo-
+ral memory and dynamic-scene geometry, and use adaptive
+candidate allocation so that additional computation is con-
+centrated only at uncertain denoising steps.
+
+
+Figure 8. Comparison with baseline methods.
+
+
+Figure 9. Comparison with baseline methods.
+
+
+Figure 10. Qualitative comparison at 512 × 512 resolution.
+
+
+Figure 11. Qualitative comparison at 512 × 512 resolution.
+
+
+References
+[1] Jan Ackermann, Shengqu Cai, Boyang Deng, Zhengfei
+Kuang, Songyou Peng, and Gordon Wetzstein. Geoflow: En-
+forcing implicit geometric consistency in video generation,
+2026. 1, 2
+[2] Zhaochong An, Orest Kupyn, Th´eo Uscidda, Andrea Colaco,
+Karan Ahuja, Serge Belongie, Mar Gonzalez-Franco, and
+Marta Tintore Gazulla. Vggrpo: Towards world-consistent
+video generation with 4d latent reward.
+arXiv preprint
+arXiv:2603.26599, 2026. 1, 2
+[3] Sherwin Bahmani, Ivan Skorokhodov, Guocheng Qian, Ali-
+aksandr Siarohin, Willi Menapace, Andrea Tagliasacchi,
+David B Lindell, and Sergey Tulyakov. Ac3d: Analyzing
+and improving 3d camera control in video diffusion trans-
+formers. In 2025 IEEE/CVF Conference on Computer Vi-
+sion and Pattern Recognition (CVPR), pages 22875–22889.
+IEEE, 2025. 1, 2
+[4] Jianhong Bai, Menghan Xia, Xiao Fu, Xintao Wang, Lian-
+rui Mu, Jinwen Cao, Zuozhu Liu, Haoji Hu, Xiang Bai,
+Pengfei Wan, et al. Recammaster: Camera-controlled gen-
+erative rendering from a single video. In 2025 IEEE/CVF
+International Conference on Computer Vision (ICCV), pages
+14834–14844. IEEE, 2025. 2
+[5] Lichen Bai, Shitong Shao, Zipeng Qi, Zhiqiang Xu, Haoyi
+Xiong, Zeke Xie, et al.
+Zigzag diffusion sampling: Dif-
+fusion models can self-improve via self-reflection.
+In In-
+ternational Conference on Learning Representations, pages
+38561–38591, 2025. 1, 2, 6
+[6] Arpit Bansal, Hong-Min Chu, Avi Schwarzschild, Roni Sen-
+gupta, Micah Goldblum, Jonas Geiping, and Tom Gold-
+stein.
+Universal guidance for diffusion models.
+In In-
+ternational Conference on Learning Representations, pages
+51304–51323, 2024. 2
+[7] Amir Bar, Gaoyue Zhou, Danny Tran, Trevor Darrell, and
+Yann LeCun. Navigation world models. In 2025 IEEE/CVF
+Conference on Computer Vision and Pattern Recognition
+(CVPR), pages 15791–15801. IEEE, 2025. 1
+[8] Yoshua Bengio, Li Yao, Guillaume Alain, and Pascal Vin-
+cent.
+Generalized denoising auto-encoders as generative
+models. Advances in neural information processing systems,
+26, 2013. 2
+[9] Josef Bengtson, David Nilsson, and Fredrik Kahl.
+Geo-
+metric consistency refinement for single image novel view
+synthesis via test-time adaptation of diffusion models.
+In
+2025 IEEE/CVF Conference on Computer Vision and Pat-
+tern Recognition Workshops (CVPRW), pages 6389–6398.
+IEEE, 2025. 2, 6
+[10] Bradley Brown, Jordan Juravsky, Ryan Ehrlich, Ronald
+Clark, Quoc V Le, Christopher R´e, and Azalia Mirhoseini.
+Large language monkeys: Scaling inference compute with
+repeated sampling. arXiv preprint arXiv:2407.21787, 2024.
+2
+[11] Chenjie Cao, Jingkai Zhou, Shikai Li, Jingyun Liang, Chao-
+hui Yu, Fan Wang, Xiangyang Xue, and Yanwei Fu. Uni3c:
+Unifying precisely 3d-enhanced camera and human motion
+controls for video generation. In Proceedings of the SIG-
+GRAPH Asia 2025 Conference Papers, pages 1–12, 2025. 1,
+2, 5
+[12] Yue-Jiang Dong, Wang Zhao, Jiale Xu, Ying Shan, and
+Song-Hai Zhang.
+Depthsync: Diffusion guidance-based
+depth synchronization for scale-and geometry-consistent
+video depth estimation.
+In 2025 IEEE/CVF International
+Conference on Computer Vision (ICCV), pages 5415–5425.
+IEEE, 2025. 2
+[13] Hongyang Du, Junjie Ye, Xiaoyan Cong, Runhao Li,
+Jingcheng Ni, Aman Agarwal, Zeqi Zhou, Zekun Li, Randall
+Balestriero, and Yue Wang. Videogpa: Distilling geometry
+priors for 3d-consistent video generation, 2026. 2
+[14] Weichen Fan, Amber Yijia Zheng, Raymond A Yeh, and Zi-
+wei Liu. Cfg-zero*: Improved classifier-free guidance for
+flow matching models.
+arXiv preprint arXiv:2503.18886,
+2025. 2
+[15] Ruiqi Gao*, Aleksander Holynski*, Philipp Henzler, Arthur
+Brussee,
+Ricardo Martin-Brualla,
+Pratul P. Srinivasan,
+Jonathan T. Barron, and Ben Poole*. Cat3d: Create any-
+thing in 3d with multi-view diffusion models. Advances in
+Neural Information Processing Systems, 2024. 2
+[16] Hyojun Go, Byeongjun Park, Jiho Jang, Jin-Young Kim,
+Soonwoo Kwon, and Changick Kim. Splatflow: Multi-view
+rectified flow model for 3d gaussian splatting synthesis. In
+2025 IEEE/CVF Conference on Computer Vision and Pat-
+tern Recognition (CVPR), pages 21524–21536. IEEE, 2025.
+2
+[17] Hyojun Go, Byeongjun Park, Hyelin Nam, Byung-Hoon
+Kim, Hyungjin Chung, and Changick Kim.
+Videorfsplat:
+Direct scene-level text-to-3d gaussian splatting generation
+with flexible pose and multi-view joint modeling. In 2025
+IEEE/CVF International Conference on Computer Vision
+(ICCV), pages 1–12. IEEE, 2025. 2
+[18] Hao He, Yinghao Xu, Yuwei Guo, Gordon Wetzstein, Bo
+Dai, Hongsheng Li, and Ceyuan Yang. Cameractrl: Enabling
+camera control for text-to-video generation. arXiv preprint
+arXiv:2404.02101, 2024. 1, 2
+[19] Haoran He, Jiajun Liang, Xintao Wang, Pengfei Wan, Di
+Zhang, Kun Gai, and Ling Pan. Scaling image and video
+generation via test-time evolutionary search, 2025. 2
+[20] Hao He, Ceyuan Yang, Shanchuan Lin, Yinghao Xu, Meng
+Wei, Liangke Gui, Qi Zhao, Gordon Wetzstein, Lu Jiang,
+and Hongsheng Li. Cameractrl ii: Dynamic scene explo-
+ration via camera-controlled video diffusion models.
+In
+2025 IEEE/CVF International Conference on Computer Vi-
+sion (ICCV), pages 13416–13426. IEEE, 2025. 2
+[21] Xianglong He, Chunli Peng, Zexiang Liu, Boyang Wang,
+Yifan Zhang, Qi Cui, Fei Kang, Biao Jiang, Mengyin An,
+Yangyang Ren, et al. Matrix-game 2.0: An open-source real-
+time and streaming interactive world model. arXiv preprint
+arXiv:2508.13009, 2025. 1
+[22] Jiaxin Huang, Yuanbo Yang, Bangbang Yang, Lin Ma,
+Yuewen Ma, and Yiyi Liao.
+Gen3r:
+3d scene genera-
+tion meets feed-forward reconstruction. In Proceedings of
+the IEEE/CVF Conference on Computer Vision and Pattern
+Recognition, pages 25358–25369, 2026. 1, 2
+[23] Siqiao Huang, Jialong Wu, Qixing Zhou, Shangchen Miao,
+and Mingsheng Long.
+Vid2world: Crafting video diffu-
+
+
+sion models to interactive world models.
+arXiv preprint
+arXiv:2505.14357, 2025. 1
+[24] Tianyu Huang, Wangguandong Zheng, Tengfei Wang, Yuhao
+Liu, Zhenwei Wang, Junta Wu, Jie Jiang, Hui Li, Rynson
+W. H. Lau, Wangmeng Zuo, and Chunchao Guo.
+Voy-
+ager: Long-range and world-consistent video diffusion for
+explorable 3d scene generation, 2025. 2
+[25] Ziqi Huang, Yinan He, Jiashuo Yu, Fan Zhang, Chenyang Si,
+Yuming Jiang, Yuanhan Zhang, Tianxing Wu, Qingyang Jin,
+Nattapol Chanpaisit, Yaohui Wang, Xinyuan Chen, Limin
+Wang, Dahua Lin, Yu Qiao, and Ziwei Liu. VBench: Com-
+prehensive benchmark suite for video generative models. In
+Proceedings of the IEEE/CVF Conference on Computer Vi-
+sion and Pattern Recognition, 2024. 6
+[26] Ziqi Huang, Fan Zhang, Xiaojie Xu, Yinan He, Jiashuo
+Yu, Ziyue Dong, Qianli Ma, Nattapol Chanpaisit, Chenyang
+Si, Yuming Jiang, Yaohui Wang, Xinyuan Chen, Ying-
+Cong Chen, Limin Wang, Dahua Lin, Yu Qiao, and Zi-
+wei Liu. Vbench++: Comprehensive and versatile bench-
+mark suite for video generative models.
+arXiv preprint
+arXiv:2411.13503, 2024. 6
+[27] Sangwon Jang, Taekyung Ki, Jaehyeong Jo, Saining Xie,
+Jaehong Yoon, and Sung Ju Hwang. Self-refining video sam-
+pling. arXiv preprint arXiv:2601.18577, 2026. 1, 2, 5, 6, 3
+[28] Dimitrios Karageorgiou, Symeon Papadopoulos, Ioannis
+Kompatsiaris, and Efstratios Gavves.
+Test-time noise
+guided adaptation for realistic autoregressive video genera-
+tion. arXiv preprint arXiv:2607.15849, 2026. 2
+[29] Sunwoo Kim, Minkyu Kim, and Dongmin Park.
+Test-
+time alignment of diffusion models without reward over-
+optimization, 2025. 2
+[30] Diederik P Kingma and Max Welling. Auto-encoding varia-
+tional bayes. arXiv preprint arXiv:1312.6114, 2013. 4
+[31] Xin Kong, Daniel Watson, Yannick Str¨umpler, Michael
+Niemeyer, and Federico Tombari. Causnvs: Autoregressive
+multi-view diffusion for flexible 3d novel view synthesis,
+2025. 2
+[32] Orest Kupyn, Fabian Manhardt, Federico Tombari, and
+Christian Rupprecht.
+Epipolar geometry improves video
+generation models. arXiv preprint arXiv:2510.21615, 2025.
+1, 2
+[33] Dohun Lee, Bryan S Kim, Geon Yeong Park, and Jong Chul
+Ye. Videoguide: Improving video diffusion models without
+training through a teacher’s guide, 2024. 2
+[34] Vincent Leroy, Yohann Cabon, and J´erˆome Revaud. Ground-
+ing image matching in 3d with mast3r. In European confer-
+ence on computer vision, pages 71–91. Springer, 2024. 8
+[35] Teng Li, Guangcong Zheng, Rui Jiang, Shuigen Zhan, Tao
+Wu, Yehao Lu, Yining Lin, Chuanyun Deng, Yepan Xiong,
+Min Chen, Lin Cheng, and Xi Li. Realcam-i2v: Real-world
+image-to-video generation with interactive complex camera
+control, 2025. 2
+[36] Zizun Li, Haoyu Guo, Runzhe Teng, Chunhua Shen, and
+Tong He. Geo-align: Video generation alignment via metric
+geometry reward. arXiv preprint arXiv:2605.23903, 2026. 1
+[37] Hanwen Liang, Junli Cao, Vidit Goel, Guocheng Qian,
+Sergei Korolev, Demetri Terzopoulos, Konstantinos Platan-
+iotis, Sergey Tulyakov, and Jian Ren.
+Wonderland: Nav-
+igating 3d scenes from a single image.
+arXiv preprint
+arXiv:2412.12091, 2024. 2
+[38] Lu Ling, Yichen Sheng, Zhi Tu, Wentian Zhao, Cheng Xin,
+Kun Wan, Lantao Yu, Qianyu Guo, Zixun Yu, Yawen Lu,
+et al.
+Dl3dv-10k: A large-scale scene dataset for deep
+learning-based 3d vision. In Proceedings of the IEEE/CVF
+Conference on Computer Vision and Pattern Recognition,
+pages 22160–22169, 2024. 5
+[39] Yaron Lipman, Ricky TQ Chen, Heli Ben-Hamu, Maximil-
+ian Nickel, and Matt Le. Flow matching for generative mod-
+eling. arXiv preprint arXiv:2210.02747, 2022. 2
+[40] Fangfu Liu, Wenqiang Sun, Hanyang Wang, Yikai Wang,
+Haowen Sun, Junliang Ye, Jun Zhang, and Yueqi Duan. Re-
+conx: Reconstruct any scene from sparse views with video
+diffusion model, 2025. 2
+[41] Fangfu Liu, Hanyang Wang, Yimo Cai, Kaiyan Zhang, Xiao-
+hang Zhan, and Yueqi Duan. Video-t1: Test-time scaling for
+video generation. In Proceedings of the IEEE/CVF interna-
+tional conference on computer vision, pages 18671–18681,
+2025. 2, 3, 6
+[42] Lijuan Liu, Wenfa Li, Dongbo Zhang, Shuo Wang, and
+Shaohui Jiao.
+Idcnet: Guided video diffusion for metric-
+consistent rgbd scene generation with precise camera con-
+trol. 2025. 2
+[43] Xingchao Liu, Chengyue Gong, and Qiang Liu.
+Flow
+straight and fast: Learning to generate and transfer data with
+rectified flow. arXiv preprint arXiv:2209.03003, 2022. 2
+[44] Xi Liu, Chaoyi Zhou, and Siyu Huang.
+3dgs-enhancer:
+Enhancing unbounded 3d gaussian splatting with view-
+consistent 2d diffusion priors. Advances in Neural Informa-
+tion Processing Systems, 37:133305–133327, 2024. 1, 2
+[45] Grace Luo, Trevor Darrell, Oliver Wang, Dan B Goldman,
+and Aleksander Holynski. Readout guidance: Learning con-
+trol from diffusion features. In 2024 IEEE/CVF Conference
+on Computer Vision and Pattern Recognition (CVPR), pages
+8217–8227. IEEE, 2024. 2
+[46] Nanye Ma, Shangyuan Tong, Haolin Jia, Hexiang Hu, Yu-
+Chuan Su, Mingda Zhang, Xuan Yang, Yandong Li, Tommi
+Jaakkola, Xuhui Jia, et al. Inference-time scaling for diffu-
+sion models beyond scaling denoising steps. arXiv preprint
+arXiv:2501.09732, 2025. 2, 3
+[47] Shunqi Mao, Wei Guo, Chaoyi Zhang, Jieting Long, Ke Xie,
+and Weidong Cai. Ctrl-z sampling: Scaling diffusion sam-
+pling with controlled random zigzag explorations, 2026. 2
+[48] Yiran Qin, Ao Sun, Yuze Hong, Benyou Wang, and Ruimao
+Zhang. Navigatediff: Visual predictors are zero-shot nav-
+igation assistants. In 2025 IEEE International Conference
+on Robotics and Automation (ICRA), pages 12002–12002.
+IEEE, 2025. 1
+[49] Vignav Ramesh and Morteza Mardani. Test-time scaling of
+diffusion models via noise trajectory search. Advances in
+Neural Information Processing Systems, 38:87284–87317,
+2026. 2
+[50] Jeremy Reizenstein, Roman Shapovalov, Philipp Henzler,
+Luca Sbordone, Patrick Labatut, and David Novotny. Com-
+mon objects in 3d:
+Large-scale learning and evaluation
+
+
+of real-life 3d category reconstruction.
+In Proceedings of
+the IEEE/CVF international conference on computer vision,
+pages 10901–10911, 2021. 5
+[51] Xuanchi Ren, Tianchang Shen, Jiahui Huang, Huan Ling,
+Yifan Lu, Merlin Nimier-David, Thomas M¨uller, Alexan-
+der Keller, Sanja Fidler, and Jun Gao. Gen3c: 3d-informed
+world-consistent video generation with precise camera con-
+trol. In Proceedings of the IEEE/CVF Conference on Com-
+puter Vision and Pattern Recognition, pages 6121–6132,
+2025. 1, 2
+[52] Raghav Singhal, Zachary Horvitz, Ryan Teehan, Mengye
+Ren, Zhou Yu, Kathleen McKeown, and Rajesh Ranganath.
+A general framework for inference-time scaling and steering
+of diffusion models, 2025. 2
+[53] Charlie Snell, Jaehoon Lee, Kelvin Xu, and Aviral Ku-
+mar. Scaling llm test-time compute optimally can be more
+effective than scaling model parameters.
+arXiv preprint
+arXiv:2408.03314, 2024. 2
+[54] Wenqiang Sun, Shuo Chen, Fangfu Liu, Zilong Chen, Yueqi
+Duan, Jun Zhang, and Yikai Wang. Dimensionx: Create any
+3d and 4d scenes from a single image with controllable video
+diffusion, 2024. 2
+[55] Wenqiang Sun, Haiyu Zhang, Haoyuan Wang, Junta Wu,
+Zehan Wang, Zhenwei Wang, Yunhong Wang, Jun Zhang,
+Tengfei Wang, and Chunchao Guo.
+Worldplay: Towards
+long-term geometric consistency for real-time interactive
+world modeling. arXiv preprint arXiv:2512.14614, 2025. 1
+[56] S. Umeyama. Least-squares estimation of transformation pa-
+rameters between two point patterns. IEEE Transactions on
+Pattern Analysis and Machine Intelligence, 13(4):376–380,
+1991. 5
+[57] Team Wan, Ang Wang, Baole Ai, Bin Wen, Chaojie Mao,
+Chen-Wei Xie, Di Chen, Feiwu Yu, Haiming Zhao, Jianxiao
+Yang, et al. Wan: Open and advanced large-scale video gen-
+erative models. arXiv preprint arXiv:2503.20314, 2025. 5,
+1
+[58] Hanyang Wang, Yiyang Liu, Jiawei Chi, Fangfu Liu, Ran
+Xue, and Yueqi Duan. Cfg-ctrl: Control-based classifier-free
+diffusion guidance. arXiv preprint arXiv:2603.03281, 2026.
+1, 2, 6, 3
+[59] Jianyuan Wang, Minghao Chen, Nikita Karaev, Andrea
+Vedaldi, Christian Rupprecht, and David Novotny.
+Vggt:
+Visual geometry grounded transformer. In 2025 IEEE/CVF
+Conference on Computer Vision and Pattern Recognition
+(CVPR), pages 5294–5306. IEEE, 2025. 4, 8
+[60] Jianyuan Wang, Minghao Chen, Shangzhan Zhang, Nikita
+Karaev, Johannes Sch¨onberger, Patrick Labatut, Piotr Bo-
+janowski, David Novotny, Andrea Vedaldi, and Christian
+Rupprecht. Vggt-ω, 2026. 8
+[61] Shuzhe Wang,
+Vincent Leroy,
+Yohann Cabon,
+Boris
+Chidlovskii, and Jerome Revaud. Dust3r: Geometric 3d vi-
+sion made easy. In 2024 IEEE/CVF Conference on Com-
+puter Vision and Pattern Recognition (CVPR), pages 20697–
+20709. IEEE, 2024. 8
+[62] Weijie Wang, Xiaoxuan He, Youping Gu, Yifan Yang, Zeyu
+Zhang, Yefei He, Yanbo Ding, Xirui Hu, Donny Y. Chen,
+Zhiyuan He, Yuqing Yang, and Bohan Zhuang.
+World-
+r1: Reinforcing 3d constraints for text-to-video generation,
+2026. 2
+[63] Yifan Wang, Jianjun Zhou, Haoyi Zhu, Wenzheng Chang,
+Yang Zhou, Zizun Li, Junyi Chen, Jiangmiao Pang, Chun-
+hua Shen, and Tong He. π3: Permutation-equivariant visual
+geometry learning, 2026. 5, 8
+[64] Zhouxia Wang, Ziyang Yuan, Xintao Wang, Yaowei Li,
+Tianshui Chen, Menghan Xia, Ping Luo, and Ying Shan.
+Motionctrl: A unified and flexible motion controller for
+video generation. In ACM SIGGRAPH 2024 Conference Pa-
+pers, pages 1–11, 2024. 1, 2
+[65] Zhaoqing Wang, Xiaobo Xia, Zhuolin Bie, Jinlin Liu, Dong-
+dong Yu, Jia-Wang Bian, and Changhu Wang.
+Taming
+camera-controlled video generation with verifiable geometry
+reward, 2025. 2
+[66] Thadd¨aus Wiedemer, Yuxuan Li, Paul Vicol, Shixiang Shane
+Gu, Nick Matarese, Kevin Swersky, Been Kim, Priyank
+Jaini, and Robert Geirhos. Video models are zero-shot learn-
+ers and reasoners. arXiv preprint arXiv:2509.20328, 2025.
+1
+[67] Haoyu Wu, Diankun Wu, Tianyu He, Junliang Guo, Yang Ye,
+Yueqi Duan, and Jiang Bian. Geometry forcing: Marrying
+video diffusion and 3d representation for consistent world
+modeling, 2026. 2
+[68] Tianxing Wu, Chenyang Si, Yuming Jiang, Ziqi Huang, and
+Ziwei Liu. Freeinit: Bridging initialization gap in video dif-
+fusion models, 2024. 2
+[69] Yilun Xu, Mingyang Deng, Xiang Cheng, Yonglong Tian,
+Ziming Liu, and Tommi Jaakkola. Restart sampling for im-
+proving generative processes, 2023. 2
+[70] Liudi Yang, George Eskandar, Fengyi Shen, Mohammad Al-
+tillawi, Yang Bai, Chi Zhang, Ziyuan Liu, and Abhinav Val-
+ada.
+Confctrl: Enabling precise camera control in video
+diffusion via confidence-aware interpolation. arXiv preprint
+arXiv:2603.09819, 2026. 1, 2
+[71] Tengjiao Yin, Jinglei Shi, Heng Guo, and Xi Wang. Vigor:
+Video geometry-oriented reward for temporal generative
+alignment. arXiv preprint arXiv:2603.16271, 2026. 1, 2,
+6
+[72] Jiwen Yu, Yinhuai Wang, Chen Zhao, Bernard Ghanem,
+and Jian Zhang.
+Freedom: Training-free energy-guided
+conditional diffusion model.
+In 2023 IEEE/CVF Inter-
+national Conference on Computer Vision (ICCV), pages
+23117–23127. IEEE, 2023. 2
+[73] Mark Yu, Wenbo Hu, Jinbo Xing, and Ying Shan.
+Tra-
+jectorycrafter: Redirecting camera trajectory for monocular
+videos via diffusion models.
+In 2025 IEEE/CVF Interna-
+tional Conference on Computer Vision (ICCV), pages 100–
+111. IEEE, 2025. 1, 2
+[74] Wangbo Yu, Jinbo Xing, Li Yuan, Wenbo Hu, Xiaoyu Li,
+Zhipeng Huang, Xiangjun Gao, Tien-Tsin Wong, Ying Shan,
+and Yonghong Tian. Viewcrafter: Taming video diffusion
+models for high-fidelity novel view synthesis. arXiv preprint
+arXiv:2409.02048, 2024. 1, 2
+[75] Jiazhao Zhang, Kunyu Wang, Shaoan Wang, Minghan Li,
+Haoran Liu, Songlin Wei, Zhongyuan Wang, Zhizheng
+Zhang, and He Wang.
+Uni-navid: A video-based vision-
+
+
+language-action model for unifying embodied navigation
+tasks. arXiv preprint arXiv:2412.06224, 2024. 1
+[76] Qihang Zhang, Shuangfei Zhai, Miguel ´Angel Bautista,
+Kevin Miao, Alexander Toshev, Joshua Susskind, and Jiatao
+Gu. World-consistent video diffusion with explicit 3d mod-
+eling. In arXiv, 2024. 2
+[77] Songchun Zhang, Huiyao Xu, Sitong Guo, Zhongwei Xie,
+Hujun Bao, Weiwei Xu, and Changqing Zou. Spatialcrafter:
+Unleashing the imagination of video diffusion models for
+scene reconstruction from limited observations. In Proceed-
+ings of the IEEE/CVF International Conference on Com-
+puter Vision (ICCV), 2025. 2
+[78] Xiangcheng Zhang, Haowei Lin, Haotian Ye, James Zou,
+Jianzhu Ma, Yitao Liang, and Yilun Du. Inference-time scal-
+ing of diffusion models through classical search, 2025. 2
+[79] Yifan Zhang, Chunli Peng, Boyang Wang, Puyi Wang,
+Qingcheng Zhu, Fei Kang, Biao Jiang, Zedong Gao, Eric Li,
+Yang Liu, et al. Matrix-game: Interactive world foundation
+model. arXiv preprint arXiv:2506.18701, 2025. 1
+[80] Xinxin Zhao, Wenzhe Cai, Likun Tang, and Teng Wang.
+Imaginenav: Prompting vision-language models as embod-
+ied navigator through scene imagination. In International
+Conference on Learning Representations, pages 94387–
+94401, 2025. 1
+[81] Guangcong Zheng, Teng Li, Rui Jiang, Yehao Lu, Tao Wu,
+and Xi Li. Cami2v: Camera-controlled image-to-video dif-
+fusion model. arXiv preprint arXiv:2410.15957, 2024. 1,
+2
+[82] Jensen Zhou, Hang Gao, Vikram Voleti, Aaryaman Vasishta,
+Chun-Han Yao, Mark Boss, Philip Torr, Christian Rupprecht,
+and Varun Jampani. Stable virtual camera: Generative view
+synthesis with diffusion models, 2025. 2
