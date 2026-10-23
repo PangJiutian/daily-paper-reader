@@ -1,6 +1,9 @@
 * <a class="dpr-sidebar-root-link" href="#/">首页</a>
 * <a class="dpr-sidebar-root-link dpr-sidebar-noactive-link" href="javascript:void(0)" data-dpr-hash="#/tutorial/README">使用教程</a>
 * Daily Papers
+  * 2026-10-24 <!--dpr-date:20261024-->
+    * 精读区
+      * <a class="dpr-sidebar-item-link dpr-sidebar-item-structured" href="#/202610/24/2610.26811v1-state-world-models-execute-the-rules-generate-the-pixels" data-sidebar-item="{&quot;title&quot;: &quot;State World Models: Execute the Rules, Generate the Pixels&quot;, &quot;link&quot;: &quot;https://arxiv.org/abs/2610.26811v1-state-world-models-execute-the-rules-generate-the-pixels&quot;, &quot;score&quot;: &quot;8.0&quot;, &quot;tags&quot;: [{&quot;kind&quot;: &quot;query&quot;, &quot;label&quot;: &quot;video-world-models&quot;}], &quot;evidence&quot;: &quot;分离世界演化与视频渲染的有状态规则世界模型&quot;}">State World Models: Execute the Rules, Generate the Pixels</a>
   * 2026-10-23 <!--dpr-date:20261023-->
     * 精读区
       * <a class="dpr-sidebar-item-link dpr-sidebar-item-structured" href="#/202610/23/2610.20822v1-temporal-specification-guidance-for-text-to-video-generation" data-sidebar-item="{&quot;title&quot;: &quot;Temporal Specification Guidance for Text-to-Video Generation&quot;, &quot;link&quot;: &quot;https://arxiv.org/abs/2610.20822v1-temporal-specification-guidance-for-text-to-video-generation&quot;, &quot;score&quot;: &quot;8.0&quot;, &quot;tags&quot;: [{&quot;kind&quot;: &quot;query&quot;, &quot;label&quot;: &quot;video-world-models&quot;}], &quot;evidence&quot;: &quot;基于时序规范的可控文本到视频生成&quot;}">Temporal Specification Guidance for Text-to-Video Generation</a>

@@ -48,17 +48,17 @@
 <section class="dpr-home-dashboard-card dpr-home-report-card">
   <div class="dpr-home-dashboard-header">
     <div>
-      <span class="dpr-home-dashboard-kicker">2026-10-23</span>
+      <span class="dpr-home-dashboard-kicker">2026-10-24</span>
       <h3 class="dpr-home-dashboard-title">今日汇总</h3>
     </div>
-    <strong class="dpr-home-dashboard-count">共 4 篇</strong>
+    <strong class="dpr-home-dashboard-count">共 1 篇</strong>
   </div>
   <dl class="dpr-home-dashboard-stats">
     <div class="dpr-home-dashboard-stat"><dt>累计更新</dt><dd>1 次</dd></div>
-    <div class="dpr-home-dashboard-stat"><dt>精读</dt><dd>2</dd></div>
-    <div class="dpr-home-dashboard-stat"><dt>速读</dt><dd>2</dd></div>
+    <div class="dpr-home-dashboard-stat"><dt>精读</dt><dd>1</dd></div>
+    <div class="dpr-home-dashboard-stat"><dt>速读</dt><dd>0</dd></div>
   </dl>
-  <p class="dpr-home-dashboard-body">最近更新：2026-10-22 22:47:46 UTC<br>状态：成功</p>
+  <p class="dpr-home-dashboard-body">最近更新：2026-10-23 22:35:22 UTC<br>状态：成功</p>
 </section>
 <section class="dpr-home-dashboard-card dpr-home-brief-card">
   <div class="dpr-home-dashboard-header">
@@ -69,7 +69,7 @@
     <strong class="dpr-home-dashboard-count">AI</strong>
   </div>
   <div class="dpr-home-dashboard-body">
-<p>今日精读2篇、速读2篇共4篇视频生成前沿论文，全部得分8.0，重点集中在可控视频生成与具身导航视频。最值得看的是《Temporal Specification Guidance for Text-to-Video Generation》的时间规格引导，以及《Map2Vid》面向具身导航、带有人性化运动控制的视频生成。普通读者可先读这两篇精读理解“可控性”主线，再用《GeoART》与《UniState》补充测试时优化和世界模拟记忆干预的视角。</p>
+<p>今日精读 1 篇论文《State World Models: Execute the Rules, Generate the Pixels》（8.0/10），聚焦“规则执行”与“像素生成”如何协同工作的世界模型思路。最值得看的是，它把状态规则与画面生成连接起来，并给出两者配合的具体机制。普通读者可以先看方法框架与实验对比，再判断是否跟进复现或延伸阅读。</p>
   </div>
 </section>
 <section class="dpr-home-dashboard-card dpr-home-deep-card">
@@ -78,12 +78,12 @@
       <span class="dpr-home-dashboard-kicker">今日累计</span>
       <h3 class="dpr-home-dashboard-title">精读推荐</h3>
     </div>
-    <strong class="dpr-home-dashboard-count">2 篇</strong>
+    <strong class="dpr-home-dashboard-count">1 篇</strong>
   </div>
   <div class="dpr-home-dashboard-body">
-<ul class="dpr-home-dashboard-paper-list"><li><span class="dpr-home-dashboard-paper-title" title="Temporal Specification Guidance for Text-to-Video Generation">Temporal Specification Guidance for Text-to-Video Generation</span></li><li><span class="dpr-home-dashboard-paper-title" title="Map2Vid: Embodied Navigation Video Generation with Human-Friendly Motion Control">Map2Vid: Embodied Navigation Video Generation with Human-Friendly Motion Control</span></li></ul>
+<ul class="dpr-home-dashboard-paper-list"><li><span class="dpr-home-dashboard-paper-title" title="State World Models: Execute the Rules, Generate the Pixels">State World Models: Execute the Rules, Generate the Pixels</span></li></ul>
   </div>
-  <div class="dpr-home-dashboard-tags"><span class="dpr-home-dashboard-tag">video-world-models <strong>2</strong></span></div>
+  <div class="dpr-home-dashboard-tags"><span class="dpr-home-dashboard-tag">video-world-models <strong>1</strong></span></div>
 </section>
 <section class="dpr-home-dashboard-card dpr-home-skim-card">
   <div class="dpr-home-dashboard-header">
@@ -91,12 +91,12 @@
       <span class="dpr-home-dashboard-kicker">今日累计</span>
       <h3 class="dpr-home-dashboard-title">速读推荐</h3>
     </div>
-    <strong class="dpr-home-dashboard-count">2 篇</strong>
+    <strong class="dpr-home-dashboard-count">0 篇</strong>
   </div>
   <div class="dpr-home-dashboard-body">
-<ul class="dpr-home-dashboard-paper-list"><li><span class="dpr-home-dashboard-paper-title" title="GeoART: Geometry-Aware Refinement via Test-Time Scaling for Camera-Conditioned Video Diffusion">GeoART: Geometry-Aware Refinement via Test-Time Scaling for Camera-Conditioned Video Diffusion</span></li><li><span class="dpr-home-dashboard-paper-title" title="UniState: Unifying Memory and Intervention for Controllable World Simulation">UniState: Unifying Memory and Intervention for Controllable World Simulation</span></li></ul>
+<p class="dpr-home-dashboard-empty">今日暂无推荐。</p>
   </div>
-  <div class="dpr-home-dashboard-tags"><span class="dpr-home-dashboard-tag">video-world-models <strong>2</strong></span></div>
+
 </section>
 </div>
 
