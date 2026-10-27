@@ -1,6 +1,9 @@
 * <a class="dpr-sidebar-root-link" href="#/">首页</a>
 * <a class="dpr-sidebar-root-link dpr-sidebar-noactive-link" href="javascript:void(0)" data-dpr-hash="#/tutorial/README">使用教程</a>
 * Daily Papers
+  * 2026-10-28 <!--dpr-date:20261028-->
+    * 精读区
+      * <a class="dpr-sidebar-item-link dpr-sidebar-item-structured" href="#/202610/28/2610.30926v1-making-mllm-latents-matter-factor-aware-predictive-learning-for-cinematic-video-generation" data-sidebar-item="{&quot;title&quot;: &quot;Making MLLM Latents Matter: Factor-Aware Predictive Learning for Cinematic Video Generation&quot;, &quot;link&quot;: &quot;https://arxiv.org/abs/2610.30926v1-making-mllm-latents-matter-factor-aware-predictive-learning-for-cinematic-video-generation&quot;, &quot;score&quot;: &quot;8.0&quot;, &quot;tags&quot;: [{&quot;kind&quot;: &quot;query&quot;, &quot;label&quot;: &quot;video-world-models&quot;}], &quot;evidence&quot;: &quot;因子感知可控电影视频生成含相机控制&quot;}">Making MLLM Latents Matter: Factor-Aware Predictive Learning for Cinematic Video Generation</a>
   * 2026-10-27 <!--dpr-date:20261027-->
     * 精读区
       * <a class="dpr-sidebar-item-link dpr-sidebar-item-structured" href="#/202610/27/2610.25861v2-actionrope-action-as-coordinates-for-spatially-consistent-control-in-planar-camera-game-world-models" data-sidebar-item="{&quot;title&quot;: &quot;ActionRoPE: Action as Coordinates for Spatially Consistent Control in Planar-Camera Game World Models&quot;, &quot;link&quot;: &quot;https://arxiv.org/abs/2610.25861v2-actionrope-action-as-coordinates-for-spatially-consistent-control-in-planar-camera-game-world-models&quot;, &quot;score&quot;: &quot;8.0&quot;, &quot;tags&quot;: [{&quot;kind&quot;: &quot;query&quot;, &quot;label&quot;: &quot;video-world-models&quot;}], &quot;evidence&quot;: &quot;交互式游戏世界模型中的空间一致动作控制&quot;}">ActionRoPE: Action as Coordinates for Spatially Consistent Control in Planar-Camera Game World Models</a>

@@ -48,17 +48,17 @@
 <section class="dpr-home-dashboard-card dpr-home-report-card">
   <div class="dpr-home-dashboard-header">
     <div>
-      <span class="dpr-home-dashboard-kicker">2026-10-27</span>
+      <span class="dpr-home-dashboard-kicker">2026-10-28</span>
       <h3 class="dpr-home-dashboard-title">今日汇总</h3>
     </div>
-    <strong class="dpr-home-dashboard-count">共 2 篇</strong>
+    <strong class="dpr-home-dashboard-count">共 1 篇</strong>
   </div>
   <dl class="dpr-home-dashboard-stats">
     <div class="dpr-home-dashboard-stat"><dt>累计更新</dt><dd>1 次</dd></div>
-    <div class="dpr-home-dashboard-stat"><dt>精读</dt><dd>2</dd></div>
+    <div class="dpr-home-dashboard-stat"><dt>精读</dt><dd>1</dd></div>
     <div class="dpr-home-dashboard-stat"><dt>速读</dt><dd>0</dd></div>
   </dl>
-  <p class="dpr-home-dashboard-body">最近更新：2026-10-26 23:13:21 UTC<br>状态：成功</p>
+  <p class="dpr-home-dashboard-body">最近更新：2026-10-27 23:03:43 UTC<br>状态：成功</p>
 </section>
 <section class="dpr-home-dashboard-card dpr-home-brief-card">
   <div class="dpr-home-dashboard-header">
@@ -69,7 +69,7 @@
     <strong class="dpr-home-dashboard-count">AI</strong>
   </div>
   <div class="dpr-home-dashboard-body">
-<p>今日精读两篇 8.0 分论文，聚焦平面相机游戏世界模型的空间一致控制与视频交互新范式。最值得关注 ActionRoPE 将动作建模为坐标以增强空间一致性，以及视频作为读写、分享、交互世界媒介的潜力。普通读者可先读 ActionRoPE 理解空间控制思路，再结合视频交互综述拓展应用想象。</p>
+<p>今日精读 1 篇论文，重点研究电影级视频生成中的 MLLM 潜在表示利用问题。最值得关注的是 Factor-Aware Predictive Learning 这一思路，它试图让多模态大模型的潜在表示真正参与电影级视频生成，该文获评 8.0 分。普通读者可以先从“潜在表示如何影响生成质量”入手理解，再关注该方法在电影级视频生成任务上的实际效果。</p>
   </div>
 </section>
 <section class="dpr-home-dashboard-card dpr-home-deep-card">
@@ -78,12 +78,12 @@
       <span class="dpr-home-dashboard-kicker">今日累计</span>
       <h3 class="dpr-home-dashboard-title">精读推荐</h3>
     </div>
-    <strong class="dpr-home-dashboard-count">2 篇</strong>
+    <strong class="dpr-home-dashboard-count">1 篇</strong>
   </div>
   <div class="dpr-home-dashboard-body">
-<ul class="dpr-home-dashboard-paper-list"><li><span class="dpr-home-dashboard-paper-title" title="ActionRoPE: Action as Coordinates for Spatially Consistent Control in Planar-Camera Game World Models">ActionRoPE: Action as Coordinates for Spatially Consistent Control in Planar-Camera Game World Models</span></li><li><span class="dpr-home-dashboard-paper-title" title="Reading, Writing, Sharing, and Interacting with the World through Video">Reading, Writing, Sharing, and Interacting with the World through Video</span></li></ul>
+<ul class="dpr-home-dashboard-paper-list"><li><span class="dpr-home-dashboard-paper-title" title="Making MLLM Latents Matter: Factor-Aware Predictive Learning for Cinematic Video Generation">Making MLLM Latents Matter: Factor-Aware Predictive Learning for Cinematic Video Generation</span></li></ul>
   </div>
-  <div class="dpr-home-dashboard-tags"><span class="dpr-home-dashboard-tag">video-world-models <strong>2</strong></span></div>
+  <div class="dpr-home-dashboard-tags"><span class="dpr-home-dashboard-tag">video-world-models <strong>1</strong></span></div>
 </section>
 <section class="dpr-home-dashboard-card dpr-home-skim-card">
   <div class="dpr-home-dashboard-header">
