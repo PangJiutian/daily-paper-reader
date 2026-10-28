@@ -1,0 +1,3297 @@
+Ψ-0.6: Adaptive Streams of Thought in a Unified Vision-
+Language World Model
+Khai Loong Aw*, Klemen Kotar*, Baihan Zhang*, Yifan Liu*,
+Lilian Chen, Atlas Kazemian, Rahul Venkatesh, Daniel Yamins
+Stanford University
+Abstract. Humans reason about the physical world by flexibly combining different forms of inference
+as a problem unfolds. Achieving this flexibility is a major open challenge in AI: capabilities often
+remain separated across specialized models, limiting how they can be composed and jointly adapted
+to a task. We introduce Ψ-0.6, a unified vision-language world model that adaptively composes
+perception, language, geometry, and simulation within a shared reasoning process we call streams
+of thought. These streams interleave images, text, and explicit representations of geometry and
+motion, all of which the model can generate and interpret through a shared token interface. Ψ-
+0.6 surpasses leading open-weight models zero-shot on multi-view spatial reasoning, with further
+gains from reasoning through geometric intermediates. It also supports counterfactual simulation:
+generating and interpreting imagined scenes to determine, for example, whether moving an object
+would obstruct a pathway. Reinforcement learning from task feedback jointly optimizes the selection,
+generation, and use of intermediate representations, improving visual question-answering accuracy
+with gains that transfer to unseen benchmarks. Ψ-0.6 offers a path toward adaptive physical reasoning
+– not only predicting the physical world but also choosing the representations through which to reason.
+1 Introduction
+“Solving a problem simply means representing it so as to make the solution transparent.”
+— Herbert A. Simon, The Sciences of the Artificial
+Humans reason flexibly about the physical world, shifting between different forms of inference as a
+problem unfolds. When assembling furniture, we read instructions, change viewpoint, and mentally
+rotate a panel to imagine whether it will fit. These abilities are remarkably powerful, in three related
+but distinct senses. First, they are unified: diverse capabilities are expressed in a single system.
+Second, they are compositional: intermediate inferences and imagined states can be combined
+into solutions that no single operation provides. Third, they are adaptive: which representations
+are useful depends on the task, and experience can improve how they are selected and used. For
+example, words express goals and relations; geometric representations expose spatial structure;
+and imagined scenes reveal possible action consequences [1, 2]. Here we ask: how can an AI
+system learn which representations are useful for solving problems in the physical world?
+This remains a major challenge for current physical AI systems, as capabilities often remain
+fragmented across specialized models, limiting how flexibly they can be combined and adapted to a
+task. Vision encoders estimate and perceive, vision-language models (VLMs) describe and answer,
+and world models (WMs) predict and imagine – each with a separate architecture, training, and
+interface. This separation makes it difficult to compose these capabilities within a shared reasoning
+process and jointly optimize how these models’ predictions are generated and used through
+downstream task feedback. A growing body of work builds unified multimodal models [3, 4, 5, 6, 7],
+but these capabilities are not integrated into a shared reasoning process. Another line of work
+allows language or vision-language models to invoke external models, tools, or programs [8, 9, 10].
+However, the invoked components are typically treated as fixed black boxes whose prediction
+mechanisms are not jointly optimized with the reasoner for downstream tasks.
+*Equal contribution.
+arXiv:2610.32177v1  [cs.AI]  23 Oct 2026
+
+
+Ψ-0.6: Adaptive Streams of Thought in a Unified Vision-Language World Model
+tGI0,rgb0,d0,c0→1,c1→2,c2→3,c3→4,c4→5,c5→6,c6→7,d1,rgb1,d2,rgb2,d
+t0,rgb0,c0→1,c1→2,c2→3,c3→4,c4→5,c5→6,c
+rgb1
+d1,
+c1→2,
+c0→1,
+d0,
+rgb0,
+tGI0,
+rgb2
+c1→2,
+rgb1,
+c0→1,
+rgb0,
+t0,
+t0,rgb0,c0→1,c1→2,c2→3,c3→4,c4→5,c5→6,rgb1,
+rgb0,t0,c0→1,f0→1,rgb1,t1,c1→2,f1→2,rgb
+tGI0,rgb0,d0,c0→1,c1→2,f0→1,d1,rgb1,f1→2,d2,rgb2
+rgb0,d0,c0→1,d1,rgb1,c1→2,d2,rgb2
+tGA0
+f2→3,
+f1→2,
+f0→1,
+tGQ0,
+rgb3,
+rgb2,
+rgb1,
+rgb0,
+tGI0,rgb0,d0,c0→1,c1→2,c2→3,c3→4,c4→5,d1,rgb1,d2,rgb2,d3,rgb3,d4,rgb4,d5,rgb5
+c4→5
+c3→4,
+c2→3,
+c1→2,
+c0→1,
+tGD0,
+rgb0,
+rgb3
+f2→3,
+rgb2,
+f1→2,
+rgb1,
+f0→1,
+rgb0,
+t0,
+rgb0,rgb1,rgb2,rgb3,rgb4,tGQ0,tGA0
+rgb1
+rgb2,
+c0→1,
+rgb0,
+t0,
+rgb0,c0→1,rgb2,d0,d1,d2,t0
+rgb0,d0,c0→1,d1,rgb1,c1→2,d2,rgb2,c2→3
+tGI0,rgb0,c0→1,rgb1,c1→2,rgb2,c2→3,rgb3
+tGI0,rgb0,d0,c0→1,f0→1
+tGD0,rgb0,c0→1,f0→1,rgb1,c1→2,f1→2,rgb2
+c4→5
+tLD4,
+c3→4,
+tLD3,
+c2→3,
+tLD2,
+c1→2,
+tLD1,
+c0→1,
+tLD0,
+rgb0,
+t5
+rgb5,
+f4→5,
+t4,
+rgb4,
+f3→4,
+t3,
+rgb3,
+f2→3,
+t2,
+rgb2,
+,
+t0
+rgb5,
+d5,
+f4→5,
+c4→5,
+rgb4,
+d4,
+f3→4,
+c3→4,
+rgb3,
+d3,
+f2→3,
+c2→3,
+rgb2,
+d2,
+f1→2,
+c1→2,
+rgb1,
+d1,
+f0→1,
+rgb0,d0,d1,rgb1,d2,rgb2,d3,rgb3,d4,rgb4,d5,rgb5,d6,rgb6,d7,rg
+rgb3
+f2→3,
+c2→3,
+rgb2,
+f1→2,
+c1→2,
+rgb1,
+f0→1,
+c0→1,
+tGD0,
+rgb0,
+rgb0,c0→1,rgb1,c1→2,rgb2,c2→3,rgb3,t0
+t0,rgb0,rgb1,rgb2,rgb3,rgb4
+t0,rgb0,d0,d1,rgb1,d2,rgb2
+tGA0
+d2,
+d1,
+d0,
+rgb3,
+rgb2,
+rgb1,
+rgb0,
+tGQ0,
+t1
+rgb1,
+f0→1,
+c0→1,
+t0,
+rgb0,
+rgb0,d0,c0→1,f0→1,d1,rgb1,c1→2,f1→2,d
+rgb5
+rgb4,
+rgb3,
+rgb2,
+rgb1,
+c4→5,
+c3→4,
+c2→3,
+c1→2,
+c0→1,
+rgb0,
+rgb1
+c0→1,
+tLD0,
+rgb0,
+rgb3
+d3,
+c2→3,
+rgb2,
+rgb1,
+rgb0,
+t0,rgb0,d0,c0→1,c1→2,c2→3,f0→1,d1,rgb1,f1
+tGA0
+rgb1,
+d1,
+f0→1,
+d0,
+tGQ0,
+rgb0,
+rgb4
+d4,
+f3→4,
+rgb3,
+d3,
+f2→3,
+rgb2,
+d2,
+f1→2,
+rgb1,
+d1,
+f0→1,
+3→4,
+tGA0
+rgb1,
+f0→1,
+d0,
+rgb0,
+tGQ0,
+rgb0,rgb1,rgb2,c0→1,c1→2,c2→3,rgb3
+rgb4
+rgb3,
+rgb2,
+rgb1,
+rgb0,
+rgb2
+d2,
+f1→2,
+c1→2,
+rgb1,
+d1,
+f0→1,
+c0→1,
+d0,
+rgb0,
+t0
+rgb3,
+rgb2,
+rgb1,
+rgb4,
+c0→1,
+rgb0,
+t0
+rgb6,
+d6,
+f5→6,
+rgb5,
+d5,
+f4→5,
+rgb4,
+d4,
+f3→4,
+rgb3,
+d3,
+f2→3,
+b2,
+rgb5
+d5,
+c4→5,
+rgb4,
+d4,
+c3→4,
+rgb3,
+d3,
+3,
+tGD0,rgb0,d0,f0→1,d1
+tGI0,rgb0,c0→1,f0→1,rgb1,c1→2,f1→2,rgb2,c2→3,f2→3,rgb3,c3→4,f3→4,rgb4,c4→5,f4→5,rgb
+tGQ0,rgb0,rgb1,rgb2,d0,d1,d2,c0→1,c1→2,tReason0,c2
+tGD0,rgb0,d0,c0→1,c1→2,c2→3,c3→4,c4→5,c5→6,d1,rgb1,d2,rgb2,d3,rgb3,d4,rgb4,d5,rgb5
+rgb4
+rgb3,
+rgb2,
+rgb1,
+rgb0,
+tGD0,
+rgb2
+rgb1,
+rgb3,
+rgb0,
+t0,
+rgb7
+d7,
+rgb6,
+d6,
+rgb5,
+d5,
+rgb4,
+d4,
+rgb3,
+d3,
+rgb2,
+d2,
+tGA0
+rgb4,
+d4,
+c3→4,
+c2→3,
+c1→2,
+c0→1,
+d3,
+d2,
+d1,
+d0,
+rgb3,
+rgb2,
+rgb1,
+rgb0,
+tGQ0,
+rgb6
+c5→6,
+rgb5,
+c4→5,
+rgb4,
+c3→4,
+rgb3,
+c2→3,
+b2,
+tGI0,rgb0,d0,c0→1,f0→1,d1,rgb1,c1→2,f1→2,d2,rg
+tGD0,rgb0,c0→1,c1→2,c2→3,c3→4,c4→5
+rgb0,rgb1,rgb2,rgb3,rgb4,rgb5,rgb6,tGD0
+tGI0,rgb0,c0→1,c1→2,c2→3,c3→4,rgb1,rgb2,rgb3,rgb4
+rgb3
+c2→3,
+tLD2,
+rgb2,
+c1→2,
+tLD1,
+rgb1,
+c0→1,
+tLD0,
+rgb0,
+rgb0,rgb1,c0→1,tGD0
+t0
+rgb4,
+d4,
+c3→4,
+rgb3,
+d3,
+c2→3,
+rgb2,
+d2,
+c1→2,
+rgb1,
+d1,
+1,
+f0→1
+rgb1,
+rgb0,
+tGD0,rgb0,c
+rgb0,c0
+rgb6
+d6,
+5→6,
+rgb0,t0,
+b5
+gb6
+tGD0,rgb0,f0→1,rgb1,f1→2,rgb2,f2→3,rgb3
+rgb1
+f0→1,
+c0→1,
+0,
+rgb0,d0,d1,rgb1,d2,rgb2,t0
+tGD0,rgb0,c0→1,c1→2,c2→3,c
+rgb0,rgb1,rgb2,rgb3,rgb4
+tGI0,rgb0,c0→1,c1→2,c2→3,c3→4,c4→5,f0→
+rgb7
+f6→7,
+rgb6,
+tGA0
+tGQ0,
+rgb4,
+f3→4,
+rgb3,
+→3,
+rgb0,c0→1,rgb2,f0→1,f1→2
+tGI0,rgb0,c0→1,f0→1,rgb1,c1→2,f1→2,rgb2,c2→3,f2→
+rgb0,c0→1,rgb1,f0
+tGD0
+rgb7,
+d7,
+f6→7,
+c6→7,
+rgb6,
+d6,
+f5→6,
+c5→6,
+rgb5,
+d5,
+f4→5,
+tLD6
+rgb6,
+5→6,
+t0
+rgb3,
+d3,
+f2→3,
+c2→3,
+rgb2,
+d2,
+f1→2,
+c1→2,
+rgb1,
+d1,
+f0→1,
+c0→1,
+d0,
+rgb0,
+rgb5
+rgb4,
+rgb3,
+rgb2,
+rgb1,
+rgb0,
+D0,
+c0→2
+rgb2,
+rgb0,
+c1→2
+rgb2,
+rgb1,
+tGD0,
+rgb1
+d1,
+c0→1,
+tLD0,
+rgb5
+f4→5,
+c4→5,
+rgb4,
+f3→4,
+c3→4,
+rgb3,
+f2→3,
+c2→3,
+t0
+f0→1,
+gb1,
+rgb0,t0,c0→1,f0→1,rgb1,t1,c1→
+rgb7
+d7,
+f6→7,
+rgb6,
+d6,
+f5→6,
+rgb5,
+d5,
+f4→5,
+rgb4,
+d4,
+→4,
+rgb4
+d4,
+c3→4,
+rgb3,
+3,
+tGD0
+b7,
+t0,rgb0,rgb1,rgb2,rgb3,rgb4,rgb5,rgb6,rg
+rg
+tGD0
+rgb7,
+d7,
+c6→7,
+rgb6,
+d6,
+5→6,
+rgb0,rgb1,rgb2,d0,d1,d2,c0→1,c1→2,c2→3,d3,rgb3
+tGD0
+rgb7,
+tGI0,rgb
+rgb0,d0,c0→1,c1→2,c2→3,d1,r
+tGD0,rgb0,d0,c0→1,c1→2,d
+rgb3
+c2→3,
+rgb2,
+c1→2,
+rgb1,
+c0→1,
+gb0,
+rgb6
+d6,
+f5→6,
+rgb5,
+rgb0,d0,f0→1,d
+tGD0
+rgb3,
+rgb2,
+rgb1,
+rgb0,
+tGA0
+tGQ0,
+rgb7,
+rgb6,
+rgb5,
+rgb4,
+rgb3,
+rgb2,
+rgb1,
+rgb0,
+tGA0
+tGQ0,
+rgb4,
+rgb3,
+rgb2,
+rgb1,
+rgb0,
+d5
+rgb5,
+d4,
+rgb4,
+d3,
+rgb3,
+d2,
+rgb2,
+d1,
+rgb1,
+d0,
+rgb0,
+c3→4
+rgb4,
+c2→3,
+rgb3,
+c1→2,
+rgb2,
+c0→1,
+rgb1,
+rgb0,rgb1,f0→1,rgb2,
+rgb0,t0,p0,f0→1,t1,p1,f1→2,t2,p2,f2→3,t3,
+rgb0,p0,rgb1,p1,rgb2,p2,rgb3,p3,rgb4,
+tGI0,rgb0,f0→1,rgb1,f1→2,rgb2,f2→3,rgb3,f3→4,
+rgb0,f0→1,rgb1,f1→2,rgb2,f2→3,rgb3
+rgb0,c0→1,rgb1,c1→2,rgb2,c2→3,rgb3,c3→4,rgb4,c4→5,rgb5,c5→6,rgb6
+A Capability Unification
+Vision  ·  Language  ·  World Modeling
+CAMERA
+DEPTH
+FLOW
+POINTS
+TEXT
+RGB
+Captioning
+T "Clean four cups
+using a sponge and
+soap bottle on a
+pink tablecloth."
+Depth estimation
+Camera pose estimation
+Optical Flow
+Segmentation
+Text-to-Video
+Flow-conditioned generation
+Novel view synthesis
+Point tracking
+Video question answering
+Q What is the
+brown pony
+doing?
+Spatial reasoning
+Q From image 3,
+what is behind
+the bronze
+statue?
+Zero-shot Point Tracking  rgb,rgb -> p
+Action-cond. generation  rgb,p -> rgb
+Structure from motion cue  rgb,f -> d
+Text-to-points grounding  rgb,t -> p
+Temporal caption  rgb0,t0,rgb1,t1,...
+Zero-shot Depth  rgb,c -> f -> d
+Zero-shot Flow  rgb,rgb -> f
+Video prediction  rgb -> rgb
+Caption from flow  rgb,f -> t
+Depth warp  rgb0,c,d0 -> d1
+Flow prediction  rgb,c -> f
+B
+Compositional Unification
+c = camera     d = depth     f = flow     p = points     t = text
+INPUT
+"Facing image 2, turn 90° left – what is
+behind me?"
+camera
+Vision
+imagined view
+World Modeling
+reasoning trace
+"…image 2 turned
+90° right is image
+3's orientation…"
+answer
+Door
+Language
+INPUT
+"Move the box (marked 1)
+0.60 m left. After the
+move, how many of these
+objects are within 1 m of
+the box (marked 1)?"
+depth
+d0
+imagined motion
+f0→1
+rgb1
+reasoning trace
+"…shifting its position closer
+to the center of the room…"
+answer
+2
+Vision
+World Modeling
+Language
+C Optimization Unification
+rgb0
+rgb1
+rgb2
+How does the robot
+put the glue stick in
+the mug?
+Question
+f0→1
+d1
+f1→2
+Notation
+f0→1
+d1
+f1→2
+Stream-of-thought reasoning
+Grasp and lift the glue stick,
+move it over the mug, then
+lower it into the opening.
+Answer
+rgb0
+rgb1
+rgb2
+How should I put this
+item in my cart?
+Question
+d0
+f0→1
+c1→2
+d2
+Notation
+d0
+f0→1
+c1→2
+d2
+Stream-of-thought reasoning
+Take the
+container from
+the shelf, turn
+toward the cart
+and lower it
+into the basket.
+Answer
+policy
+Figure 1: Ψ-0.6: representation-adaptive reasoning across vision, language, and world mod-
+eling. (A) Capability unification. Diverse representations share a common token interface. Different
+choices of supplied and predicted tokens express perception, geometry, language, and imagination
+within a single transformer. (B) Compositional unification. Streams of thought combine model
+capabilities. (C) Optimization unification. Because intermediate representations are predictions of
+the same model, choosing which representations to generate and use becomes a learnable action.
+To achieve flexible reasoning, we turn to a powerful recipe that already exists – in large language
+models (LLMs): (i) a unified model provides a broad repertoire of capabilities, (ii) a generic
+2
+
+
+Ψ-0.6: Adaptive Streams of Thought in a Unified Vision-Language World Model
+prompting interface makes those capabilities accessible and composable across tasks [11, 12], and
+(iii) reinforcement learning on task outcomes shapes the intermediate reasoning strategies used to
+solve a problem [13]. Chain-of-thought has been central to the reasoning capabilities of modern
+LLMs, motivating the question of whether similarly self-directed, adaptive reasoning can extend to
+the physical world. Doing so requires making visual and geometric predictions available not only as
+task outputs, but as intermediate operations that a model can generate, compose, and learn to use.
+We introduce Ψ-0.6, a unified vision-language world model that adaptively composes perception,
+language, geometry, and simulation within a shared reasoning process we call streams of thought.
+These are sequences interleaving images and text with explicit representations of geometry and
+motion (Fig. 1). Ψ-0.6 builds on the Probabilistic Structure Integration (PSI; Ψ) framework [14],
+extending it to language and flexible reasoning. The model predicts images, text, camera pose,
+depth, optical flow, and point tracks as tokens with a shared transformer. An any-to-any prompting
+interface allows it to condition on and generate these representations in different combinations, so
+the output of one operation can become context for the next (§2.2). For example, an image pair can
+prompt a camera-pose estimate, while an image and camera pose can prompt a new view.
+Unification thus turns representations into reasoning operations: the same model can generate
+them, condition on them, compose them, and learn when they are useful. World modeling extends
+these streams beyond observed scenes through counterfactual simulation: asked whether moving
+an object would obstruct a pathway, the model can translate the specified displacement into an
+optical-flow prediction, generate the resulting scene, and answer using its own prediction. Crucially,
+the reasoner and imaginer are the same model: predicted scenes are generated and interpreted
+within the same token interface rather than supplied by a separate visual generator.
+Beyond prescribed reasoning pathways, Ψ-0.6 learns representation-adaptive streams of thought
+through reinforcement learning on task feedback. Because geometric intermediates, imagined
+views, and text are all actions of the same policy, downstream reward can shape both which
+representations are generated and their contents. Unlike VLMs that invoke fixed external tools,
+Ψ-0.6 generates these intermediates within the reasoner itself, enabling their generation and use to
+be jointly optimized end to end (§6).
+Our experiments demonstrate three benefits of unification: strong zero-shot capabilities, composi-
+tional physical reasoning, and the ability to learn adaptive reasoning strategies from task feedback.
+On MindCube [15], a challenging benchmark of multi-view spatial reasoning, Ψ-0.6 outperforms
+leading open-weight models in zero-shot evaluation, with further gains from geometric context and
+composed streams of thought (§4). On FlowBench [16], when given a specified counterfactual
+motion, its world-modeling capabilities surpass those of dedicated expert models that receive
+privileged inputs. In simulation, its performance on counterfactual questions comes close to that of
+other leading open-source VLMs, and it transfers to real robot data after training only on simulation
+examples (§5). Reinforcement learning yields mean relative accuracy gains over a video-only
+question-answering baseline on held-out data and across four unseen benchmarks, demonstrating
+transfer of the learned policy (§6). Together, these results demonstrate our core thesis that unifying
+perception, geometry, language, and imagination allows task feedback to shape not only what a
+model predicts but also how it reasons.
+3
+
+
+Ψ-0.6: Adaptive Streams of Thought in a Unified Vision-Language World Model
+tQ0,c23,c23,d2,f34,f12,c12,d2,rgb3
+c12,f01,c23,p0,rgb1,c01,tQ0,d0,rgb4
+rgb4,c12,rgb4,rgb0,d2,c01,d0,d0,f12
+c23,p1,c23,f34,f12,d2,d1,p0,rgb3
+c23,rgb2,f23,tQ0,c01,rgb2,p1,d
+f34,f01,tA0,f01,p0,tA0,c01,
+d0,rgb3,tA0,tA0,f23,c
+p1,rgb0,f23,f01,rgb1,
+3,d2,f12,rgb1,f23,tA0
+4,p0,rgb0,f12,c12,tA0
+f12,c23,rgb2,rgb0,rgb4,p1
+rgb0,rgb4,tReason0,tReason0
+f34,rgb3,f34,rgb1,tA0,c12,rgb1,p0,d1
+f12,c12,tQ0,f12,tA0,rgb3,rgb4,c01,f23
+d0,d2,rgb2,d1,tA0,rgb2,f23,rgb4,rgb3
+c01,rgb1,d1,rgb3,tQ0,rgb4,rgb4,c01,rgb2
+f12,rgb0,c01,rgb2,f23,c23,d1,d0,d0
+d2,f34,rgb1,c01,tReason0,rgb1,c23,p1,d2
+b3,tReason0,p0,d0,rgb0,rgb4
+01,c01,c23,tQ0,tReason0
+3,c01,f23,rgb0,rgb3
+4 c01,c01,c01,f01
+3,tQ0,c01,d2
+rgb4,c01,rgb3
+tReason0,p0,rg
+p1,tA0,rgb2,f12,f23
+f12,rgb1,rgb1,rgb3,tReason
+rgb2,f12,f23,tA0,d2,rgb3,p1,rgb4 c
+d0,rgb2,rgb4,d0,rgb2,f34,tReason0,p0,f34
+tA0,c23,f12,rgb0,rgb2,d1,rgb1,d0,f01
+A
+TRAINING
+Unified Model
+RGB
+camera
+depth
+flow
+points
+text
+RGB
+C
+D
+F
+P
+T
+RGB
+C
+D
+F
+P
+T
+transformer
+TRAINING RECIPE
+randomly included
+others
+Video
++ geometry
+Text
+text
+Captions
+text
+Video QA
+Q
+A
+Text-to-video
+text
+Imagined motion
+Q
+reasoning
+A
+Pre-training
+Mid-training
+Post-training
+INFERENCE
+Generic Prompting Interface
+prompt specifies inference pathway
+PROMPTS
+INFERENCE PATHWAYS
+depth estimation
+action-cond. rollout
+novel view synthesis
+camera pose estimation
+text
+captioning
+Q
+A
+question answering
+point tracking
+INTERACTIVE ROLLOUT
+model-generated
+user-specified
+turn to pot
+fix camera
+pour water
+Q
+What is
+happening?
+A
+A person fills a jug,
+then pours the water
+into a pot.
+B
+Fine-grained control
+42
+pointer
+contents
+move pointer; keep content
+compressed
+lifted
+Probabilistic predictions
+frame 0
+frame 1
+prob.
+prob.
+sample
+future 1
+future 2
+…
+…
+copy
+and
+move
+copy
+and
+hold
+copy
+and
+move
+revealed
+patch
+Figure 2: Architecture, training recipe, and prompting interface. (A) Ψ-0.6 is a unified model
+across diverse modalities. Pretraining, mid-training, and post-training sample different sequence
+families; hollow tokens denote stochastically included sequence elements. Generic prompting
+interface: prompts specify the available information and requested inference pathway. Ψ-0.6 is
+interactive: it can generate a view based on a user-specified camera pose, then use that generated
+view as context for subsequent reasoning. (B) Fine-grained control: each patch is represented by
+a pointer token and content tokens. Pointers specify modality and spatial and temporal locations,
+enabling targeted conditioning and scene edits. Probabilistic prediction: Ψ-0.6 represents a
+distribution over compatible continuations, allowing the same prompt to yield alternative predictions
+through sampling.
+2 A Unified Model with Adaptive Streams of Thought
+Ψ-0.6 combines three conceptual components, extending a familiar LLM recipe beyond language:
+(i) a unified model provides a broad repertoire of visual, geometric, and linguistic capabilities;
+(ii) a generic prompting interface flexibly accesses and composes these capabilities; and (iii)
+reinforcement learning teaches the model to direct its own reasoning from task feedback. Here
+we explain how these components support capability unification, compositional unification, and
+optimization unification, respectively.
+4
+
+
+Ψ-0.6: Adaptive Streams of Thought in a Unified Vision-Language World Model
+2.1 Unified Multimodal Model
+Architecture: one vocabulary, one transformer. Images, camera pose, depth, optical flow, point
+tracks, and text are serialized as tokens in a sequence processed by our 8B-parameter autore-
+gressive transformer. Perception, description, and simulation thus become different conditional
+predictions.
+2.2 Generic Prompting Interface: Streams of Thought
+A generic prompting interface makes the model’s capabilities available as flexible reasoning oper-
+ations. Ψ-0.6 reasons through streams of thought: sequences interleaving images and text with
+explicit visual abstractions, including camera pose, depth, optical flow, and point tracks. These
+representations offer complementary projections of the world, allowing each reasoning step to use
+a representation suited to the problem – text, geometry, or a predicted scene.
+Any-to-any prompting: all tasks are token orderings. A prompt specifies what is given and what
+is requested. Different token choices and orderings express different inference pathways through
+the same model. Any modality combination can condition prediction, enabling richly controllable
+world modeling over spatial, temporal, and semantic aspects of a scene. Let RGB0 denote an
+image, while C0→1 and F0→1 denote camera motion and optical flow. Then RGB0, C0→1 →RGB1
+and RGB0, RGB1 →C0→1 express novel view synthesis and pose estimation; replacing C with F
+gives motion-conditioned generation and flow estimation. These are conditional predictions of the
+same model. A camera pose can therefore serve as an estimate when inferred from images, a
+command when supplied to generate a view, or an intermediate when used to answer a spatial
+question. In this sense, the model acts as a “multiverse generator” over a “garden of forking
+paths” [17]. Prompts control both what is constrained and what is left for the model to infer.
+Compositional reasoning: predictions become context. Streams of thought compose these
+conditional predictions into multistep reasoning processes, with the output of one prediction pro-
+viding context for the next. For example, the model can generate a view from an image and a
+user-specified camera pose, then use the generated view as context for answering a spatial ques-
+tion (Fig. 2A). Visual and geometric predictions are therefore not only task outputs, but intermediate
+operations that connect perception, language, and imagination within one reasoning process. A
+prompt can prescribe these operations; their selection can also become part of what the model
+learns.
+Ψ-0.6 builds on Probabilistic Structure Integration (PSI; Ψ) [14], inheriting two further properties
+that make its prompting interface unusually flexible: fine-grained control over individual patches
+and probabilistic prediction, which allows unspecified content to remain open to multiple plausible
+continuations. We kindly refer readers to Appendix Sec B.1 for details.
+2.3 Reinforcement Learning: Adaptive Stream-of-Thought Reasoning
+Beyond executing prescribed reasoning pathways, Ψ-0.6 learns representation-adaptive streams of
+thought – choosing which representation to use and when – from task feedback. Within the shared
+token interface, these choices become policy actions, making the reasoning strategy itself a target
+of optimization. We instantiate this approach through reinforcement learning and apply it to visual
+question answering. The policy selects visual representations, including depth, camera motion,
+5
+
+
+Ψ-0.6: Adaptive Streams of Thought in a Unified Vision-Language World Model
+and optical flow, according to the input and question, and receives reward based on downstream
+answer quality. Section §6 specifies the learning formulation, training procedure, and evaluation.
+2.4 Training Recipe: Pretraining, Mid-training, and Post-training
+Pretraining builds a broad base of predictive knowledge, mid-training integrates additional repre-
+sentations and data, and post-training teaches task-directed use of the resulting capabilities. In
+each supervised stage, we form different dataset groups (e.g., image captioning, video question
+answering), each with its own datasets and sequence notations, and allocate a training ratio to each.
+Training on these dataset groups is unified under a simple next-token prediction objective. Thus,
+sequence construction determines both what the model observes and what it learns to predict.
+Pretraining: visual world modeling and geometric integration. The model is pretrained on a
+large video dataset spanning natural scenes, human activity, and robot interaction. Training begins
+with RGB and camera conditioning and continues with depth and flow integrated into the sequence.
+Pure RGB sequences train appearance and motion prediction; interleaved sequences additionally
+train relationships between images and geometric structure. Keeping both in the mixture exposes
+the model to prediction with different amounts and types of conditioning information. This stage
+extends Probabilistic Structure Integration (PSI; Ψ) [14], part of a lineage of models demonstrating
+state-of-the-art visual understanding and world modeling across optical flow and point tracking [18],
+depth estimation and novel-view synthesis [19], object segmentation [20], physical object discovery
+and 3D manipulation [21], and perceptual simulation [22]. Ψ-0.6 extends these visual prediction
+and control capabilities to language-grounded reasoning in subsequent stages.
+Mid-training: vision-language alignment. The next step is learning language through text-only
+data from FineWeb-Edu and DataComp-LM (DCLM), followed by vision-language alignment by
+adding images and videos paired with captions, both global and temporally indexed.
+Post-training: useful, controllable, user-directed reasoning. Instruction tuning introduces image
+and video question answering and text-to-video control of camera and object motion. Post-training
+also teaches spatial reasoning (§4) and answering questions by counterfactually imagining object
+motion (§5). Pretraining and mid-training sequences are retained to preserve the model’s broad
+predictive capabilities. Beyond these next-token prediction stages, reinforcement learning trains
+adaptive streams of thought from task feedback, improving how the model selects intermediate
+representations for downstream reasoning (§6).
+3 Related Work
+Unified multimodal models and reasoning. A growing line of work unifies increasingly broad
+sets of modalities and capabilities within a single model (Fig. 3). Unified-IO, Unified-IO 2, and
+4M-21 cast diverse vision, language, and geometric tasks into shared prediction interfaces [3, 4, 5].
+Chameleon and Emu3.5 extend this paradigm to interleaved image and text generation [6, 7]. More
+recent work uses unified models for multimodal reasoning: ThinkMorph, AD-Loop, and BRAID
+interleave visual and textual reasoning steps [23, 24, 25], while COOPER incorporates depth
+and segmentation for spatial reasoning [26]. These works demonstrate that shared multimodal
+representations can support not only diverse tasks, but also compositional reasoning. Ψ-0.6 builds
+on these advances by integrating vision-language reasoning with physical world modeling through
+a shared token interface. Sequences of text, images, camera pose, depth, optical flow, and point
+6
+
+
+Ψ-0.6: Adaptive Streams of Thought in a Unified Vision-Language World Model
+tQ0,c2→3,c2→3,d2,f3→4,f1→2,c1→2,d2,rgb3
+c1→2,f0→1,c2→3,p0,rgb1,c0→1,tQ0,d0
+rgb4,c1→2,r
+c2→3,
+1,d2
+,rgb0
+→4,f1→2,rgb2
+,f2→3,f0→1,rgb1,d1,f0→1,rgb0,d0
+c1→2,tQ0,f1→2,c2→3,d2,f1→2,rgb1,f2→3,tA0
+f3→4,p0,rgb0,f1→2,c1→2,tA0
+gb4,p1
+0
+f
+d0,d2
+c0→1,rgb1,d1,rgb3,tQ0,rgb
+tok
+given
+tok
+written by the model
+tok
+returned by a separate tool
+A Related model classes
+Standard VLM
+LLaVA, Qwen3-VL, InternVL3
+rgb0
+rgb1
+Q
+reasoning
+A
+vision
+encoder
+LLM
+text out only
+Images are read but never written: everything
+the model emits is text.
+VLM + tool calls
+MindJourney, TwNV, AVIC, APC, SandboxVLM
+rgb0
+Q
+turn
+rgb1
+find
+3D
+A
+VLM (reasoner)
+world model
+experts
+separate
+weights
+Images join the context, but separately
+trained, frozen models write them.
+Unified multimodal
+Chameleon, Emu3/3.5, Janus-Pro, BAGEL
+rgb0
+Q
+text
+rgb1
+text
+A
+one backbone
+text: next token
+images out: VQ tokens or diffusion
+interleaved, generated images read back:
+Chameleon, BAGEL, Emu3.5
+One backbone reads and writes text and
+pixels; some interleave both in one stream.
+Native multimodal reasoners
+ThinkMorph, AD-Loop, COOPER, BRAID
+rgb0
+Q
+think
+v1
+think
+A
+unified model, e.g. BAGEL
+text: next token · images: rectified flow
+v = image
+latent · depth
+seg. as RGB
+Writes and reads back its own visual
+thoughts; no camera, flow or track tokens.
+Any-to-any
+4M-21, Unified-IO 2
+encoder–decoder, e.g. 4M-21
+caption
+call 1
+depth
+caption
+depth
+call 2
+RGB
+UIO2: depth
+flow as RGB, camera as text
+Any subset of modalities in, one named target
+out per call; the caller schedules any chain.
+World models
+Genie 3, Cosmos, Veo 3, Motion Prompting
+text
+rgb0
+a1
+rgb1
+a2
+rgb2
+video world model
+diffusion or autoregressive
+a = action
+camera
+flow
+tracks
+Frames (and audio) from text and per-step or
+one-off controls; no text answers.
+B Frontier assistants
+ChatGPT, Claude, Gemini
+reads
+images
+reads
+video
+calls
+tools
+writes
+images
+writes
+video
+class
+ChatGPT
+–
+VLM + tools
+Claude
+–
+–
+–
+VLM + tools
+Gemini
+VLM + tools
+All three are a standard VLM plus tool calls: generated
+images and video come from separate models.
+in the model
+separate model or tool
+– none
+Architectures are not public; per provider documentation,
+Oct. 2026.
+C Ψ-0.6 (ours)
+PROMPTS
+VS. THE CLASSES IN A
+RGB
+camera
+depth
+flow
+points
+text
+INFERENCE PATHWAYS
+Q
+A
+imagines views with its own weights
+vs. tool calls
+Q
+reasoning
+A
+reasons through flow and depth
+vs. unified, native
+many targets in one stream
+vs. any-to-any
+text
+Q
+A
+rolls out, then answers
+vs. world models
+Adaptive streams of thought
+RL learns which depth, camera and flow
+streams to use per question
+Compact, interpretable steps
+camera, depth, flow: far fewer
+dimensions than pixels, yet readable
+Counterfactual imagination
+object motion → flow → resulting scene
+→ answer, in one model
+policy
+…
+…
+…
+…
+Figure 3: Comparison to related work. (A) Six classes of related models. (B) Frontier assistants
+pair a VLM with separate tools. (C) Ψ-0.6 reads and writes all of these in one model; each pathway
+contrasts with a class in (A).
+7
+
+
+Ψ-0.6: Adaptive Streams of Thought in a Unified Vision-Language World Model
+A Spatial Intelligence Reasoning
+MindCube benchmark categories
+C Accuracy
+RGB
+C
+camera
+D
+depth
+25
+50
+75
+Zero-shot
+57.7
+Ψ-0.6 — compositional
+51.3
+Ψ-0.6 — RGB + C
+50.4
+Ψ-0.6 — RGB + D
+49.7
+Ψ-0.6 — RGB
+47.6
+DeepSeek-VL2-Small
+47.4
+LLaVA-OneVision-7B
+42.5
+Qwen3-VL-8B — CoT
+39.3
+Qwen3-VL-8B
+37.4
+RoboBrain
+33.3
+Space-Qwen
+32.1
+Spatial-MLLM
+Supervised Fine-tuning
+83.0
+GeoThinker-8B
+76.3
+Ψ-0.6 — RGB + C
+76.0
+3DThinker-7B — SFT + RL
+73.6
+InternVL3-2B
+70.7
+Qwen2.5-VL-3B — SFT + RL
+68.7
+Ψ-0.6 — RGB
+64.4
+3DThinker-7B — SFT
+60.8
+Qwen2.5-VL-3B — SFT
+Spatial
+models
+chance 32.4%
+(— 95% bootstrap CI)
+Ψ-0.6 (%)
+Rotation
+Around
+Among
+Zero-shot RGB + D
+34.0
+69.6
+47.8
+Compositional prompt
+58.0
+69.6
+52.7
+SFT RGB + C
+33.4
+86.9
+86.2
+B Compositional Prompting
+Q: Facing view 1, what is to your right?
+A. Green cabinet
+B. Window and brown cabinet
+C. Pictures
+“to your right” = turn 90° right
+Inverse dynamics
+57.7% in C
+90° right
+95°
+145°
+Ψ predicts poses
+pick closest
+B
+Ψ reads
+Novel view synthesis
+all views
+90° right
+Ψ renders it
+B
+Ψ reads
+1
+2
+3
+1
+2
+3
+1
+2
+2
+3
+3
+2
+1
+1
+2
+Rotation
+Q: From view 3, turn 90° left. What is to your left?
+A. Metal bin
+B. Table
+C. Pathway
+D. Bookcase
+1
+2
+3
+4
+Around
+Q: From view 3, turn left and move forward. Do you get closer to the red trash bin?
+A. Yes
+B. No
+1
+2
+3
+Among
+Q: From view 1, what is to the left of the black boots?
+A. Sofa
+B. Windows
+C. TV cabinet
+D. Dining Table
+1
+2
+3
+4
+Figure 4: Spatial intelligence reasoning on MINDCUBE. (A) Benchmark categories: Rotation,
+Around, and Among, adapted from Wang et al. [15]. (B) Two compositional-prompting routes: infer
+relative poses and select a real input view, or synthesize RGB at a target pose, then read an answer.
+(C) Accuracy for zero-shot and benchmark-trained systems; some trained comparisons use RL.
+tracks form streams of computation, with generated representations recursively consumed and
+composed as intermediate reasoning steps. This enables reasoning through explicit geometry and
+motion, including counterfactual simulation, while learning to select task-relevant representations
+from downstream feedback.
+Tool-augmented LLMs and VLMs. Another line of work enables compositional reasoning by
+allowing language or vision-language models to invoke external models, tools, or programs [8, 9, 10]
+(Fig. 3). In contrast, the intermediate operations in Ψ-0.6 are generated by the reasoner itself
+through the same shared token interface, rather than delegated to separately parameterized
+systems. This makes both the choice of intermediate representation and its contents part of
+the model’s own computation, enabling end-to-end optimization of the reasoning process; we
+discuss the resulting advantages for co-adaptation, counterfactual generation, and task-dependent
+intermediate representations in §6.
+4 Capability and Compositional Unification: Spatial Intelligence
+Ψ-0.6 represents our hypothesis for building unified VLMs with capable spatial intelligence. First,
+we start from a visual world model backbone trained to jointly model appearance, geometry,
+8
+
+
+Ψ-0.6: Adaptive Streams of Thought in a Unified Vision-Language World Model
+and motion [14], then extend it with language. Standard VLMs typically attach a visual encoder
+to a pretrained LLM, whose initial predictive knowledge comes from text [27, 28]. Language
+pretraining does not directly supervise how appearance changes with viewpoint or object motion.
+We hypothesize that learning these relationships through visual and geometric prediction provides a
+stronger foundation for spatial reasoning, with language supplying an interface to these capabilities.
+Second, we ground reasoning in explicit geometric abstractions, whereas standard VLMs reason
+and answer primarily in text. A single transformer interleaves RGB frames, camera pose, depth,
+optical flow, point tracks, and text as a unified token sequence. These visual streams of thought
+express spatial structure and motion in intermediate predictions that can be inspected to diagnose
+errors. Third, unifying world-model and vision-language capabilities yields compositional, end-
+to-end reasoning. Flexible token orderings express pose estimation, novel view synthesis, and
+question answering, allowing one task’s output to condition the next. A spatial question can thus
+combine capabilities of the same model architecture – estimate the camera motion the question
+describes, get to the view that reveals the answer, then read it.
+MINDCUBE tests spatial reasoning across multiple views of a scene [15]. It is challenging in two
+ways: (i) its questions involve counterfactual camera motions (e.g., turn left) rather than answering
+from static images/video, and (ii) its images are separated by large angles (e.g., 90 degrees),
+which is unlike how most video models and VLMs are trained. MINDCUBE is organized into three
+categories (Fig. 4A), all requiring integrating observations across large viewpoint changes and
+reasoning in the reference frame specified by the question.
+Zero-shot. Frozen Ψ-0.6 reaches 49.7–51.3% across RGB-only, RGB-depth, and RGB-camera con-
+figurations (Fig. 4C). Ψ-0.6 is state-of-the-art relative to open-source generalist VLMs (DeepSeek-
+VL2-Small, LLaVA-OneVision-7B, Qwen3-VL-8B), and spatial specialists (RoboBrain, Space-Qwen,
+Spatial-MLLM).
+Compositional Prompting. Beyond directly answering the question, Ψ-0.6 can combine its VLM
+capabilities with its vision and world-modeling capabilities (Figure 4B). Ψ-0.6 uses inverse dynamics:
+predict relative camera poses, select the real input view matching the question’s requested turn, and
+read the answer from it. Alternatively, Ψ-0.6 uses novel view synthesis (NVS): generate an RGB
+frame at the target camera pose and read the answer from this imagined view. Inverse dynamics
+requires the viewpoint to be one of the inputs, but NVS additionally allows a viewpoint absent from
+the inputs. Using inverse dynamics, Ψ-0.6 reaches 57.7%, compared to 51.3% zero-shot.
+SFT. MINDCUBE fine-tuning yields 68.7% with RGB-only inputs and 76.3% with RGB+camera inputs
+on the held-out Tiny test split (Fig. 4C). The RGB-only result exceeds the displayed SFT-only
+Qwen2.5-VL and 3DThinker baselines. The RGB+camera result exceeds InternVL3’s map-then-
+reason configuration and Qwen2.5-VL with SFT+RL, is comparable to 3DThinker with SFT+RL
+(76.0%), and trails GeoThinker (83.0%) [15, 29, 30].
+5 From Compositions to Counterfactuals
+Beyond answering questions about static scenes, Ψ-0.6’s WM capability lets it answer questions
+requiring counterfactual imagination, reasoning about worlds that are not directly observed. The
+model intervenes on a scene, predicts the consequence, and reads the answer off its own predic-
+tion. While §4 moved the camera, here the intervention moves an object: the question states a
+displacement of a marked object and asks where things end up – occluded or not, closer to which
+landmark, touching a wall, still feasible to push further, etc. This is the rung above association on
+9
+
+
+Ψ-0.6: Adaptive Streams of Thought in a Unified Vision-Language World Model
+A Counterfactual Imagination
+Q: What if the box (marked 1) moves 0.8 m right and 0.5 m toward the camera? Will the cup (marked 2) be hidden?
+Human / Ψ-0.6
+Hidden.
+(text reasoning…)
+Standard VLM
+Totally visible.
+2
+1
+B FlowBench-Real
+Q: If the robot arm moves the object
+marked 3 so that it ends up about
+11 cm to the right and about 8 cm
+down, will the object marked 3 end
+up to the left of the object marked 4,
+from the camera's viewpoint?
+A. Yes.
+B. No.
+SOURCES Bridge V2, DROID,
+Language-Table, RT-1, Berkeley UR5
+C Imagine, then Answer
+Q: Move the garbage can (marked black) 0.75 m right. After the move, is the garbage can to the left of the stove knob (marked green)?
+FlowBench-Sim example
+A. Yes.
+B. No.
+Input frame
+Decoding procedure
+Predicted flow
+Predicted frame
+Reasoning
+Answer
+P(motion)
+Text-enhanced Decoding
+1
+0
+predict high P(motion)
+patches first
+Image + text logits
+Image only
+logits
++2
+−1
++
+The garbagecan
+was moved
+slightly to the
+right, shifting its
+position closer to
+the center of the
+room. ...
+B
+QUESTION
+TYPES
+Left / right On the left or right of object?
+Depth order Which is nearer to the camera?
+Near object Within a given distance?
+Closer to Which object is closest?
+Closest three Which three are closest?
+Count near How many objects nearby?
+Occlusion Object visible or blocked?
+Feasibility Is the move possible?
+Figure 5: Counterfactual imagination of object motion. (A) Answering a counterfactual question
+requires imagining the outcome of a hypothetical motion. A person, like Ψ-0.6, imagines the box
+sliding in front of the cup and answers correctly, whereas a VLM that reasons only in text does
+not. (B) A FlowBench-Real question on real robot data. Ψ-0.6 generalizes to FlowBench-Real after
+training on FlowBench-Sim (Tab. 3). (C) Stream of Thought on FlowBench-Sim: Ψ-0.6 predicts
+the optical flow of the instructed motion, decoding high-P(motion) patches first (pMotion) with
+text-enhanced CFG (2× image-and-text minus 1× image-only logits), then the future frame, and
+reasons to its answer. Bottom: FlowBench question types.
+the ladder of causation [31], and it is exactly where existing open-source VLMs are near chance
+before fine-tuning.
+Benchmark. FLOWBENCH [16] evaluates visual world models on spatial questions involving
+counterfactual object motions. It comprises two splits: FLOWBENCH-SIM, featuring scalable and
+accurate datasets in simulated indoor scenes [32, 33], and FLOWBENCH-REAL, augmenting five
+robot datasets (DROID, Bridge V2, Language-Table, RT-1, and Berkeley UR5) with counterfactual
+motion questions across diverse embodiments and environments (Appendix A.2).
+World modeling: Ψ-0.6 outperforms state-of-the-art expert models. Text- and action-conditioned
+future prediction is one of the pressing abilities needed in world modeling, with promising appli-
+cations like planning in robotics. To improve text-to-flow predictions, Ψ-0.6 employs two powerful
+decoding techniques. Critically, these are enabled by Ψ-0.6’s fine-grained control and probabilistic
+predictions, attributes that are absent from many other world models. First, before generating flow,
+Ψ-0.6 computes the probability of motion (“pMotion”) at every patch with a single feedforward pass.
+Then, Ψ-0.6 generates flow predictions sequentially from patches most likely to move to least likely.
+The intuition behind this is: in FLOWBENCH, motion typically involves a single, often small object, so
+10
+
+
+Ψ-0.6: Adaptive Streams of Thought in a Unified Vision-Language World Model
+Table 1: World modeling ability: expert models vs. Ψ-0.6. “rEPEmove” is the relative endpoint error
+on moving pixels; static pixels are excluded. “Acc” denotes what percentage of predictions have
+rEPE lower than a threshold. (Definition in Appendix. A.4) “Blank” stands for the percentage of the
+model predicting zero flow. “Dir” is the 2-D angle between predicted and ground-truth flow on pixels
+where both move. “∆PSNR” shows the improvement of the generated simulated image after the
+move on moving pixels compared with zero flow. n = 622.
+Method
+Acc↑
+rEPEmove ↓
+rEPEmove med ↓
+Blank ↓
+Dir (◦) ↓
+∆PSNR ↑
+Oracle Input
+Zero flow
+0.0%
+1.000
+1.000
+100.0%
+–
+0.00
+–
+Modular (Grounding DINO + SAM2 + Depth Pro)
+50.8%
+0.552
+0.358
+15.0%
+1.4
+–
+Camera intrinsics
+FOFPred [34]
+2.4%
+0.915
+0.958
+0.0%
+25.9
+–
+–
+Qwen-Image-Edit [35]
+7.9%
+2.154
+1.014
+2.9%
+64.8
+-1.63
+GT frame-0 mask
+IP2P [36] (plain MSE)
+10.5%
+2.659
+1.221
+2.9%
+71.0
+-3.35
+GT frame-0 mask
+IP2P [36] (SoM target)
+13.7%
+2.938
+1.122
+3.1%
+64.4
+-0.96
+GT frame-0 mask
+IP2P [36] (mask-weighted)
+16.4%
+2.655
+1.000
+2.7%
+57.3
+-4.00
+GT frame-0 mask
+Ψ-0.6 Default seq 32
+31.8%
+0.635
+0.639
+27.5%
+14.1
++1.60
+–
+Ψ-0.6 + pMotion + CFG2.0
+56.4%
+0.454
+0.356
+0.3%
+8.1
++0.94
+–
+Table 2: Accuracy on FlowBench-Sim (%). Closest-3 requires the exact set of three. Cat. avg is
+the unweighted mean over the 8 categories.
+Model
+Closer Closest_3
+Contact Count
+Feasibility
+L/R
+Near Occl.
+Avg
+Cat. Avg
+Chance
+25.0
+5.0
+50.0
+25.0
+50.0
+50.0
+50.0
+50.0
+35.8
+38.1
+Qwen3-VL-8B [41]
+47.2
+11.9
+52.6
+24.5
+56.6
+77.3
+58.4
+55.0
+46.9
+47.9
+Qwen3.5-9B [42]
+53.5
+10.7
+52.6
+23.3
+52.8
+68.4
+53.3
+51.7
+44.3
+45.8
+Qwen3-VL-32B [41]
+41.8
+17.0
+38.6
+20.9
+67.6
+81.9
+55.3
+62.5
+48.3
+48.2
+Qwen3-VL-8B FlowBench-FT
+89.0
+36.3
+93.0
+57.3
+88.4
+98.6
+88.0
+72.5
+76.3
+77.9
+Ψ-0.6 Base
+23.4
+0.0
+24.0
+12.1
+9.4
+45.7
+50.4
+31.5
+24.5
+24.6
+Ψ-0.6 FT
+85.1
+33.9
+73.7
+48.2
+85.9
+97.4
+87.2
+77.5
+73.1
+73.6
+predicting flow for the patches most likely to move first helps the model focus on the relevant region.
+Second, our model uses a form of classifier-free guidance (CFG) [37]: at every generated token,
+compare the flow prediction logits with and without conditioning on the text instruction, then amplify
+the difference – this amplifies the effect of the text instruction on motions. Results for ablating these
+two techniques are in Appendix A.6.
+We compare our models with various baseline models: FOFPred [34], InstructPix2Pix [36], Qwen-
+Image-Edit [35], and a Modular design with state-of-the-art experts [38, 39, 40] (Appendix A.3).
+Against baselines, Ψ-0.6 establishes the strongest overall flow prediction without privileged inputs.
+Its best configuration reaches 56.4% accuracy, compared with 16.4% for the strongest image-
+editing baseline. It also reduces rEPEmove to 0.454, versus 0.915 for FOFPred. Even the modular
+geometric pipeline reaches only 50.8% accuracy and 0.552 rEPEmove, despite using specialized
+models for each task and the oracle input. Finally, every evaluated Ψ-0.6 configuration improves
+next-frame prediction fidelity over the zero-motion reference (+0.25 to +1.60 dB, for the moving
+region), whereas the image editors decrease it (−0.96 to −4.00 dB). Together, these results show
+that Ψ-0.6 predicts both where an object moves and how its appearance should change more
+reliably than task-specific generative experts, while requiring no oracle inputs.
+Strong VQA abilities of Ψ-0.6. Fine-tuning on FLOWBENCH-SIM greatly improves Ψ-0.6’s capabil-
+ities: accuracy rises from 24.5% to 73.1% overall and from 24.6% to 73.6% category-averaged,
+11
+
+
+Ψ-0.6: Adaptive Streams of Thought in a Unified Vision-Language World Model
+Table 3: Accuracy on FlowBench-Real (%). Note: No FlowBench-Real examples are used in
+training, so this table evaluates the generalization ability of models. Closest-3 requires the exact
+set of three. Cat. avg is the unweighted mean over the 7 categories.
+Model
+L/R
+Near Closer
+Depth
+Closest-3
+Count
+Occl.
+Avg
+Cat. Avg
+Chance
+50.0
+50.0
+26.7
+50.0
+7.0
+25.1
+50.0
+37.6
+37.0
+Qwen3-VL-8B [41]
+52.2
+48.9
+42.3
+62.1
+7.9
+38.2
+37.2
+42.7
+41.2
+Qwen3.5-9B [42]
+52.2
+56.1
+40.6
+50.0
+11.4
+30.0
+50.7
+42.7
+41.6
+Qwen3-VL-32B [41]
+58.9
+49.9
+40.7
+50.0
+19.0
+43.5
+39.2
+44.4
+43.0
+Qwen-8B FlowBench-FT
+70.3
+80.0
+61.4
+62.8
+58.0
+29.5
+31.9
+59.6
+56.3
+Ψ-0.6 Base
+50.3
+51.3
+23.3
+50.0
+7.4
+26.7
+50.0
+37.5
+37.0
+Ψ-0.6 FlowBench-FT
+57.5
+74.6
+63.0
+41.1
+29.6
+26.7
+50.0
+51.4
+48.9
+improving in all eight categories and roughly doubling the 35.8% chance level (Table 2). This places
+Ψ-0.6 close to Qwen3-VL-8B fine-tuned on the same data, a dedicated VLM designed for Visual
+Question Answering. Ψ-0.6 is the only model we evaluate that is at once the strongest flow predictor
+and a competitive counterfactual question answerer.
+To evaluate transfer, we test the models on FLOWBENCH-REAL without using any of its examples
+during training (Table 3). Ψ-0.6 reaches 51.4% overall and 48.9% category-averaged accuracy,
+improving by 13.9 and 11.9 percentage points over the base model. Transfer is clearest in the
+categories that depend on metric geometry rather than on language priors: “Closer” rises from
+23.3% to 63.0%, and “Near” reaches 74.6%, both ahead of every open-source model we evaluate
+without fine-tuning. This shows that supervised fine-tuning of Ψ-0.6 on FLOWBENCH enables
+sim-to-real transfer for its spatial question-answering capabilities to unseen data. Viewed alongside
+its world-modeling capabilities, these results support the use of Ψ-0.6 as a unified framework for
+world modeling and VQA.
+6 Optimization Unification: RL for Adaptive Streams of Thought
+“My experience is what I agree to attend to.”
+— William James, The Principles of Psychology
+Whereas Ψ-0.6 used prescribed reasoning pathways in the previous sections, here we show that it
+can learn streams of thought that are self-generated, representation-adaptive, and unfold over time.
+As reasoning proceeds, the model learns not only what intermediate content to generate, but which
+representation to invoke and when. Unification makes both the choice and generation of these
+intermediates into actions of the same policy, enabling reinforcement learning on task feedback to
+optimize the reasoning process end to end (optimization unification).
+• Self-generated intermediates. Unlike tool-augmented LLMs and VLMs that invoke external
+models or programs [8, 9, 10], Ψ-0.6 generates its intermediates within the reasoner itself. This
+enables: (i) co-adaptation of the reasoner and its intermediate predictions through gradient-based
+credit assignment, (ii) generation of states unavailable through existing tool calls, including future
+or counterfactual states, and (iii) task-dependent intermediates whose appropriate form may itself
+12
+
+
+Ψ-0.6: Adaptive Streams of Thought in a Unified Vision-Language World Model
+A Adaptive Streams of Thought
+rgb0
+rgb1
+rgb2
+How do I put
+this shirt away?
+Question
+policy
+d1
+c1→2
+f1→2
+Notation
+d1
+c1→2
+f1→2
+Stream-of-thought reasoning
+Fold it, look
+down, then
+lower it into the
+drawer.
+Answer
+B Reinforcement Learning: GRPO
+How do I put
+this shirt away?
+input
+clip + question
+policy
+d1
+c1→2
+f1→2
+f0→1
+d0
+f1→2
+…
+group of 16 notations
+sampled per video
+scorer
+same base model
+rewards
+one per notation
+group-relative advantage
+A = r − mean(r)
+r = loss(rgb only) − loss(notation)
+above mean: reinforced
+below mean: suppressed
+group mean
+update: raise the probability of above-mean notations, lower the rest · KL to the initial policy
+C Heldout Accuracy
+Unseen Benchmarks
+D Useful Loss Reduction
+rgb-only
+random
+policy
+policy (best-of-16)
+chance
+EgoDex
+25%
+47.5
+50.2
+53.5
+73.3
+HanDyVQA
+20%
+23.9
+25.6
+26.3
+34.6
+What part of the sack is lifted?
+rgb1
+rgb3
+d1
+f12
+d3
+SSv2
+25%
+82.3
+86.2
+87.5
+96.0
+TGIF-QA
+20%
+31.4
+31.9
+32.6
+40.4
+What does the man do 4 times ?
+rgb0
+rgb4
+f01
+f12
+f23
+f34
+PE
+25%
+84.2
+84.0
+85.4
+91.8
+STAR
+25%
+29.4
+30.5
+32.8
+46.6
+What did the person do with the bag?
+rgb0
+rgb4
+d0
+d2
+f34
+OpenVid
+25%
+92.2
+94.7
+94.0
+98.8
+EgoPlanBench2
+25%
+25.9
+26.8
+28.6
+38.1
+Goal: clean up. What is the next action?
+rgb0
+rgb4
+d0
+c01
+f12
+d4
+Top-10% random notation
+%Δ loss vs rgb-only
+Density (%)
+Loss change vs RGB (%)
+(lower is better)
+Loss change vs
+RGB-only (%)
+Before RL
+RL gain
+EgoDex
+−12.3
+−16.6
+OpenVid
+−10.6
+−13.2
+SSv2
+−26.8
+−31.6
+PE
+−7.4 −7.1
+0
+−25
+−50
+0
+5
+EgoDex
+OpenVid
+SSv2
+PE
+Figure 6: Learning adaptive stream-of-thought reasoning. (A) Given a video and question,
+Ψ-0.6 functions as both a policy – emitting a notation naming the stream of thought to use – and
+as a VLM, answering with those streams in context. (B) The GRPO RL loop: collect notations
+with the current policy, score each by probability of ground-truth answer relative to RGB-only, and
+train on the beneficial notations. (C) The learned Ψ-0.6 policy improves video question-answering
+accuracy, with gains generalizing to unseen benchmarks. (D) These accuracy gains are a result of
+loss reductions on the ground truth.
+be ambiguous. For example, a bottle and its cap are one segment for object recognition, yet
+separate segments for robotic manipulation.
+• Representation-adaptive computation. Ψ-0.6 uses representation-adaptive test-time compute
+through explicit geometric projections of the world. In text chain-of-thought, the representational
+medium is fixed – language; in Ψ-0.6, the medium itself becomes part of the computation.
+• Unfolds over time. Different representations can be called into computation as the situation
+evolves: depth for spatial structure, optical flow for motion, camera pose across viewpoints, or
+a predicted scene to imagine what may happen next. This is particularly relevant to embodied
+agents and robotics, where perception and action unfold continuously in the world.
+13
+
+
+Ψ-0.6: Adaptive Streams of Thought in a Unified Vision-Language World Model
+Learning to Select Streams of Thought Although our framework is generic, here we show a
+proof-of-concept specifically for visual question-answering. Given a video v and question q, the
+policy emits a notation z selecting from depth, camera-motion, and optical-flow streams (Fig. 6A).
+For example, d0, c2→3, f2→3 requests depth at the first frame and camera motion and flow between
+two later frames. This turns Ψ-0.6’s generic prompting interface into a policy over reasoning
+representations. At a high level, reinforcement learning alternates between two phases (Fig. 6B):
+• Collect data with the policy. For each question, sample notations z from the current policy
+(initialized with a uniform distribution), and score each by how much it lowers the ground truth’s
+loss. We build a dataset using videos from EgoDex [43], Something-Something v2 (SSv2) [44],
+PE [45], and OpenVid-1M [46]. Since these datasets provide captions rather than questions, we
+convert their captions into question-answer pairs (Appendix A.7).
+• Train the policy on the collected data. Initially, we use filtered behavior cloning (rejection-
+sampling fine-tuning) on the sampled notations that beat RGB-only to teach the model to emit
+notations; subsequently, we use on-policy GRPO (Group Relative Policy Optimization) to update
+the policy’s LoRA parameters with rewards relative to the other samples in the group, refining
+which streams it selects.
+Learned policy generalizes accuracy improvements to unseen benchmarks. The RL-trained
+policy improves accuracy on held-out examples from the training distributions (a mean relative gain
+of 5.6% over video-only question answering), with the largest gains on EgoDex, the most challenging
+dataset. Encouragingly, this suggests that adaptive reasoning may provide greater benefits on
+harder problems, where additional intermediate computation is most useful. Critically, these gains
+transfer to four completely unseen benchmarks (a mean relative gain of 9.0%), providing evidence
+that the learned policy generalizes beyond its training data. Another encouraging signal is the best-
+of-k performance is substantially higher than single-rollout (Fig. 6C), indicating further headroom
+for policy optimization. The selected streams are diverse and, in some cases, interpretable;
+for example, repeated-action questions can elicit sequences of optical-flow predictions, object
+interactions can combine depth and flow, and observer-motion questions can combine depth with
+camera motion.
+7 Discussion
+We introduce Ψ-0.6, a unified vision-language world model that turns visual, geometric, linguistic,
+and world-model predictions into composable reasoning operations. Through capability, compo-
+sitional, and optimization unification, a single model can perceive, imagine, reason, and learn
+which representations to invoke as a problem unfolds. Streams of thought support stronger spatial
+reasoning, counterfactual imagination, and representation-adaptive reasoning learned from task
+feedback. Importantly, the medium of reasoning need not be fixed: models can learn not only what
+to predict, but which representation to reason through and when. This opens a path toward agents
+whose reasoning continually reorganizes itself across representations as they learn from embodied
+experience.
+More broadly, reinforcement learning over streams of thought could support a remarkably general
+recipe for representation-adaptive reasoning across diverse domains and modalities. Within a
+shared predictive interface, observations in any modality can supply feedback for learning how to
+reason through others. For example, given a video, a stream of thought through depth, optical
+flow, or camera motion could be rewarded by how well it supports predictions of future visual
+14
+
+
+Ψ-0.6: Adaptive Streams of Thought in a Unified Vision-Language World Model
+input. This serves as a label-free, task-independent source of reward without human annotations or
+separate RL environments. Once perception and prediction are part of the reasoner, observations
+of the world can provide supervision for not only what an embodied agent predicts, but which
+representation of the physical world to reason through before acting. Extending Ψ-0.6 with actions
+and proprioception would allow perception, physical reasoning, imagination, and control to become
+composable operations of a single agent.
+7.1 Implications for physical reasoning and learning
+Benefits of geometric representations in stream-of-thought reasoning.
+First, geometric
+representations provide an explicit decomposition of the problem.
+One might ask why such
+intermediates should be useful when all the information is contained in the original video itself.
+But the same is true in mathematical reasoning: all the information is contained in the problem
+statement, yet explicitly producing and using intermediate chains of thought [47] can decompose a
+difficult computation into simpler steps, improving a model’s final output. Geometric representations
+can play an analogous role for visual reasoning, exposing depth, motion, correspondence, and
+camera transformation rather than requiring them to be repeatedly inferred from pixels. Empirically,
+we find that using these intermediates improves both understanding, such as video question-
+answering, and fine-grained prediction and control, such as reasoning through optical flow or
+camera motion.
+Second, geometric representations can focus learning on the crucial aspects of the physical world.
+These are lower-dimensional projections that deliberately abstract away incidental visual detail while
+preserving factors of the environment – such as geometry, motion, correspondence, and viewpoint
+– that might generalize beyond the particular objects, scenes, or environments encountered during
+training. Predicting several such representations from the same experience can also provide a
+form of “data augmentation”: a single video supplies multiple aligned, structured views of the same
+underlying physical event. Together, these may improve sample efficiency, particularly in regimes
+where both the quantity and diversity of data are limited [48], such as robotics, biology, or the
+experimental sciences.
+Third, these intermediates combine the twin advantages of interpretability and compactness.
+“Thinking with images/video” reasons by generating or editing pixels, making intermediate states
+directly interpretable [49, 50, 51, 52, 53], whereas latent reasoning compresses intermediate
+computation into continuous representations that are difficult to inspect directly [54, 55, 56, 57, 58].
+Ψ-0.6 occupies a middle ground by externalizing compact intermediates as physically meaningful
+tokens: their semantics are grounded in recognizable properties of the physical world, but they
+need not reproduce every visual detail to expose the structure relevant to a computation.
+7.2 Limitations
+Scale.
+Our results establish the conceptual and functional consequences of unifying vision,
+language, and world modeling, rather than exhaust the performance achievable by this framework.
+Ψ-0.6 was developed at substantially smaller scale in training data, compute, research, and
+engineering effort than contemporary frontier multi-modal systems. We expect scaling these
+resources will strengthen all of Ψ-0.6’s capabilities; our preliminary experiments already suggest
+continued gains with scale, motivating further study.
+15
+
+
+Ψ-0.6: Adaptive Streams of Thought in a Unified Vision-Language World Model
+Learning synergy and specialization.
+Ψ-0.6 advances the broader trend toward unified models
+by bringing vision, language, and world modeling into a shared reasoning process. Unification can
+promote positive transfer through shared knowledge [59], but can also introduce interference when
+capabilities compete for limited capacity or require conflicting computations [60, 61, 62]. Ψ-0.6
+demonstrates functional unification and inference-time gains from composing capabilities, but we
+do not isolate positive and negative transfer among those capabilities during training. A natural next
+step is a sparse mixture-of-experts architecture, which could retain the advantages of unification
+while managing the cost of a large model [63, 64]. By activating only a subset of experts per
+token, it allows specialization and greater total capacity without a proportional increase in inference
+computation.
+7.3 Key open problems
+From visual proxy actions to embodied control.
+Our next step is extending the framework
+from reasoning about actions to acting in the physical world. In Ψ-0.6, optical flow and point tracks
+already function as proxy actions: they specify how parts of a visual scene should move, but do not
+directly actuate the world. One route toward robotics would be to train an inverse-kinematics (IK)
+model conditioned on flow or point predictions, analogous to RGB-based IK models [65, 66, 67].
+More generally, robot joint commands, end-effector poses, gripper states, and other control signals
+could become additional token modalities. Policy prediction and world simulation could then become
+different queries to the same model, extending the unified interface from perception and imagination
+to physical control.
+Combining such action tokens with adaptive streams of thought would enable a richer form of
+embodied reasoning. Rather than mapping observations directly to commands, the model could
+learn when to inspect geometry, predict motion, imagine the consequences of an action, evaluate
+progress, seek another observation, or act. Our current adaptive-stream experiments optimize
+downstream task performance on visual question answering rather than physical control. In an
+embodied agent, reward could jointly optimize what action to take, what reasoning to perform before
+acting, and how much computation that reasoning should consume. This would extend our adaptive
+streams of thought from choosing how to reason about the world to choosing how to reason and
+act within it.
+Generic verification for the physical world.
+Physical reasoning may provide an unusually rich
+source of supervision because different representations of the same world must satisfy shared
+constraints. Depth, camera motion, optical flow, point tracks, and appearance should agree across
+viewpoints and time, while forward and inverse predictions create additional cycles that can be
+checked. For example, a camera motion inferred from two views should generate a compatible
+second view when supplied back to the model.
+Recent work shows that cross-modal cycle
+consistency can itself provide a dense, label-free reward for multimodal reasoning [68]. Such
+signals suggest a route toward generic physical verifiers: mechanisms that score intermediate
+reasoning through consistency with the structure of the world rather than requiring human labels for
+every trajectory.
+Autodiscovery.
+Verification could, in turn, support an automatic loop for the discovery of reasoning
+intermediates. Ψ-0.6 currently reasons through deliberately chosen abstractions whose physical
+meaning is known in advance. Adaptive streams of thought learn which of these representations to
+16
+
+
+Ψ-0.6: Adaptive Streams of Thought in a Unified Vision-Language World Model
+use and when; future systems could instead ask which intermediate representations should exist at
+all. A model could propose compact intermediate variables, evaluate whether reasoning through
+them improves predictive consistency or downstream task performance [69], and retain useful
+abstractions within its own reasoning interface. Work on latent-action world models already shows
+that useful transition representations can emerge from unlabeled video rather than being specified
+a priori [70, 71]. Extending this idea from action representations to reasoning representations
+suggests a closed loop: propose an abstraction, evaluate the consequences of using it, and
+reincorporate successful abstractions into future computation. In this view, not only the reasoning
+policy, but the vocabulary through which a model reasons, can itself become an object of learning.
+Acknowledgments
+We are very grateful to Yash Shah, Kristine Zheng, Cliona O’Doherty, Seojin Lee, Arjun Chandra,
+Greyson Brothers, Khaled Jedoui, and Ishaan Gupta for helpful feedback on the manuscript.
+Funding:
+This work was supported by the following awards. D.L.K.Y.: Simons Foundation grant
+543061, National Science Foundation CAREER grant 1844724, National Science Foundation Grant
+NCS-FR 2123963, Office of Naval Research grant S5122, ONR MURI 00010802, ONR MURI
+S5847, and ONR MURI 1141386 - 493027. We also thank Stanford HAI, Stanford Data Sciences,
+Stanford Marlowe team, and the Google TPU Research Cloud team for computing support.
+Data and materials availability:
+Our model and code will be released at https://huggingface.
+co/StanfordNeuroAILab and https://github.com/neuroailab.
+References
+[1] Roger N. Shepard and Jacqueline Metzler. Mental rotation of three-dimensional objects.
+Science, 171(3972):701–703, 1971. https://doi.org/10.1126/science.171.3972.701. URL
+https://doi.org/10.1126/science.171.3972.701.
+[2] Peter W. Battaglia, Jessica B. Hamrick, and Joshua B. Tenenbaum. Simulation as an engine
+of physical scene understanding. Proceedings of the National Academy of Sciences, 110(45):
+18327–18332, 2013. https://doi.org/10.1073/pnas.1306572110. URL https://doi.org/10.
+1073/pnas.1306572110.
+[3] Jiasen Lu, Christopher Clark, Rowan Zellers, Roozbeh Mottaghi, and Aniruddha Kembhavi.
+Unified-IO: A Unified Model for Vision, Language, and Multi-Modal Tasks, June 2022. URL
+https://arxiv.org/abs/2206.08916v2.
+[4] Jiasen Lu, Christopher Clark, Sangho Lee, Zichen Zhang, Savya Khosla, Ryan Marten, Derek
+Hoiem, and Aniruddha Kembhavi. Unified-IO 2: Scaling Autoregressive Multimodal Models
+with Vision, Language, Audio, and Action, December 2023. URL http://arxiv.org/abs/2312.
+17172. arXiv:2312.17172 [cs.CV].
+[5] Roman Bachmann, O˘guzhan Fatih Kar, David Mizrahi, Ali Garjani, Mingfei Gao, David Griffiths,
+Jiaming Hu, Afshin Dehghan, and Amir Zamir. 4M-21: An Any-to-Any Vision Model for Tens of
+Tasks and Modalities, June 2024. URL http://arxiv.org/abs/2406.09406. arXiv:2406.09406
+[cs.CV].
+17
+
+
+Ψ-0.6: Adaptive Streams of Thought in a Unified Vision-Language World Model
+[6] Chameleon Team. Chameleon: Mixed-Modal Early-Fusion Foundation Models, March 2025.
+URL http://arxiv.org/abs/2405.09818. arXiv:2405.09818 [cs.CL].
+[7] Yufeng Cui, Honghao Chen, Haoge Deng, Xu Huang, Xinghang Li, Jirong Liu, Yang Liu,
+Zhuoyan Luo, Jinsheng Wang, Wenxuan Wang, et al. Emu3.5: Native Multimodal Models are
+World Learners, October 2025. URL http://arxiv.org/abs/2510.26583. arXiv:2510.26583
+[cs.CV].
+[8] Timo Schick, Jane Dwivedi-Yu, Roberto Dessì, Roberta Raileanu, Maria Lomeli, Luke
+Zettlemoyer, Nicola Cancedda, and Thomas Scialom. Toolformer: Language Models Can
+Teach Themselves to Use Tools, February 2023. URL http://arxiv.org/abs/2302.04761.
+arXiv:2302.04761 [cs.CL].
+[9] Dídac Surís, Sachit Menon, and Carl Vondrick. ViperGPT: Visual Inference via Python Execu-
+tion for Reasoning, March 2023. URL http://arxiv.org/abs/2303.08128. arXiv:2303.08128
+[cs.CV].
+[10] Yushi Hu, Weijia Shi, Xingyu Fu, Dan Roth, Mari Ostendorf, Luke Zettlemoyer, Noah A.
+Smith, and Ranjay Krishna. Visual Sketchpad: Sketching as a Visual Chain of Thought
+for Multimodal Language Models, November 2024. URL http://arxiv.org/abs/2406.09403.
+arXiv:2406.09403 [cs.CV].
+[11] Tom B. Brown, Benjamin Mann, Nick Ryder, Melanie Subbiah, Jared Kaplan, Prafulla Dhariwal,
+Arvind Neelakantan, Pranav Shyam, Girish Sastry, Amanda Askell, et al. Language models
+are few-shot learners. In Advances in Neural Information Processing Systems, volume 33,
+2020. URL https://arxiv.org/abs/2005.14165.
+[12] Takeshi Kojima, Shixiang Shane Gu, Machel Reid, Yutaka Matsuo, and Yusuke Iwasawa. Large
+language models are zero-shot reasoners. In Advances in Neural Information Processing
+Systems, volume 35, 2022. URL https://arxiv.org/abs/2205.11916.
+[13] DeepSeek-AI, Daya Guo, Dejian Yang, Haowei Zhang, Junxiao Song, Peiyi Wang, Qihao
+Zhu, Runxin Xu, Ruoyu Zhang, Shirong Ma, et al. DeepSeek-R1: Incentivizing Reasoning
+Capability in LLMs via Reinforcement Learning. Nature, 645(8081):633–638, September
+2025. ISSN 0028-0836, 1476-4687. https://doi.org/10.1038/s41586-025-09422-z. URL
+http://arxiv.org/abs/2501.12948. arXiv:2501.12948 [cs.CL].
+[14] Klemen Kotar, Wanhee Lee, Rahul Venkatesh, Honglin Chen, Daniel Bear, Jared Watrous,
+Simon Kim, Khai Loong Aw, Lilian Naing Chen, Stefan Stojanov, et al. World Modeling with
+Probabilistic Structure Integration, September 2025. URL http://arxiv.org/abs/2509.09737.
+arXiv:2509.09737 [cs.CV].
+[15] Qineng Wang, Baiqiao Yin, Pingyue Zhang, Jianshu Zhang, Kangrui Wang, Zihan Wang, Jieyu
+Zhang, Keshigeyan Chandrasegaran, Han Liu, Ranjay Krishna, et al. MindCube: Spatial
+Mental Modeling from Limited Views, March 2026. URL http://arxiv.org/abs/2506.21458.
+arXiv:2506.21458 [cs.AI].
+[16] Yifan Liu, Baihan Zhang, Khai Loong Aw, Klemen Kotar, and Daniel L. K. Yamins. Flowbench.
+https://github.com/liuyifan22/FlowBench, 2026.
+[17] Moire. Language models are multiverse generators, January 2021. URL https://generative.
+ink/posts/language-models-are-multiverse-generators/. Section: GPT-3.
+18
+
+
+Ψ-0.6: Adaptive Streams of Thought in a Unified Vision-Language World Model
+[18] Seungwoo Kim, Khai Loong Aw, Klemen Kotar, Cristobal Eyzaguirre, Wanhee Lee, Yunong
+Liu, Jared Watrous, Stefan Stojanov, Juan Carlos Niebles, Jiajun Wu, et al. Taming generative
+video models for zero-shot optical flow extraction, November 2025. URL http://arxiv.org/
+abs/2507.09082. arXiv:2507.09082 [cs.CV].
+[19] Wanhee Lee, Klemen Kotar, Rahul Mysore Venkatesh, Jared Watrous, Honglin Chen,
+Khai Loong Aw, and Daniel L. K. Yamins. 3D Scene Understanding Through Local Ran-
+dom Access Sequence Modeling, April 2025. URL http://arxiv.org/abs/2504.03875.
+[20] Rahul Venkatesh, Klemen Kotar, Lilian Naing Chen, Seungwoo Kim, Luca Thomas Wheeler,
+Jared Watrous, Ashley Xu, Gia Ancone, Wanhee Lee, Honglin Chen, et al. Discovering and us-
+ing Spelke segments, July 2025. URL http://arxiv.org/abs/2507.16038. arXiv:2507.16038
+[cs].
+[21] Rahul Venkatesh, Klemen Kotar, Lilian Naing Chen, Wanhee Lee, Gia Ancone, Seungwoo
+Kim, Luca Thomas Wheeler, Jared Watrous, Honglin Chen, Daniel Bear, et al. Physical
+Object Understanding with a Physically Controllable World Model, May 2026. URL http:
+//arxiv.org/abs/2606.00439. arXiv:2606.00439 [cs.CV].
+[22] Wanhee Lee, Klemen Kotar, Rahul Mysore Venkatesh, Jared Watrous, and Daniel L. K.
+Yamins. Perceptual 3D Simulation With Physical World Modeling, June 2026. URL http:
+//arxiv.org/abs/2606.27575. arXiv:2606.27575 [cs.CV].
+[23] Jiawei Gu, Yunzhuo Hao, Huichen Will Wang, Linjie Li, Michael Qizhe Shieh, Yejin Choi, Ranjay
+Krishna, and Yu Cheng. ThinkMorph: Emergent Properties in Multimodal Interleaved Chain-
+of-Thought Reasoning, 2025. URL https://arxiv.org/abs/2510.27492. Version Number:
+3.
+[24] Shengqiong Wu, Bobo Li, Xinkai Wang, Xiangtai Li, Lei Cui, Furu Wei, Shuicheng Yan, Hao Fei,
+and Tat-seng Chua. Synergizing Understanding and Generation with Interleaved Analyzing-
+Drafting Thinking, 2026. URL https://arxiv.org/abs/2602.21435. Version Number: 2.
+[25] Zican Hu, Xuyang Hu, Yiming Liu, Zuwei Long, Wei Liu, Yunzhuo Hao, Jiawei Gu, Linjie Li,
+Yu Cheng, Zhenhong Sun, et al. Bridging Interleaved Multi-Modal Reasoning as a Unified
+Decision Process, July 2026. URL https://arxiv.org/abs/2607.03748. Version Number: 1.
+[26] Zefeng Zhang, Xiangzhao Hao, Hengzhu Tang, Zhenyu Zhang, Jiawei Sheng, Xiaodong Li,
+Zhenyang Li, Li Gao, Daiting Shi, Dawei Yin, et al. COOPER: A Unified Model for Cooperative
+Perception and Reasoning in Spatial Intelligence, 2025. URL https://arxiv.org/abs/2512.
+04563. Version Number: 2.
+[27] Haotian Liu, Chunyuan Li, Yuheng Li, and Yong Jae Lee. Improved Baselines with Visual
+Instruction Tuning, 2024. URL http://arxiv.org/abs/2310.03744. arXiv:2310.03744 [cs].
+[28] Jean-Baptiste Alayrac, Jeff Donahue, Pauline Luc, Antoine Miech, Iain Barr, Yana Hasson,
+Karel Lenc, Arthur Mensch, Katie Millican, Malcolm Reynolds, et al. Flamingo: a Visual
+Language Model for Few-Shot Learning, 2022.
+URL http://arxiv.org/abs/2204.14198.
+arXiv:2204.14198 [cs].
+[29] Zhangquan Chen, Manyuan Zhang, Xinlei Yu, Xufang Luo, Mingze Sun, Zihao Pan, Xiang An,
+Yan Feng, Peng Pei, Xunliang Cai, et al. Think with 3D: Geometric Imagination Grounded
+Spatial Reasoning from Limited Views, March 2026. URL http://arxiv.org/abs/2510.18632.
+arXiv:2510.18632 [cs.CV].
+19
+
+
+Ψ-0.6: Adaptive Streams of Thought in a Unified Vision-Language World Model
+[30] Haoyuan Li, Qihang Cao, Tao Tang, Kun Xiang, Zihan Guo, Jianhua Han, Hang Xu, and
+Xiaodan Liang. Thinking with geometry: Active geometry integration for spatial reasoning,
+2026. URL https://arxiv.org/abs/2602.06037v1.
+[31] Judea Pearl. Causality. Cambridge university press, 2009.
+[32] Eric Kolve, Roozbeh Mottaghi, Winson Han, Eli VanderBilt, Luca Weihs, Alvaro Herrasti, Daniel
+Gordon, Yuke Zhu, Abhinav Gupta, and Ali Farhadi. AI2-THOR: An Interactive 3D Environment
+for Visual AI. arXiv, 2017.
+[33] Matt Deitke, Eli VanderBilt, Alvaro Herrasti, Luca Weihs, Jordi Salvador, Kiana Ehsani, Winson
+Han, Eric Kolve, Ali Farhadi, Aniruddha Kembhavi, et al. ProcTHOR: Large-Scale Embodied
+AI Using Procedural Generation. In NeurIPS, 2022. Outstanding Paper Award.
+[34] Kanchana Ranasinghe, Honglu Zhou, Yu Fang, Luyu Yang, Le Xue, Ran Xu, Caiming Xiong,
+Silvio Savarese, Michael S. Ryoo, and Juan Carlos Niebles. Future optical flow prediction
+improves robot control and video generation. In Conference on Computer Vision and Pattern
+Recognition (CVPR) Findings, 2026.
+[35] Chenfei Wu, Jiahao Li, Jingren Zhou, Junyang Lin, Kaiyuan Gao, Kun Yan, Sheng ming
+Yin, Shuai Bai, Xiao Xu, Yilei Chen, et al. Qwen-image technical report, 2025. URL https:
+//arxiv.org/abs/2508.02324.
+[36] Tim Brooks, Aleksander Holynski, and Alexei A Efros. Instructpix2pix: Learning to follow
+image editing instructions. In 2023 IEEE/CVF Conference on Computer Vision and Pattern
+Recognition (CVPR), pages 18392–18402. IEEE, 2023.
+[37] Jonathan Ho and Tim Salimans.
+Classifier-free diffusion guidance.
+arXiv preprint
+arXiv:2207.12598, 2022.
+[38] Shilong Liu, Zhaoyang Zeng, Tianhe Ren, Feng Li, Hao Zhang, Jie Yang, Qing Jiang, Chunyuan
+Li, Jianwei Yang, Hang Su, et al. Grounding dino: Marrying dino with grounded pre-training
+for open-set object detection. In European conference on computer vision, pages 38–55.
+Springer, 2024.
+[39] Nikhila Ravi, Valentin Gabeur, Yuan-Ting Hu, Ronghang Hu, Chaitanya Ryali, Tengyu Ma,
+Haitham Khedr, Roman Rädle, Chloe Rolland, Laura Gustafson, et al. Sam 2: Segment
+anything in images and videos. In International Conference on Learning Representations,
+volume 2025, pages 28085–28128, 2025.
+[40] Alexey Bochkovskiy, Amaël Delaunoy, Hugo Germain, Marcel Santos, Yichao Zhou, Stephan
+Richter, and Vladlen Koltun. Depth pro: Sharp monocular metric depth in less than a second.
+In International Conference on Learning Representations, volume 2025, pages 75602–75637,
+2025.
+[41] Shuai Bai, Yuxuan Cai, Ruizhe Chen, Keqin Chen, Xionghui Chen, Zesen Cheng, Lianghao
+Deng, Wei Ding, Chang Gao, Chunjiang Ge, et al. Qwen3-vl technical report. arXiv preprint
+arXiv:2511.21631, 2025.
+[42] Qwen Team. Qwen3.5: Towards native multimodal agents, February 2026. URL https:
+//qwen.ai/blog?id=qwen3.5.
+[43] Ryan Hoque, Peide Huang, David J. Yoon, Mouli Sivapurapu, and Jian Zhang. EgoDex:
+20
+
+
+Ψ-0.6: Adaptive Streams of Thought in a Unified Vision-Language World Model
+Learning Dexterous Manipulation from Large-Scale Egocentric Video, March 2026. URL
+http://arxiv.org/abs/2505.11709. arXiv:2505.11709 [cs.CV].
+[44] Raghav Goyal, Samira Ebrahimi Kahou, Vincent Michalski, Joanna Materzy´nska, Susanne
+Westphal, Heuna Kim, Valentin Haenel, Ingo Fruend, Peter Yianilos, Moritz Mueller-Freitag,
+et al. The "something something" video database for learning and evaluating visual common
+sense, June 2017. URL http://arxiv.org/abs/1706.04261. arXiv:1706.04261 [cs.CV].
+[45] Daniel Bolya, Po-Yao Huang, Peize Sun, Jang Hyun Cho, Andrea Madotto, Chen Wei, Tengyu
+Ma, Jiale Zhi, Jathushan Rajasegaran, Hanoona Rasheed, et al. Perception Encoder: The
+best visual embeddings are not at the output of the network, April 2025. URL http://arxiv.
+org/abs/2504.13181. arXiv:2504.13181 [cs.CV].
+[46] Kepan Nan, Rui Xie, Penghao Zhou, Tiehan Fan, Zhenheng Yang, Zhijie Chen, Xiang Li,
+Jian Yang, and Ying Tai. OpenVid-1M: A Large-Scale High-Quality Dataset for Text-to-video
+Generation, February 2025.
+URL http://arxiv.org/abs/2407.02371.
+arXiv:2407.02371
+[cs.CV].
+[47] Jason Wei, Xuezhi Wang, Dale Schuurmans, Maarten Bosma, Brian Ichter, Fei Xia, Ed Chi,
+Quoc Le, and Denny Zhou. Chain-of-thought prompting elicits reasoning in large language
+models. In Advances in Neural Information Processing Systems, volume 35, 2022. URL
+https://arxiv.org/abs/2201.11903.
+[48] Khai Loong Aw, Klemen Kotar, Wanhee Lee, Seungwoo Kim, Khaled Jedoui, Rahul Venkatesh,
+Lilian Naing Chen, Michael C. Frank, and Daniel L. K. Yamins. Zero-shot World Models Are
+Developmentally Efficient Learners, April 2026. URL http://arxiv.org/abs/2604.10333.
+[49] Thaddäus Wiedemer, Yuxuan Li, Paul Vicol, Shixiang Shane Gu, Nick Matarese, Kevin
+Swersky, Been Kim, Priyank Jaini, and Robert Geirhos. Video models are zero-shot learners
+and reasoners, September 2025. URL http://arxiv.org/abs/2509.20328. arXiv:2509.20328
+[cs.LG].
+[50] Jingqi Tong, Yurong Mou, Hangcheng Li, Mingzhe Li, Yongzhuo Yang, Ming Zhang, Qiguang
+Chen, Tianyi Liang, Xiaomeng Hu, Yining Zheng, et al. Thinking with Video: Video Generation
+as a Promising Multimodal Reasoning Paradigm, April 2026. URL http://arxiv.org/abs/
+2511.04570. arXiv:2511.04570 [cs.CV].
+[51] Chengzu Li, Wenshan Wu, Huanyu Zhang, Yan Xia, Shaoguang Mao, Li Dong, Ivan Vuli´c, and
+Furu Wei. Imagine while Reasoning in Space: Multimodal Visualization-of-Thought, January
+2025. URL http://arxiv.org/abs/2501.07542. arXiv:2501.07542 [cs.CL].
+[52] Ethan Chern, Zhulin Hu, Steffi Chern, Siqi Kou, Jiadi Su, Yan Ma, Zhijie Deng, and Pengfei
+Liu. Thinking with Generated Images, May 2025. URL http://arxiv.org/abs/2505.22525.
+arXiv:2505.22525 [cs.CV].
+[53] Yutong Bian, Dongjie Cheng, Heming Xia, Yongqi Li, and Wenjie Li. Optical Reasoning:
+Rethinking Images as an Expressive Reasoning Medium Beyond Text, June 2026. URL
+http://arxiv.org/abs/2606.09585. arXiv:2606.09585 [cs.AI].
+[54] Qixun Wang, Yang Shi, Yifei Wang, Yuanxing Zhang, Pengfei Wan, Kun Gai, Xianghua Ying,
+and Yisen Wang. Monet: Reasoning in Latent Visual Space Beyond Images and Language,
+November 2025. URL http://arxiv.org/abs/2511.21395. arXiv:2511.21395 [cs.CV].
+21
+
+
+Ψ-0.6: Adaptive Streams of Thought in a Unified Vision-Language World Model
+[55] Bangzheng Li, Ximeng Sun, Jiang Liu, Ze Wang, Jialian Wu, Xiaodong Yu, Hao Chen, Emad
+Barsoum, Muhao Chen, and Zicheng Liu. Latent Visual Reasoning, October 2025. URL
+http://arxiv.org/abs/2509.24251. arXiv:2509.24251 [cs.CV].
+[56] Zeyuan Yang, Xueyang Yu, Delin Chen, Maohao Shen, and Chuang Gan. Machine Mental
+Imagery: Empower Multimodal Reasoning with Latent Visual Tokens, June 2025.
+URL
+http://arxiv.org/abs/2506.17218. arXiv:2506.17218 [cs.CV].
+[57] Huanyu Zhang, Wenshan Wu, Chengzu Li, Ning Shang, Yan Xia, Yangyu Huang, Yifan Zhang,
+Li Dong, Zhang Zhang, Liang Wang, et al. Latent Sketchpad: Sketching Visual Thoughts
+to Elicit Multimodal Reasoning in MLLMs, October 2025. URL http://arxiv.org/abs/2510.
+24514. arXiv:2510.24514 [cs.CV].
+[58] Linquan Wu, Tianxiang Jiang, Yifei Dong, Haoyu Yang, Fengji Zhang, Shichaang Meng,
+Ai Xuan, Linqi Song, and Jacky Keung. LaViT: Aligning Latent Visual Thoughts for Multi-
+modal Reasoning, August 2026. URL http://arxiv.org/abs/2601.10129. arXiv:2601.10129
+[cs.CV].
+[59] Shayne Longpre, Le Hou, Tu Vu, Albert Webson, Hyung Won Chung, Yi Tay, Denny Zhou,
+Quoc V. Le, Barret Zoph, Jason Wei, et al. The Flan Collection: Designing Data and Methods
+for Effective Instruction Tuning, February 2023.
+URL http://arxiv.org/abs/2301.13688.
+arXiv:2301.13688 [cs.AI].
+[60] Alexis Conneau, Kartikay Khandelwal, Naman Goyal, Vishrav Chaudhary, Guillaume Wen-
+zek, Francisco Guzmán, Edouard Grave, Myle Ott, Luke Zettlemoyer, and Veselin Stoy-
+anov.
+Unsupervised Cross-lingual Representation Learning at Scale, April 2020.
+URL
+http://arxiv.org/abs/1911.02116. arXiv:1911.02116 [cs.CL].
+[61] Yang Shi, Yuhao Dong, Yue Ding, Yuran Wang, Xuanyu Zhu, Sheng Zhou, Wenting Liu,
+Haochen Tian, Rundong Wang, Huanqian Wang, et al.
+RealUnify: Do Unified Models
+Truly Benefit from Unification? A Comprehensive Benchmark, March 2026.
+URL http:
+//arxiv.org/abs/2509.24897. arXiv:2509.24897 [cs.AI].
+[62] Penghao Wu, Haiwen Diao, Weichen Fan, Lewei Lu, Dahua Lin, and Ziwei Liu. Uncovering
+Understanding-Generation Synergy in Native Unified Multimodal Models: From Representation,
+Task to System, September 2026. URL http://arxiv.org/abs/2609.01607. arXiv:2609.01607
+[cs.CV].
+[63] Noam Shazeer, Azalia Mirhoseini, Krzysztof Maziarz, Andy Davis, Quoc Le, Geoffrey Hinton,
+and Jeff Dean. Outrageously Large Neural Networks: The Sparsely-Gated Mixture-of-Experts
+Layer, January 2017. URL http://arxiv.org/abs/1701.06538. arXiv:1701.06538 [cs.LG].
+[64] Basil Mustafa, Carlos Riquelme, Joan Puigcerver, Rodolphe Jenatton, and Neil Houlsby.
+Multimodal Contrastive Learning with LIMoE: the Language-Image Mixture of Experts, June
+2022. URL http://arxiv.org/abs/2206.02770. arXiv:2206.02770 [cs.CV].
+[65] Raktim Gautam Goswami, Prashanth Krishnamurthy, Yann LeCun, and Farshad Khorrami.
+Robopepp: Vision-based robot pose and joint angle estimation through embedding predictive
+pre-training. In 2025 IEEE/CVF Conference on Computer Vision and Pattern Recognition
+(CVPR), pages 6930–6939. IEEE, 2025.
+[66] Yifan Liu, Fangneng Zhan, Wanhua Li, Haowen Sun, Katerina Fragkiadaki, and Hanspeter
+22
+
+
+Ψ-0.6: Adaptive Streams of Thought in a Unified Vision-Language World Model
+Pfister. Robotag: End-to-end robot configuration estimation via topological alignment graph.
+arXiv preprint arXiv:2511.07717, 2025.
+[67] Shikun Ban, Juling Fan, Xiaoxuan Ma, Wentao Zhu, Yu Qiao, and Yizhou Wang. Real-time
+holistic robot pose estimation with unknown states. In European Conference on Computer
+Vision, pages 1–17. Springer, 2024.
+[68] Zirui Zhang, Haoyu Dong, Kexin Pei, and Chengzhi Mao. R-c2: Cycle-consistent reinforcement
+learning improves multimodal reasoning. arXiv preprint arXiv:2603.25720, 2026.
+[69] Stefan Stojanov, David Wendt, Seungwoo Kim, Rahul Mysore Venkatesh, Kevin Feigelis,
+Klemen Kotar, Khai Loong Aw, Jiajun Wu, and Daniel L K Yamins. Self-Supervised Learning
+of Motion Concepts by Optimizing Counterfactuals. NeurIPS, 2025.
+[70] Shenyuan Gao, Siyuan Zhou, Yilun Du, Jun Zhang, and Chuang Gan. AdaWorld: Learning
+Adaptable World Models with Latent Actions, June 2025. URL http://arxiv.org/abs/2503.
+18938. arXiv:2503.18938 [cs.AI].
+[71] Zhongwei Ren, Yunchao Wei, Xun Guo, Yao Zhao, Bingyi Kang, Jiashi Feng, and Xiaojie
+Jin. VideoWorld: Exploring Knowledge Learning from Unlabeled Videos, March 2025. URL
+http://arxiv.org/abs/2501.09781. arXiv:2501.09781 [cs.CV].
+[72] Edward J Hu, Yelong Shen, Phillip Wallis, Zeyuan Allen-Zhu, Yuanzhi Li, Shean Wang,
+Lu Wang, and Weizhu Chen. Lora: Low-rank adaptation of large language models. arXiv
+preprint arXiv:2106.09685, 2021.
+[73] Tim Dettmers, Artidoro Pagnoni, Ari Holtzman, and Luke Zettlemoyer. Qlora: Efficient finetun-
+ing of quantized llms. Advances in neural information processing systems, 36:10088–10115,
+2023.
+[74] Yihan Wang, Lahav Lipson, and Jia Deng. Sea-raft: Simple, efficient, accurate raft for optical
+flow. In European Conference on Computer Vision, pages 36–54. Springer, 2024.
+[75] Johan Edstedt, Qiyu Sun, Georg Bökman, Mårten Wadenbäck, and Michael Felsberg. Roma:
+Robust dense feature matching. In 2024 IEEE/CVF Conference on Computer Vision and
+Pattern Recognition (CVPR), page 19790–19800. IEEE, 2024. https://doi.org/10.1109/
+cvpr52733.2024.01871. URL http://dx.doi.org/10.1109/CVPR52733.2024.01871.
+[76] Nikita Karaev, Yuri Makarov, Jianyuan Wang, Natalia Neverova, Andrea Vedaldi, and Christian
+Rupprecht. Cotracker3: Simpler and better point tracking by pseudo-labeling real videos. In
+2025 IEEE/CVF International Conference on Computer Vision (ICCV), pages 1–10. IEEE,
+2025.
+[77] Maxime Oquab, Timothée Darcet, Théo Moutakanni, Huy Vo, Marc Szafraniec, Vasil Khalidov,
+Pierre Fernandez, Daniel Haziza, Francisco Massa, Alaaeldin El-Nouby, et al. Dinov2: Learning
+robust visual features without supervision. arXiv preprint arXiv:2304.07193, 2023.
+[78] Qwen, An Yang, Baosong Yang, Beichen Zhang, Binyuan Hui, Bo Zheng, Bowen Yu,
+Chengyuan Li, Dayiheng Liu, Fei Huang, et al. Qwen2.5 Technical Report, January 2025. URL
+http://arxiv.org/abs/2412.15115. arXiv:2412.15115 [cs.CL].
+[79] Masatoshi Tateno, Gido Kato, Hirokatsu Kataoka, Yoichi Sato, and Takuma Yagi. HanDyVQA:
+A Video QA Benchmark for Fine-Grained Hand-Object Interaction Dynamics, June 2026. URL
+http://arxiv.org/abs/2512.00885. arXiv:2512.00885 [cs.CV].
+23
+
+
+Ψ-0.6: Adaptive Streams of Thought in a Unified Vision-Language World Model
+[80] Yunseok Jang, Yale Song, Youngjae Yu, Youngjin Kim, and Gunhee Kim. TGIF-QA: Toward
+Spatio-Temporal Reasoning in Visual Question Answering, December 2017.
+URL http:
+//arxiv.org/abs/1704.04497. arXiv:1704.04497 [cs.CV].
+[81] Bo Wu, Shoubin Yu, Zhenfang Chen, Joshua B. Tenenbaum, and Chuang Gan. STAR: A
+Benchmark for Situated Reasoning in Real-World Videos, May 2024. URL http://arxiv.org/
+abs/2405.09711. arXiv:2405.09711 [cs.AI].
+[82] Lu Qiu, Yi Chen, Yuying Ge, Yixiao Ge, Ying Shan, and Xihui Liu. EgoPlan-Bench2: A
+Benchmark for Multimodal Large Language Model Planning in Real-World Scenarios, April
+2025. URL http://arxiv.org/abs/2412.04447. arXiv:2412.04447 [cs.AI].
+[83] Yuncong Yang, Jiageng Liu, Zheyuan Zhang, Siyuan Zhou, Reuben Tan, Jianwei Yang, Yilun
+Du, and Chuang Gan. Mindjourney: Test-time scaling with world models for spatial reasoning.
+Advances in Neural Information Processing Systems, 38:109855–109885, 2026.
+[84] Jensen Zhou, Hang Gao, Vikram Voleti, Aaryaman Vasishta, Chun-Han Yao, Mark Boss,
+Philip Torr, Christian Rupprecht, and Varun Jampani. Stable virtual camera: Generative view
+synthesis with diffusion models. In 2025 IEEE/CVF International Conference on Computer
+Vision (ICCV), pages 12405–12414. IEEE, 2025.
+[85] Yifan Liu, Fangneng Zhan, Kaichen Zhou, Yilun Du, Paul Pu Liang, and Hanspeter Pfister.
+Abstract 3d perception for spatial intelligence in vision-language models. In Proceedings of
+the IEEE/CVF Conference on Computer Vision and Pattern Recognition, pages 38647–38656,
+2026.
+[86] Yanbing Zhang, Bo Wang, Jianhui Liu, Nan Jiang, Jiaxiu Jiang, Haoze Sun, Yijun Yang,
+Shenghe Zheng, Lin Song, Haoyang Huang, et al. Thinking with Novel Views: A Systematic
+Analysis of Generative-Augmented Spatial Intelligence, May 2026. URL http://arxiv.org/
+abs/2605.10588. arXiv:2605.10588 [cs.CV].
+[87] Phillip Y. Lee, Jihyeon Je, Chanho Park, Mikaela Angelina Uy, Leonidas Guibas, and Minhyuk
+Sung. Perspective-aware reasoning in vision-language models via mental imagery simulation.
+In Proceedings of the IEEE/CVF International Conference on Computer Vision (ICCV), 2025.
+arXiv:2504.17207.
+[88] Shoubin Yu, Yue Zhang, Zun Wang, Jaehong Yoon, Huaxiu Yao, Mingyu Ding, and Mo-
+hit Bansal.
+When and How Much to Imagine: Adaptive Test-Time Scaling with World
+Models for Visual Spatial Reasoning, May 2026. URL http://arxiv.org/abs/2602.08236.
+arXiv:2602.08236 [cs.CV].
+[89] Wanyue Zhang, Wenxiang Wu, Wang Xu, Jiaxin Luo, Helu Zhi, Yibin Huang, Shuo Ren, Zitao
+Liu, and Jiajun Zhang. World2VLM: Distilling World Model Imagination into VLMs for Dynamic
+Spatial Reasoning, April 2026. URL http://arxiv.org/abs/2604.26934. arXiv:2604.26934
+[cs.CV].
+24
+
+
+Ψ-0.6: Adaptive Streams of Thought in a Unified Vision-Language World Model
+A Supplementary Results
+A.1 Spatial Intelligence Reasoning: MindCube
+An interesting observation is that different spatial tasks expose different bottlenecks. MINDCUBE
+separates in-place camera turns (Rotation), movement around a scene (Around), and relative object
+positions across views (Among; Fig. 4A). Direct RGB+depth prompting is strongest on Around and
+near chance on Rotation. Structured prompting improves the displayed Rotation and Among results
+most. The SFT configuration is strong on Around and Among but remains near chance on Rotation
+– we hypothesize that this is because the Rotation training data contains very limited scene diversity,
+making it challenging for learning to generalize to the test set.
+Inference protocol for the fine-tuned models. All fine-tuned Ψ-0.6 results on MINDCUBE (Fig. 4C)
+use direct answering: the model emits the answer immediately after the inputs, without generating
+a text reasoning trace. We fine-tune on the 10k MINDCUBE training questions – which are disjoint
+from the 1,050-question Tiny split used for evaluation – mixed with the model’s general training
+data. Each training sequence places the question and its answer options first, then the input views
+(optionally with depth and/or relative camera poses), and ends with the answer.
+A.2 Details of FlowBench
+FLOWBENCH [16] is a robotics and computer vision benchmark that evaluates the capability of
+visual world models to answer questions based on specified counterfactual motions. FLOWBENCH
+contains diverse categories of questions, such as “occlusion” (“if we move the table 0.50 meters
+to the right, will it occlude the view of the chair?”) and “closer to” (“if we move the eraser 5cm
+to the left, which three objects would it be closest to?”). FLOWBENCH contains two main splits.
+First, FLOWBENCH-SIM is built in a simulator [32, 33] and contains diverse indoor scenes with
+full rooms depicted, and involves moving objects with various scales from chairs to potatoes.
+Second, FLOWBENCH-REAL was built by adding counterfactual motion questions to five robot
+datasets: DROID, Bridge V2, Language-Table, RT-1, and Berkeley UR5. It spans five distinct robot
+embodiments, with scenes ranging from laboratory tabletops to toy kitchens and kitchen counters,
+and moved objects ranging from colored blocks and toy food to cups, bowls, bottles, utensils, and
+cloths.
+A.3 Details for baselines in flow prediction
+Baselines. We compare our model against expert models that can map one RGB frame plus a
+language instruction to a dense displacement field. Each is fine-tuned on the same FlowBench-
+training set used for training Ψ-0.6, and evaluated on the identical benchmark. We first report a
+zero-flow predictor: under a static camera only 0.6% of pixels move, so predicting nothing is already
+a fine approximation, and any method whose wrong vectors exceed the true magnitude scores
+worse. FOFPred [34] is the closest published match, image plus action phrase to HSV-encoded
+flow, fine-tuned with LoRA [72] after raising its magnitude normaliser so our displacements are not
+clipped. As instruction editors we fine-tune InstructPix2Pix [36] in three variants differing only in
+supervision target (badge-free render, Set-of-Mark render, and a mask-weighted loss on the object’s
+before/after footprints), and Qwen-Image-Edit [35] with 4-bit QLoRA [73]. The mask weighting
+targets an identity shortcut: rgb0 and rgb1 differ in under 1% of pixels on average, so a plain
+25
+
+
+Ψ-0.6: Adaptive Streams of Thought in a Unified Vision-Language World Model
+reconstruction loss is minimised by copying the input. Finally, a non-generative pipeline — the only
+baseline using the instruction’s metric distance — grounds the referring expression with Grounding
+DINO [38] and SAM 2 [39], predicts metric depth with Depth Pro [40], and applies the displacement
+as a 3-D rigid translation.
+Read-out and oracles. Editors emit images, not flow, and correspondence models cannot convert
+them here: with an identical camera the correct warp is the identity, so given the true rgb1, SEA-
+RAFT [74], RoMa [75] and CoTracker3 [76] recover under 25% of the true magnitude. We instead
+localise the object by frame-difference proposals scored with DINOv2 descriptors [77] and refined
+by SAM 2. This paints flow on the ground-truth frame-0 mask, so editors are given that mask while
+PSI and FOFPred must also decide which pixels move — the groups are not directly comparable
+and PSI’s margin is understated. Notably, Ψ-0.6 does not need any of these oracles to perform
+well on FlowBench, as it is able to read the answer off its own prediction.
+A.4 Definition of metrics for flow prediction
+We specify the definition of rEPE and Acc for Table 1. Let f ∈RH×W×2 be the ground-truth flow from
+I0 to I1 and ˆf the prediction, bilinearly resampled to the ground-truth resolution H × W = 600 × 800
+of FlowBench when a model decodes at a different size. We write ep = ∥ˆfp −fp∥2 for the endpoint
+error at pixel p and M = { p : ∥fp∥2 > 1 px } for the set of ground-truth moving pixels. Because
+each counterfactual displaces a single object in front of a static camera, M covers only ∼0.6% of
+the frame while the displacements inside it are large (mean 100.2 px, median 83 px). An endpoint
+error averaged over the whole frame is therefore dominated by static background and is nearly
+identical for every method, and an absolute error restricted to M conflates a small mistake on a
+large motion with a large mistake on a small one. We thus report a relative error on the moving
+pixels as the primary quantity.
+rEPE. Each pixel’s error is normalised by that pixel’s own motion distance before averaging,
+rEPEmove( ˆf, f) =
+1
+|M|
+X
+p∈M
+∥ˆfp −fp∥2
+∥fp∥2
+.
+(1)
+The normalisation is per pixel rather than per sample or per dataset: a prediction is charged by the
+fraction of the true displacement it gets wrong. Static pixels are excluded, since a relative error
+against zero motion is undefined. This fixes the scale of the column: a zero-flow prediction ( ˆf ≡0)
+scores exactly 1.000 on every sample, so any entry above 1 is worse than predicting no motion
+at all, and 0.5 means the residual error is half the motion it was meant to reproduce. The table
+reports the mean of Eq. 1 over the N = 622 benchmark samples; the “med” column is its median
+over samples, which is robust to the few cases where a method moves the wrong object and incurs
+an arbitrarily large error.
+Acc. We additionally report the fraction of samples whose relative error falls below a tolerance t,
+Acc(t) = 1
+N
+N
+X
+i=1
+1
+h
+rEPEmove
+  ˆf(i), f(i)
+≤t
+i
+,
+t = 0.4.
+(2)
+A prediction counts as correct when its endpoint error is, averaged over the moved object, within
+40% of the true displacement. The tolerance is relative rather than a fixed pixel radius, so it scales
+with the motion: a 100 px displacement is allowed 40 px of slack, a 30 px displacement only 12 px. By
+26
+
+
+Ψ-0.6: Adaptive Streams of Thought in a Unified Vision-Language World Model
+construction a blank prediction scores rEPEmove = 1 and is never counted as correct, so a model
+cannot inflate Acc by abstaining. We use t = 0.4 for every row of Table 1.
+A.5 VQA on FLOWBENCH.
+Fine-tuning on FLOWBENCH substantially improves the VQA performance of Ψ-0.6 across all eight
+categories (Table 2). Overall accuracy increases from 24.5% to 73.1%. The fine-tuned model
+outperforms all evaluated off-the-shelf Qwen models on both aggregate metrics and achieves the
+second-highest overall accuracy, trailing Qwen3-VL-8B fine-tuned on the same dataset by 3.2
+points. At the category level, Ψ-0.6 stays within 4 points of that model on five of the eight categories
+and is ahead on Occlusion (77.5% vs. 72.5%); the remaining gap is concentrated in Contact (73.7%
+vs. 93.0%) and Count (48.2% vs. 57.3%). These results demonstrate strong abilities in Ψ-0.6’s
+spatial question answering, showcasing Ψ-0.6’s capability to serve as a VLM.
+A.6 Flow prediction ablation
+Table 4: Ablation study of Ψ-0.6 models: effect of pMotion, CFG scale, and sequence length on
+optical flow prediction. n = 622.
+Method
+Acc↑
+rEPEmove ↓
+rEPEmove med ↓
+Blank ↓
+Dir (◦) ↓
+∆PSNR ↑
+Oracle Input
+Ψ-0.6 Default seq 32
+31.8%
+0.635
+0.639
+27.5%
+14.1
++1.60
+–
++ pMotion
+44.2%
+0.577
+0.474
+34.6%
+6.6
++1.59
+–
++ pMotion + CFG1.5
+54.0%
+0.463
+0.363
+5.6%
+7.7
++1.49
+–
++ pMotion + CFG2.0
+56.4%
+0.454
+0.356
+0.3%
+8.1
++0.94
+–
++ pMotion + CFG2.5
+56.4%
+0.463
+0.347
+0.0%
+9.1
++0.25
+–
++ pMotion + CFG1.5 + seq 128
+54.2%
+0.462
+0.364
+5.6%
+7.8
++1.45
+–
++ pMotion + CFG1.5 + seq full
+54.2%
+0.462
+0.364
+5.3%
+7.8
++1.39
+–
+To improve text-to-flow predictions, Ψ-0.6 further employs two powerful decoding techniques.
+Critically, these are enabled by Ψ-0.6’s fine-grained control and probabilistic predictions, attributes
+that are absent from many other world models. First, before generating flow, Ψ-0.6 computes
+the probability of motion (“pMotion”) at every patch with a single feedforward pass. Then, Ψ-0.6
+generates flow predictions sequentially from patches most likely to move to least likely. The intuition
+behind this is: in FLOWBENCH, motion typically involves a single, often small object, so predicting
+flow for the patches most likely to move first helps the model focus on the relevant region. Second,
+our model uses a form of classifier-free guidance (CFG) [37]: at every generated token, compare
+the flow prediction logits with and without conditioning on the text instruction, then amplify the
+difference – this amplifies the effect of the instruction.
+Table 4 shows that pMotion raises accuracy from 31.8% to 44.2% and reduces directional error from
+14.1◦to 6.6◦. CFG at scale 1.5 further improves accuracy to 54.0%, lowers rEPEmove to 0.463, and
+reduces the blank rate to 5.6%. Stronger guidance further improves flow metrics but compromises
+reconstruction: scale 2.5 eliminates blanks while reducing reconstruction gains from +1.49 to
++0.25 dB. Decoding beyond 32 tokens yields no further improvement, likely due to FlowBench’s
+sparse, single-object motions. These results favor pMotion with moderate CFG as the best overall
+configuration, without requiring longer decoding.
+27
+
+
+Ψ-0.6: Adaptive Streams of Thought in a Unified Vision-Language World Model
+A.7 Question–answer data for stream selection
+The stream-selection policy (§6) is trained and evaluated on videos from four sources: EgoDex [43],
+Something-Something v2 (SSv2) [44], PE [45], and OpenVid-1M [46]. None of these datasets
+provides question–answer pairs. Each provides a caption or label per clip, which we convert into
+open-ended question–answer pairs. SSv2 labels (e.g., “covering glass with handkerchief”) and
+EgoDex task descriptions (e.g., “Place the lid onto the cup on the wooden table.”) are short and
+formulaic, so we convert them deterministically. PE and OpenVid captions are longer free-form
+descriptions. For these, we prompt Qwen2.5-7B-Instruct [78] with the caption alone, without the
+video, to write one to three question–answer pairs. The prompt asks for temporal, spatial, causal,
+descriptive, action, or narrative questions that are answerable from the caption and add no new
+information.
+Unseen evaluation benchmarks.
+We evaluate transfer of the stream-selection policy on four
+multiple-choice video question-answering benchmarks, none of which appears in training: HanDyVQA
+[79], which probes fine-grained hand–object interaction dynamics in egocentric video; TGIF-QA [80],
+which tests spatio-temporal reasoning such as repeated actions and state transitions; STAR [81],
+which tests situated reasoning about interactions, sequences, predictions, and feasibility in real-
+world videos; and EgoPlan-Bench2 [82], which asks for the next action toward a stated goal in
+everyday egocentric tasks. The policy selects streams from the video and question alone, without
+access to the answer options.
+28
+
+
+Ψ-0.6: Adaptive Streams of Thought in a Unified Vision-Language World Model
+B Supplementary Text
+B.1 Preliminaries on Probabilistic Structure Integration (PSI)
+Ψ-0.6 builds on Probabilistic Structure Integration (PSI) [14], inheriting two further properties that
+make its prompting interface unusually flexible: fine-grained control over individual patches and
+probabilistic prediction, which allows unspecified content to remain open to multiple plausible
+continuations.
+Fine-grained control. Ψ-0.6 represents visual fields as independently encoded spatial patches,
+using local patch quantization together with explicit pointer tokens. Each RGB, flow, or depth patch
+is represented by content tokens describing what the patch contains and a pointer token specifying
+its modality, spatial location, and temporal location—that is, where and when the content belongs.
+Because content and location are represented separately, a prompt can address only selected
+regions of a visual field, leave the remaining regions unspecified, or relocate existing content by
+changing its pointer while preserving its content tokens. This enables fine-grained conditioning and
+targeted scene edits. For example, in Fig. 2B, moving a patch on the upper part of a can downward
+while keeping the base fixed specifies a compression, whereas moving it upward without fixing
+the base specifies a lift. The same representation also allows patches to be generated in arbitrary
+spatial order, including sequentially (autoregressively), in parallel, or through a combination of both.
+Probabilistic prediction. Prompts specify constraints rather than a single deterministic target.
+For any partially specified scene, Ψ-0.6 represents a distribution over compatible continuations,
+allowing the same prompt to yield alternative predictions through sampling.
+B.2 Supplementary Discussion
+Unifying reasoning and imagination.
+The value of a unified predictive model becomes particu-
+larly clear when reasoning requires considering a world that has not yet been observed. A growing
+line of work augments language-based reasoners with external visual generators or world models.
+Mindjourney [83] invokes a frozen Stable Virtual Camera [84]; SandboxVLM introduces expert
+models and 3D reconstruction [85]; Thinking with Novel Views [86] uses an external “Painter”;
+APC [87] chains multiple foundation models; and AVIC [88] learns when to invoke a world model.
+These approaches demonstrate the value of visual imagination, but retain a separation between the
+system that reasons and the system that imagines. World2VLM [89] finds benefits from distilling
+imagined experience into a VLM rather than relying only on runtime coupling. Ψ-0.6 pushes this
+integration further: the model that interprets an observation is also the model that predicts its
+geometry, motion, and possible transformations. Imagined states are generated and consumed
+within the same model and token interface as the rest of the reasoning process. When the reasoner
+and the imaginer are the same model, imagination becomes a first-class reasoning operation rather
+than a separately invoked tool.
+29
+
+
+Ψ-0.6: Adaptive Streams of Thought in a Unified Vision-Language World Model
+C Model and Training Details for Reproducibility
+We describe the implementation of the unified model, its prompting interface, the training of the
+stream-selection policy, and the supervised training recipe, following the organization of §2. The
+model inherits the patch-based representation and conditional-prediction approach of PSI [14];
+here we specify the tokenization, transformer, sequence construction, and optimization needed to
+implement these mechanisms. The base recipe describes Ψ-0.6 after approximately 1.2 million
+supervised training steps, followed by context-length extension. The initialization of the stream-
+selection policy and its answer scorer is described in §C.3.
+C.1 Unified Multimodal Model
+C.1.1
+A common token and position interface
+Each sequence element represents one image, a depth map, an optical-flow field, a relative camera
+pose, or a text segment. We serialize elements into a stream of discrete token IDs. Each token also
+carries a position (x, y, t, c): two spatial coordinates, a temporal index, and a channel specifying the
+representation and, where applicable, its code component. The transformer input is the sum of a
+token embedding and a channel embedding. Spatial and temporal positions enter attention through
+rotary embeddings.
+For a visual patch, serialization emits a fixed pointer token followed by the patch’s content codes.
+The pointer has token ID 65,000; its position identifies the requested patch, and its channel is
+the first content channel of that modality. The same pointer ID is reused across locations and
+modalities. Pointers supply the location as conditioning information, and prediction loss is applied
+to the supervised content codes.
+The transformer has one 65,536-entry token embedding and output vocabulary. Code indices
+overlap across modalities: for example, a visual code and a text token can have the same integer ID,
+with their channel embeddings distinguishing their roles. Table 5 summarizes the representations
+used in the supervised training mixture for Ψ-0.6.
+Element
+Serialized size
+Content representation
+RGB patch
+1 pointer + 4 codes
+Learned codes for a 16×16 pixel patch.
+Depth patch
+1 pointer + 2 codes
+Learned codes for normalized inverse depth on the
+same patch grid.
+Flow patch
+1 pointer + 2 codes
+Learned codes for two-dimensional displacement;
+channels also encode the temporal gap.
+Camera pose
+1 pointer + 8 values
+Two fields of view, three axis–angle rotation compo-
+nents, and three translation components.
+Text segment
+1 pointer + text tokens
+GPT-2 byte-pair encoding, followed by an end-of-text
+token.
+Table 5: Token representations. Pointer tokens count toward sequence length but do not receive
+prediction loss. Patch sizes are in image pixels, whereas the model’s spatial coordinates index the
+patch grid.
+30
+
+
+Ψ-0.6: Adaptive Streams of Thought in a Unified Vision-Language World Model
+C.1.2
+Visual quantization and geometric labels
+Local patch codes.
+RGB, depth, and flow use separately trained, frozen patch quantizers. Their
+encoders apply a Haar wavelet transform within each 16×16 patch, project the patch to 512
+features, and process it with three residual blocks using 1×1 convolutions. Each residual block uses
+channel-wise layer normalization (LayerNorm, ϵ = 10−5), a hidden width of 1,024, and sigmoid
+linear unit (SiLU) activations. Encoding is therefore local to each patch. Finite scalar quantization
+(FSQ) maps six scalar components, with (8, 8, 8, 5, 5, 5) levels, to one of 8353 = 64, 000 discrete
+indices. Quantizer training uses a straight-through estimator (STE) for rounding. There are four
+such codes per RGB patch and two per depth or flow patch. The first code has an auxiliary
+coarse-reconstruction objective. Decoders use nine residual blocks with 3×3 convolutions on the
+code grid followed by an inverse Haar wavelet transform, so reconstruction can combine information
+across neighboring patches.
+The RGB quantizer was trained on ImageNet and OpenImages with an L1 reconstruction term, a
+DINOv2 feature term, and a coarse L1 term weighted by 0.01. The flow quantizer uses squared
+reconstruction error and a coarse squared error term weighted by 0.01. These quantizers are trained
+independently and frozen during autoregressive transformer training, which uses precomputed
+visual codes.
+Depth and camera geometry.
+The corpus preprocessing pipeline uses Depth Anything 3 (DA3)
+to estimate depth, camera intrinsics, and camera poses from video. Depth is converted to inverse
+depth, normalized to a clip’s inverse-depth range, and quantized as a three-channel replicated
+scalar image. Reconstruction uses the stored per-clip normalization bounds to convert decoded
+values back to depth.
+Optical flow.
+The flow preprocessing pipeline estimates displacement with AllTracker in two-frame
+mode. Horizontal and vertical displacement are expressed in pixels at the preprocessing resolution,
+divided by 40 before quantization, and multiplied by 40 after decoding. Each stored field has
+an associated frame gap. Training sequences use only frame pairs for which the required flow
+field is available. Flow positions carry the source time, while a gap-dependent pair of channels
+distinguishes the two content codes and the temporal interval.
+Camera-pose discretization.
+Given camera-to-world matrices Ti and Tj, the camera element
+represents T −1
+i
+Tj. Horizontal and vertical fields of view are rounded to integer degrees. The
+rotation is expressed as a three-component axis–angle vector in degrees; each component is
+clipped to [−180, 180], rounded, and shifted by 180. Translation components are expressed in
+centimeters, clipped to [−1000, 1000], rounded, and shifted by 1000. This deterministic discretization
+produces eight integers occupying fixed component channels. The sequence notation identifies
+the source and destination frames; camera tokens use spatial coordinates (0, 0) and the source
+frame’s temporal coordinate.
+C.1.3
+Text representation
+Text uses GPT-2 byte-pair encoding (BPE) and end-of-text (EOT) ID 50,256. A pointer precedes
+each text segment. To use the same spatial-position interface as visual tokens, text is laid out
+in rows of width 100: token position k has x = k mod 100 and y = ⌊k/100⌋. Its temporal index
+associates the segment with a frame or clip. Questions and answers share the base text channel
+31
+
+
+Ψ-0.6: Adaptive Streams of Thought in a Unified Vision-Language World Model
+Setting
+Value
+Transformer blocks / hidden width
+32 / 4,096
+Query heads / key–value heads
+32 / 8
+Head dimension / SwiGLU hidden width
+128 / 16,384
+Token vocabulary / channel embeddings
+65,536 / 384
+Base training sequence length
+4,096 tokens
+Normalization
+RMSNorm, ϵ = 10−5
+Input–output token embeddings
+Tied
+Dropout / stochastic depth / linear biases
+0 / 0 / disabled
+Table 6: Architecture of Ψ-0.6. The channel table reserves capacity beyond the modalities used in
+this recipe.
+and are distinguished by their position in the causal sequence. The stream-selection policy uses a
+distinct reasoning channel and text delimiters around the emitted notation.
+C.1.4
+Transformer architecture
+The model is a decoder-only transformer with approximately 8.05 billion parameters. Each block
+uses a pre-norm layout, applying root mean square normalization (RMSNorm) before grouped-query
+attention (GQA) with a causal mask and before a Swish-gated linear unit (SwiGLU) feed-forward
+network, with residual connections around both operations. Attention uses scaled dot products
+with factor 1/
+√
+128. The output projection shares weights with the input token embedding. Within
+each 128-dimensional attention head, three-axis rotary position embeddings (RoPE) allocate 48
+dimensions to x, 48 to y, and 32 to t, with frequency base 100. Explicit coordinates preserve a
+patch’s identity when its place in the serialized sequence changes, and the causal mask determines
+which earlier tokens it can attend to.
+C.2 Generic Prompting Interface: Streams-of-Thought
+C.2.1
+Notation and sequence construction
+A notation lists the elements of a sequence in causal order. Node elements refer to one time
+index, as in RGB0 or D0; edge elements refer to a pair, as in C0→1 or F0→1. Here D, C, and F
+denote depth, relative camera pose, and optical flow, respectively. At inference, an arrow separates
+supplied context from requested outputs. For example, RGB0, C0→1 →RGB1 requests a new
+image conditioned on a source image and camera motion, whereas RGB0, RGB1 →C0→1 requests
+the relative camera pose. Longer streams concatenate these operations, making generated content
+available to later predictions.
+Training uses complete sequences sampled from a finite, weighted set of notations for each dataset
+group. The temporal sampler maps the notation’s indices to available frames and geometric edges
+in a clip. Each element is then loaded, allocated a token budget, and serialized. Examples from the
+instruction mixture include RGB0, C0→1, F0→1, RGB1 for geometric video modeling; RGB0, D0, T0
+for image description; and Q, RGB0, D0, A for answering an image question with depth, where T0 is
+a caption and Q and A are question and answer text. Video-question sequences can place the
+question before or after the images, and geometric representations can be interleaved with images
+32
+
+
+Ψ-0.6: Adaptive Streams of Thought in a Unified Vision-Language World Model
+or placed between the question and answer.
+Token allocation and patch order.
+During base training, the 4,096-token budget includes
+pointers and conditioning tokens. Text and fixed-length camera elements are accounted for first.
+The remaining budget is distributed approximately uniformly in patch count across image, depth,
+and flow elements, subject to their available patch counts. The allocator accounts for five tokens
+per RGB patch and three per depth or flow patch, with stochastic remainder allocation and a final
+length adjustment to meet the sequence budget. Within each visual element, patches are randomly
+permuted and the allocated subset is retained; text retains its linguistic order. Short sequences are
+padded with masked positions.
+Element selection and supervision.
+Sampling different notations exposes the model to different
+conditioning sets and prediction orders. Each dataset group’s loss mask specifies the conditioning
+elements and supervised targets. The first RGB element usually serves as context; the final
+global-caption group also supervises it, supporting text-first image prediction. Question-answer
+groups supervise answer text, with their image, depth, flow, pose, and question tokens providing
+context. The group masks and mixture weights are described in §C.4.
+C.2.2
+Generating and composing elements
+Generation begins by serializing the supplied elements and constructing a template for the re-
+quested element. The template supplies pointer tokens, positions, and channels, while leaving
+content slots to be sampled from the transformer’s output distribution. Content IDs are sampled
+within the configured range of the target modality. The resulting codes can be retained as context
+for the next element or decoded into a visual representation.
+To accelerate visual inference, the decoder combines an autoregressive patch prefix with parallel
+decoding of the remaining patches. It first generates a chosen number of patches sequentially,
+caching attention keys and values to establish shared structure. The remaining patches are
+processed concurrently, with content codes within each patch generated sequentially. Each parallel
+patch attends to the supplied context, the completed prefix, and its own preceding content codes.
+This reduces the number of sequential decoding steps needed to complete a visual output. The
+sequential budget is measured in patches.
+Temperature, top-k, nucleus threshold, patch ordering, and sequential patch budget control infer-
+ence. Generic generation defaults to temperature 1, top-k 1,000, nucleus threshold 1, and 32
+sequential patches. Text is decoded in token order and truncated at its first end-of-text token within
+a specified output budget.
+Guidance and targeted patch ordering.
+Classifier-free guidance (CFG) combines conditional
+and reference logits before sampling:
+zguided = zref + s
+ zcond −zref
+
+.
+(3)
+The reference context is formed by omitting selected elements, such as a motion instruction, while
+retaining other context such as the input image. For sparse-motion outputs, the probability that
+a patch moves can also be estimated from the first flow-code distribution. With Z denoting the
+seven code indices identified as no-motion codes, the ordering score is 1 −P
+z∈Z p(z). Decoding
+high-scoring patches first allocates the sequential budget to likely moving regions. Guidance and
+motion-based patch ordering provide task-specific control over inference.
+33
+
+
+Ψ-0.6: Adaptive Streams of Thought in a Unified Vision-Language World Model
+C.3 Training Adaptive Streams-of-Thought
+The adaptive-stream extension trains a policy to emit a notation from a video and question. The
+policy learns to select and order depth, camera-motion, and flow representations. These selected
+elements are assembled with the video and question as context for an answer scorer, whose answer
+loss supplies the policy’s training signal.
+Policy initialization by scored search.
+For each training video-question pair, 64 candidate
+notations are scored using the model’s teacher-forced mean cross-entropy on the reference answer.
+Candidate selection considers the ten lowest-loss notations and prioritizes improvements over
+RGB-only answering. Sampling weights are proportional to exp(−ℓ/0.5 −0.01m), where ℓis
+answer loss and m is the number of selected elements. The model is then supervised on the
+notation and answer tokens, with the video and question as context. These examples are mixed
+with replay of the vision-language training data. The four notation-training sources are EgoDex,
+Something-Something v2, PE-Video, and OpenVid.
+On-policy optimization.
+Subsequent optimization samples K = 16 notations per video-question
+pair and updates low-rank adaptation (LoRA) adapters on the initialized policy. Let ℓ(a; x, q, y) be
+the scorer’s mean answer-token loss when the notation a selects additional context for video x,
+question q, and reference answer y. Reward favors lower ℓ; subtracting an RGB-only baseline gives
+the equivalent within-input objective
+r(a; x, q, y) = ℓ(∅; x, q, y) −ℓ(a; x, q, y).
+(4)
+Because the baseline is shared by a group, it cancels when forming Ai = ri −K−1 P
+j rj. We
+use Dr. GRPO, a variant of group relative policy optimization (GRPO), with group-mean reward
+centering, scaling by a global running root-mean-square statistic, and advantage clipping to
+[−3, 3]. It averages reward measurements over three paired random seeds, uses a fixed maximum-
+output-length normalizer for notation-token log-probabilities, and regularizes the policy against its
+initialization. The policy receives the video and question, while the reference answer supplies the
+training reward.
+Policy and scorer initialization.
+The policy and answer scorer are initialized from instruction-
+trained models. Policy distillation runs for approximately 40k steps. Subsequent LoRA training uses
+learning rate 3×10−5, Kullback–Leibler (KL) regularization coefficient 0.02, and ranks 128, 256, or
+512, with longer runs trained for approximately 6k steps.
+C.4 Training Recipe: Pretraining, Mid-training, and Post-training
+C.4.1
+Supervised objective and sampling
+Each dataset group specifies data sources, notation weights, a token allocator, and a supervision
+mask. Group weights are normalized to sampling probabilities, determining each group’s share
+of sampled sequences. Within a group, eligible files are drawn from the pooled sources, and a
+notation is sampled according to its normalized weight.
+All stages optimize next-token cross-entropy. Pointer, padding, and group-specific conditioning
+positions are excluded from the loss. Let Tb be the supervised positions in sample b, and let ℓbi be
+34
+
+
+Ψ-0.6: Adaptive Streams of Thought in a Unified Vision-Language World Model
+Stage
+Steps (≈)
+Sequence mixture
+RGB pretraining
+0–500k
+Video prediction with 2–8 RGB frames.
+Geometric integration
+500–700k
+RGB, depth, flow, and camera-conditioned
+video sequences.
+Language introduction
+700–900k
+50% vision; 50% FineWeb-Edu.
+Caption alignment
+900k–1.03M
+25% each: vision, FineWeb-Edu, global cap-
+tions, and local captions.
+Instruction training
+1.03–1.10M
+Captioning, question answering, text control,
+and predictive replay; DCLM replaces FineWeb-
+Edu.
+Instruction refinement
+1.10–1.20M
+More video-question training and revised cap-
+tion/geometry mixtures (Table 8).
+Table 7: Supervised training stages for Ψ-0.6, with approximate cumulative step boundaries. Every
+stage uses batches of 512 sequences and a 4,096-token sequence budget. The first approximately
+180k steps use TPU v6e; subsequent stages use TPU v5e.
+the next-token negative log-likelihood at position i. Instruction training uses
+Linstruction = 1
+B
+B
+X
+b=1
+P
+i∈Tb ℓbi
+max(1, |Tb|).
+(5)
+This gives each sequence equal weight despite differences in the number of supervised tokens.
+The earlier pretraining and alignment stages instead average over supervised tokens across the
+batch, P
+b
+P
+i∈Tb ℓbi/ P
+b |Tb|. Camera-pose tokens initially serve as conditioning information and
+are excluded from the loss; they become supervised prediction targets during caption alignment.
+C.4.2
+Training stages and data mixtures
+Table 7 summarizes the supervised training stages for Ψ-0.6. The initial video stage trains RGB-only
+prediction. The next stage adds depth and flow prediction and camera conditioning. Language is
+introduced with text-only data, followed by image/video caption alignment, then instruction training
+with question answering and text-conditioned visual prediction. Earlier predictive tasks remain in
+the mixture.
+FineWeb-Edu and DCLM are used at different training stages. FineWeb-Edu is the text-only source
+during language introduction and caption alignment. DCLM-baseline is the text-only source in both
+instruction stages. The model’s depth, hidden width, and token vocabulary remain unchanged.
+Final instruction mixture.
+The final stage has nine groups, with approximate sampling pro-
+portions shown in Table 8. Relative to the preceding instruction stage, video-question sampling
+increases from approximately 5% to 15%, and local-caption sampling decreases from approximately
+15% to 10%. Global-caption notations expand from 80 to 151 and video-question notations from 26
+to 42.
+C.4.3
+Data sources and text construction
+Video corpus.
+The visual-prediction mixture combines 24 video sources spanning egocentric
+recordings (Aria, EgoDex, Ego-Exo4D, and Egocentric10K), robot interaction (Bridge, DROID, FMB,
+35
+
+
+Ψ-0.6: Adaptive Streams of Thought in a Unified Vision-Language World Model
+Group
+Share (≈)
+Data and supervision
+Visual prediction
+20%
+Video corpus; content loss after the first RGB element.
+Text-only
+20%
+DCLM-baseline; language-modeling loss.
+Image captions
+5%
+COCO train and PixMo-Cap; captions and, in most nota-
+tions, depth targets.
+Image questions
+5%
+PixMo-Cap-QA, VQA v2, LLaVA-Instruct-150K, and the
+naturalistic Cambrian subset; answer-only loss.
+Global video captions
+20%
+Clip-level captions with visual/geometry sequences; all
+content elements supervised.
+Video questions
+15%
+OpenVid, PE-Video, and SSv2 question–answer data;
+answer-only loss.
+Global camera control
+1%
+CO3D and MVImgNet; text-conditioned camera/visual
+prediction and captioning.
+Local video captions
+10%
+Time-indexed captions interleaved with video and geom-
+etry; first RGB masked.
+Local camera control
+1%
+SpatialVid; time-indexed text and camera/visual se-
+quences.
+Table 8: Approximate sampling proportions during instruction refinement, rounded to whole
+percentages. All groups mask pointers and padding.
+and Language-Table), multiview scenes and objects (CO3D, DL3DV, MVImgNet, RealEstate10K,
+ScanNet, ToyBox, and ZeroShape), human activity (AIST, CelebV-HQ, Kinetics-700, Motion-X, and
+Something-Something v2), and web video (PE-Video, SpatialVid, YouTube, and a hand-selected
+collection). The initial stage uses RGB from these sources. Geometric integration joins the
+available RGB, depth, flow, and pose codes; sources without a modality support only the compatible
+notations.
+Captions and instruction data.
+Caption alignment adds global text from COCO, EgoDex, LVD-
+2M, OpenVid, PE-Video, and Bridge, together with time-indexed text from Ego-Exo4D and AgiBot.
+Instruction training retains global captions from EgoDex, OpenVid, PE-Video, Bridge, SSv2, and
+DROID, and adds Qwen-captioned material from the hand-selected, SpatialVid, and YouTube
+collections. The local-caption group uses Ego-Exo4D, AgiBot, EPIC-KITCHENS clips, and local
+captions from those three additional video collections. Global captions can precede or follow
+visual sequences, while local captions are interleaved with their associated times. This trains both
+description and text-conditioned prediction using the same token interface.
+Image instruction data are listed in Table 8.
+Question–answer construction.
+The global video-question group uses question–answer pairs
+constructed from OpenVid, PE-Video, and SSv2 text. The SSv2 conversion uses fixed action-
+question templates and rewrites the source action label into an answer. The caption rephrasing
+pipeline for PE-Video and OpenVid prompts a language model with the caption text alone to produce
+one to three question–answer pairs, then concatenates multiple pairs into one question field and
+one answer field. Its prompt requires that answers be supported by the caption and forbids adding
+information.
+36
+
+
+Ψ-0.6: Adaptive Streams of Thought in a Unified Vision-Language World Model
+C.4.4
+Optimization and infrastructure
+Supervised training uses AdamW, Adam with decoupled weight decay, with β1 = 0.9, β2 = 0.95,
+ϵ = 10−8, weight decay 0.1 on matrix parameters, and global gradient norm clipping at 1.0.
+Normalization gains are not weight-decayed. The learning rate warms up linearly for the first 2,000
+steps to 3×10−4, then remains constant until the final 50,000 supervised training steps, when it
+decreases linearly toward zero.
+The base training stages in Table 7 use a global batch of 512 sequences, with 4,096 positions per
+sequence. Training uses bfloat16 (BF16) autocasting, full-precision (FP32) master weights and
+optimizer state, and activation checkpointing with recomputation at transformer-block boundaries.
+The implementation uses PyTorch/XLA single-program, multiple-data (SPMD) execution with fully
+sharded data parallelism (FSDP) and a causal FlashAttention kernel.
+Over approximately 1.2 million supervised training steps, the sequence budget corresponds to
+1.2×106 × 512 × 4096 ≃2.5×1012
+(6)
+processed sequence positions, counting all positions in the training sequences. The standard
+6ND estimate with N ≃8.05×109 parameters gives approximately 1.2×1023 FLOPs for the base
+transformer’s supervised training.
+C.4.5
+Context-length extension
+For tasks requiring longer multimodal sequences, we continue training instruction-trained models
+with sequence budgets of 16,384 or 32,768 tokens. We retain the transformer architecture, modality
+tokenizers, spatial–temporal position representation, and next-token prediction objective. The larger
+budget accommodates more visual patches and longer streams of interleaved images, geometry,
+and text. During this phase, context parallelism distributes positions within each sequence across
+devices to manage memory use.
+37
+
+
+Ψ-0.6: Adaptive Streams of Thought in a Unified Vision-Language World Model
+C.5 Technical Glossary and Hyperparameter Reference
+Tables 9–11 collect the named methods and numerical settings used throughout this appendix. They
+cover the model and its representations, supervised training, and the decoding and adaptive-policy
+procedures.
+Component / term
+Method and setting
+Transformer
+Decoder-only; approximately 8.05B parameters; 32 blocks; hidden width
+4,096.
+RMSNorm
+Root mean square normalization; pre-norm residual blocks; ϵ = 10−5.
+GQA
+Grouped-query causal self-attention; 32 query heads, 8 key–value heads;
+head dimension 128.
+Attention scaling
+Scaled dot-product attention; logit scale 1/
+√
+128.
+FlashAttention
+Memory-efficient causal attention kernel used in TPU training.
+SwiGLU
+Swish-gated linear unit feed-forward network; hidden width 16,384.
+Three-axis RoPE
+Rotary position embeddings on (x, y, t); dimensions (48, 48, 32) per head;
+frequency base 100.
+Weight tying / channels
+Shared input embedding and output projection; vocabulary 65,536; 384
+channel embeddings.
+Transformer regularization
+Dropout 0; stochastic depth 0; linear biases disabled.
+Haar wavelet transform
+Patch-local transform on 16×16 pixels; inverse transform after decoding.
+Patch autoencoder
+Encoder: 3 residual blocks with 1×1 convolutions. Decoder: 9 blocks
+with 3×3 convolutions. Feature width 512; residual hidden width 1,024.
+LayerNorm / SiLU
+Quantizer residual blocks use channel-wise layer normalization (ϵ =
+10−5) and sigmoid linear unit activations.
+FSQ
+Finite scalar quantization; levels (8, 8, 8, 5, 5, 5); 64,000 indices per code;
+4 codes per RGB patch, 2 per depth or flow patch.
+STE
+Straight-through estimator for rounding during quantizer training.
+Pointer tokens
+One supplied pointer per patch, camera element, or text segment; token
+ID 65,000.
+GPT-2 BPE / EOT
+Byte-pair encoding for text; end-of-text ID 50,256; spatial row width 100
+tokens.
+DA3
+Depth Anything 3 supplies depth, camera intrinsics, and poses; depth
+codes represent normalized inverse depth.
+AllTracker
+Two-frame optical flow; displacement divided by 40 before quantization
+and multiplied by 40 after decoding.
+Camera discretization
+Relative pose T −1
+i
+Tj; integer-degree fields of view and axis–angle ro-
+tation; integer-centimeter translation. Rotation components clipped to
+[−180, 180]; translation to [−1000, 1000].
+Table 9: Technical glossary: architecture, tokenization, and geometric representations. Transformer
+RMSNorm and quantizer LayerNorm apply to their respective networks.
+38
+
+
+Ψ-0.6: Adaptive Streams of Thought in a Unified Vision-Language World Model
+Component / term
+Method and setting
+Next-token CE
+Cross-entropy on supervised content tokens; token-mean reduction in
+pretraining/alignment and sequence-mean reduction in instruction train-
+ing.
+AdamW
+Adam with decoupled weight decay; β1 = 0.9, β2 = 0.95, ϵ = 10−8.
+Weight decay
+0.1 on matrix parameters; 0 on normalization gains.
+Gradient clipping
+Global gradient norm capped at 1.0.
+Learning-rate schedule
+Peak 3×10−4; 2,000-step linear warmup; constant phase; linear decay
+toward zero over the final 50,000 steps.
+Batch / training duration
+512 sequences per global batch; approximately 1.2M supervised steps
+for the base model.
+Context length
+4,096 positions during base training; 16,384 or 32,768 during context
+extension.
+Token allocation
+Approximately uniform visual patch counts per element within the se-
+quence budget; random visual patch order.
+BF16 / FP32
+Bfloat16 autocasting; 32-bit floating-point master weights and optimizer
+state.
+Activation checkpointing
+Recompute transformer-block activations during backpropagation.
+SPMD / FSDP
+Single-program, multiple-data execution and fully sharded data paral-
+lelism in PyTorch/XLA.
+Context parallelism
+Distribute sequence positions across devices during context-length ex-
+tension.
+TPU hardware
+TPU v6e for the first approximately 180k steps; TPU v5e for subsequent
+base-training stages.
+RGB quantizer objective
+Mean absolute error (MAE/L1), DINOv2 feature loss with weight 1, and
+coarse L1 loss with weight 0.01.
+Flow quantizer objective
+Mean squared error (MSE) and coarse MSE with weight 0.01.
+Table 10: Technical glossary: supervised optimization and training infrastructure. Optimizer and
+schedule settings refer to the transformer; the final two rows describe the independently trained
+visual quantizers.
+39
+
+
+Ψ-0.6: Adaptive Streams of Thought in a Unified Vision-Language World Model
+Component / term
+Method and setting
+KV caching
+Key–value caching for autoregressive patch decoding.
+Sequential / parallel decoding
+Inference speedup using an autoregressive patch prefix followed by
+concurrent decoding of remaining patches; codes within each patch are
+generated sequentially.
+Sampling controls
+Temperature, top-k, and nucleus (top-p) sampling; generic defaults T = 1,
+k = 1,000, p = 1, with 32 sequential patches.
+CFG
+Classifier-free guidance; combine reference and conditional logits as
+zref + s(zcond −zref).
+Motion-based patch order
+Prioritize flow patches by 1 −P
+z∈Z p(z), where Z contains seven no-
+motion codes.
+Teacher-forced scoring
+Mean reference-answer token cross-entropy used to score candidate
+notations during policy training.
+Scored-search distillation
+64 candidates; top-10 loss filtering; sampling weight exp(−ℓ/0.5−0.01m),
+where m is the selected-element count; approximately 40k training steps.
+Dr. GRPO
+Variant of group relative policy optimization; K = 16 notations per input;
+group-mean reward centering; global running RMS advantage scaling.
+Advantage / reward settings
+Advantage clipping to [−3, 3]; average reward measurements over 3
+paired random seeds; fixed maximum-output-length normalization of
+notation log-probabilities.
+LoRA
+Low-rank adaptation for policy updates; ranks 128, 256, or 512; learning
+rate 3×10−5; approximately 6k steps in the longer runs.
+KL regularization
+Kullback–Leibler regularization toward the initialized policy; coefficient
+0.02 in the longer LoRA runs.
+Table 11: Technical glossary: decoding controls and adaptive-policy training. Sampling values are
+the generic predictor defaults; policy settings summarize the procedures in §C.3.
+40
