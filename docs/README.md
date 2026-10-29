@@ -48,17 +48,17 @@
 <section class="dpr-home-dashboard-card dpr-home-report-card">
   <div class="dpr-home-dashboard-header">
     <div>
-      <span class="dpr-home-dashboard-kicker">2026-10-29</span>
+      <span class="dpr-home-dashboard-kicker">2026-10-30</span>
       <h3 class="dpr-home-dashboard-title">今日汇总</h3>
     </div>
-    <strong class="dpr-home-dashboard-count">共 2 篇</strong>
+    <strong class="dpr-home-dashboard-count">共 1 篇</strong>
   </div>
   <dl class="dpr-home-dashboard-stats">
     <div class="dpr-home-dashboard-stat"><dt>累计更新</dt><dd>1 次</dd></div>
-    <div class="dpr-home-dashboard-stat"><dt>精读</dt><dd>2</dd></div>
+    <div class="dpr-home-dashboard-stat"><dt>精读</dt><dd>1</dd></div>
     <div class="dpr-home-dashboard-stat"><dt>速读</dt><dd>0</dd></div>
   </dl>
-  <p class="dpr-home-dashboard-body">最近更新：2026-10-28 23:03:39 UTC<br>状态：成功</p>
+  <p class="dpr-home-dashboard-body">最近更新：2026-10-29 22:59:12 UTC<br>状态：成功</p>
 </section>
 <section class="dpr-home-dashboard-card dpr-home-brief-card">
   <div class="dpr-home-dashboard-header">
@@ -69,9 +69,9 @@
     <strong class="dpr-home-dashboard-count">AI</strong>
   </div>
   <div class="dpr-home-dashboard-body">
-<p>今天精读 2 篇：聚焦多智能体世界模型与统一视觉语言世界模型。</p>
-<p>最值得关注的是 9.0 分的《OverSeer: Multi-Agent World Models Beyond What Agents See》，其次是 8.0 分的《$Ψ$-0.6: Adaptive Streams of Thought in a Unified Vision-Language World Model》。</p>
-<p>普通读者可先看 OverSeer，再补 Ψ-0.6，重点理解“智能体视野之外”和“自适应思维流”两个方向。</p>
+<p>今日精读 1 篇论文，重点关注交互式世界模型中的视频自编码器。</p>
+<p>《Rethinking Video Autoencoders for Interactive World Models》（8.0/10）值得一读，核心在于重新审视视频自编码器如何支撑交互式世界模型。</p>
+<p>普通读者可以先看这篇论文对现有视频自编码器设计的反思与改进方向，再判断它是否适用于自己的场景。</p>
   </div>
 </section>
 <section class="dpr-home-dashboard-card dpr-home-deep-card">
@@ -80,12 +80,12 @@
       <span class="dpr-home-dashboard-kicker">今日累计</span>
       <h3 class="dpr-home-dashboard-title">精读推荐</h3>
     </div>
-    <strong class="dpr-home-dashboard-count">2 篇</strong>
+    <strong class="dpr-home-dashboard-count">1 篇</strong>
   </div>
   <div class="dpr-home-dashboard-body">
-<ul class="dpr-home-dashboard-paper-list"><li><span class="dpr-home-dashboard-paper-title" title="OverSeer: Multi-Agent World Models Beyond What Agents See">OverSeer: Multi-Agent World Models Beyond What Agents See</span></li><li><span class="dpr-home-dashboard-paper-title" title="$Ψ$-0.6: Adaptive Streams of Thought in a Unified Vision-Language World Model">$Ψ$-0.6: Adaptive Streams of Thought in a Unified Vision-Language World Model</span></li></ul>
+<ul class="dpr-home-dashboard-paper-list"><li><span class="dpr-home-dashboard-paper-title" title="Rethinking Video Autoencoders for Interactive World Models">Rethinking Video Autoencoders for Interactive World Models</span></li></ul>
   </div>
-  <div class="dpr-home-dashboard-tags"><span class="dpr-home-dashboard-tag">video-world-models <strong>2</strong></span></div>
+  <div class="dpr-home-dashboard-tags"><span class="dpr-home-dashboard-tag">video-world-models <strong>1</strong></span></div>
 </section>
 <section class="dpr-home-dashboard-card dpr-home-skim-card">
   <div class="dpr-home-dashboard-header">

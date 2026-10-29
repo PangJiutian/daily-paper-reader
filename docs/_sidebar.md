@@ -1,6 +1,9 @@
 * <a class="dpr-sidebar-root-link" href="#/">首页</a>
 * <a class="dpr-sidebar-root-link dpr-sidebar-noactive-link" href="javascript:void(0)" data-dpr-hash="#/tutorial/README">使用教程</a>
 * Daily Papers
+  * 2026-10-30 <!--dpr-date:20261030-->
+    * 精读区
+      * <a class="dpr-sidebar-item-link dpr-sidebar-item-structured" href="#/202610/30/2610.30129v1-rethinking-video-autoencoders-for-interactive-world-models" data-sidebar-item="{&quot;title&quot;: &quot;Rethinking Video Autoencoders for Interactive World Models&quot;, &quot;link&quot;: &quot;https://arxiv.org/abs/2610.30129v1-rethinking-video-autoencoders-for-interactive-world-models&quot;, &quot;score&quot;: &quot;8.0&quot;, &quot;tags&quot;: [{&quot;kind&quot;: &quot;query&quot;, &quot;label&quot;: &quot;video-world-models&quot;}], &quot;evidence&quot;: &quot;可控交互视频世界模型与潜在压缩&quot;}">Rethinking Video Autoencoders for Interactive World Models</a>
   * 2026-10-29 <!--dpr-date:20261029-->
     * 精读区
       * <a class="dpr-sidebar-item-link dpr-sidebar-item-structured" href="#/202610/29/2610.28554v1-overseer-multi-agent-world-models-beyond-what-agents-see" data-sidebar-item="{&quot;title&quot;: &quot;OverSeer: Multi-Agent World Models Beyond What Agents See&quot;, &quot;link&quot;: &quot;https://arxiv.org/abs/2610.28554v1-overseer-multi-agent-world-models-beyond-what-agents-see&quot;, &quot;score&quot;: &quot;9.0&quot;, &quot;tags&quot;: [{&quot;kind&quot;: &quot;query&quot;, &quot;label&quot;: &quot;video-world-models&quot;}], &quot;evidence&quot;: &quot;多智能体视频世界模型，用世界中心辅助视角保持一致性&quot;}">OverSeer: Multi-Agent World Models Beyond What Agents See</a>
