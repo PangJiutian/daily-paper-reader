@@ -1,6 +1,9 @@
 * <a class="dpr-sidebar-root-link" href="#/">首页</a>
 * <a class="dpr-sidebar-root-link dpr-sidebar-noactive-link" href="javascript:void(0)" data-dpr-hash="#/tutorial/README">使用教程</a>
 * Daily Papers
+  * 2026-10-31 <!--dpr-date:20261031-->
+    * 精读区
+      * <a class="dpr-sidebar-item-link dpr-sidebar-item-structured" href="#/202610/31/2610.38468v1-cinematize-from-unreal-agentic-choreography-for-controllable-world-simulation" data-sidebar-item="{&quot;title&quot;: &quot;Cinematize from Unreal: Agentic Choreography for Controllable World Simulation&quot;, &quot;link&quot;: &quot;https://arxiv.org/abs/2610.38468v1-cinematize-from-unreal-agentic-choreography-for-controllable-world-simulation&quot;, &quot;score&quot;: &quot;8.0&quot;, &quot;tags&quot;: [{&quot;kind&quot;: &quot;query&quot;, &quot;label&quot;: &quot;video-world-models&quot;}], &quot;evidence&quot;: &quot;基于智能体的语言驱动世界编排，在虚幻引擎中保持持久状态与可控动态&quot;}">Cinematize from Unreal: Agentic Choreography for Controllable World Simulation</a>
   * 2026-10-30 <!--dpr-date:20261030-->
     * 精读区
       * <a class="dpr-sidebar-item-link dpr-sidebar-item-structured" href="#/202610/30/2610.30129v1-rethinking-video-autoencoders-for-interactive-world-models" data-sidebar-item="{&quot;title&quot;: &quot;Rethinking Video Autoencoders for Interactive World Models&quot;, &quot;link&quot;: &quot;https://arxiv.org/abs/2610.30129v1-rethinking-video-autoencoders-for-interactive-world-models&quot;, &quot;score&quot;: &quot;8.0&quot;, &quot;tags&quot;: [{&quot;kind&quot;: &quot;query&quot;, &quot;label&quot;: &quot;video-world-models&quot;}], &quot;evidence&quot;: &quot;可控交互视频世界模型与潜在压缩&quot;}">Rethinking Video Autoencoders for Interactive World Models</a>
