@@ -48,7 +48,7 @@
 <section class="dpr-home-dashboard-card dpr-home-report-card">
   <div class="dpr-home-dashboard-header">
     <div>
-      <span class="dpr-home-dashboard-kicker">2026-10-31</span>
+      <span class="dpr-home-dashboard-kicker">2026-11-01</span>
       <h3 class="dpr-home-dashboard-title">今日汇总</h3>
     </div>
     <strong class="dpr-home-dashboard-count">共 1 篇</strong>
@@ -58,7 +58,7 @@
     <div class="dpr-home-dashboard-stat"><dt>精读</dt><dd>1</dd></div>
     <div class="dpr-home-dashboard-stat"><dt>速读</dt><dd>0</dd></div>
   </dl>
-  <p class="dpr-home-dashboard-body">最近更新：2026-10-30 23:00:28 UTC<br>状态：成功</p>
+  <p class="dpr-home-dashboard-body">最近更新：2026-10-31 22:11:43 UTC<br>状态：成功</p>
 </section>
 <section class="dpr-home-dashboard-card dpr-home-brief-card">
   <div class="dpr-home-dashboard-header">
@@ -69,7 +69,9 @@
     <strong class="dpr-home-dashboard-count">AI</strong>
   </div>
   <div class="dpr-home-dashboard-body">
-<p>今日精读 1 篇高分论文，聚焦如何借助智能体编排，从虚幻引擎实现可控的世界仿真。该研究最值得关注的是，它让编舞式智能体驱动电影化场景生成，为可控世界仿真提供了一条新路径。建议普通读者先抓住“智能体编排”与“可控仿真”这条主线，再结合原文，理解具体实现细节与适用边界。</p>
+<p>今日精读1篇8.0分论文《FutureWorld: A Plug-and-Play Causal Next-State Predictor for Interactive Video World Exploration》，日报以精读为主。</p>
+<p>最值得关注的是“因果下一状态预测”和“即插即用接入交互式视频世界探索”这两个方向。</p>
+<p>普通读者可先看摘要与方法图，重点确认它如何接入现有视频世界模型、以及因果预测带来的实际效果。</p>
   </div>
 </section>
 <section class="dpr-home-dashboard-card dpr-home-deep-card">
@@ -81,7 +83,7 @@
     <strong class="dpr-home-dashboard-count">1 篇</strong>
   </div>
   <div class="dpr-home-dashboard-body">
-<ul class="dpr-home-dashboard-paper-list"><li><span class="dpr-home-dashboard-paper-title" title="Cinematize from Unreal: Agentic Choreography for Controllable World Simulation">Cinematize from Unreal: Agentic Choreography for Controllable World Simulation</span></li></ul>
+<ul class="dpr-home-dashboard-paper-list"><li><span class="dpr-home-dashboard-paper-title" title="FutureWorld: A Plug-and-Play Causal Next-State Predictor for Interactive Video World Exploration">FutureWorld: A Plug-and-Play Causal Next-State Predictor for Interactive Video World Exploration</span></li></ul>
   </div>
   <div class="dpr-home-dashboard-tags"><span class="dpr-home-dashboard-tag">video-world-models <strong>1</strong></span></div>
 </section>
